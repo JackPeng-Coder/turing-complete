@@ -4036,7 +4036,7 @@ git commit -m "feat(levels): add chapter 1 levels 7-12 with reference solutions"
 - Consumes: `Graph`、`LevelSpec`、`GradeResult`
 - Produces:
   - `src/app/commands.ts`：`interface Command { readonly label: string; do(g: Graph): void; undo(g: Graph): void }`、`class CommandStack { push(c: Command, g: Graph): void; undo(g: Graph): boolean; redo(g: Graph): boolean; canUndo(): boolean; canRedo(): boolean; clear(): void; readonly depth: number }`
-  - `src/app/progress.ts`：`interface LevelRecord { passed: boolean; best: Metrics | null; stars: 0 | 1 | 3 }`、`interface Progress { version: 1; levels: Record<string, LevelRecord> }`、`const PLUMBING = ['level_input', 'level_output'] as const`、`const SCORE_WEIGHTS = { delay: 4, tick: 8 } as const`、`function emptyProgress(): Progress`、`function isUnlocked(p: Progress, levelId: string, order: readonly string[]): boolean`、`function resumePointOf(p: Progress, order: readonly string[]): string`、`function unlockedComponents(p: Progress, levels: readonly LevelSpec[]): Set<string>`、`function paletteDefsFor(p: Progress, levels: readonly LevelSpec[], level: LevelSpec): string[]`、`function applyGrade(p: Progress, level: LevelSpec, result: GradeResult): Progress`（纯函数，返回新对象）
+  - `src/app/progress.ts`：`interface LevelRecord { passed: boolean; best: Metrics | null; stars: 0 | 1 | 3 }`、`interface Progress { version: 1; levels: Record<string, LevelRecord> }`、`const STARTER_COMPONENTS = ['level_input', 'level_output'] as const`、`const SCORE_WEIGHTS = { delay: 4, tick: 8 } as const`、`function emptyProgress(): Progress`、`function isUnlocked(p: Progress, levelId: string, order: readonly string[]): boolean`、`function resumePointOf(p: Progress, order: readonly string[]): string`、`function unlockedComponents(p: Progress, levels: readonly LevelSpec[]): Set<string>`、`function paletteDefsFor(p: Progress, levels: readonly LevelSpec[], level: LevelSpec): string[]`、`function applyGrade(p: Progress, level: LevelSpec, result: GradeResult): Progress`（纯函数，返回新对象）
   - `src/persist/storage.ts`：`const STORAGE_KEY = 'tc.progress.v1'`、`function loadProgress(initialComponents: readonly string[]): Progress`、`function saveProgress(p: Progress): void`、`function exportProgress(p: Progress): string`、`function importProgress(json: string): Progress`、`function migrate(raw: unknown): Progress`
 
 - [ ] **Step 1: 写失败测试 `test/app/progress.test.ts`**
@@ -4126,7 +4126,7 @@ describe('resumePointOf', () => {
 });
 
 describe('unlockedComponents', () => {
-  it('always offers the level IO plumbing so a level is never unbuildable', () => {
+  it('always offers the starter components so a level is never unbuildable', () => {
     const unlocked = unlockedComponents(emptyProgress(), levels);
     expect(unlocked.has('level_input')).toBe(true);
     expect(unlocked.has('level_output')).toBe(true);
@@ -4197,8 +4197,25 @@ export interface Progress {
   levels: Record<string, LevelRecord>;
 }
 
-/** Components that exist to route level I/O, always offered in the palette. */
-export const PLUMBING = ['level_input', 'level_output'] as const;
+/**
+ * Always available, whatever the player has unlocked.
+ *
+ * This is NOT just the level I/O STARTER_COMPONENTS. Level 1 offers `const_on` and its
+ * reference solution IS `const_on -> level_output`, so the constants have to be
+ * available from the very first level -- they cannot come from an earlier
+ * reward, because there is no earlier level. Keeping them out of this set makes
+ * level 1's palette empty of anything that can drive an output, which is the
+ * "level 1 is unplayable" defect this derivation exists to prevent.
+ *
+ * Task 8's chapter-1 gating test seeds its own walk with the same set; keep the
+ * two in sync.
+ */
+export const STARTER_COMPONENTS = [
+  'level_input',
+  'level_output',
+  'const_on',
+  'const_off',
+] as const;
 
 /** Must match SCORE_WEIGHTS in levels/grader.ts. */
 const SCORE_WEIGHTS = { delay: 4, tick: 8 } as const;
@@ -4229,14 +4246,14 @@ export function resumePointOf(progress: Progress, order: readonly string[]): str
 
 /**
  * The unlocked component set is *derived*, not stored: every reward from a
- * passed level, plus the level-IO plumbing. Storing it as well would let the
+ * passed level, plus the starter components (level IO and the constants). Storing them
  * two drift apart after an import from an older save.
  */
 export function unlockedComponents(
   progress: Progress,
   levels: readonly LevelSpec[],
 ): Set<string> {
-  const unlocked = new Set<string>(PLUMBING);
+  const unlocked = new Set<string>(STARTER_COMPONENTS);
   for (const level of levels) {
     if (progress.levels[level.id]?.passed !== true) continue;
     for (const component of level.rewards?.components ?? []) unlocked.add(component);
@@ -5495,7 +5512,7 @@ function makeStore(levelId: string) {
 }
 
 describe('palette panel', () => {
-  it('offers nothing but the level plumbing while nothing is unlocked', () => {
+  it('offers nothing but the starter components while nothing is unlocked', () => {
     // level 2 needs a NAND, which only level 1's reward unlocks
     const store = makeStore('ch1-02-nand-gate');
     const root = document.createElement('div');
@@ -6051,8 +6068,8 @@ git commit -m "feat(ui): add chapter map, original narrative shell and playwrigh
 2. **关卡 I/O 绑定方式根本行不通**：初版写「引脚同名即绑定」，但引脚名由组件定义固定，改 `def` 字段不可能改名。已改为显式的 `level_input` / `level_output` 元件 + `IN_<引脚名>` / `OUT_<引脚名>` 实例 id 约定，并配套一个真实的 `andSolution()` 测试。
 3. **`truth-table` 检查器会静默放过一切**：初版在 `rows` 缺省时生成「空 outputs」的行，比较循环什么都不比，于是任何电路都算通过。现已定为硬错误（`reason: 'missing-rows'`），并加了 `truthTable()` 生成器：缺某个输出引脚的期望值时它直接抛错。有专门测试锁死。
 4. **Task 2 的信号表扩容会静默破坏索引**：重分配 `Uint8Array` 会让此前发出的所有 `base` 失效，而 `net.ts` 的 `drive` 数组正建立在那些索引上。已改为固定容量 + 越界抛错，容量 65536（规格预算 20000 实例，余量充足）。
-5. **`unlockedComponents` 存两份必然漂移**：进度里既存已解锁集合、又有关卡奖励，导入旧档后两者会不一致，表现为「关卡要求 NAND 但进度里没有」。已改为纯派生函数：奖励来自已通过关卡，`level_input` / `level_output` 作为永远可用的 plumbing。
-6. **第 1 关在初版里根本没法玩**：`emptyProgress([])` 下所有元件都是锁的，玩家放不下任何东西。派生式解锁一并解决了它，并有测试断言 plumbing 永远可用。
+5. **`unlockedComponents` 存两份必然漂移**：进度里既存已解锁集合、又有关卡奖励，导入旧档后两者会不一致，表现为「关卡要求 NAND 但进度里没有」。已改为纯派生函数：奖励来自已通过关卡，`level_input` / `level_output` 作为永远可用的 STARTER_COMPONENTS。
+6. **第 1 关在初版里根本没法玩**：`emptyProgress([])` 下所有元件都是锁的，玩家放不下任何东西。派生式解锁一并解决了它，并有测试断言 STARTER_COMPONENTS 永远可用。
 7. **参考解里有一处电路写错了**：初版的 NOR 参考解是 `NOT(NAND)`，那其实是 AND。已改为 `or` + `not`（NOR 关卡本来就已解锁 OR），并补上「两串 NAND 冒充 NOR」作为反例。
 8. **第 12 关撞上两个硬约束**：4 位直通需要 `maker`（阶段 1 才有），而四条线也不能驱动同一个输入引脚。已改为四个 1 位输出 + 16 行真值表生成，教学目的（位权）不变。
 9. **每个测试行都要重新编译整个电路**：初版 `runChecks` 为真值表每一行新建一次 `Simulation`（含 `validateGraph` 与信号表分配）。已改为每个 check 只编译一次、每行只 `reset()`。
