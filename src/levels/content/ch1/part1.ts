@@ -122,7 +122,8 @@ export const CH1_PART1: readonly LevelSpec[] = [
     allowedComponents: ['nand', 'not', 'and', 'or', 'level_input', 'level_output'],
     io: IO_2,
     checks: [truthTable(IO_2, { out: ({ a, b }) => (a || b ? 0 : 1) })],
-    threeStar: { gate: 4, delay: 3, tick: 0 },
+    // Three-star target = the reference solution's own metrics; the reference scores exactly it.
+    threeStar: { gate: 2, delay: 2, tick: 0 },
     rewards: { components: ['const_on', 'const_off'] },
   },
 ];
