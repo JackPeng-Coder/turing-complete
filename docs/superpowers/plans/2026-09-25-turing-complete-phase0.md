@@ -2240,8 +2240,8 @@ const andSpec: LevelSpec = {
 /** AND built from NAND + NOT, with explicit level input/output connectors. */
 function andSolution(): ReturnType<typeof emptyGraph> {
   const g = emptyGraph();
-  const inA = addInstance(g, 'level_input', 0, 0, 'IN_A');
-  const inB = addInstance(g, 'level_input', 0, 60, 'IN_B');
+  const inA = addInstance(g, 'level_input', 0, 0, 'IN_a');
+  const inB = addInstance(g, 'level_input', 0, 60, 'IN_b');
   const nand = addInstance(g, 'nand', 60, 20);
   const not = addInstance(g, 'not', 120, 20);
   const out = addInstance(g, 'level_output', 180, 20, 'OUT');
@@ -2297,8 +2297,8 @@ describe('runChecks / truth-table', () => {
 /** Level I/O is bound by a dedicated connector instance whose ports are named after the level pins. */
 function andSolution(): Graph {
   const g = emptyGraph();
-  const inA = addInstance(g, 'level_input', 0, 0, 'IN_A');
-  const inB = addInstance(g, 'level_input', 0, 60, 'IN_B');
+  const inA = addInstance(g, 'level_input', 0, 0, 'IN_a');
+  const inB = addInstance(g, 'level_input', 0, 60, 'IN_b');
   const nand = addInstance(g, 'nand', 60, 20);
   const not = addInstance(g, 'not', 120, 20);
   const out = addInstance(g, 'level_output', 180, 20, 'OUT');
@@ -2312,7 +2312,7 @@ function andSolution(): Graph {
 
 > **关卡绑定的算法**（`level_input` / `level_output` 两个元件已经在 Task 3 的 `BASE_DEFS` 里定义好了，这里只需要用）：**实例 id 形如 `IN_<引脚名>` 的 `level_input` 实例即是该关卡输入；实例 id 为 `OUT` 的 `level_output` 实例即单输出关卡的输出（多输出时 id 为 `OUT_<引脚名>`）。** 这条规则简单、可见、可测，而且在画板上直接显示为引脚名。
 >
-> 注意 `andSolution()` 里用的 `addInstance(g, 'level_input', 0, 0, 'IN_A')` 第四参数是显式 id——`build()` 夹具（Task 8）会替玩家自动生成这些 id，但测试里手写时必须自己写对。
+> 注意 `andSolution()` 里用的 `addInstance(g, 'level_input', 0, 0, 'IN_a')` 第四参数是显式 id——`build()` 夹具（Task 8）会替玩家自动生成这些 id，但测试里手写时必须自己写对。
 
 - [ ] **Step 2: 运行测试，确认失败**
 
@@ -2535,11 +2535,14 @@ export function generateRows(
   });
 }
 
-function evaluateRule(rule: ConstraintRule, inputs: Record<string, number>): number {
+function evaluateRule(rule: ConstraintRule, inputs: Record<string, number>, width: number): number {
   if (rule.kind === 'sum-equals') {
     let sum = 0;
     for (const id of rule.inputs) sum += inputs[id] ?? 0;
-    return sum;
+    // Reduce the sum into the declared output width. Without this a 2-input
+    // parity constraint on a 1-bit output can never match (sum 2 !== 1), so the
+    // intended "half adder sum" test would be unsatisfiable.
+    return sum % 2 ** width;
   }
   let count = 0;
   for (const id of rule.inputs) count += inputs[id] ?? 0;
@@ -2592,7 +2595,11 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
         for (const inputs of enumerateInputs(spec)) {
           const attempt = runRow(io, spec, inputs, 0);
           ticksUsed = Math.max(ticksUsed, attempt.ticksUsed);
-          const want = evaluateRule(check.rule, inputs);
+          const want = evaluateRule(
+          check.rule,
+          inputs,
+          spec.io.outputs.find((p) => p.id === check.rule.output)?.width ?? 1,
+        );
           const got = attempt.outputs[check.rule.output] ?? 0;
           if (want !== got) {
             failures.push(
@@ -2725,8 +2732,8 @@ describe('truth-table discrimination', () => {
 
   it('rejects a NAND that is missing the final inverter', () => {
     const g = emptyGraph();
-    const inA = addInstance(g, 'level_input', 0, 0, 'IN_A');
-    const inB = addInstance(g, 'level_input', 0, 60, 'IN_B');
+    const inA = addInstance(g, 'level_input', 0, 0, 'IN_a');
+    const inB = addInstance(g, 'level_input', 0, 60, 'IN_b');
     const nand = addInstance(g, 'nand', 60, 20);
     const out = addInstance(g, 'level_output', 120, 20, 'OUT');
     connect(g, { inst: inA.id, port: 'out' }, { inst: nand.id, port: 'a' });
@@ -2742,8 +2749,8 @@ describe('truth-table discrimination', () => {
 
   it('rejects a circuit whose level output is never wired', () => {
     const g = emptyGraph();
-    const inA = addInstance(g, 'level_input', 0, 0, 'IN_A');
-    const inB = addInstance(g, 'level_input', 0, 60, 'IN_B');
+    const inA = addInstance(g, 'level_input', 0, 0, 'IN_a');
+    const inB = addInstance(g, 'level_input', 0, 60, 'IN_b');
     const nand = addInstance(g, 'nand', 60, 20);
     connect(g, { inst: inA.id, port: 'out' }, { inst: nand.id, port: 'a' });
     connect(g, { inst: inB.id, port: 'out' }, { inst: nand.id, port: 'b' });
@@ -2813,8 +2820,8 @@ describe('constraint check', () => {
 
   it('accepts a half adder sum built from XOR', () => {
     const g = emptyGraph();
-    const inA = addInstance(g, 'level_input', 0, 0, 'IN_A');
-    const inB = addInstance(g, 'level_input', 0, 60, 'IN_B');
+    const inA = addInstance(g, 'level_input', 0, 0, 'IN_a');
+    const inB = addInstance(g, 'level_input', 0, 60, 'IN_b');
     const xor = addInstance(g, 'xor', 60, 20);
     const out = addInstance(g, 'level_output', 120, 20, 'OUT');
     connect(g, { inst: inA.id, port: 'out' }, { inst: xor.id, port: 'a' });
@@ -2825,8 +2832,8 @@ describe('constraint check', () => {
 
   it('rejects OR where parity is required', () => {
     const g = emptyGraph();
-    const inA = addInstance(g, 'level_input', 0, 0, 'IN_A');
-    const inB = addInstance(g, 'level_input', 0, 60, 'IN_B');
+    const inA = addInstance(g, 'level_input', 0, 0, 'IN_a');
+    const inB = addInstance(g, 'level_input', 0, 60, 'IN_b');
     const or = addInstance(g, 'or', 60, 20);
     const out = addInstance(g, 'level_output', 120, 20, 'OUT');
     connect(g, { inst: inA.id, port: 'out' }, { inst: or.id, port: 'a' });
@@ -2911,8 +2918,8 @@ const andSpec: LevelSpec = {
 
 function andSolution(): Graph {
   const g = emptyGraph();
-  const inA = addInstance(g, 'level_input', 0, 0, 'IN_A');
-  const inB = addInstance(g, 'level_input', 0, 60, 'IN_B');
+  const inA = addInstance(g, 'level_input', 0, 0, 'IN_a');
+  const inB = addInstance(g, 'level_input', 0, 60, 'IN_b');
   const nand = addInstance(g, 'nand', 60, 20);
   const not = addInstance(g, 'not', 120, 20);
   const out = addInstance(g, 'level_output', 180, 20, 'OUT');
