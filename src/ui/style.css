@@ -1,0 +1,40 @@
+/* Literal colours are the one accepted exception to "colours come from
+   theme.ts": a stylesheet cannot import a TypeScript constant without a build
+   step. The values mirror `src/ui/theme.ts`. */
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #0d1117; color: #c9d1d9; }
+#app { display: flex; flex-direction: column; height: 100vh; }
+.shell-bar { display: flex; align-items: center; gap: 16px; padding: 8px 16px; background: #161b22; border-bottom: 1px solid #30363d; flex: 0 0 auto; }
+.shell-title { font-weight: 600; }
+.shell-status { font-size: 13px; color: #7d8590; }
+.shell-metrics { font-variant-numeric: tabular-nums; }
+.palette { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; background: #161b22; border-bottom: 1px solid #30363d; flex: 0 0 auto; }
+.palette h2 { margin: 0 8px 0 0; font-size: 13px; color: #7d8590; align-self: center; }
+.palette-item { padding: 4px 10px; background: #1e2530; border: 1px solid #4a5568; border-radius: 4px; cursor: pointer; color: #c9d1d9; }
+.palette-item:disabled { opacity: 0.45; cursor: not-allowed; }
+.truth-table { padding: 8px 16px; background: #161b22; border-top: 1px solid #30363d; max-height: 28vh; overflow: auto; flex: 0 0 auto; }
+.truth-table table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.truth-table td { border: 1px solid #30363d; padding: 2px 8px; }
+.truth-table th { border: 1px solid #30363d; padding: 2px 8px; color: #7d8590; font-weight: 600; }
+/* One screen at a time fills the space below the shell bar. The board screen is
+   a flex column (palette / board / truth table); the map screen scrolls. */
+.screens { flex: 1 1 auto; min-height: 0; display: flex; }
+.screen { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.screen-board { display: flex; flex-direction: column; }
+.screen-map { overflow: auto; }
+/* The board is an ordinary in-flow flex child, never an absolutely positioned
+   layer: its DOM box and its drawable area have to be the same rectangle, or
+   canvas.clientWidth/clientHeight stop matching the pointer coordinates. */
+.board { flex: 1 1 auto; min-height: 0; width: 100%; display: block; background: #0d1117; touch-action: none; }
+.map { padding: 16px; }
+.map h2 { margin: 0 0 12px; font-size: 15px; color: #7d8590; }
+.map-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+.map-tile { padding: 12px; text-align: left; background: #161b22; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; color: #c9d1d9; }
+.map-tile:disabled { opacity: 0.4; cursor: not-allowed; }
+.briefing { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; background: rgba(13, 17, 23, 0.96); z-index: 10; padding: 40px; text-align: center; }
+.briefing p { max-width: 52ch; line-height: 1.7; font-size: 17px; color: #c9d1d9; }
+.briefing button { padding: 8px 24px; background: #1e2530; border: 1px solid #2fd4a7; color: #2fd4a7; border-radius: 4px; cursor: pointer; font-size: 15px; }
