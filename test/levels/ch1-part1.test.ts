@@ -224,8 +224,13 @@ describe('an empty circuit fails every level instead of throwing', () => {
 });
 
 describe('the level registry', () => {
+  // The assembled registry is the whole of chapter 1: this file's levels are its
+  // first half and `ch1-part2.test.ts` appends the rest and owns the
+  // whole-chapter assertions. Scoping these to part 1's own length keeps them
+  // just as strict about order and ids without pinning the chapter's total size,
+  // which is not this file's business.
   it('orders chapter 1 by level id', () => {
-    expect(LEVEL_ORDER).toEqual(CH1_PART1.map((l) => l.id));
+    expect(LEVEL_ORDER.slice(0, CH1_PART1.length)).toEqual(CH1_PART1.map((l) => l.id));
   });
 
   it('resolves a level by id and rejects an unknown one', () => {
@@ -234,7 +239,9 @@ describe('the level registry', () => {
   });
 
   it('lists a chapter by number', () => {
-    expect(levelsOfChapter(1).map((l) => l.index)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(levelsOfChapter(1).slice(0, CH1_PART1.length).map((l) => l.index)).toEqual([
+      1, 2, 3, 4, 5, 6,
+    ]);
     expect(levelsOfChapter(2)).toEqual([]);
   });
 });
