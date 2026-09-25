@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { STARTER_COMPONENTS } from '../../src/app/progress';
 import type { Graph } from '../../src/core/graph';
 import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
 import { grade } from '../../src/levels/grader';
@@ -10,22 +11,16 @@ import { build, registry } from '../fixtures/build';
 const byId = new Map(CH1_PART1.map((l) => [l.id, l]));
 
 /**
- * What the game hands the player before the first puzzle.
+ * The always-available set is imported, not restated: `STARTER_COMPONENTS` in
+ * `src/app/progress.ts` is the same constant `paletteDefsFor` filters each
+ * level's palette with, so this test grades the gating against exactly what the
+ * player is offered. A local copy with a "keep in sync" comment is not an
+ * invariant -- this file and `ch1-part2.test.ts` used to carry one each.
  *
- * `level_input` / `level_output` are plumbing: always available, never unlocked
- * by a reward. The two constant sources are starter parts -- level 1's puzzle is
- * "hold the output high", and it has no predecessor level to unlock a source
- * from, so the constants are part of the starting palette rather than a reward.
- * (Level 6 lists them again; by then it is a no-op. The progress layer's
- * `PLUMBING` needs to grow to match this set, or level 1's palette is empty of
- * anything that can drive its output.)
+ * It holds the level I/O plumbing plus the two constant sources: level 1's
+ * puzzle is "hold the output high" and it has no predecessor level to unlock a
+ * source from, so the constants are starter parts rather than a reward.
  */
-const STARTER_COMPONENTS: readonly string[] = [
-  'level_input',
-  'level_output',
-  'const_on',
-  'const_off',
-];
 
 describe('chapter 1 levels 1-6', () => {
   it('exposes six levels in order', () => {
@@ -33,9 +28,8 @@ describe('chapter 1 levels 1-6', () => {
   });
 
   it('gates every part behind a component unlocked earlier', () => {
-    // level_input / level_output are plumbing and always available; the two
-    // constants are the starter palette level 1 itself is built from. See
-    // STARTER_COMPONENTS for why they cannot come from an earlier reward.
+    // The starter set is the initial palette; see its doc comment above for why
+    // the constants are in it and cannot come from an earlier reward.
     const unlocked = new Set<string>(STARTER_COMPONENTS);
     for (const level of CH1_PART1) {
       for (const def of level.allowedComponents) {

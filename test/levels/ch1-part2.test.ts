@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { STARTER_COMPONENTS } from '../../src/app/progress';
 import type { Graph } from '../../src/core/graph';
 import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
 import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
@@ -10,19 +11,15 @@ import { build, registry } from '../fixtures/build';
 const byId = new Map(CH1_PART2.map((l) => [l.id, l]));
 
 /**
- * What the game hands the player before the first puzzle. Kept in sync with
- * `test/levels/ch1-part1.test.ts`, which pins level 1's palette to this set.
+ * The starting palette, imported from `src/app/progress.ts` -- the same constant
+ * `paletteDefsFor` uses, so this walk cannot drift from the parts the player is
+ * actually offered. (`ch1-part1.test.ts` imports it too; neither file restates
+ * it.)
  *
  * Levels 7-12 cannot be gated on their own rewards alone: level 8's Delay Line
  * and levels 9-11's gates are handed out by part 1, so the gating walk below
  * starts from the starter set and walks the WHOLE chapter.
  */
-const STARTER_COMPONENTS: readonly string[] = [
-  'level_input',
-  'level_output',
-  'const_on',
-  'const_off',
-];
 
 describe('chapter 1 levels 7-12', () => {
   it('exposes six levels in order', () => {
