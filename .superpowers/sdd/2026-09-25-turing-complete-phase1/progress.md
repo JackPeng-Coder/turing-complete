@@ -158,5 +158,52 @@ Task 1: review ⚠️ carried into Task 2 (named risk, not a Task 1 gap): `level
   DEF width. Task 2 must route the effective width through the region loop (`net.ts:231-245`)
   AND `capacityFor` (`net.ts:137-150`), and keep spec/def widths in agreement, or a
   `read(pin.width)` runs past a def-sized region. Carried verbatim into Task 2's dispatch.
-Task 2: BASE `c4fb3ab`.
+Task 2: BASE `6010948` (corrected again to the true dispatch base: `7f95f40`. Both
+  `6010948` and `7f95f40` are controller commits that landed before Task 2's dispatch, so
+  its review range must start there. Lesson: stop correcting BASE and instead take BASE
+  immediately before each dispatch, after any controller bookkeeping commit).
+Task 2: HEAD `6cdb37b` — DONE, review dispatched.
+  Interface rename worth recording: `levelIoInstanceId(level, graph, defId)` ->
+  `levelIoPlacement(level, graph, defId)` returning `{ id, width } | undefined`.
+  The width had to travel with the id, or `place()` cannot set `params.width` and the game
+  builds level-IO instances that its own binder then rejects.
+Task 2: implementer's RED finding is the sharpest evidence yet that the phase-0 defects
+  were real rather than theoretical: with the old spec-width binding, a **1-bit** bound
+  `level_output` passed **all 256 rows** of an 8-bit level — it read 8 bits from the spec
+  width and happened to alias a wide driver — while the input side wrote past its 1-bit pin
+  into neighbouring slots. Accidental correctness and silent corruption, one root cause.
+Task 2: complete (commits 7f95f40..6cdb37b, review clean — no Critical, no Important).
+Task 2: minor (deferred): the rich `io.mismatch` message is discarded at checks.ts:398, so a
+  pin-width disagreement reaches the player as a `missing-io` failure rendered as a row of
+  zeros with no explanation. Unreachable through play today (graphs are never persisted and
+  `place()` always sizes the part) but Tasks 8–11 hand-author wide levels, so this is exactly
+  when it could bite. Deferred to the final review with the reviewer's own note that
+  `mismatch` is test-visible only until a failure-panel task renders `reason`.
+Task 2: minor (deferred): `params.width` is per instance and widens every pin of that
+  instance, `level_output.mirror` included (8 unused slots per 8-bit output). Harmless, but it
+  means level IO instances cannot mix widths. Recorded so Task 11's `ram8` level and the CPU
+  chapters know the rule before they need a per-pin form.
+Task 2: minor (deferred): report §1.1 and §1.6 describe behaviour the code does not have (the
+  write-back lines were already driven by `OutputPin.width`; a malformed width reaches
+  `grade()` as `failures: []` plus an `invalid-params` issue, not as `invalid`). Code is
+  correct; the ledger records the real behaviour.
+
+Ruling: close Task 2's `1e9`-width escape in Task 3 rather than parking it. The reviewer
+found that `invalid-params` accepts any positive safe integer, so `params.width = 1e9` passes
+`validateGraph`, `capacityFor` asks for >4 GB, and the resulting `RangeError` escapes
+`createSim` into `runChecks`/`grade` — precisely the escape Task 2's ruling 2 exists to
+forbid. The reviewer judged it Minor because only authored data can trigger it, and I agree
+on severity; I am fixing it anyway because the guard was added to close the hazard class and
+a three-line cap closes it completely, so leaving it half-closed is worse than either
+extreme. Routed to Task 3, which already owns `core/defs` and touches the same validation
+neighbourhood. — Cost if wrong: a hand-authored level with a width above 4096 is rejected
+rather than attempted; no legitimate level comes close to 4096 bits.
+
+Ruling: Task 3 must keep `tsc --noEmit`, `pnpm build` and `pnpm smoke` output **in a log
+file**, not only inline in its report. Task 2's reviewer could not verify those three claims
+from the artifacts and had to re-derive the type-safety argument by hand. The cost of keeping
+the logs is one redirect; the cost of not keeping them is a reviewer spending its budget
+re-doing a verifiable check. — Cost if wrong: a few KB of scratch per task.
+
+Task 3: BASE `6cdb37b`.
 
