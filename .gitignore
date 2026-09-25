@@ -6,3 +6,8 @@ coverage/
 .vite/
 playwright-report/
 test-results/
+
+# User-supplied research input. Kept on disk as source material, but never
+# shipped: it quotes the original game's dialogue verbatim, and the project
+# claims (see README.md) to contain none of the original's text.
+图灵完备_Turing_Complete_游戏资料全集.md
