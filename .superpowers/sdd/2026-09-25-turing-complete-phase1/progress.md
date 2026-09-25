@@ -205,8 +205,101 @@ from the artifacts and had to re-derive the type-safety argument by hand. The co
 the logs is one redirect; the cost of not keeping them is a reviewer spending its budget
 re-doing a verifiable check. — Cost if wrong: a few KB of scratch per task.
 
-Task 3: BASE `e27d81a` (new convention, adopted from here on: commit all controller
-  bookkeeping FIRST, then take BASE = HEAD immediately before dispatching. This makes the
-  review range exactly the implementer's commits plus nothing else, and removes the repeated
-  BASE corrections Tasks 1 and 2 needed).
+Task 3: BASE `e27d81a`, implementer commit `a57908a` — DONE_WITH_CONCERNS; fix round 1 dispatched.
+Task 3: controller-found Important: the wide family conflated the **gate** metric with the
+  **delay** metric. `delayOf` (net.ts:616,639,648) and `gateCost` (grader.ts:29-34) both
+  consume `def.cost`, so setting `cost: 1` on every wide operator fixed delay correctly and
+  made an `add8` count as **one gate**. Spec §5.4 defines the gate metric as expanding
+  "电路 + 自定义组件 + 宽位组件" into NAND equivalents, while spec §3.2 defines a wide
+  component as contributing 1 unit of **delay**. The two metrics deliberately differ for wide
+  parts: gate multiplies, delay does not.
+  Why this mattered enough to stop and fix: Tasks 8–11 author every `threeStar.gate` target,
+  and they would have been measured against a metric the spec does not describe. Fixing it
+  after 26 levels existed would have invalidated all 26 sets of targets.
+  Ruling: add an explicit NAND-equivalent gate cost with `cost` as the fallback (so phase-0
+  defs and all 12 chapter-1 scores stay byte-identical), and pin the asymmetry with a test
+  asserting one `and8` has `delay === 1` and `gate > 1`. — Cost if wrong: the gate numbers for
+  wide parts are my chosen constructions rather than the original game's, which is already
+  true of every chapter-2 number (see the source-fidelity ruling).
+Task 3: review clean on the round-1 range — Finding 1 ADDRESSED; task quality Approved. The
+  reviewer independently re-derived all 24 `gateCost` values at width 8 from the stated
+  constructions and confirmed the phase-0 freeze is assertion-based (literal metrics AND
+  scores for 12 reference circuits, cross-checked against `scoreOf`, with each `threeStar`
+  bound compared directly) rather than an absence of change.
+Task 3: fix round 2/5 dispatched — the same conflation one level up: the phase-0 built-in
+  gates still fall through `?? def.cost` and are worth 1 each, so a built-in `and` costs 1
+  while one bit of `and8` costs 2, both under the label "NAND equivalent".
+
+Ruling: fix the **metric**, not the documentation — and lift my own freeze instruction for
+the three chapter-1 gate targets it moves. The reviewer recommended the opposite (keep the
+numbers, correct the two doc comments) because fixing the metric moves `ch1-06` gate 2→4,
+`ch1-10` 2→6, `ch1-11` 2→4 and those levels would stop meeting their own `threeStar.gate`.
+I overrule that recommendation on the authority of spec §5.4, which defines gate as
+"电路 + 自定义组件 + 宽位组件全部展开后，**NAND 等价门**的总数" with no carve-out for the
+built-in gates: the spec is the binding authority, the plan argues from it, and the
+documentation is what is wrong. The freeze was my instruction and it exists to stop
+*accidental* score drift, not to entrench a metric that contradicts the spec.
+Recalibration rule: re-measure the 12 chapter-1 reference solutions and set `threeStar.gate`
+to the measured value only where the reference no longer meets it; delay and tick must not
+move; and add a machine check that **every** level's reference solution meets **all** of its
+own `threeStar` bounds. That last test is worth more than the three edited numbers — it
+turns the phase-0 principle ("a target its own reference solution fails is a defect") into
+something that cannot silently rot across chapters 3–7.
+— Cost if wrong: three chapter-1 three-star gate thresholds become more generous (2→4, 2→6,
+2→4), so three levels get slightly easier to three-star. The alternative is 26 chapter-2
+targets authored against a metric the spec does not define, which is worse and harder to
+undo later.
+
+Task 3: ruling ratified — `shift_*`/`rot_*` are barrel shifters (3 stages × 8 muxes = 24
+  muxes → 96 NAND at width 8; +29 for the `amount >= width` corner rules on logical shifts,
+  +44 for `ashr8` sign-fill), **not** the `8 × mux2` I suggested in the fix dispatch. My
+  suggestion was wrong: the `amount` pin is 8 bits wide, so 8 muxes is a shift-by-one and
+  cannot produce `shift_l8(1, 7) = 0x80`. The implementer deviated with a stated reason and
+  the deviation is correct. — Cost if wrong: the gate counts for the shift family are 4×
+  higher than a naive reading would give, which makes those levels' star targets stricter.
+Task 3: honest-limits note carried forward — the per-operator `gateCost` values are counts of
+  **documented constructions, not proven minima**. The implementer names `mul8` (704) and
+  `div8` (950) as the two it would least defend as tight. Tasks 8–11 must therefore treat a
+  `threeStar.gate` target as "achievable with a good solution" and measure it from the
+  reference solution, not from the bare `gateCost` of the parts used.
+
+Task 3: ruling ratified — `splitter`/`maker` pin **count** is a def-factory parameter, not
+  `params.width`. Task 2's rule widens *every* pin of an instance, so an instance knob would
+  have made all eight outputs 4 bits instead of re-counting them. Registered at 8; a level
+  needing 4 bits uses `b0..b3`. **Recorded limitation: the project cannot instantiate these
+  two at a non-8 count**, and per-instance counts would need a def-level hook in `net.ts`.
+  Later chapters (`byte_indexer`, `bit_indexer`) may need that hook; not this phase.
+
+Task 3: fix round 2/5 (1 addressed, 0 open — built-in gates priced at 1 NAND equivalent while
+  the wide family was priced per the documented basis; commits 0ebb7bc..2027b75). All nine
+  built-in gates now state an explicit `gateCost` (nand 1, not 1, and 2, or 3, nor 4, xor 4,
+  xnor 5, and3 4, or3 6) with an all-NAND construction derived per cell; `cost` stayed 1 on
+  all nine so delay is provably unchanged; the false doc claims were corrected in four places.
+Task 3: complete (commits e27d81a..2027b75, review clean after 2 fix rounds).
+  Recalibrated chapter-1 targets (measured, raised only, no delay/tick moved):
+  `ch1-06-nor-gate` gate 2→4, `ch1-10-bigger-or-gate` gate 2→6, `ch1-11-bigger-and-gate`
+  gate 2→4. The other nine chapter-1 references were unaffected.
+  New phase-wide guarantee: `test/levels/grader.test.ts` walks the **shipped** level set and
+  asserts every level's reference solution meets **all** of its own `threeStar` bounds. That
+  test fails for a missed bound while the freeze test stays green — mutation-proven — which is
+  the machine check that keeps chapters 3–7 honest.
+Task 3: minor (deferred): `src/levels/grader.ts:38-39` says the `?? def.cost` fallback is for
+  defs "zero on both", but a synthetic test def with `cost: 1` and no `gateCost` legitimately
+  uses it, and `registry.ts:54-58` permits absence for any part worth ≤ 1 NAND. Doc wording
+  narrower than the mechanism; no behaviour.
+Task 3: minor (deferred): the four items adjudicated as not worth fixing this round —
+  `toUint`'s `Uint8Array` branch unexercised (carrier for phase 5's 16/32-bit defs),
+  `makeOp`'s negative intermediate at w=32 (value correct), the freeze test's copied circuits
+  that could drift from `ch1-part1`/`part2`'s local `solutions`, and no `grade()` end-to-end on
+  a wide-part level spec. Final review to triage.
+
+Ruling: Tasks 5 and 6 (`fuzz` and `custom` checkers) are merged into **one** dispatch. They
+add two variants to the same `LevelCheck` union in the same two files, and both carry the same
+`missing-rows` lesson — an empty specification must not pass silently. The skill's own
+guidance is to batch same-shape work rather than pay a dispatch and a review seat per variant.
+— Cost if wrong: if one of the two needed its own judgment, its review is bundled with the
+other's and a fix round must address both. The plan's task numbering stays as documentation;
+this ledger records the merge so a reader is not confused by the gap that Task 5–6 creates.
+Task 4: BASE `2027b75`.
+
 
