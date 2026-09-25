@@ -1,5 +1,7 @@
 import type { ComponentDef } from '../registry';
 import {
+  DECODER_DEFS,
+  DECODER_DEF_IDS,
   FULL_ADDER,
   WIDE_DEF_IDS,
   WIDE_STORAGE_DEFS,
@@ -194,7 +196,8 @@ const POST_PHASE0_DEF_IDS = ['full_adder'] as const;
 
 /**
  * Every def id the game ships: phase 0's one-bit parts, the one-bit gate added
- * since, then the wide family -- the operators, then the storage parts.
+ * since, then the wide family -- the operators, the storage parts, and the
+ * decoders.
  *
  * The wide ids are not repeated here -- `wide.ts` owns them next to the defs
  * they name, and `test/core/defs-wide.test.ts` pins that each list agrees with
@@ -206,6 +209,7 @@ export const DEF_IDS = [
   ...POST_PHASE0_DEF_IDS,
   ...WIDE_DEF_IDS,
   ...WIDE_STORAGE_DEF_IDS,
+  ...DECODER_DEF_IDS,
 ] as const;
 
 export type DefId = (typeof DEF_IDS)[number];
@@ -335,4 +339,14 @@ export const BASE_DEFS: readonly ComponentDef[] = [
   // on BOTH metrics, like the two 1-bit memories above: an asserted clear beats
   // an asserted load/en, and the counter wraps to 0 at 256.
   ...WIDE_STORAGE_DEFS,
+
+  // The decoder family (task 10): `decoder1` (`sel:1 -> out:2`) and `decoder3`
+  // (`sel:3 -> out:8`) are what chapter-2 levels 25 and 26 reward and offer in
+  // their own palettes; `decoder2` is the same generator at width 2. Registered
+  // at the widths their ids name rather than at the family's default width,
+  // because a decoder's `out` pin is `2 ** w` bits -- the ids say which part they
+  // are, and `createDecoderDef(w)` builds one. Their paper trail is in `wide.ts`:
+  // the generator, the one-hot contract, and the minterm tree that prices them
+  // (1 / 10 / 27 NAND equivalents at w = 1 / 2 / 3).
+  ...DECODER_DEFS,
 ];

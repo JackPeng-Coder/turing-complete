@@ -12,6 +12,13 @@ import type { PortValue } from '../signal';
  * literal list rather than generated; the section note there says why, and what
  * each def keeps in `state`.
  *
+ * Task 10 added the DECODER family (`decoder1`, `decoder2`, `decoder3`) between
+ * the operators and the storage parts. It is generated per width like the
+ * operators are, but it is deliberately NOT a `createWideDefs` product: a
+ * decoder's two pins have different widths (`sel` is `w` bits, `out` is `2 ** w`)
+ * and that generator builds one width for every pin of every def it produces.
+ * The section note below the operators has the full reason.
+ *
  * Three rules this module establishes, because nothing in the project had a
  * width other than 1 before it:
  *
@@ -811,6 +818,152 @@ export function createWideDefs(width: number = DEFAULT_WIDE_WIDTH): readonly Com
     switchDef(`switch${w}`, { zh: `${w} 位开关`, en: `${w}-Bit Switch` }, w),
   ];
 }
+
+// ---------------------------------------------------------------------------
+// THE DECODER FAMILY (task 10)
+//
+// `decoder1` and `decoder3` are the parts chapter-2 levels 25 and 26 reward AND
+// offer in their own palettes; `decoder2` is the same definition one width up --
+// the compendium's "2-Bit Decoder", which no level name introduces, so it is not a
+// second hand-written part but this generator at width 2, registered so a later
+// chapter can reach for it.
+//
+// WHY THIS IS NOT PART OF `createWideDefs`. That generator builds one width for
+// every pin of every def it produces, and a decoder's two pins deliberately
+// differ: `sel` is `w` bits and `out` is `2 ** w`. The id says which width it is
+// (`decoder3` = a 3-bit select, an 8-bit output), and the width is a parameter of
+// the DEF rather than of the instance for exactly the reason the module header
+// gives for `splitter` / `maker`: `params.width` widens EVERY pin of an instance
+// (`net.ts`, `effectiveWidth`), so no instance knob can make one pin three bits
+// and the other eight. A decoder built by `createWideDefs(8)` would have a `2 ** 8
+// = 256`-bit `out` pin -- a port this project has no carrier for -- which is why
+// the registered widths come from the literal list below and `createWideDefs`
+// never grows a decoder.
+//
+// ONE-HOT OUTPUT. The value published is `1 << sel`: bit `sel` high and every
+// other bit low. That is what a decoder is FOR -- turning an address into a
+// one-of-N select line -- and the level data states the same expectation at both
+// widths (`truthTable(io, { out: ({ sel }) => 1 << (sel ?? 0) })`). Publishing
+// `sel` instead would be a wire wearing a decoder's pins: it agrees with the
+// one-hot reading at sel 0 and 1 and disagrees everywhere above, which is the
+// "pass-through decoder" that level 26's test file measures as a failure. Do not
+// "simplify" this to the select value.
+//
+// COST. `cost` is 1 -- the delay unit every operator pays (spec §3.2), because the
+// part is one node however many minterms it expands to. `gateCost` is the minterm
+// tree's NAND count, derived at `decoderNand` below and stated explicitly on every
+// def, never inherited from `cost`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Widest select field this generator will build: `out` is `2 ** w` bits, and
+ * `2 ** 5 = 32` is the widest value a `number` carries exactly (`MAX_WIDE_WIDTH`
+ * is the same ceiling applied to a data width).
+ *
+ * A width outside `1..DECODER_MAX_WIDTH` is REFUSED rather than clamped, which is
+ * the opposite of `clampWidth` and is deliberate: clamping a request for a 6-bit
+ * decoder would hand the caller a part with a different pin shape than the one it
+ * asked for, in silence, and no level name can reach such a width anyway.
+ */
+export const DECODER_MAX_WIDTH = 5;
+
+/**
+ * NANDs in a `w`-to-`2 ** w` decoder: **`w` inverters plus `2 ** (w + 1) - 4`
+ * AND gates**, on the same basis as every other count in this file (one 2-input
+ * NAND is the unit, so `NOT` = 1 and `AND` = 2).
+ *
+ * THE CONSTRUCTION is the shared minterm tree level 26 teaches -- do not rebuild
+ * the low decode once per output line:
+ *
+ *  * Invert every select bit: `w` NOTs, which hand the tree both literals of each
+ *    bit.
+ *  * Grow the minterms one literal at a time. Layer 2 ANDs each literal of bit 1
+ *    with each literal of bit 0: 4 ANDs, giving the four minterms of the low two
+ *    bits. Layer `j` does the same to the `2 ** (j - 1)` minterms already in hand
+ *    with bit `j - 1`'s two literals: `2 ** j` ANDs. The last layer IS the
+ *    `2 ** w` output lines, so no minterm is ever decoded twice and the tree has
+ *    depth `w`.
+ *  * ANDs total `sum(2 ** j for j in 2..w)` = `2 ** (w + 1) - 4`.
+ *
+ *   w | NOTs | ANDs | NANDs | the same number in the level data
+ *   --|------|------|-------|-------------------------------------------------
+ *   1 |  1   |  0   |   1   | level 25's reference: one `not`, `maker` free
+ *   2 |  2   |  4   |  10   | 2 NOTs + 4 two-literal ANDs
+ *   3 |  3   | 12   |  27   | level 26's reference: 3 NOTs + 4 ANDs + 8 ANDs
+ *
+ * Both level targets are this tree's own arithmetic, which is the check that
+ * these numbers describe the construction the levels were authored against
+ * rather than a drawing invented here. A documented construction, not a proven
+ * minimum: sharing the low decode is what makes it cheaper than `2 ** w` flat
+ * `w`-input ANDs (at w = 3, 35 NANDs instead of 27).
+ */
+function decoderNand(w: number): number {
+  return w * NOT + (2 ** (w + 1) - 4) * AND;
+}
+
+/**
+ * One decoder at `w` select bits: `sel: w` in, `out: 2 ** w` out, one-hot.
+ *
+ * The generator is the width mechanism, exactly as `createWideDefs(width)` is for
+ * the operators: `createDecoderDef(3)` is `decoder3` (`sel:3 -> out:8`), and the
+ * pins are rebuilt at that width rather than re-counted per instance (which the
+ * kernel cannot do -- see the section note).
+ *
+ * `sel` is read through `toUint`, so a poisoned, oversized or unwired select is
+ * masked into the select field before it can index anything; the published value
+ * is then `2 ** sel`, which is at most `2 ** (2 ** w - 1)` and fits the pin by
+ * construction. `2 ** sel` and not `1 << sel`: `<<` converts through int32, so at
+ * a 5-bit select bit 31 would come out negative -- the "negative reading" every
+ * def in this file is written to avoid.
+ */
+export function createDecoderDef(width: number): ComponentDef {
+  if (!Number.isInteger(width) || width < 1 || width > DECODER_MAX_WIDTH) {
+    throw new Error(`decoder width must be an integer in 1..${DECODER_MAX_WIDTH}, got ${width}`);
+  }
+  const w = width;
+  const lines = 2 ** w;
+  return combinational(
+    `decoder${w}`,
+    { zh: `${w} 位解码器`, en: `${w}-Bit Decoder` },
+    'wide',
+    [{ id: 'sel', width: w }],
+    [{ id: 'out', width: lines }],
+    // The delay unit, one per node; the gate metric is the tree below.
+    1,
+    decoderNand(w),
+    (i, o) => {
+      o[0] = u(2 ** toUint(i[0], w), lines);
+    },
+  );
+}
+
+/**
+ * The select widths this phase registers, in order.
+ *
+ * 1 and 3 are the widths the level names introduce; 2 is the compendium's 2-bit
+ * decoder, which no level name introduces and which therefore must not become a
+ * hand-written part of its own -- it is `createDecoderDef(2)`.
+ */
+export const DECODER_WIDTHS = [1, 2, 3] as const;
+
+/**
+ * Ids `DECODER_DEFS` registers, in order, as a literal tuple so `DEF_IDS` can
+ * spread it and `DefId` still narrows to the individual strings.
+ *
+ * The id is `decoder` + the SELECT width, which is the contract the level data
+ * spells (`ch2-25-1-bit-decoder` rewards `decoder1`, level 26 `decoder3`); the
+ * output width is `2 ** w` and is deliberately not part of the name.
+ */
+export const DECODER_DEF_IDS = ['decoder1', 'decoder2', 'decoder3'] as const;
+
+/**
+ * The decoder family, in `DECODER_DEF_IDS` order.
+ *
+ * Registered from this list rather than from a `createWideDefs` call for the
+ * reason in the section note: the output pin is `2 ** w` bits, so the widths are
+ * a decision this family owns.
+ */
+export const DECODER_DEFS: readonly ComponentDef[] = DECODER_WIDTHS.map((w) => createDecoderDef(w));
 
 // ---------------------------------------------------------------------------
 // THE STORAGE FAMILY (task 4)

@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS, DEF_IDS } from '../../src/core/defs/index';
-import { WIDE_DEF_IDS, WIDE_STORAGE_DEF_IDS } from '../../src/core/defs/wide';
+import {
+  DECODER_DEFS,
+  DECODER_DEF_IDS,
+  DECODER_MAX_WIDTH,
+  DECODER_WIDTHS,
+  WIDE_DEF_IDS,
+  WIDE_STORAGE_DEF_IDS,
+  createDecoderDef,
+  createWideDefs,
+} from '../../src/core/defs/wide';
 import { extractField, insertField, packBits, unpackBits } from '../../src/core/fields';
 import { CH2_BATCH2 } from '../../src/levels/content/ch2/batch2';
+import { CH2_BATCH3 } from '../../src/levels/content/ch2/batch3';
 import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
 import { LEVELS } from '../../src/levels/index';
 import type { LevelSpec } from '../../src/levels/spec';
@@ -143,7 +153,11 @@ describe('base defs', () => {
     // storage elements are zero gates AND zero delay, so a second explicit 0
     // would only give the two zeroes a way to drift apart. Every part that is
     // worth a gate states its own count instead.
-    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS]);
+    //
+    // The decoder family joins the operators and the storage parts here because
+    // it is a wide part too: one DELAY unit, and a gate count it states itself
+    // (1 / 10 / 27), so the `?? cost` fallback would price a 3-bit decoder at 1.
+    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS, ...DECODER_DEF_IDS]);
     for (const d of r.all()) {
       if (wide.has(d.id) || d.category === 'logic1') continue;
       expect(d.cost, `${d.id} leans on the fallback but is not free`).toBe(0);
@@ -282,12 +296,15 @@ describe('base defs: extra coverage', () => {
 
   it('declares 1-bit pins on every def outside the wide family', () => {
     // Phase 0 shipped only 1-bit parts, and every def it shipped still is one.
-    // The wide family -- task 3's operators and task 4's storage parts -- is
-    // where a pin wider than one bit appears, and `defs-wide.test.ts` pins its
-    // exact pin widths against each task brief's table, a stronger statement
-    // than this loop makes; those defs are excluded here rather than weakening
-    // this invariant to "some pins".
-    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS]);
+    // The wide family -- task 3's operators, task 4's storage parts and task 10's
+    // decoders -- is where a pin wider than one bit appears, and
+    // `defs-wide.test.ts` pins the operators' and the storage family's exact pin
+    // widths against each task brief's table, a stronger statement than this loop
+    // makes; those defs are excluded here rather than weakening this invariant to
+    // "some pins". `decoder1` is the sharpest case: its `out` is 2 bits wide by
+    // contract (a 1-to-2 decoder's whole point), so it belongs to that exclusion
+    // and is pinned by the decoder tests above.
+    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS, ...DECODER_DEF_IDS]);
     for (const d of r.all()) {
       if (wide.has(d.id)) continue;
       for (const p of [...d.inputs, ...d.outputs]) {
@@ -412,6 +429,181 @@ describe('fields', () => {
 });
 
 /**
+ * The decoder family: `decoder1` and `decoder3` are the parts levels 25 and 26
+ * reward, and `decoder2` is the same generator at width 2.
+ *
+ * ONE-HOT, NOT A NUMBER. A decoder turns an address into a one-of-N select line:
+ * the value on `out` is `1 << sel` -- bit `sel` high and every other bit low --
+ * and NOT `sel` itself. Level 26's own check states the same expectation
+ * (`truthTable(IO_SEL3_OUT8, { out: ({ sel }) => 1 << (sel ?? 0) })`), and the
+ * tables below are written out rather than computed from the def, so the level
+ * and the part cannot agree by sharing one mistake. A decoder that published
+ * `sel` would be a wire: it would pass `sel = 0` and `sel = 1` on both widths and
+ * teach nothing.
+ *
+ * WHY THE IDS ARE PINNED HERE. `rewards.components` and `allowedComponents` are
+ * `readonly string[]`, so the compiler cannot see a reward that names no def --
+ * the defect class the walk at the bottom of this file covers. These tests are
+ * the other half: the parts those two levels hand out behave like decoders.
+ */
+describe('the decoder family', () => {
+  const r = createRegistry(BASE_DEFS);
+
+  /** Runs a def the way `settle` does: one input, one output slot, no state. */
+  const decode = (id: string, sel: number): number | Uint8Array | undefined => {
+    const out: (number | Uint8Array)[] = [0];
+    r.get(id).evaluate!([sel], out, undefined, { tick: 0 });
+    return out[0];
+  };
+
+  it('decodes one select bit into a two-line one-hot vector', () => {
+    // The index IS the select value: sel 0 lights bit 0 (out reads 1) and sel 1
+    // lights bit 1 (out reads 2). Written out, so the table states the contract
+    // instead of agreeing with the implementation.
+    const TABLE: readonly number[] = [0b01, 0b10];
+    for (let sel = 0; sel < TABLE.length; sel += 1) {
+      expect(decode('decoder1', sel), `decoder1(sel=${sel})`).toBe(TABLE[sel]);
+    }
+    // The pass-through a decoder is not: `sel = 1` reads 2, never 1.
+    expect(decode('decoder1', 1)).not.toBe(1);
+  });
+
+  it('decodes three select bits into eight one-hot lines', () => {
+    const TABLE: readonly number[] = [
+      0b0000_0001, // sel 0 -> bit 0
+      0b0000_0010, // sel 1 -> bit 1
+      0b0000_0100, // sel 2 -> bit 2
+      0b0000_1000, // sel 3 -> bit 3
+      0b0001_0000, // sel 4 -> bit 4
+      0b0010_0000, // sel 5 -> bit 5
+      0b0100_0000, // sel 6 -> bit 6
+      0b1000_0000, // sel 7 -> bit 7
+    ];
+    /** Set bits in a byte: a one-hot vector has exactly one, whatever it decodes. */
+    const ones = (value: number): number => {
+      let count = 0;
+      for (let bit = 0; bit < 8; bit += 1) count += (value >> bit) & 1;
+      return count;
+    };
+    for (let sel = 0; sel < TABLE.length; sel += 1) {
+      const got = decode('decoder3', sel);
+      expect(got, `decoder3(sel=${sel})`).toBe(TABLE[sel]);
+      // Every row is a one-hot vector -- eight outputs, exactly one high...
+      expect(ones(Number(got)), `decoder3(sel=${sel}) is not one-hot`).toBe(1);
+      // ...and from sel 2 up the high bit is not where the NUMBER `sel` would put
+      // it, which is the only place the two readings differ: a def that published
+      // `sel` (the "pass-through decoder" level 26's test file names) passes the
+      // first two rows and fails every row below.
+      if (sel >= 2) expect(got, `decoder3(sel=${sel}) published sel`).not.toBe(sel);
+    }
+  });
+
+  it('registers every width as a wide, combinational, one-delay-unit part', () => {
+    // The whole surface in one row per part: id, select width, output width and
+    // NAND equivalents. `out` is a WIDE pin carrying a one-hot vector, which is
+    // why these are `category: 'wide'`, and the three rows are the whole family
+    // this phase registers -- `defs/index.ts` spreads `DECODER_DEF_IDS` rather
+    // than assuming the operator generator's 8.
+    const ROWS: readonly (readonly [string, number, number, number])[] = [
+      ['decoder1', 1, 2, 1],
+      ['decoder2', 2, 4, 10],
+      ['decoder3', 3, 8, 27],
+    ];
+    for (const [id, selWidth, outWidth, gateCost] of ROWS) {
+      expect([...DEF_IDS], id).toContain(id);
+      expect(r.has(id), id).toBe(true);
+      const def = r.get(id);
+      expect(def.category, id).toBe('wide');
+      // The DELAY unit, one per node -- never the gate count.
+      expect(def.cost, id).toBe(1);
+      expect(def.sequential, id).toBe(false);
+      expect(def.stateBytes, id).toBe(0);
+      expect(def.clockEdge, id).toBeUndefined();
+      // Stated explicitly, not inherited from `cost`: the two fields exist
+      // because a 27-NAND decoder is still one node of delay.
+      expect(typeof def.gateCost, id).toBe('number');
+      expect(def.gateCost, id).toBe(gateCost);
+      expect(def.inputs.map((p) => `${p.id}:${p.width}`), id).toEqual([`sel:${selWidth}`]);
+      expect(def.outputs.map((p) => `${p.id}:${p.width}`), id).toEqual([`out:${outWidth}`]);
+      // A palette part, not plumbing: `ui/palette.ts` drops a hidden def even
+      // when the level lists it, which is the silence this family ends.
+      expect(def.hidden, id).toBeUndefined();
+    }
+    expect(r.get('decoder1').name).toEqual({ zh: '1 位解码器', en: '1-Bit Decoder' });
+    expect(r.get('decoder3').name).toEqual({ zh: '3 位解码器', en: '3-Bit Decoder' });
+  });
+
+  it('prices the shared minterm tree, which is the number level 26 was measured at', () => {
+    const gate = (id: string): number => r.get(id).gateCost ?? -1;
+    // THE DERIVATION, written out at `decoderNand` in `wide.ts`: `w` inverters,
+    // then one minterm layer of `2 ** j` AND gates per extra select bit, so the
+    // layers total `2 ** (w + 1) - 4` ANDs. On the file's basis (NOT 1, AND 2):
+    expect(gate('decoder1')).toBe(1 * 1 + 0 * 2);
+    expect(gate('decoder2')).toBe(2 * 1 + 4 * 2);
+    expect(gate('decoder3')).toBe(3 * 1 + 12 * 2);
+    // The recurrence that table implies, so a single edited number cannot pass
+    // while the construction it claims stops adding up: each extra select bit
+    // adds its own inverter and doubles the last minterm layer.
+    expect(gate('decoder2')).toBe(gate('decoder1') + 1 + 2 ** 2 * 2);
+    expect(gate('decoder3')).toBe(gate('decoder2') + 1 + 2 ** 3 * 2);
+    // THE CROSS-CHECK, and the reason these are the numbers rather than a
+    // drawing invented here: level 25's reference solution is one `not` with the
+    // `maker` free (1) and level 26's is the two-level tree (3 NOTs + 4 ANDs + 8
+    // ANDs = 27). Both level targets are this tree's own arithmetic.
+    expect(gate('decoder1')).toBe(1);
+    expect(gate('decoder3')).toBe(27);
+    // ...and neither is a single NAND, which is what `cost` alone would say.
+    expect(gate('decoder3')).toBeGreaterThan(r.get('decoder3').cost);
+  });
+
+  it('is generated per width, the only knob that can give its two pins different sizes', () => {
+    // `params.width` cannot do this job: the kernel resolves a pin's width as
+    // `inst.params.width ?? pin.width` for EVERY pin of the instance (`net.ts`,
+    // `effectiveWidth`), so an instance knob makes `sel` and `out` the same
+    // width and cannot express `sel:3 -> out:8` at all. The pin count is a
+    // parameter of the DEF, exactly as `createWideDefs(width)` builds the
+    // splitter's pin list, and `decoder2` is that generator at width 2 rather
+    // than a second hand-written part.
+    expect(DECODER_WIDTHS).toEqual([1, 2, 3]);
+    expect(DECODER_DEF_IDS).toEqual(['decoder1', 'decoder2', 'decoder3']);
+    // The literal tuple and the generator cannot drift apart.
+    expect(DECODER_WIDTHS.map((w) => `decoder${w}`)).toEqual([...DECODER_DEF_IDS]);
+    expect(DECODER_DEFS.map((d) => d.id)).toEqual([...DECODER_DEF_IDS]);
+    for (const def of DECODER_DEFS) expect([...DEF_IDS], def.id).toContain(def.id);
+
+    // Every width the generator builds -- the registered three and the two above
+    // them that no level names -- is the same one-hot decode, so the widths are
+    // one definition rather than three implementations.
+    for (let w = 1; w <= DECODER_MAX_WIDTH; w += 1) {
+      const def = createDecoderDef(w);
+      expect(def.id).toBe(`decoder${w}`);
+      expect(def.inputs.map((p) => `${p.id}:${p.width}`)).toEqual([`sel:${w}`]);
+      expect(def.outputs.map((p) => `${p.id}:${p.width}`)).toEqual([`out:${2 ** w}`]);
+      const out: (number | Uint8Array)[] = [0];
+      for (let sel = 0; sel < 2 ** w; sel += 1) {
+        def.evaluate!([sel], out, undefined, { tick: 0 });
+        expect(out[0], `decoder${w}(sel=${sel})`).toBe(2 ** sel);
+      }
+    }
+
+    // A decoder's `out` pin is `2 ** w` bits, so the OPERATOR generator -- which
+    // builds one width for every pin of every def it produces -- must never grow
+    // one: its decoder would be a 256-bit port under an id (`decoder8`) that no
+    // level data spells.
+    expect(createWideDefs(8).map((d) => d.id).filter((id) => id.startsWith('decoder'))).toEqual(
+      [],
+    );
+    // An out-of-range width is refused loudly rather than clamped into a part
+    // with a different pin shape: `clampWidth` would answer a request for 6 with
+    // 6, whose `out` pin is 64 bits -- wider than the `number` carrier the def
+    // publishes.
+    expect(() => createDecoderDef(0)).toThrow(/1\.\.5/);
+    expect(() => createDecoderDef(DECODER_MAX_WIDTH + 1)).toThrow(/1\.\.5/);
+    expect(() => createDecoderDef(1.5)).toThrow(/1\.\.5/);
+  });
+});
+
+/**
  * The defect class this block guards: a level whose `rewards.components` names
  * an id that no def declares.
  *
@@ -427,18 +619,19 @@ describe('fields', () => {
  *
  * WHAT IS WALKED. The game's own level set (`LEVELS`, chapter 1) plus the
  * chapter-2 batches that are shipped data: `CH2_LEVELS` (the batches joined into
- * the game so far) and `CH2_BATCH2`, which is written and reviewed but not
- * joined yet. Naming the unjoined batch explicitly is the point -- level 20
- * lives in it, and a walk that only covered `LEVELS` + `CH2_LEVELS` would have
- * passed this test while the defect stood. When a batch is appended to
- * `CH2_LEVELS`, it joins this walk with no edit here; the one line to delete
- * then is the `CH2_BATCH2` import, which a batch join makes redundant.
+ * the game so far) and the two written-but-unjoined batches `CH2_BATCH2` and
+ * `CH2_BATCH3`. Naming the unjoined batches explicitly is the point -- level 20
+ * lives in the second and levels 25 and 26 in the third, and a walk that only
+ * covered `LEVELS` + `CH2_LEVELS` would have passed this test while the holes
+ * stood. When a batch is appended to `CH2_LEVELS`, it joins this walk with no
+ * edit here; the one line to delete then is that batch's import, which a batch
+ * join makes redundant.
  */
 describe('shipped level rewards', () => {
   const r = createRegistry(BASE_DEFS);
 
-  /** Every shipped level: the game's order first, then the unjoined batch. */
-  const SHIPPED: readonly LevelSpec[] = [...LEVELS, ...CH2_LEVELS, ...CH2_BATCH2];
+  /** Every shipped level: the game's order first, then the unjoined batches. */
+  const SHIPPED: readonly LevelSpec[] = [...LEVELS, ...CH2_LEVELS, ...CH2_BATCH2, ...CH2_BATCH3];
 
   it('names only registered defs in rewards.components', () => {
     const named = new Set<string>();
@@ -454,9 +647,12 @@ describe('shipped level rewards', () => {
     expect(missing, 'rewards that name no def').toEqual([]);
     // NON-VACUITY. An empty walk passes the assertion above no matter what the
     // level data says, so the walk proves it reached the levels: `full_adder` is
-    // level 20's reward, and level 20 is in the batch that is not joined into
-    // `LEVELS`/`CH2_LEVELS` yet -- the exact hole this test exists to cover.
+    // level 20's reward, in the batch after `CH2_LEVELS`, and `decoder1` /
+    // `decoder3` are levels 25 and 26's rewards, in the batch after that -- the
+    // exact holes this test exists to cover.
     expect([...named]).toContain('full_adder');
+    expect([...named]).toContain('decoder1');
+    expect([...named]).toContain('decoder3');
     expect(named.size).toBeGreaterThan(1);
   });
 
@@ -479,8 +675,11 @@ describe('shipped level rewards', () => {
       }
     }
     expect(missing, 'palette ids that name no def').toEqual([]);
-    // The same non-vacuity anchor as above: `full_adder` is only reachable
-    // through the unjoined batch, and only level 20 lists it.
+    // The same non-vacuity anchors as above: `full_adder` is only reachable
+    // through the second unjoined batch, and `decoder1` / `decoder3` -- which
+    // levels 25 and 26 offer in their own palettes -- only through the third.
     expect([...offered]).toContain('full_adder');
+    expect([...offered]).toContain('decoder1');
+    expect([...offered]).toContain('decoder3');
   });
 });
