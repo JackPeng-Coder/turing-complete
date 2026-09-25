@@ -17,6 +17,20 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# git emits nothing for an empty range, and PowerShell then hands back $null
+# rather than an empty collection -- which List.AddRange rejects. Collect
+# defensively so a same-revision range produces an empty section, not a crash.
+function Add-Lines {
+  param(
+    [System.Collections.Generic.List[string]]$Target,
+    [AllowNull()]$Lines
+  )
+  if ($null -eq $Lines) { return }
+  foreach ($line in @($Lines)) {
+    if ($null -ne $line) { $Target.Add([string]$line) }
+  }
+}
+
 if (-not (Test-Path -LiteralPath $PlanFile -PathType Leaf)) {
   Write-Error "no such plan file: $PlanFile"
   exit 2
@@ -42,13 +56,13 @@ $body = [System.Collections.Generic.List[string]]::new()
 $body.Add("# Review package: $Base..$Head")
 $body.Add('')
 $body.Add('## Commits')
-$body.AddRange([string[]](& git log --oneline "$Base..$Head"))
+Add-Lines $body (& git log --oneline "$Base..$Head")
 $body.Add('')
 $body.Add('## Files changed')
-$body.AddRange([string[]](& git diff --stat "$Base..$Head"))
+Add-Lines $body (& git diff --stat "$Base..$Head")
 $body.Add('')
 $body.Add('## Diff')
-$body.AddRange([string[]](& git diff -U10 "$Base..$Head"))
+Add-Lines $body (& git diff -U10 "$Base..$Head")
 
 $parent = Split-Path -Parent $OutFile
 if ($parent -and -not (Test-Path -LiteralPath $parent)) {
