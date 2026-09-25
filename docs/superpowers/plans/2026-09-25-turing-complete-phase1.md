@@ -70,36 +70,18 @@ Ledger: `.superpowers/sdd/2026-09-25-turing-complete-phase1/progress.md`
 同一概念的电路关；第 34 关「总线」按 spec §3.1「不做总线协议（多驱动仲裁）」
 改建为「同一时刻只有一个驱动器有效」的选择器关。三处改建都记录在账本里。
 
-| # | 关卡（源资料名） | 本复刻版 io | 检查器 | 解锁 |
-|---|---|---|---|---|
-| 13 | ODD Number of Signals 奇数个信号 | `a:4` → `out:1` | truth-table 16 行 | `splitter` `maker` `const8` |
-| 14 | Double Trouble 成对的麻烦 | `a,b,c,d:1` → `out:1` | constraint at-least 2 | `and3`(已有) `or3`(已有) |
-| 15 | Binary Racer 二进制速算 | `a:4` → `out:3` | truth-table 16 行 | `less_u` |
-| 16 | Counting Signals 信号计数 | `a,b,c,d:1` → `out:3` | truth-table 16 行 | `equal8` |
-| 17 | Double the Number 加倍 | `a:8` → `d:8` | truth-table 256 行（生成） | `add8` `mul8` |
-| 18 | Byte OR 8 位或 | `a:8 b:8` → `out:8` | fuzz 256 轮 | `and8` `or8` `nand8` `nor8` |
-| 19 | Byte NOT 8 位非 | `a:8` → `out:8` | fuzz 256 轮 | `xor8` `xnor8` `not8` |
-| 20 | Half Adder 半加器 | `a,b:1` → `sum,carry:1` | truth-table 4 行 | `full_adder` |
-| 21 | Full Adder 全加器 | `a,b,cin:1` → `sum,cout:1` | truth-table 8 行 | `neg8` |
-| 22 | Adding Bytes 8 位加法器 | `a:8 b:8 cin:1` → `out:8 cout:1` | fuzz 256 轮 | `switch` `switch8` |
-| 23 | Negative Numbers 负数 | `a:8` → `out:8` | fuzz 256 轮 | `div8` |
-| 24 | Signed Negator 相反数 | `a:8` → `out:8` | fuzz 256 轮 | `less_s` `shift_l8` `shift_r8` |
-| 25 | 1 Bit Decoder 1 位解码器 | `sel:1` → `out:2` | truth-table 2 行 | `decoder1`(= decoder2) |
-| 26 | 3 Bit Decoder 3 位解码器 | `sel:3` → `out:8` | truth-table 8 行 | `decoder3` |
-| 27 | Logic Engine 逻辑引擎 | `a:8 b:8 op:8` → `out:8` | fuzz 256 轮 | `ashr8` `rot_l8` `rot_r8` |
-| 28 | Circular Dependency 循环依赖 | `set,value:1` → `out:1` | script + 稳定性 | `ram8` |
-| 29 | Delayed Lines 延迟线 | `a:8` → `out:8` | script 逐拍 | `reg8` `delay8` |
-| 30 | Odd Ticks 奇变偶不变 | `enable:1` → `out:1` | script 逐拍 + 周期 | （无） |
-| 31 | Bit Inverter 1 位取反器 | `a,inv:1` → `out:1` | truth-table 4 行 | （无） |
-| 32 | Bit Switch 1 位开关 | `a,on:1` → `out:1` | truth-table 4 行 | （无） |
-| 33 | Input Selector 数据选择器 | `a:8 b:8 sel:1` → `out:8` | fuzz 256 轮 | `mux8` |
-| 34 | The bus 总线 | `a:8 b:8 sel:1` → `out:8` | truth-table + 唯一驱动断言 | （无） |
-| 35 | Saving Gracefully 优雅存储 | `d,load:1` → `out:1` | script 逐拍 | （无） |
-| 36 | Saving Bytes 存储一字节 | `d:8 load:1` → `out:8` | script 逐拍 | `counter8` |
-| 37 | Little Box 小盒子 | `d:8 load,sel:1` → `out:8` | script 逐拍 | （无） |
-| 38 | Counter 计数器 | `en,reset:1` → `out:8` | script 逐拍 + 回绕 | （无） |
+26 关的逐关定义在 **Task 8–11 各自的小节里**，每关四个批次只拥有自己那几关，
+这样每个实施者的 brief 都是自足的（brief 提取器按 `## Task N:` 切分，
+提取不到本节之外的内容）。总览：
 
-**解锁链的两条机器化规则**（Task 7 必须测试它们）：
+| 批次 | 关卡 | 主题 | 检查器 |
+|---|---|---|---|
+| Task 8 | 13–17 | 标量逻辑与计数 | truth-table / constraint |
+| Task 9 | 18–22 | 8 位逻辑与加法 | fuzz 起步 |
+| Task 10 | 23–27 | 补码、解码器与逻辑引擎 | fuzz |
+| Task 11 | 28–38 | 存储与时序 | script |
+
+**全章共用的解锁链规则**（Task 7 必须把它们变成机器检查）：
 
 - 每一关用到的组件，必须在**该关之前**已经解锁（否则玩家卡死）。
 - 每个第 2 章组件必须**恰好**被一个关卡解锁，且解锁点不晚于它第一次被需要。
@@ -269,40 +251,114 @@ spec §5.2：`custom` 是逃生舱，但必须只依赖内核公开接口，且�
 
 **Files:** `src/levels/content/ch2/batch1.ts`, `test/levels/ch2-batch1.test.ts`
 
-按总表实现第 13–17 关（`id` 用 `ch2-13-odd-number-of-signals` 形式）。
-每关必须提供完整的 `LevelSpec` 字段（含原创 `brief` 与 `hint`）、
-至少一个检查器、由参考解**实测**得出的 `threeStar`、以及 `rewards`。
-第 15、16 关的输出是 3 位计数，用 `generateRows` 生成真值表行，
-**不得**留空 `rows`。
+逐关定义（`id` 形如 `ch2-13-odd-number-of-signals`）：
+
+| # | 关卡名（源资料） | io | 检查器 | 解锁 | 教学点 |
+|---|---|---|---|---|---|
+| 13 | ODD Number of Signals 奇数个信号 | `a:4` → `out:1` | truth-table 16 行 | `splitter` `maker` `const8` | 异或链判奇偶；宽端口拆成位 |
+| 14 | Double Trouble 成对的麻烦 | `a,b,c,d:1` → `out:1` | constraint `at-least` 2 | — | 至少 2 个为高 |
+| 15 | Binary Racer 二进制速算 | `a:4` → `out:3` | truth-table 16 行 | `less_u` | 4 位量化成 3 位计数 |
+| 16 | Counting Signals 信号计数 | `a,b,c,d:1` → `out:3` | truth-table 16 行 | `equal8` | 4 个 1 位信号相加（半加器思想） |
+| 17 | Double the Number 加倍 | `a:8` → `out:8` | truth-table 256 行（生成） | `add8` `mul8` | 左移一位即加倍 |
+
+每关必须提供完整 `LevelSpec`：`id` `chapter: 2` `index` `name`(中英)
+`brief`(原创) `hint`(原创) `allowedComponents` `io` `checks` `threeStar` `rewards`。
+
+要求：
+
+- 第 15、16 关输出是 3 位计数，用 `generateRows` 生成真值表行，
+  **不得**留空 `rows`（空 `rows` 是硬失败 `missing-rows`）。
+- 第 13 关的 4 位输入是**有意的**：源资料没说宽度，4 位既够教学又让
+  16 行真值表可穷举。这一选择在关卡数据注释里标为「本复刻版设计」。
+- 第 15 关源资料是「限时二进制转换小游戏」，本作改建为 4 位 → 3 位计数电路。
+  这一改建必须写进关卡 `brief` 的数据注释。
+- `threeStar` 三项都必须由参考解**实测**得出，且参考解本身就满足。
+- 每关一条参考解测试 + 一条**必须真的失败**的反例测试。
 
 ## Task 9: 第 2 章关卡 18–22（8 位逻辑与加法）
 
 **Files:** `src/levels/content/ch2/batch2.ts`, `test/levels/ch2-batch2.test.ts`
 
-第 18–22 关。**`fuzz` 从本批开始使用**（第 18、19、22 关）。
-第 22 关的 `threeStar.delay` 必须由参考解实测得出；
-源资料给出的「延迟 ≤ 35」是**成就**而非通关条件，作为
-`threeStar.delay` 的**参考值**记录在关卡注释里，实测值以参考解为准。
+| # | 关卡名（源资料） | io | 检查器 | 解锁 | 教学点 |
+|---|---|---|---|---|---|
+| 18 | Byte OR 8 位或 | `a:8` `b:8` → `out:8` | fuzz 256 轮 | `and8` `or8` `nand8` `nor8` | 8 位按位或 |
+| 19 | Byte NOT 8 位非 | `a:8` → `out:8` | fuzz 256 轮 | `xor8` `xnor8` `not8` | 8 位按位非 |
+| 20 | Half Adder 半加器 | `a:1` `b:1` → `sum:1` `carry:1` | truth-table 4 行 | `full_adder` | 和与进位 |
+| 21 | Full Adder 全加器 | `a:1` `b:1` `cin:1` → `sum:1` `cout:1` | truth-table 8 行 | `neg8` | 带进位的 1 位加法器 |
+| 22 | Adding Bytes 8 位加法器 | `a:8` `b:8` `cin:1` → `out:8` `cout:1` | fuzz 256 轮 | `switch` `switch8` | 级联全加器 |
+
+要求：
+
+- **`fuzz` 从本批开始使用**（第 18、19、22 关），必须用 `seed` + `rounds: 256`，
+  期望函数是纯函数。
+- 第 20 关的 id 是 `ch2-20-half-adder`，但**不**产出 `half_adder` 组件
+  （spec §3.3 的第 2 章清单里没有它）；奖励是 `full_adder`，玩家下一关就要用。
+- 第 22 关的 `threeStar.delay` 必须**由参考解实测**得出。源资料给的
+  「延迟 ≤ 35」是**成就**而非通关条件：把它作为注释里的参考值记下来，
+  但 `threeStar` 用实测值。若实测值大于 35，照实写实测值。
+- 第 21 关源资料的成就是「仅用 5 个蓝色元件」；本作没有「蓝色元件」体系
+  （那是自定义组件，阶段 3 才有），因此改为 `threeStar.gate` 实测门槛，
+  并在数据注释里说明这一映射。
 
 ## Task 10: 第 2 章关卡 23–27（补码、解码器与逻辑引擎）
 
 **Files:** `src/levels/content/ch2/batch3.ts`, `test/levels/ch2-batch3.test.ts`
 
-第 23–27 关。第 27 关的 `op:8` 语义必须在关卡 `brief` 里对玩家**说清楚**
-（8 位操作码 → 8 位结果），因为源资料只给了「完整逻辑运算集」这句话，
-没有枚举成员。第 25 关的 `decoder1` 奖励必须带 `params.width` 的用法说明
-（玩家在后续关卡里用它得到 2 位解码器）。
+| # | 关卡名（源资料） | io | 检查器 | 解锁 | 教学点 |
+|---|---|---|---|---|---|
+| 23 | Negative Numbers 负数 | `a:8` → `out:8` | fuzz 256 轮 | `div8` | 二进制补码表示 |
+| 24 | Signed Negator 相反数 | `a:8` → `out:8` | fuzz 256 轮 | `less_s` `shift_l8` `shift_r8` | 取反 + 1 |
+| 25 | 1 Bit Decoder 1 位解码器 | `sel:1` → `out:2` | truth-table 2 行 | `decoder1` | 1-to-2 解码 |
+| 26 | 3 Bit Decoder 3 位解码器 | `sel:3` → `out:8` | truth-table 8 行 | `decoder3` | 3-to-8 解码 |
+| 27 | Logic Engine 逻辑引擎 | `a:8` `b:8` `op:8` → `out:8` | fuzz 256 轮 | `ashr8` `rot_l8` `rot_r8` | 8 位算术逻辑单元 |
+
+要求：
+
+- 第 23 关源资料是「限时小游戏」，本作改建为补码运算电路；
+  这一改建写进关卡数据注释。
+- 第 27 关的 `op` 语义**源资料没有枚举**，因此必须由本计划钉死并在
+  关卡 `brief` 里对玩家说清楚。采用 `op` 的低 3 位选择运算：
+  `0=and 1=or 2=xor 3=not a 4=add 5=sub 6=shift_l(a, b 低 3 位) 7=ashr(a, b 低 3 位)`，
+  `out` 为 8 位结果（`add`/`sub` 丢弃高位进位）。`brief` 必须逐条列出这 8 个操作码。
+- 第 25 关解锁的解码器是**宽度参数化**的：`decoder1` 与 `decoder2` 是同一个
+  组件定义在不同 `params.width` 下的形态，不各占一个解锁点。
+  第 25 关的 `brief` 必须说明玩家可以用 `params.width` 得到 2 位解码器。
+- 第 24 关的 `threeStar` 与第 23 关一样由参考解实测。
 
 ## Task 11: 第 2 章关卡 28–38（存储与时序）
 
 **Files:** `src/levels/content/ch2/batch4.ts`, `test/levels/ch2-batch4.test.ts`
 
-第 28–38 关。第 28、29、30、35、36、37、38 关用 `script` 检查器逐拍断言，
-其余用真值表或 fuzz。第 30 关（振荡器）必须断言**周期性**，
-不能只断言「某一拍为高」。第 34 关按 spec §3.1 改建为选择器关，
-`brief` 必须明确说明本作不实现多驱动仲裁，并记录这一改建。
-第 37 关的 `ram8` 容量与「装满」的定义必须由关卡数据定义清楚，
-不得含糊（源资料只给了「刚好装满存储空间的电路设计」一句）。
+| # | 关卡名（源资料） | io | 检查器 | 解锁 | 教学点 |
+|---|---|---|---|---|---|
+| 28 | Circular Dependency 循环依赖 | `set:1` `value:1` → `out:1` | script + 稳定性 | `ram8` | 反馈回路构成锁存器 |
+| 29 | Delayed Lines 延迟线 | `a:8` → `out:8` | script 逐拍 | `reg8` `delay8` | 延迟一拍 |
+| 30 | Odd Ticks 奇变偶不变 | `enable:1` → `out:1` | script + 周期断言 | — | 振荡器即时钟源 |
+| 31 | Bit Inverter 1 位取反器 | `a:1` `inv:1` → `out:1` | truth-table 4 行 | — | XOR 做条件取反 |
+| 32 | Bit Switch 1 位开关 | `a:1` `on:1` → `out:1` | truth-table 4 行 | — | 条件通断 |
+| 33 | Input Selector 数据选择器 | `a:8` `b:8` `sel:1` → `out:8` | fuzz 256 轮 | `mux8` | 2-to-1 MUX |
+| 34 | The bus 总线 | `a:8` `b:8` `sel:1` → `out:8` | truth-table 4 行 | — | 唯一驱动有效 |
+| 35 | Saving Gracefully 优雅存储 | `d:1` `load:1` → `out:1` | script 逐拍 | — | 条件写入锁存器 |
+| 36 | Saving Bytes 存储一字节 | `d:8` `load:1` → `out:8` | script 逐拍 | `counter8` | 8 位寄存器 |
+| 37 | Little Box 小盒子 | `d:8` `addr:8` `load:1` → `out:8` | script 逐拍 | — | 256 字节全装满 |
+| 38 | Counter 计数器 | `en:1` `reset:1` → `out:8` | script + 回绕 | — | 自增寄存器 |
+
+要求：
+
+- 第 28 关的「稳定性」指：`settle()` **不得**抛 `UnstableCircuitError`。
+  这是本关的核心断言 —— 玩家必须用存储元件切断组合环。必须有反例：
+  纯组合的 `not` 环必须抛错。
+- 第 30 关必须断言**周期性**（连续多拍的高低翻转规律），
+  不能只断言「某一拍为高」。`enable=0` 时输出必须保持，不得继续振荡。
+- 第 34 关按 spec §3.1「不做总线协议（多驱动仲裁）」改建为选择器关：
+  `out` 恰好等于被选中的那一路。这一改建（以及「本引擎禁止多驱动」这条理由）
+  必须写进关卡数据注释与 `brief`。
+- 第 37 关源资料只有「刚好装满存储空间的电路设计」一句：
+  本作定义为「用 `ram8` 的 256 字节全部可寻址且可读回」，
+  即 `addr` 0–255 每一格写入后都能读回原值。这一定义必须写进 `brief`。
+- 第 38 关源资料的成就是「≤ 65 个门」，映射为 `threeStar.gate` 实测门槛，
+  并在数据注释里说明。
+
 
 ## Task 12: 阶段 1 收尾验证
 
