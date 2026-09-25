@@ -3673,7 +3673,7 @@ export const CH1_PART2: readonly LevelSpec[] = [
     io: IO_CONST,
     checks: [truthTable(IO_CONST, { out: () => 1 })],
     threeStar: { gate: 0, delay: 0, tick: 0 },
-    rewards: { components: ['xor'] },
+    rewards: { components: ['delay_line', 'xor'] },
   },
   {
     id: 'ch1-08-second-tick',
@@ -3701,7 +3701,7 @@ export const CH1_PART2: readonly LevelSpec[] = [
         ],
       },
     ],
-    threeStar: { gate: 0, delay: 0, tick: 2 },
+    threeStar: { gate: 0, delay: 0, tick: 3 },
     rewards: { components: ['and3'] },
   },
   {
