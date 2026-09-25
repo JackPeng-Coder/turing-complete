@@ -300,6 +300,146 @@ guidance is to batch same-shape work rather than pay a dispatch and a review sea
 — Cost if wrong: if one of the two needed its own judgment, its review is bundled with the
 other's and a fix round must address both. The plan's task numbering stays as documentation;
 this ledger records the merge so a reader is not confused by the gap that Task 5–6 creates.
-Task 4: BASE `2027b75`.
+Task 4: BASE `2027b75`, commit `740e670` — DONE_WITH_CONCERNS, review **Approved** (0 Critical,
+  no code defect). The reviewer verified the publish-mechanism fix, `delay_line`/`mem1`
+  byte-identical behaviour, the storage contract per def, capability of multi-byte state, the
+  three named test classes (the latch test asserts the held value *between* an input flip and
+  the edge; the oscillator asserts both a stable storage ring and a still-throwing
+  combinational twin), and capacity arithmetic (200 `ram8` banks at exactly 200 × 44 slots).
+
+Ruling: **amend Global Constraint 5**, do not change the code. `ram8`'s `evaluate` reads `addr`
+as a pure selector, so the constraint's literal words ("`evaluate` must never read `inputs`") are
+now false for one def. The constraint exists because a `delay_line` that mirrored its input
+degraded into a wire, and that purpose is intact: `d` and `load` are never read, and the
+published byte is always one a clock edge wrote. Constraint 5 now reads: `evaluate` publishes the
+held state and may read **at most** one input that only selects among bytes already in `state`.
+— Cost if wrong: the constraint is one sentence weaker, and a future reader could use the carve-out
+to justify a def that genuinely leaks an input into its published value. The def-level test that
+mutates a storage def into mirroring its input (`net.test.ts:685`) is the guard against that.
+
+Ruling: **built-in storage stays at 0 NAND equivalents**, against the reviewer's suggestion that a
+256-byte RAM at 0 gates might be too generous. The gate metric measures **what the player built,
+not what the platform provides**: spec §5.4 charges 0 for `const`/`probe`/`level_*` and 1 for NAND,
+Phase 0 already priced `mem1`/`delay_line` at 0, and pricing storage at its expansion (~663,000
+gates for RAM cells alone) would make any gate target involving storage meaningless and would
+invert the incentive that makes unlocking a part worth doing. The player who wants to *count*
+storage gates builds a latch from gates. A comment at the storage defs now states this so a later
+reader does not "fix" it by pricing them. — Cost if wrong: gate scores for levels solved with
+built-in storage understate the storage's real NAND cost; a player comparing "my latch" against
+"the built-in register" sees the built-in as cheaper, which is the same relationship every other
+unlocked part already has.
+Task 4: ruling ratified — the four storage defs keep `category: 'wide'`, not `'memory1'`, which
+  Phase 0 used for the 1-bit pair. The category is a grouping label; the palette is driven by each
+  level's `allowedComponents` (`src/app/progress.ts` intersects the two), so this cannot leak a
+  part into the wrong level. Splitting 8-bit storage into a 1-bit-named category would be the more
+  confusing choice.
+Task 4: fix round 1/5 (4 addressed, 0 open — commits 740e670..171fd6c). All six re-review items
+  ADDRESSED: mutation logs re-run on the final tree with the differing test **named**
+  (`publishes a multi-byte storage def through the same path`, the 12-bit holder) and shown to be
+  indifferent to A/B/C by running it alone under each; `#publishState` made non-deletable
+  (mutation D red on exactly the two new tests, so the pass can no longer be removed or reverted
+  silently); the `compile` guard now throws `CircuitValidationError` with one error-severity
+  issue so `checks.ts` maps it to `'invalid'` instead of letting it escape the pipeline;
+  `delay_line`/`mem1` pinned to exactly 1 state byte and 1 output pin **by def id**, with the weak
+  inequality retained for the RAM family.
+Task 4: complete (commits 2027b75..171fd6c…, review clean after 1 fix round).
+
+Ruling: my own ruling's **premise** was wrong, and the re-reviewer caught it. I wrote that the
+gate metric measures what the player built because "a built-in part is not charged" — false:
+`gateCost()` sums `def.gateCost ?? def.cost` over every placed instance, so `and` costs 2 and
+`add8` costs 72. The true rule is narrower and is now the one recorded: **the `cost` fallback is
+0 for exactly four kinds of def — a rail, a level connector, a wire-like packer, and a storage
+element.** Storage is the exception, not built-in parts generally. The same comment had the same
+slip twice more: it said a player wanting storage to cost gates builds a latch "from `mem1`",
+but `mem1` is itself a 0-gate storage element. Ruled: keep the **conclusion** (storage stays 0 on
+both metrics) and correct the premise sentences to match `grader.ts`, which already states the
+narrow rule correctly. Dispatched as its own tiny comment-only fix because no live subagent
+remained to resume. — Cost if wrong: none to behaviour; a wrong rationale in a comment is how a
+later reader gets talked into a wrong change, which is exactly what happened here.
+
+Ruling: a fresh comment-only fix gets **no** review seat. It changes no behaviour, the ruling it
+records is already reviewed, and its correctness is checkable by reading two sentences against
+`grader.ts`. This is a deliberate, recorded exception to "every change is reviewed", not an
+oversight; the final whole-branch review will read it. — Cost if wrong: an unreviewed comment
+could state something false; the cost is bounded to the comment, and the assertion that guards
+the behaviour (storage at 0 on both metrics) is already pinned by test.
+Task 4: comment correction landed separately as `3fc19cf` (`docs(core): make the free-storage
+  premise match gateCost()`), comment-only, 2 files 22/11. `grader.ts` already stated the narrow
+  rule, so the fix aligned `wide.ts` to it. The implementer also re-scoped one neighbouring
+  sentence it was not asked to touch ("drop in the unlocked part instead of rebuilding it"
+  scores better) — true of storage, not of gates generally, since an `add8` costs its declared
+  72 either way. Correct call; recorded here so the scope creep is visible rather than silent.
+
+Task 5–6 (merged): BASE `3fc19cf`, commit `e61d556` — DONE, review dispatched.
+  The implementer found and removed a **latent real defect** while adding the two kinds: the
+  `script` branch was the fall-through of `runChecks`'s dispatch, so a `fuzz` or `custom` check
+  reached `check.steps` and threw `TypeError: check.steps is not iterable` out of
+  `runChecks`/`grade` — on every board edit. Its RED-2 log records exactly that error against
+  the pre-change dispatch. The dispatch is now exhaustive with an unknown-kind guard. Same
+  failure class as the phase-0 `RangeError` escape, caught before any level used the new kinds
+  rather than after.
+Task 5–6 handoffs recorded for later tasks:
+  1. The chapter-1 content tests have an "every level has a check with something to compare"
+     loop that knows only `truth-table`/`script`. Task 8's chapter-2 content tests must add a
+     `fuzz` clause (positive integer `rounds`, every pin named), or the new kinds are unguarded
+     by that invariant.
+  2. The UI (`src/ui/truthTable.ts`) does not render the new `detail`/`round` fields, so a fuzz
+     or malformed-custom failure shows as a bare pin row. Recorded against Task 12.
+  3. Over-cap `rounds` clamp rather than fail; and a custom checker that always returns
+     `passed: true` passes its level — reviewing custom checkers is part of reviewing the levels
+     that name them.
+  4. A `custom` checker owns its tick count, which the kernel trusts via `Math.max`, so a checker
+     could understate ticks and inflate a star rating. No shipped checker exists yet; a rule for
+     chapters 3–7, not a defect.
+
+Ruling: batch the remaining work, because dispatch overhead has dominated the last five tasks
+(each dispatch carries a full brief plus context; each fix round re-carries its findings).
+**Task 7 (chapter assembly) merges into Task 12 (phase-end verification)** — assembly is a
+prerequisite of verification, it cannot be properly tested until chapter-2 content exists, and
+Task 12 already owns the unlock-chain test. The four content batches stay separate: 26 levels is
+precisely the case where one implementer's context runs out and quality drops.
+— Cost if wrong: the assembly work is not independently reviewed until the phase end, so a
+mistake in chapter wiring surfaces later and inside a larger diff.
+
+Task 5–6: review **Approved** (0 Critical, 0 Important, 9 Minor). Independently verified rather
+  than accepted: the reviewer recomputed xorshift32 by hand and confirmed the golden vectors for
+  seed `0x1234`, confirmed seed 0 unmapped returns 0 forever while the remap yields 8 distinct
+  vectors, confirmed the latent `check.steps` defect is real (31 occurrences of the TypeError in
+  RED-2), and confirmed the new `round`/`detail` fields degrade gracefully because the only
+  reader (`src/ui/truthTable.ts`) never branches on `reason`.
+Task 5–6: ruling ratified — extending `test/levels/checks.test.ts` was NOT required; the new
+  focused `test/levels/fuzz-custom.test.ts` is the better choice, since a 700-line addition to a
+  shared file costs more than a focused new one. Both briefs named the shared file; the brief was
+  wrong and the implementer was right.
+Task 5–6: ruling ratified — over-cap `rounds` **clamps** rather than failing. Clamping cannot hang
+  the editor and still fails wrong circuits; a hard failure would punish a legitimate authoring
+  choice. — Cost if wrong: an author asking for 10^7 rounds silently gets 4096, and the cap is per
+  check, so many fuzz checks in one level cost ~26 ms each per board edit.
+Task 5–6: ruling ratified — a `custom` checker owns its `ticksUsed`. The brief makes
+  `CheckOutcome.ticksUsed` the channel, and `io.reset()` zeroes `sim.tickCount`, so the kernel has
+  no independent measure to compare against. A checker could understate ticks and inflate a star
+  rating; that trust is now documented on the `CustomChecker` type and is reviewed with any
+  checker a later chapter ships. — Cost if wrong: a first-party checker can inflate its own level's
+  star rating, which is why reviewing it is part of reviewing the level that names it.
+Task 5–6: fix round 1/5 dispatched — (1) `checks.ts:388-396` (level with no output pins) has no
+  test although report §2 claims it does; it is one of the four mandated vacuity shapes, so it
+  gets its own case and the report gets corrected; (2) `custom/index.ts:13-19` documents pin-id and
+  value validation that `failureIssue` does not perform (`fuzz` validates with `fitsPin`, `custom`
+  does not), so either enforce it or soften the doc — a doc promising enforcement the code skips is
+  how a later author ships a silently wrong grader; (3) `FAILURE_REASONS` hand-duplicates the
+  `reason` union, so adding a reason to the type would silently make it "malformed" — derive it;
+  (4) close the two residual `grade()` escape paths (`checks.ts:595` element-level malformation,
+  `checks.ts:838` a throwing accessor on a returned outcome), cheap fixes for the one instruction
+  that exists because a phase-0 `RangeError` fired on every board edit.
+
+Task 8 handoff (from Task 5–6's reviewer, must land with the first chapter-2 content):
+  `test/levels/ch1-part1.test.ts:50-61` and `ch1-part2.test.ts:39-49` run an "every level has a
+  check with something to compare" invariant that handles only `truth-table`/`script` with **no
+  else branch**, so it passes vacuously for `constraint`, `fuzz` and `custom`. The chapter-2
+  content tests must extend it (positive integer `rounds`, every pin named, constraint rule
+  present) or the new kinds are unguarded by the very invariant meant to catch vacuous checks.
+
+
+
 
 
