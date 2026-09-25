@@ -5,7 +5,7 @@ import { createRegistry } from '../../src/core/registry';
 import type { ComponentDef, Registry } from '../../src/core/registry';
 import { CircuitValidationError, UnstableCircuitError } from '../../src/core/errors';
 import type { PortValue } from '../../src/core/signal';
-import { SETTLE_LIMIT, Simulation, compile, delayOf } from '../../src/core/net';
+import { SETTLE_LIMIT, Simulation, compile, delayOf, type Netlist } from '../../src/core/net';
 
 const registry = createRegistry(BASE_DEFS);
 
@@ -306,6 +306,522 @@ describe('Simulation', () => {
     sim.reset();
     expect(sim.tickCount).toBe(0);
     expect(sim.read(net.outputBase(`${delay.id}.out`), 1)).toBe(0);
+  });
+});
+
+/**
+ * Slot-addressed accessors for the storage tests, in the two directions a test
+ * needs: `out` reads a pin as an unsigned number, `set` drives one the way a
+ * level drives a `level_input`'s output slot.
+ *
+ * Both go through the netlist's resolved per-instance widths, so a test cannot
+ * accidentally read a neighbouring pin's bits instead of the whole pin.
+ */
+interface Probe {
+  out(key: string): number;
+  set(key: string, value: number): void;
+}
+
+function probe(sim: Simulation, net: Netlist): Probe {
+  return {
+    out: (key) => toNumber(sim.read(net.outputBase(key), net.outputWidth(key))),
+    set: (key, value) => sim.write(net.outputBase(key), net.outputWidth(key), value),
+  };
+}
+
+/**
+ * The storage fixture: one instance of `def` whose every input pin is wired from
+ * its own `level_input`.
+ *
+ * A `level_input` declares 1-bit pins, so the width a wide input needs exists
+ * only on the instance (`params.width`) -- the same value the palette's drop
+ * path writes. `in` resolves a pin name to the feed that drives it and throws on
+ * a name the def does not have, so a typo in a test is not a silently unwired
+ * pin reading 0.
+ */
+function storageFixture(def: string): {
+  graph: Graph;
+  /** `"<instId>.out"` of the part under test. */
+  out: string;
+  /** `"<feedId>.out"` of the `level_input` driving one of its input pins. */
+  in: (pin: string) => string;
+} {
+  const g = emptyGraph();
+  const unit = addInstance(g, def, 320, 0, 'unit');
+  const feeds = new Map<string, string>();
+  registry.get(def).inputs.forEach((pin, i) => {
+    const feed = addInstance(g, 'level_input', 0, i * 40, `IN_${pin.id}`);
+    feed.params.width = pin.width;
+    connect(g, { inst: feed.id, port: 'out' }, { inst: unit.id, port: pin.id });
+    feeds.set(pin.id, feed.id);
+  });
+  return {
+    graph: g,
+    out: `${unit.id}.out`,
+    in: (pin) => {
+      const feed = feeds.get(pin);
+      if (!feed) throw new Error(`${def} has no input pin ${pin}`);
+      return `${feed}.out`;
+    },
+  };
+}
+
+/**
+ * The stateful half of the wide family, through the kernel.
+ *
+ * Three of these are the acceptance classes the phase names -- a latch, an
+ * oscillator and a counter -- and the rest pin the mechanism they all depend on:
+ * the kernel publishes storage from the def's own `evaluate`, so an 8-bit
+ * register publishes eight bits and `ram8` publishes the addressed byte. The
+ * assertions deliberately sit *between* the input flip and the clock edge: a
+ * test that only reads after a tick cannot tell a register from a wire, which is
+ * exactly how phase 0's `delay_line` degraded unnoticed.
+ */
+describe('wide storage', () => {
+  it('publishes every bit of a wide register, not just the low one', () => {
+    // The kernel's publish pass used to write `state[p]` onto output pin `p`,
+    // one bit per pin -- one bit of an eight-bit register's byte. Whatever the
+    // route, what a caller reads after a tick has to be the whole byte, and every
+    // byte below has a bit above the low one set, so a publish that kept only the
+    // low bit cannot pass.
+    const { graph, out, in: pin } = storageFixture('reg8');
+    const net = compile(graph, registry);
+    const sim = new Simulation(net, registry);
+    const p = probe(sim, net);
+
+    expect(net.outputWidth(out)).toBe(8);
+    sim.reset();
+    p.set(pin('load'), 1);
+    p.set(pin('reset'), 0);
+    for (const byte of [0xa5, 0x5a, 0xfe, 0x01]) {
+      p.set(pin('d'), byte);
+      sim.tick();
+      expect(p.out(out), `d = 0x${byte.toString(16)}`).toBe(byte);
+    }
+  });
+
+  it('publishes a multi-byte storage def through the same path', () => {
+    // The mechanism is not "eight bits wide": a def says how many state bytes it
+    // has and what to publish, and the kernel runs that. This 12-bit holder keeps
+    // TWO state bytes and publishes a byte-array port -- the form `PortValue`
+    // takes above eight bits, which no shipped storage def reaches.
+    const reg12: ComponentDef = {
+      id: 'reg12',
+      name: { zh: '12 位寄存器', en: '12-Bit Register' },
+      category: 'wide',
+      inputs: [{ id: 'd', width: 12 }],
+      outputs: [{ id: 'out', width: 12 }],
+      cost: 0,
+      sequential: true,
+      stateBytes: 2,
+      evaluate: (_i, o, state) => {
+        o[0] = new Uint8Array([state?.[0] ?? 0, state?.[1] ?? 0]);
+      },
+      clockEdge: (i, _o, state) => {
+        const d = toNumber(i[0] ?? 0);
+        state[0] = d & 0xff;
+        state[1] = (d >>> 8) & 0x0f;
+      },
+    };
+    const wide = createRegistry([...BASE_DEFS, reg12]);
+    const g = emptyGraph();
+    const feed = addInstance(g, 'level_input', 0, 0, 'IN_D');
+    feed.params.width = 12;
+    const unit = addInstance(g, 'reg12', 80, 0, 'unit');
+    connect(g, { inst: feed.id, port: 'out' }, { inst: unit.id, port: 'd' });
+    const net = compile(g, wide);
+    const sim = new Simulation(net, wide);
+    const p = probe(sim, net);
+
+    sim.reset();
+    expect(p.out('unit.out')).toBe(0x000);
+    p.set('IN_D.out', 0xabc);
+    sim.settle();
+    expect(p.out('unit.out'), 'no edge yet').toBe(0x000);
+    sim.tick();
+    expect(p.out('unit.out')).toBe(0xabc);
+    p.set('IN_D.out', 0xfff);
+    sim.settle();
+    expect(p.out('unit.out'), 'held between edges').toBe(0xabc);
+    sim.tick();
+    expect(p.out('unit.out')).toBe(0xfff);
+  });
+
+  it('holds its byte between the input flip and the next clock edge (latch)', () => {
+    const { graph, out, in: pin } = storageFixture('reg8');
+    const net = compile(graph, registry);
+    const sim = new Simulation(net, registry);
+    const p = probe(sim, net);
+
+    sim.reset();
+    p.set(pin('load'), 1);
+    p.set(pin('reset'), 0);
+    p.set(pin('d'), 0x3c);
+    sim.tick();
+    expect(p.out(out)).toBe(0x3c);
+
+    // Flip the data and drop `load`, with no edge in between: neither may reach
+    // the output.
+    p.set(pin('d'), 0x00);
+    p.set(pin('load'), 0);
+    sim.settle();
+    expect(p.out(out), 'input flipped, no edge yet').toBe(0x3c);
+
+    sim.tick();
+    expect(p.out(out), 'load was low at the edge').toBe(0x3c);
+
+    // Raising `load` again is not an edge either.
+    p.set(pin('load'), 1);
+    sim.settle();
+    expect(p.out(out), 'load raised, no edge yet').toBe(0x3c);
+
+    sim.tick();
+    expect(p.out(out), 'the edge samples the flipped input').toBe(0x00);
+  });
+
+  it('clears on reset, and reset beats load on the same edge', () => {
+    const { graph, out, in: pin } = storageFixture('reg8');
+    const net = compile(graph, registry);
+    const sim = new Simulation(net, registry);
+    const p = probe(sim, net);
+
+    sim.reset();
+    p.set(pin('load'), 1);
+    p.set(pin('reset'), 0);
+    p.set(pin('d'), 0xff);
+    sim.tick();
+    expect(p.out(out)).toBe(0xff);
+
+    // DECIDED (task 4): `reset` wins over `load` when both are asserted on the
+    // same edge, and `reset` is sampled at the edge rather than level-triggered.
+    p.set(pin('reset'), 1);
+    sim.settle();
+    expect(p.out(out), 'reset is sampled at the edge, like every input').toBe(0xff);
+    sim.tick();
+    expect(p.out(out), 'reset beats load').toBe(0x00);
+
+    // The clear was that edge's business, not a permanent mask: with `reset`
+    // dropped, the next edge samples `d` again.
+    p.set(pin('reset'), 0);
+    sim.tick();
+    expect(p.out(out)).toBe(0xff);
+  });
+
+  it('delays a byte by exactly one tick', () => {
+    const { graph, out, in: pin } = storageFixture('delay8');
+    const net = compile(graph, registry);
+    const sim = new Simulation(net, registry);
+    const p = probe(sim, net);
+
+    sim.reset();
+    expect(p.out(out)).toBe(0x00);
+    p.set(pin('a'), 0xa5);
+    sim.settle();
+    expect(p.out(out), 'no edge yet').toBe(0x00);
+    sim.tick();
+    expect(p.out(out)).toBe(0xa5);
+
+    p.set(pin('a'), 0x00);
+    sim.settle();
+    expect(p.out(out), 'the sampled byte is held until the next edge').toBe(0xa5);
+    sim.tick();
+    expect(p.out(out)).toBe(0x00);
+  });
+
+  it('counts one step per tick, holds when en is low, and wraps to 0 at 256', () => {
+    const { graph, out, in: pin } = storageFixture('counter8');
+    const net = compile(graph, registry);
+    const sim = new Simulation(net, registry);
+    const p = probe(sim, net);
+
+    sim.reset();
+    p.set(pin('en'), 1);
+    p.set(pin('reset'), 0);
+    sim.tick();
+    expect(p.out(out)).toBe(1);
+
+    // DECIDED (task 4): `reset` beats `en` on the same edge.
+    p.set(pin('reset'), 1);
+    sim.settle();
+    expect(p.out(out), 'reset is sampled at the edge, like every input').toBe(1);
+    sim.tick();
+    expect(p.out(out), 'reset beats en').toBe(0);
+
+    p.set(pin('reset'), 0);
+    sim.tick();
+    expect(p.out(out)).toBe(1);
+    sim.tick();
+    expect(p.out(out)).toBe(2);
+    sim.tick();
+    expect(p.out(out)).toBe(3);
+
+    p.set(pin('en'), 0);
+    sim.settle();
+    expect(p.out(out), 'en low is not an edge').toBe(3);
+    sim.tick();
+    sim.tick();
+    expect(p.out(out), 'en low: two edges change nothing').toBe(3);
+
+    p.set(pin('en'), 1);
+    for (let i = 0; i < 252; i += 1) sim.tick();
+    expect(p.out(out), '3 + 252 = 255, the top of the byte').toBe(255);
+    // DECIDED (task 4): the wrap is to 0 -- an 8-bit rollover, not a saturation.
+    sim.tick();
+    expect(p.out(out), '255 + 1 wraps to 0').toBe(0);
+    sim.tick();
+    expect(p.out(out), 'and keeps counting from there').toBe(1);
+  });
+
+  it('settles a 1-bit inverting ring that a delay_line breaks, and toggles once per tick', () => {
+    // Spec §12's oscillator: `nand(a, 1)` inverts, and the delay line samples
+    // instead of propagating, so the loop is not combinational and the circuit
+    // has a stable state between edges.
+    const g = emptyGraph();
+    const one = addInstance(g, 'const_on', 0, 0);
+    const nand = addInstance(g, 'nand', 60, 0);
+    const delay = addInstance(g, 'delay_line', 120, 0);
+    connect(g, { inst: one.id, port: 'out' }, { inst: nand.id, port: 'b' });
+    connect(g, { inst: delay.id, port: 'out' }, { inst: nand.id, port: 'a' });
+    connect(g, { inst: nand.id, port: 'out' }, { inst: delay.id, port: 'in' });
+    const net = compile(g, registry);
+    const sim = new Simulation(net, registry);
+    const p = probe(sim, net);
+
+    sim.reset();
+    expect(sim.settle().stable, 'the storage element breaks the loop').toBe(true);
+    expect(p.out(`${delay.id}.out`)).toBe(0);
+    expect(p.out(`${nand.id}.out`), 'settled, not oscillating').toBe(1);
+    sim.tick();
+    expect(p.out(`${delay.id}.out`)).toBe(1);
+    sim.tick();
+    expect(p.out(`${delay.id}.out`)).toBe(0);
+  });
+
+  it('settles an 8-bit inverting ring that a delay8 breaks, and toggles the whole byte', () => {
+    // The same ring one byte wide. It doubles as the wide publish's regression:
+    // the byte the ring carries is 0xff, so a publish that kept only the low bit
+    // would put 0x01 on this pin.
+    const g = emptyGraph();
+    const inv = addInstance(g, 'not8', 60, 0);
+    const delay = addInstance(g, 'delay8', 120, 0);
+    connect(g, { inst: delay.id, port: 'out' }, { inst: inv.id, port: 'a' });
+    connect(g, { inst: inv.id, port: 'out' }, { inst: delay.id, port: 'a' });
+    const net = compile(g, registry);
+    const sim = new Simulation(net, registry);
+    const p = probe(sim, net);
+
+    sim.reset();
+    expect(sim.settle().stable, 'the storage element breaks the loop').toBe(true);
+    expect(p.out(`${delay.id}.out`)).toBe(0x00);
+    expect(p.out(`${inv.id}.out`), 'the whole byte, not its low bit').toBe(0xff);
+    sim.tick();
+    expect(p.out(`${delay.id}.out`)).toBe(0xff);
+    sim.tick();
+    expect(p.out(`${delay.id}.out`)).toBe(0x00);
+    sim.tick();
+    expect(p.out(`${delay.id}.out`)).toBe(0xff);
+  });
+
+  it('throws UnstableCircuitError for the same rings with the storage element gone', () => {
+    // The other half of the oscillator claim: both rings above are stable
+    // *because* of the storage element, not because the settle loop is lenient.
+    // Each twin has the same shape with the delay taken out of the loop.
+    const bit = emptyGraph();
+    const one = addInstance(bit, 'const_on', 0, 0);
+    const nand = addInstance(bit, 'nand', 60, 0);
+    connect(bit, { inst: one.id, port: 'out' }, { inst: nand.id, port: 'b' });
+    connect(bit, { inst: nand.id, port: 'out' }, { inst: nand.id, port: 'a' });
+    expect(() => new Simulation(compile(bit, registry), registry).settle()).toThrow(
+      UnstableCircuitError,
+    );
+
+    // `switch8` with `on` high is a plain wire, so this is `not8` feeding itself.
+    const wide = emptyGraph();
+    const not = addInstance(wide, 'not8', 60, 0);
+    const wire = addInstance(wide, 'switch8', 120, 0);
+    const on = addInstance(wide, 'const_on', 0, 0);
+    connect(wide, { inst: not.id, port: 'out' }, { inst: wire.id, port: 'a' });
+    connect(wide, { inst: on.id, port: 'out' }, { inst: wire.id, port: 'on' });
+    connect(wide, { inst: wire.id, port: 'out' }, { inst: not.id, port: 'a' });
+    expect(() => new Simulation(compile(wide, registry), registry).settle()).toThrow(
+      UnstableCircuitError,
+    );
+  });
+
+  it('stores and reads back a byte at any address, 0 and 255 included', () => {
+    const { graph, out, in: pin } = storageFixture('ram8');
+    const net = compile(graph, registry);
+    const sim = new Simulation(net, registry);
+    const p = probe(sim, net);
+
+    sim.reset();
+    p.set(pin('load'), 1);
+    for (const [addr, value] of [
+      [0x00, 0xff],
+      [0x10, 0xa5],
+      [0xff, 0x5a],
+    ] as const) {
+      p.set(pin('addr'), addr);
+      p.set(pin('d'), value);
+      sim.tick();
+      expect(p.out(out), `addr 0x${addr.toString(16)}`).toBe(value);
+    }
+
+    // Read back with no further edge: the read path is combinational, so
+    // selecting another address is enough, and an address never written reads 0.
+    p.set(pin('load'), 0);
+    for (const [addr, want] of [
+      [0x10, 0xa5],
+      [0xff, 0x5a],
+      [0x00, 0xff],
+      [0x0f, 0x00],
+    ] as const) {
+      p.set(pin('addr'), addr);
+      sim.settle();
+      expect(p.out(out), `addr 0x${addr.toString(16)} with no edge`).toBe(want);
+    }
+  });
+
+  it('is combinational on its read path and edge-triggered on its write path', () => {
+    // The subtlest def in the family: `addr` selects which stored byte the
+    // output shows right now, while `d` and `load` are only sampled at the edge.
+    const { graph, out, in: pin } = storageFixture('ram8');
+    const net = compile(graph, registry);
+    const sim = new Simulation(net, registry);
+    const p = probe(sim, net);
+
+    sim.reset();
+    p.set(pin('addr'), 3);
+    p.set(pin('d'), 0x11);
+    p.set(pin('load'), 1);
+    sim.tick();
+    expect(p.out(out)).toBe(0x11);
+
+    // `d` changes with `load` still asserted: nothing may show before an edge.
+    p.set(pin('d'), 0xab);
+    sim.settle();
+    expect(p.out(out), 'd does not leak into the read path').toBe(0x11);
+
+    // An address change needs no edge at all.
+    p.set(pin('addr'), 4);
+    sim.settle();
+    expect(p.out(out), 'an unwritten address reads 0').toBe(0x00);
+    p.set(pin('addr'), 3);
+    sim.settle();
+    expect(p.out(out), 'back to 3, still no edge').toBe(0x11);
+
+    sim.tick();
+    expect(p.out(out), 'the edge latched 0xab at 3').toBe(0xab);
+    p.set(pin('addr'), 4);
+    sim.settle();
+    expect(p.out(out), 'address 4 was never written').toBe(0x00);
+  });
+
+  it('gives every instance its own 256 bytes', () => {
+    const g = emptyGraph();
+    const units: string[] = [];
+    // One `level_input` per input pin, in `def.inputs` order: d, addr, load.
+    const pins: string[][] = [];
+    for (const [i, name] of ['one', 'two'].entries()) {
+      const unit = addInstance(g, 'ram8', 320, i * 240, name);
+      const keys: string[] = [];
+      registry.get('ram8').inputs.forEach((pin, j) => {
+        const feed = addInstance(g, 'level_input', 0, i * 240 + j * 40, `${name}_${pin.id}`);
+        feed.params.width = pin.width;
+        connect(g, { inst: feed.id, port: 'out' }, { inst: unit.id, port: pin.id });
+        keys.push(`${feed.id}.out`);
+      });
+      units.push(`${unit.id}.out`);
+      pins.push(keys);
+    }
+    const net = compile(g, registry);
+    const sim = new Simulation(net, registry);
+    const p = probe(sim, net);
+
+    sim.reset();
+    for (const [i, byte] of [0x11, 0x22].entries()) {
+      const [d, addr, load] = pins[i]!;
+      p.set(d!, byte);
+      p.set(addr!, 0x40);
+      p.set(load!, 1);
+    }
+    sim.tick();
+    // Same address, same edge, two memories: neither one wrote into the other.
+    expect(p.out(units[0]!)).toBe(0x11);
+    expect(p.out(units[1]!)).toBe(0x22);
+  });
+
+  it('reserves table capacity for a bank of 8-bit storage parts and their read regions', () => {
+    // `ram8` is the widest part in the kernel so far: 17 input slots and 8
+    // output slots per instance, plus a materialised read region for every wide
+    // input a narrower driver feeds (a 1-bit `level_input` is narrower than both
+    // `d` and `addr`). `capacityFor` has to reserve all of it up front -- the
+    // table is fixed and `alloc` only throws.
+    const g = emptyGraph();
+    const banks = 200;
+    for (let i = 0; i < banks; i += 1) {
+      const unit = addInstance(g, 'ram8', 320, i * 200);
+      for (const [j, pin] of ['d', 'addr', 'load'].entries()) {
+        const feed = addInstance(g, 'level_input', 0, i * 200 + j * 30);
+        connect(g, { inst: feed.id, port: 'out' }, { inst: unit.id, port: pin });
+      }
+    }
+    const net = compile(g, registry);
+    // Per bank: 3 feed slots + (8 + 8 + 1) input slots + 8 output slots + (8 + 8)
+    // region slots = 44, all of them allocated.
+    expect(net.slotCount).toBe(banks * 44);
+    expect(new Simulation(net, registry).settle().stable).toBe(true);
+  });
+
+  it('publishes a 1-bit storage def across a pin an instance widened', () => {
+    // `delay_line` declares 1-bit pins and task 2 resolved widths per instance,
+    // so a `params.width = 8` delay line has an 8-bit output pin. The held `1`
+    // must still land as 0b00000001, with no stale high byte -- the behaviour the
+    // pre-task-4 publish path documented and this one inherits unchanged.
+    const g = emptyGraph();
+    const feed = addInstance(g, 'level_input', 0, 0, 'IN_A');
+    feed.params.width = 8;
+    const delay = addInstance(g, 'delay_line', 80, 0, 'delay');
+    delay.params.width = 8;
+    connect(g, { inst: feed.id, port: 'out' }, { inst: delay.id, port: 'in' });
+    const net = compile(g, registry);
+    const sim = new Simulation(net, registry);
+    const p = probe(sim, net);
+
+    expect(net.outputWidth('delay.out')).toBe(8);
+    sim.reset();
+    p.set('IN_A.out', 1);
+    sim.settle();
+    expect(p.out('delay.out'), 'no edge yet').toBe(0);
+    sim.tick();
+    expect(p.out('delay.out')).toBe(0b0000_0001);
+    p.set('IN_A.out', 0);
+    sim.tick();
+    expect(p.out('delay.out')).toBe(0);
+  });
+
+  it('refuses a storage def that could never publish what it holds', () => {
+    // The publish pass runs a def's `evaluate`; it has no state layout of its own
+    // to fall back on (see `Simulation.#publishState`), so a storage def with
+    // state and no `evaluate` could only ever hold zero in silence. `compile` is
+    // where a netlist becomes runnable, so it is refused there instead.
+    const mute: ComponentDef = {
+      id: 'mute_store',
+      name: { zh: '沉默存储', en: 'Mute Store' },
+      category: 'memory1',
+      inputs: [{ id: 'in', width: 1 }],
+      outputs: [{ id: 'out', width: 1 }],
+      cost: 0,
+      sequential: true,
+      stateBytes: 1,
+      clockEdge: (i, _o, state) => {
+        state[0] = i[0] === 1 ? 1 : 0;
+      },
+    };
+    const withMute = createRegistry([...BASE_DEFS, mute]);
+    const g = emptyGraph();
+    addInstance(g, 'mute_store', 0, 0);
+    expect(() => compile(g, withMute)).toThrow(/mute_store/);
   });
 });
 

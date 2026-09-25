@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS, DEF_IDS } from '../../src/core/defs/index';
-import { WIDE_DEF_IDS } from '../../src/core/defs/wide';
+import { WIDE_DEF_IDS, WIDE_STORAGE_DEF_IDS } from '../../src/core/defs/wide';
 import { extractField, insertField, packBits, unpackBits } from '../../src/core/fields';
 
 // `evaluate(inputs, outputs, state, ctx)`: `state` is the instance's private
@@ -43,7 +43,16 @@ describe('base defs', () => {
 
   it('marks exactly the storage elements as sequential', () => {
     const sequential = r.all().filter((d) => d.sequential).map((d) => d.id);
-    expect(sequential.sort()).toEqual(['delay_line', 'mem1']);
+    // Phase 0's two one-bit memories plus task 4's eight-bit half; `mux8` is
+    // combinational and is deliberately absent.
+    expect(sequential.sort()).toEqual([
+      'counter8',
+      'delay8',
+      'delay_line',
+      'mem1',
+      'ram8',
+      'reg8',
+    ]);
   });
 
   it('hides the level IO plumbing from the palette but keeps it registered', () => {
@@ -102,7 +111,7 @@ describe('base defs', () => {
     // storage elements are zero gates AND zero delay, so a second explicit 0
     // would only give the two zeroes a way to drift apart. Every part that is
     // worth a gate states its own count instead.
-    const wide = new Set<string>(WIDE_DEF_IDS);
+    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS]);
     for (const d of r.all()) {
       if (wide.has(d.id) || d.category === 'logic1') continue;
       expect(d.cost, `${d.id} leans on the fallback but is not free`).toBe(0);
@@ -202,9 +211,9 @@ describe('base defs', () => {
   });
 });
 
-// Beyond the brief: guards the task's global constraints (1-bit pins, the cost
-// rules, `stateBytes` per output) and the truth tables the brief only checks
-// for cost.
+// Beyond the brief: guards the task's global constraints (1-bit pins on the
+// phase-0 parts, the cost rules, the publish rule) and the truth tables the
+// brief only checks for cost.
 describe('base defs: extra coverage', () => {
   const r = createRegistry(BASE_DEFS);
   const evalTo = (id: string, inputs: number[]): number | Uint8Array | undefined => {
@@ -215,11 +224,12 @@ describe('base defs: extra coverage', () => {
 
   it('declares 1-bit pins on every def outside the wide family', () => {
     // Phase 0 shipped only 1-bit parts, and every def it shipped still is one.
-    // The wide family (Task 3) is where a pin wider than one bit first appears,
-    // and `defs-wide.test.ts` pins its exact pin widths against the task brief's
-    // table -- a stronger statement than this loop makes, so these defs are
-    // excluded here rather than having this invariant weakened to "some pins".
-    const wide = new Set<string>(WIDE_DEF_IDS);
+    // The wide family -- task 3's operators and task 4's storage parts -- is
+    // where a pin wider than one bit appears, and `defs-wide.test.ts` pins its
+    // exact pin widths against each task brief's table, a stronger statement
+    // than this loop makes; those defs are excluded here rather than weakening
+    // this invariant to "some pins".
+    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS]);
     for (const d of r.all()) {
       if (wide.has(d.id)) continue;
       for (const p of [...d.inputs, ...d.outputs]) {
@@ -229,11 +239,25 @@ describe('base defs: extra coverage', () => {
     expect(r.byCategory('wide').length).toBeGreaterThan(0);
   });
 
-  it('reserves one state byte per output slot for storage elements only', () => {
+  it('gives every def a publisher, and sizes storage honestly', () => {
+    // The kernel's publish pass calls `evaluate` and knows no state layout of
+    // its own (see `Simulation.#publishState`), so a def with state and no
+    // `evaluate` could never publish what it holds -- `compile` refuses one
+    // rather than letting it hold zero in silence. This is the catalog half of
+    // that rule.
     for (const d of r.all()) {
       expect(typeof d.evaluate, d.id).toBe('function');
       expect(typeof d.clockEdge, d.id).toBe(d.sequential ? 'function' : 'undefined');
-      expect(d.stateBytes, d.id).toBe(d.sequential ? d.outputs.length : 0);
+      // A combinational def holds nothing; a storage def holds something, and
+      // enough of it to publish every bit of its output pins. The exact numbers
+      // are pinned per def in `defs-wide.test.ts`; this is the rule they obey,
+      // and it replaces phase 0's "one state byte per output pin", which a
+      // 256-byte `ram8` cannot satisfy and an 8-bit register should not need.
+      expect(d.stateBytes > 0, d.id).toBe(d.sequential);
+      if (d.sequential) {
+        const outputBits = d.outputs.reduce((bits, pin) => bits + pin.width, 0);
+        expect(d.stateBytes * 8, d.id).toBeGreaterThanOrEqual(outputBits);
+      }
     }
   });
 

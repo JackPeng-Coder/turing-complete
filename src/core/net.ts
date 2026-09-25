@@ -223,6 +223,16 @@ export function compile(graph: Graph, registry: Registry): Netlist {
 
   for (const inst of graph.instances) {
     const def = registry.get(inst.def);
+    // A storage element publishes what it holds through its own `evaluate` (see
+    // `Simulation.#publishState`), so one without it could never put its state on
+    // a pin. That is a defect in the DEF rather than in the circuit, and this is
+    // the only place a graph and a catalog meet -- so it is refused here, loudly,
+    // instead of holding zero in silence.
+    if (def.sequential && def.stateBytes > 0 && !def.evaluate) {
+      throw new Error(
+        `${def.id}: a storage element must declare evaluate() to publish what it holds`,
+      );
+    }
     const inWidths = def.inputs.map((pin) => effectiveWidth(inst, pin));
     const outWidths = def.outputs.map((pin) => effectiveWidth(inst, pin));
     const inputs = inWidths.map((width) => table.alloc(width));
@@ -387,23 +397,47 @@ export class Simulation {
   }
 
   /**
-   * Publishes storage outputs from their private state.
+   * Publishes storage outputs from their private state: one pass, before the
+   * settle that follows every `reset()` and `tick()`.
    *
-   * `evaluate` does this too (and `settle` calls it), so this only exists so
-   * that a def with state but no `evaluate` still holds, and so that a caller
-   * reading right after `reset`/`tick` sees the held value. It is only correct
-   * while each state byte maps to one 1-bit value, which holds for `delay_line`
-   * and `mem1`; wide registers in a later phase need a publish hook. The write
-   * still covers the pin's whole resolved width -- a `1` published onto a pin an
-   * instance widened to 8 bits is `0b00000001`, not a stale high byte.
+   * THIS KERNEL KNOWS NO STATE LAYOUT OF ITS OWN. It used to: the previous
+   * version wrote `state[p]` onto output pin `p`, one bit per pin, which is only
+   * correct while each state byte is a 1-bit value. An 8-bit register keeping its
+   * byte in one state byte got `0b00000001` written onto its pin -- invisible
+   * only because the settle that follows republished through `evaluate`, and
+   * fatal for the one case the pass was there to serve: a storage def with no
+   * `evaluate`, which had nothing to correct it. Now the DEF publishes, through
+   * the same `evaluate` the settle sweep calls, so the two paths cannot hold two
+   * opinions about how a byte becomes a pin: `delay_line` and `mem1` publish the
+   * bit they always did, `reg8` publishes all eight of its bits, and `ram8`
+   * publishes the byte its `addr` selects, because selecting it is what its
+   * `evaluate` reads `addr` for.
+   *
+   * The pass still earns its keep: it writes the table directly, so the first
+   * sweep of the settle that follows already reads the held value rather than
+   * the pre-edge one, and a caller reading right after `reset`/`tick` sees the
+   * held value without waiting on the sweep. Running a def's `evaluate` a second
+   * time per edge (here and in `settle`) is safe because `evaluate` must be pure
+   * -- the registry says so, and the second call reaches the same value from the
+   * same state.
+   *
+   * A storage def with no `evaluate` cannot be published at all, so `compile`
+   * refuses one instead of letting it hold zero in silence.
    */
   #publishState(): void {
+    const inputs: PortValue[] = [];
+    const outputs: PortValue[] = [];
     for (let i = 0; i < this.#instances.length; i += 1) {
       const inst = this.#instances[i]!;
-      if (!inst.def.sequential) continue;
-      const state = this.#state[i]!;
+      const evaluate = inst.def.evaluate;
+      if (!inst.def.sequential || !evaluate) continue;
+      this.#readInputs(inst, inputs);
+      outputs.length = 0;
+      evaluate(inputs, outputs, this.#state[i], { tick: this.#tickCount });
       for (let p = 0; p < inst.outputs.length; p += 1) {
-        this.#table.setPort(inst.outputs[p]!, inst.outputWidths[p]!, state[p] === 1 ? 1 : 0);
+        const value = outputs[p];
+        if (value === undefined) continue;
+        this.#table.setPort(inst.outputs[p]!, inst.outputWidths[p]!, value);
       }
     }
   }
@@ -489,7 +523,9 @@ export class Simulation {
    *
    * Every def with an `evaluate` runs, storage elements included: they publish
    * the value they hold (`state`) and never their inputs, which is what makes a
-   * delay line hold for a full tick. A def that produced no value for a pin
+   * delay line hold for a full tick. (`ram8` reads its `addr` input as well, to
+   * select which held byte it publishes -- the one storage def for which that is
+   * correct, argued at the def.) A def that produced no value for a pin
    * leaves that pin alone, so `level_input` -- driven from outside through its
    * output slot -- survives the sweep.
    *

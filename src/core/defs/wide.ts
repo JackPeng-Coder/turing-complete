@@ -3,22 +3,30 @@ import type { PortValue } from '../signal';
 
 /**
  * The wide (8-bit) family: bitwise, arithmetic, shift, compare and the two bit
- * packers. Every def here is pure combinational -- no state, no clock edge --
- * and every one of them is a *generator* result, so phase 5 can register the
- * same operators at 16/32/64 bits without a second copy of the semantics.
+ * packers -- all pure combinational, no state and no clock edge, and every one
+ * of them a *generator* result, so phase 5 can register the same operators at
+ * 16/32/64 bits without a second copy of the semantics.
+ *
+ * Task 4 added the STATEFUL half of the family at the bottom of this file
+ * (`mux8`, `delay8`, `reg8`, `counter8`, `ram8`), which is registered from a
+ * literal list rather than generated; the section note there says why, and what
+ * each def keeps in `state`.
  *
  * Three rules this module establishes, because nothing in the project had a
  * width other than 1 before it:
  *
  *  * **Ids and pin names are the contract.** `and8.a`, `add8.cout`,
- *    `splitter.b0` and the rest are addressed verbatim by the chapter-2 level
- *    data, so they are written out literally in `createWideDefs` rather than
- *    derived from a clever naming scheme.
+ *    `splitter.b0`, `reg8.load` and the rest are addressed verbatim by the
+ *    chapter-2 level data, so they are written out literally in `createWideDefs`
+ *    (and in the storage list) rather than derived from a clever naming scheme.
  *  * **Values are unsigned patterns, never negative numbers.** An 8-bit port
  *    carries 0..255; two's complement exists only *inside* `less_s` and `ashr8`,
  *    which convert to a signed value to read the sign and then return an
  *    unsigned pattern again. `assertWidth` accepts nothing else on the way in.
- *  * **Edge behaviour is decided, not accidental** -- see each operator.
+ *  * **Edge behaviour is decided, not accidental** -- see each operator, and for
+ *    the storage parts see the DECIDED rules at each def: `reset` beats
+ *    `load` / `en`, `counter8` wraps to 0, and `ram8` reads combinationally
+ *    while it writes on the edge.
  *
  * PARAMETERS (`splitter` / `maker`). The brief requires their pin COUNT to be
  * configurable, and the only per-instance knob is `params.width`. That knob
@@ -797,3 +805,248 @@ export function createWideDefs(width: number = DEFAULT_WIDE_WIDTH): readonly Com
     switchDef(`switch${w}`, { zh: `${w} 位开关`, en: `${w}-Bit Switch` }, w),
   ];
 }
+
+// ---------------------------------------------------------------------------
+// THE STORAGE FAMILY (task 4)
+//
+// The stateful half of the eight-bit family: a multiplexer, a delay, a register,
+// a counter and a byte-addressed memory. Ids and pin names are the contract the
+// chapter-2 level data is written against, exactly as the operators above are,
+// and every edge rule is DECIDED here rather than inherited -- each def says
+// which one it follows.
+//
+// WHY THIS IS NOT WIDTH-GENERATED. `createWideDefs(width)` exists so phase 5 can
+// register 16/32/64-bit operators without a second family; these five are
+// registered at eight bits only, from the literal list at the bottom of this
+// section. The reason is `stateBytes`: it is a per-instance allocation, and a
+// `ram{w}` holds `2 ** w` bytes -- at the generator's own `MAX_WIDE_WIDTH` of 32
+// a single RAM instance would ask the heap for 4 GiB. Phase 5 can add a
+// generator for the holders once it has decided what a wide RAM means; nothing
+// here should inherit that decision from a default parameter.
+//
+// STATE LAYOUT: EACH DEF'S OWN. A storage def keeps what it holds in its
+// `stateBytes` bytes and reads it back in its own `evaluate`. The one-byte
+// holders keep their byte in `state[0]`; `ram8` keeps 256 bytes and publishes
+// the one its `addr` selects. The kernel has no layout of its own to agree with
+// any more: `Simulation.#publishState` used to write `state[p]` onto output pin
+// `p`, one bit per pin, which is only correct for a 1-bit value -- an eight-bit
+// register would have had `0b00000001` written onto its pin, invisible only
+// because the settle that follows republishes through `evaluate`, and fatal for
+// the one def that had no `evaluate` to do that. So the mapping from state to
+// pin is stated once, here, next to the state it describes.
+//
+// COST: FREE ON BOTH METRICS. `cost` is 0, because a storage element cuts the
+// combinational path in both directions and contributes no DELAY unit (Global
+// Constraint 4: `delayOf` charges it nothing, its cost shows up in the tick
+// metric instead). `gateCost` is left to the `?? cost` fallback for the same
+// reason phase 0 left it there on `delay_line` and `mem1`: storage is zero on
+// BOTH metrics, and a second explicit 0 would only give the two zeroes a way to
+// drift apart. `mux8` is the one combinational part in this section and states
+// its count -- 8 x MUX2 -- with the operators above.
+// ---------------------------------------------------------------------------
+
+/**
+ * The storage family's width: eight bits, hard-coded here together with the `8`
+ * in every id below.
+ *
+ * `DEFAULT_WIDE_WIDTH` happens to be the same number, and is deliberately not
+ * used: the ids are a contract with the level data, so the width they name and
+ * the width their pins are built at must not be able to drift apart.
+ */
+const W = 8;
+
+/**
+ * Publishes the byte a one-byte holder keeps in `state[0]`.
+ *
+ * Shared by `delay8`, `reg8` and `counter8`, so the storage contract's publish
+ * rule is written once: the `inputs` parameter is accepted (the kernel passes
+ * it) and deliberately never read, because a storage element that publishes its
+ * input is a wire. A missing state byte reads 0, matching `delay_line`.
+ */
+const publishByte = (
+  _i: readonly PortValue[],
+  o: PortValue[],
+  state: Uint8Array | undefined,
+): void => {
+  o[0] = state?.[0] ?? 0;
+};
+
+/**
+ * `mux8`: `sel = 0` passes `a`, `sel = 1` passes `b`.
+ *
+ * Pure combinational -- no state, no edge -- so it costs one DELAY unit like
+ * every other operator, and its GATE metric is 8 x MUX2 = 32: a byte-wide 2:1
+ * mux is one 2:1 mux per bit, on the same NAND basis as the rest of this file.
+ */
+const mux8: ComponentDef = combinational(
+  'mux8',
+  { zh: '8 位多路选择器', en: '8-Bit Multiplexer' },
+  'wide',
+  [
+    { id: 'a', width: W },
+    { id: 'b', width: W },
+    { id: 'sel', width: 1 },
+  ],
+  wideOut(W),
+  1,
+  W * MUX2,
+  (i, o) => {
+    o[0] = bit(i[2]) === 1 ? toUint(i[1], W) : toUint(i[0], W);
+  },
+);
+
+/**
+ * `delay8`: whatever byte was on `a` at the previous clock edge.
+ *
+ * `clockEdge` samples and `evaluate` publishes what was sampled; neither half
+ * touches the other's job. That split is what makes this a delay rather than a
+ * wire, and it is the contract phase 0 paid two bugs for.
+ */
+const delay8: ComponentDef = {
+  id: 'delay8',
+  name: { zh: '8 位延迟线', en: '8-Bit Delay Line' },
+  category: 'wide',
+  inputs: [{ id: 'a', width: W }],
+  outputs: wideOut(W),
+  cost: 0,
+  sequential: true,
+  stateBytes: 1,
+  evaluate: publishByte,
+  clockEdge: (i, _o, state) => {
+    state[0] = toUint(i[0], W);
+  },
+};
+
+/**
+ * `reg8`: an eight-bit register with a load enable and a clear.
+ *
+ * On a clock edge: `reset = 1` clears it, else `load = 1` samples `d`, else it
+ * holds. **DECIDED: `reset` beats `load`** when both are asserted on the same
+ * edge -- a clear is unconditional, so `d` cannot win an edge the level asked to
+ * be a clear. Both inputs are *sampled*, not level-triggered: asserting `reset`
+ * between two edges leaves the output alone until the next one.
+ */
+const reg8: ComponentDef = {
+  id: 'reg8',
+  name: { zh: '8 位寄存器', en: '8-Bit Register' },
+  category: 'wide',
+  inputs: [
+    { id: 'd', width: W },
+    { id: 'load', width: 1 },
+    { id: 'reset', width: 1 },
+  ],
+  outputs: wideOut(W),
+  cost: 0,
+  sequential: true,
+  stateBytes: 1,
+  // Publishes the held byte only: reading `d`, `load` or `reset` here would make
+  // the register a wire, and reading them is never necessary.
+  evaluate: publishByte,
+  clockEdge: (i, _o, state) => {
+    if (bit(i[2]) === 1) state[0] = 0;
+    else if (bit(i[1]) === 1) state[0] = toUint(i[0], W);
+  },
+};
+
+/**
+ * `counter8`: counts clock edges while `en = 1`.
+ *
+ * **DECIDED: the count wraps to 0 at 256** (255 + 1 = 0) rather than
+ * saturating, so the counter is a period-256 time base that keeps moving.
+ * **DECIDED: `reset` beats `en`** on the same edge, by the same rule `reg8`
+ * uses: an asserted clear is not something an enable can override. `en` low
+ * holds the count across any number of edges.
+ */
+const counter8: ComponentDef = {
+  id: 'counter8',
+  name: { zh: '8 位计数器', en: '8-Bit Counter' },
+  category: 'wide',
+  inputs: [
+    { id: 'en', width: 1 },
+    { id: 'reset', width: 1 },
+  ],
+  outputs: wideOut(W),
+  cost: 0,
+  sequential: true,
+  stateBytes: 1,
+  evaluate: publishByte,
+  clockEdge: (i, _o, state) => {
+    if (bit(i[1]) === 1) state[0] = 0;
+    else if (bit(i[0]) === 1) state[0] = ((state[0] ?? 0) + 1) & 0xff;
+  },
+};
+
+/**
+ * `ram8`: 256 bytes of storage, read at `addr`.
+ *
+ * THE READ PATH IS COMBINATIONAL, THE WRITE PATH IS NOT. `load = 1` writes `d`
+ * at `addr` on a clock edge; a read follows `addr` with no edge at all, which is
+ * why this `evaluate` -- alone among the project's storage defs -- reads an
+ * input.
+ *
+ * Global Constraint 5 forbids `evaluate` from reading its inputs for the reason
+ * it gives: a storage element that mirrors an input is a wire. Reading `addr`
+ * does not do that, and the distinction is exact: `addr` can only SELECT a byte
+ * of `state`, and the value published is always one a clock edge put there, so
+ * no input's *value* can reach a pin through this path. `d` (i[0]) and `load`
+ * (i[2]) are deliberately never read here, so nothing on the write path can leak
+ * into the read path either. A version that published `d` would be exactly the
+ * wire the contract exists to prevent, and the tests pin both halves.
+ *
+ * `stateBytes` is 256, honestly: one byte per address (2 ** W), and the kernel
+ * allocates one such array per instance -- state is not stored in the signal
+ * table, whose capacity is about pins.
+ */
+const ram8: ComponentDef = {
+  id: 'ram8',
+  name: { zh: '8 位存储器', en: '8-Bit RAM' },
+  category: 'wide',
+  inputs: [
+    { id: 'd', width: W },
+    { id: 'addr', width: W },
+    { id: 'load', width: 1 },
+  ],
+  outputs: wideOut(W),
+  cost: 0,
+  sequential: true,
+  stateBytes: 2 ** W,
+  evaluate: (i, o, state) => {
+    o[0] = state?.[toUint(i[1], W)] ?? 0;
+  },
+  clockEdge: (i, _o, state) => {
+    if (bit(i[2]) === 1) state[toUint(i[1], W)] = toUint(i[0], W);
+  },
+};
+
+/**
+ * Ids `WIDE_STORAGE_DEFS` registers, in order, as a literal tuple so `DEF_IDS`
+ * can spread it and `DefId` still narrows to the individual strings.
+ *
+ * These are the five the task-4 brief fixes at eight bits; they are not derived
+ * from a width parameter (see the section note above), so this list and the defs
+ * above it are pinned against each other by `test/core/defs-wide.test.ts`
+ * instead.
+ */
+export const WIDE_STORAGE_DEF_IDS = [
+  'mux8',
+  'delay8',
+  'reg8',
+  'counter8',
+  'ram8',
+] as const;
+
+/**
+ * The storage family, at eight bits, in `WIDE_STORAGE_DEF_IDS` order.
+ *
+ * Offered as a plain list rather than a `createStorageDefs(width)` generator on
+ * purpose: the ids say eight bits, `ram8`'s state is 2 ** 8 bytes, and a phase
+ * that wants a 16-bit register should decide what `ram16` is before a default
+ * parameter decides it for them.
+ */
+export const WIDE_STORAGE_DEFS: readonly ComponentDef[] = [
+  mux8,
+  delay8,
+  reg8,
+  counter8,
+  ram8,
+];

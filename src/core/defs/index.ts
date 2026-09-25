@@ -1,5 +1,5 @@
 import type { ComponentDef } from '../registry';
-import { WIDE_DEF_IDS, createWideDefs } from './wide';
+import { WIDE_DEF_IDS, WIDE_STORAGE_DEFS, WIDE_STORAGE_DEF_IDS, createWideDefs } from './wide';
 
 // ---------------------------------------------------------------------------
 // GATE COST: the 1-bit NAND-equivalent basis, the same one `wide.ts` prices its
@@ -114,13 +114,19 @@ const PHASE0_DEF_IDS = [
 ] as const;
 
 /**
- * Every def id the game ships: phase 0's one-bit parts, then the wide family.
+ * Every def id the game ships: phase 0's one-bit parts, then the wide family --
+ * the operators, then the storage parts.
  *
  * The wide ids are not repeated here -- `wide.ts` owns them next to the defs
- * they name, and `test/core/defs-wide.test.ts` pins that the two lists agree, so
- * a wide def can never be registered under an id that level data cannot spell.
+ * they name, and `test/core/defs-wide.test.ts` pins that each list agrees with
+ * the defs it registers, so a wide def can never be registered under an id that
+ * level data cannot spell.
  */
-export const DEF_IDS = [...PHASE0_DEF_IDS, ...WIDE_DEF_IDS] as const;
+export const DEF_IDS = [
+  ...PHASE0_DEF_IDS,
+  ...WIDE_DEF_IDS,
+  ...WIDE_STORAGE_DEF_IDS,
+] as const;
 
 export type DefId = (typeof DEF_IDS)[number];
 
@@ -234,4 +240,16 @@ export const BASE_DEFS: readonly ComponentDef[] = [
   // per-bit cells against these 1-bit gates, so the two tables cannot drift
   // into two different bases.
   ...createWideDefs(),
+
+  // The 8-bit storage family (task 4): a byte mux, a byte delay, a register, a
+  // counter and a 256-byte RAM. Registered from a literal list rather than a
+  // width generator -- a 32-bit RAM would be 4 GiB of state per instance; see
+  // the section note in `wide.ts`.
+  //
+  // Every one of them publishes what it holds through its own `evaluate`, the
+  // same call the settle sweep makes, which is what lets the kernel publish an
+  // eight-bit register correctly (see `Simulation.#publishState`). They are free
+  // on BOTH metrics, like the two 1-bit memories above: an asserted clear beats
+  // an asserted load/en, and the counter wraps to 0 at 256.
+  ...WIDE_STORAGE_DEFS,
 ];
