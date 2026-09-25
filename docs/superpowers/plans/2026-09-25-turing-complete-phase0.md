@@ -5616,7 +5616,7 @@ git commit -m "feat(ui): add canvas board, palette, shell and truth table panel"
 - Produces:
   - `src/ui/narrative.ts`：`interface Narrative { readonly before: LocalizedText; readonly after: LocalizedText }`、`const NARRATIVE: Readonly<Record<string, Narrative>>`、`function narrativeFor(levelId: string): Narrative`
   - `src/ui/map.ts`：`function mountMap(root: HTMLElement, store: Store, onSelect: (levelId: string) => void): { render(): void }`
-  - `playwright.config.ts`：webServer 启动 `pnpm preview`，端口 4173
+  - `playwright.config.ts`：webServer 通过 `NODE_BIN`/`PNPM_BIN` 启动 `build` + `preview`，端口 4173（本机 PATH 上的 `pnpm` 是坏的包装脚本）
 
 - [ ] **Step 1: 写 `src/ui/narrative.ts`（原创文案）**
 
@@ -5771,6 +5771,14 @@ export function mountMap(
 ```ts
 import { defineConfig } from '@playwright/test';
 
+// The `pnpm` shim on this host's PATH is a broken PowerShell wrapper, so the
+// preview server is started through the bundled Node binary instead. NODE and
+// PNPM are supplied by the environment; on a normal Linux CI, set both to
+// `pnpm` (or leave them unset and drop the quotes) and the command is the
+// ordinary `pnpm build && pnpm preview`.
+const NODE = process.env.NODE_BIN ?? 'node';
+const PNPM = process.env.PNPM_BIN ?? 'pnpm';
+
 export default defineConfig({
   testDir: './test/smoke',
   testMatch: /.*\.spec\.ts/,
@@ -5780,13 +5788,24 @@ export default defineConfig({
     viewport: { width: 1280, height: 800 },
   },
   webServer: {
-    command: 'pnpm build && pnpm preview --port 4173 --strictPort',
+    command: `"${NODE}" "${PNPM}" build && "${NODE}" "${PNPM}" preview --port 4173 --strictPort`,
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 180_000,
   },
 });
 ```
+
+> **两处本机实测的坑（Task 11 的修复轮报告的）**：
+>
+> 1. `pnpm` 在 PATH 上是一个坏掉的 PowerShell 包装脚本，`webServer.command` 里直接写 `pnpm` 会启动失败。用 `NODE_BIN` / `PNPM_BIN` 环境变量传入真实路径，命令里用 `"${NODE}" "${PNPM}"`。
+> 2. **浏览器版本必须与 `@playwright/test` 匹配**。本机预装的是 `chromium-1223`，而 1.63.0 需要 `1243`，直接跑会报找不到可执行文件。先装一次（约 115 MB）：
+>
+> ```
+> & "<node>" "node_modules\@playwright\test\cli.js" install chromium
+> ```
+>
+> 装完 `%LOCALAPPDATA%\ms-playwright` 下会同时有 1223 与 1243，属正常。
 
 - [ ] **Step 4: 写冒烟测试 `test/smoke/ui.spec.ts`**
 
@@ -5837,7 +5856,7 @@ test('progress survives a reload and unlocks the next level', async ({ page }) =
   await page.mouse.move(cx - 160 + 64, cy);
   await page.mouse.down();
   await page.mouse.move(cx + 160, cy, { steps: 12 });
-  await page.mouse.up();
+Run: `& "<node>" "node_modules\@playwright\test\cli.js" install chromium` 然后 `NODE_BIN=... PNPM_BIN=... pnpm smoke`
   await expect(page.locator('.truth-table')).toContainText('全部用例通过');
 
   await page.reload();
