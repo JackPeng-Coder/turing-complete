@@ -2260,9 +2260,18 @@ describe('runChecks / truth-table', () => {
   });
 
   it('fails a circuit with an unstable feedback loop without throwing', () => {
+    // Two cross-coupled NANDs with BOTH free inputs tied high, so each acts as
+    // an inverter and the loop has no stable state. Note the trap the original
+    // draft fell into: cross-coupled NANDs with the free inputs left UNWIRED
+    // are a STABLE fixed point (nand(x, 0) === 1 for every x) -- that is a
+    // perfectly good SR latch, not an unstable circuit. Tying them high is what
+    // makes it oscillate.
     const g = emptyGraph();
-    const n1 = addInstance(g, 'nand', 0, 0);
-    const n2 = addInstance(g, 'nand', 0, 40);
+    const one = addInstance(g, 'const_on', 0, 0);
+    const n1 = addInstance(g, 'nand', 0, 40);
+    const n2 = addInstance(g, 'nand', 0, 80);
+    connect(g, { inst: one.id, port: 'out' }, { inst: n1.id, port: 'b' });
+    connect(g, { inst: one.id, port: 'out' }, { inst: n2.id, port: 'b' });
     connect(g, { inst: n1.id, port: 'out' }, { inst: n2.id, port: 'a' });
     connect(g, { inst: n2.id, port: 'out' }, { inst: n1.id, port: 'a' });
     expect(() => runChecks(g, registry, andSpec)).not.toThrow();
@@ -2968,9 +2977,15 @@ describe('grade', () => {
   });
 
   it('never throws on an unstable circuit and marks it as a failure', () => {
+    // Same fixture rule as in the checks test: the free NAND inputs must be
+    // tied HIGH for the loop to oscillate. Left unwired they read 0 and the
+    // circuit settles at a stable fixed point.
     const g = emptyGraph();
-    const n1 = addInstance(g, 'nand', 0, 0);
-    const n2 = addInstance(g, 'nand', 0, 40);
+    const one = addInstance(g, 'const_on', 0, 0);
+    const n1 = addInstance(g, 'nand', 0, 40);
+    const n2 = addInstance(g, 'nand', 0, 80);
+    connect(g, { inst: one.id, port: 'out' }, { inst: n1.id, port: 'b' });
+    connect(g, { inst: one.id, port: 'out' }, { inst: n2.id, port: 'b' });
     connect(g, { inst: n1.id, port: 'out' }, { inst: n2.id, port: 'a' });
     connect(g, { inst: n2.id, port: 'out' }, { inst: n1.id, port: 'a' });
     const result = grade(g, registry, andSpec);
