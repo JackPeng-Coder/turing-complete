@@ -149,12 +149,14 @@ describe('wide defs: the brief\'s contract', () => {
     expect(r.byCategory('io').map((d) => d.id)).toContain('const8');
   });
 
-  it('costs one gate per part, nothing for a source or a wire', () => {
-    // `delayOf` charges `def.cost` per node, so a cost above 1 would give a wide
-    // part a multi-unit delay and contradict the phase-1 rule that every
-    // component contributes exactly one unit of delay. Wide parts are one gate
-    // each for the metrics; the NAND-equivalent expansion is a later phase's
-    // `expand()` and can re-derive these numbers then.
+  it('keeps the DELAY cost at one unit per operator, nothing for a source or a wire', () => {
+    // `cost` is the delay unit `delayOf` charges per node, so a value above 1
+    // would give a wide part a multi-unit delay and contradict the phase-1 rule
+    // that every component contributes exactly one unit of delay (spec §3.2).
+    // It is NOT the gate metric: the NAND-equivalent expansion lives in
+    // `gateCost`, which is pinned separately below. If this test and that one
+    // ever collapse into one number, the delay metric has silently become the
+    // gate metric again.
     for (const id of WIDE_OP_IDS) {
       if (id === 'splitter' || id === 'maker') continue;
       expect(registry.get(id).cost, id).toBe(1);
@@ -164,6 +166,119 @@ describe('wide defs: the brief\'s contract', () => {
     expect(registry.get('splitter').cost).toBe(0);
     expect(registry.get('maker').cost).toBe(0);
     expect(registry.get('const8').cost).toBe(0);
+  });
+
+  /**
+   * NAND equivalents per def, as literal numbers. The constructions behind them
+   * are documented in `wide.ts` (the "GATE COST" block plus the comment on each
+   * def); this table is the independent statement of what those constructions
+   * add up to, so changing a count has to be a deliberate edit in two places.
+   *
+   * Every number is the 8-bit case of a per-width formula.
+   */
+  const NAND_EQUIVALENTS: Record<string, number> = {
+    // Bit-sliced: one 1-bit cell per bit. AND 2, OR 3, NAND 1, NOR 4, XOR 4,
+    // XNOR 5, NOT 1 -- all from the standard all-NAND cells.
+    and8: 16,
+    or8: 24,
+    nand8: 8,
+    nor8: 32,
+    xor8: 32,
+    xnor8: 40,
+    not8: 8,
+    // 8 full adders at 9 NANDs each.
+    add8: 72,
+    // NOT8 (8) + add8 (72), `cin` tied high: the constant is a rail, not a gate.
+    neg8: 80,
+    // less_u: NOT b (8) + add (72) + NOT cout (1) = subtract and read the borrow.
+    less_u: 81,
+    // less_s: less_u (81) + XOR of the sign bits (4) + the 2:1 sign-fix mux (4).
+    less_s: 89,
+    // equal8: 8 XNOR (40) into a 7-gate AND tree (14). The XOR/OR/NOT mirror
+    // also totals 54.
+    equal8: 54,
+    // 3-stage 8-wide barrel (96) + the "amount >= 8 -> 0" logic: OR-reduce the
+    // five high amount bits (12), invert (1), AND the 8 outputs (16).
+    shift_l8: 125,
+    shift_r8: 125,
+    // The same barrel, but the over-shift case selects the sign bit instead of
+    // zero: OR-reduce (12, no inverter needed) + an 8-wide 2:1 mux (32).
+    ashr8: 140,
+    // A rotator is the barrel alone: `amount % 8` falls out of acting on the
+    // low three amount bits, so there is no over-shift logic at all.
+    rot_l8: 96,
+    rot_r8: 96,
+    // Shift-and-add: 8 partial products (8 x AND8 = 128) accumulated by 8 add8s
+    // (8 x 72 = 576).
+    mul8: 704,
+    // Restoring division, 8 iterations of (NOT b + add + conditional restore) =
+    // 8 x 112, plus the divide-by-zero rule: zero-detect (22) and a last 8-wide
+    // conditional pass onto all ones (32).
+    div8: 950,
+    // A rail, a wire with eight ends, and a wire with eight ends.
+    const8: 0,
+    splitter: 0,
+    maker: 0,
+    // `a AND on`: one AND, and eight of them.
+    switch: 2,
+    switch8: 16,
+  };
+
+  it('states a NAND-equivalent gateCost for every def, explicitly', () => {
+    // Explicit on every def, including the zeroes: none of the wide family
+    // leans on the `?? cost` fallback, so these 24 numbers are the whole gate
+    // metric for the family and a missing one is a test failure rather than a
+    // silent 1.
+    expect(Object.keys(NAND_EQUIVALENTS).sort()).toEqual([...CONTRACT_IDS].sort());
+    for (const id of CONTRACT_IDS) {
+      expect(registry.get(id).gateCost, id).toBeTypeOf('number');
+      expect(registry.get(id).gateCost, id).toBe(NAND_EQUIVALENTS[id]);
+    }
+  });
+
+  it('gives every operator more than one NAND equivalent, and no part less than its delay', () => {
+    for (const id of CONTRACT_IDS) {
+      const def = registry.get(id);
+      expect(def.gateCost!, id).toBeGreaterThanOrEqual(def.cost);
+    }
+    for (const id of WIDE_OP_IDS) {
+      if (id === 'splitter' || id === 'maker') continue;
+      expect(registry.get(id).gateCost!, id).toBeGreaterThan(1);
+    }
+  });
+
+  it('composes each count out of the others, so the constructions are checkable', () => {
+    // Each identity is one line of the derivation in `wide.ts`; a single edited
+    // number breaks the identity even if the table above were updated to match
+    // it.
+    const gate = (id: string): number => registry.get(id).gateCost!;
+    expect(gate('nor8')).toBe(gate('or8') + gate('not8')); // OR8 + NOT8
+    expect(gate('xnor8')).toBe(gate('xor8') + gate('not8')); // XOR8 + NOT8
+    expect(gate('neg8')).toBe(gate('not8') + gate('add8')); // NOT8 + add8, cin high
+    expect(gate('less_s')).toBe(gate('less_u') + 4 + 4); // sign XOR + sign-fix mux
+    expect(gate('mul8')).toBe(8 * (gate('and8') + gate('add8'))); // 8 partials, 8 adds
+    expect(gate('switch8')).toBe(8 * gate('switch')); // one AND per bit
+    expect(gate('shift_l8')).toBe(gate('rot_l8') + 12 + 1 + gate('switch8')); // barrel + OR(12) + NOT(1) + 8 ANDs
+    expect(gate('ashr8')).toBe(gate('rot_l8') + 12 + 8 * 4); // barrel + OR(12) + 8 sign-fill muxes at 4 NANDs
+    expect(gate('shift_r8')).toBe(gate('shift_l8')); // same structure, other direction
+    expect(gate('rot_r8')).toBe(gate('rot_l8'));
+  });
+
+  it('scales every count with the width the generator is asked for', () => {
+    const at = (width: number, id: string): number => {
+      const def = createWideDefs(width).find((d) => d.id === id);
+      if (!def) throw new Error(`createWideDefs(${width}) has no ${id}`);
+      return def.gateCost!;
+    };
+    expect(at(1, 'not1')).toBe(1); // 1 x NOT
+    expect(at(1, 'add1')).toBe(9); // 1 full adder
+    expect(at(1, 'switch')).toBe(2); // the bare id is always the 1-bit switch
+    expect(at(4, 'and4')).toBe(8); // 4 x AND
+    expect(at(4, 'add4')).toBe(36); // 4 x 9
+    expect(at(4, 'rot_l4')).toBe(32); // 2 stages x 4 muxes x 4
+    expect(at(16, 'and16')).toBe(32);
+    expect(at(16, 'add16')).toBe(144);
+    expect(at(16, 'rot_l16')).toBe(256); // 4 stages x 16 muxes x 4
   });
 
   it('registers the whole family without a duplicate id', () => {

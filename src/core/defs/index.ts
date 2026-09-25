@@ -21,6 +21,11 @@ const gate = (
       width: 1,
     })),
     outputs: [{ id: 'out', width: 1 }],
+    // `cost` only: for a 1-bit NAND-based gate the delay unit and the
+    // NAND-equivalent gate count are the same number, so `ComponentDef.gateCost`
+    // is left unstated and the gate metric falls back to `cost`. Stating one here
+    // would move a chapter-1 score (see `test/levels/grader.test.ts`, which
+    // freezes all twelve).
     cost: 1,
     sequential: false,
     stateBytes: 0,
@@ -177,5 +182,9 @@ export const BASE_DEFS: readonly ComponentDef[] = [
 
   // The wide (8-bit) family. Registered at the default width -- 8 is the only
   // width this phase opens; `createWideDefs(width)` is the hook for 16/32/64.
+  //
+  // These are the defs that DO state `gateCost`: a wide part is one delay unit
+  // and many NAND equivalents, so the two metrics stop agreeing here. The
+  // numbers and their constructions live next to each def in `wide.ts`.
   ...createWideDefs(),
 ];

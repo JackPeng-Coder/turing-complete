@@ -25,8 +25,32 @@ export interface ComponentDef {
   readonly category: ComponentCategory;
   readonly inputs: readonly PinDef[];
   readonly outputs: readonly PinDef[];
-  /** Gate cost when the circuit is expanded. Sources cost 0, gates cost 1. */
+  /**
+   * DELAY cost: what one pass through this part costs the longest-path metric.
+   * Sources and wires cost 0, every gate costs 1, and a wide part costs 1 as
+   * well -- a `delayOf` node is a component, not a NAND (spec §3.2: 宽位组件
+   * （如 8 位加法器）同样记为 1).
+   *
+   * This is NOT the gate metric. `cost` is read per node by `delayOf`
+   * (`net.ts`) only; the gate metric counts NAND equivalents and reads
+   * `gateCost` below.
+   */
   readonly cost: number;
+  /**
+   * NAND-equivalent GATE cost: how many 2-input NAND gates this part expands to
+   * once custom and wide components are flattened (spec §5.4). Read by
+   * `gateCost()` in `levels/grader.ts` and by nothing else.
+   *
+   * The two metrics expand wide parts differently on purpose: an `add8` is one
+   * unit of delay but 72 NAND equivalents, so this cannot share a field with
+   * `cost`.
+   *
+   * Absent means "same as `cost`". That default is exactly right for the 1-bit
+   * phase-0 family -- a NAND-based gate IS one NAND equivalent, and a source or
+   * a level connector is zero -- so leaving it out keeps every existing level's
+   * score byte-identical. Defs whose part is worth more than one NAND state it.
+   */
+  readonly gateCost?: number;
   /** Storage elements sample on the clock edge and do not add combinational delay. */
   readonly sequential: boolean;
   /**

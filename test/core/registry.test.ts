@@ -70,6 +70,21 @@ describe('base defs', () => {
     }
   });
 
+  it('leaves gateCost unstated on the phase-0 defs, so the gate metric falls back to cost', () => {
+    // `cost` is the DELAY unit and `gateCost` the NAND-equivalent GATE unit; for
+    // a 1-bit NAND-based part the two are the same number, so phase 0 says
+    // nothing and `gateCost()` (levels/grader.ts) uses `?? cost`. That fallback
+    // is what keeps every chapter-1 score byte-identical -- these defs must NOT
+    // grow an explicit `gateCost`, and if one ever does, this test fails and the
+    // score change has to be justified rather than discovered.
+    const wide = new Set<string>(WIDE_DEF_IDS);
+    for (const d of r.all()) {
+      if (wide.has(d.id)) continue;
+      expect(d.gateCost, d.id).toBeUndefined();
+    }
+    expect(new Set(r.all().map((d) => d.id)).size).toBeGreaterThan(wide.size);
+  });
+
   it('evaluates NAND', () => {
     const def = r.get('nand');
     for (const [a, b, want] of [

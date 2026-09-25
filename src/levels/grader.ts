@@ -26,11 +26,25 @@ export function scoreOf(m: Metrics): number {
   return m.gate * SCORE_WEIGHTS.gate + m.delay * SCORE_WEIGHTS.delay + m.tick * SCORE_WEIGHTS.tick;
 }
 
+/**
+ * Total NAND-equivalent gates of the circuit: the GATE metric (spec §5.4,
+ * "电路 + 自定义组件 + 宽位组件全部展开后，NAND 等价门的总数").
+ *
+ * It counts `def.gateCost`, NOT `def.cost`. The two fields are different metrics
+ * on purpose: `cost` is the per-node DELAY unit that `delayOf` charges, and a
+ * wide component is deliberately one unit of delay (spec §3.2) while expanding
+ * to many NAND equivalents here -- an `add8` is 1 delay but 72 gates.
+ *
+ * A def that states no `gateCost` falls back to `cost`, which is what every
+ * 1-bit phase-0 def wants (a NAND is one NAND equivalent, a source is zero) and
+ * what keeps every chapter-1 score unchanged.
+ */
 export function gateCost(graph: Graph, registry: Registry): number {
   let total = 0;
   for (const inst of graph.instances) {
     if (!registry.has(inst.def)) continue;
-    total += registry.get(inst.def).cost;
+    const def = registry.get(inst.def);
+    total += def.gateCost ?? def.cost;
   }
   return total;
 }
