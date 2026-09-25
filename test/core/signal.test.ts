@@ -49,6 +49,17 @@ describe('SignalTable', () => {
     expect(t.getPort(base, 16)).toEqual(new Uint8Array([0x34, 0x12]));
   });
 
+  it('reads back every bit of a wide port whose width is not a multiple of 8', () => {
+    const t = createSignalTable();
+    const base = t.alloc(12);
+    // `assertWidth` accepts ceil(12 / 8) = 2 bytes on the way in, so the reader
+    // must size its buffer to ceil(width / 8) too. Sizing it with `width / 8`
+    // floors to 1 byte and silently drops bits 8-11.
+    t.setPort(base, 12, new Uint8Array([0x34, 0x12]));
+    expect(t.getPort(base, 12)).toEqual(new Uint8Array([0x34, 0x02]));
+    expect(t.getBit(base + 9)).toBe(1);
+  });
+
   it('rejects a value that does not fit the port width', () => {
     const t = createSignalTable();
     const base = t.alloc(3);
@@ -84,9 +95,27 @@ describe('SignalTable', () => {
     const t = createSignalTable(8);
     const slots = t.slots;
     expect(slots.length).toBe(8);
+
+    // Fill the table to capacity and write through the captured reference.
     const base = t.alloc(8);
-    expect(t.slots).toBe(slots);
     t.setPort(base, 8, 0b1111_0000);
+    expect(slots[base]).toBe(0);
+    expect(slots[base + 4]).toBe(1);
+
+    // One slot too many. A grow-on-demand table would reallocate here, which
+    // silently invalidates every `base` already handed out (including the
+    // `drive` lookup `net.ts` builds over these indices), so the allocation
+    // must be refused instead. Swallow the refusal to keep asserting after it.
+    let refusal: unknown;
+    try {
+      t.alloc(1);
+    } catch (err) {
+      refusal = err;
+    }
+    expect(refusal).toBeInstanceOf(RangeError);
+
+    expect(t.slots).toBe(slots); // identity: the backing array was not swapped
+    expect(t.getPort(base, 8)).toBe(0b1111_0000); // and the values survived
     expect(slots[base]).toBe(0);
     expect(slots[base + 4]).toBe(1);
   });

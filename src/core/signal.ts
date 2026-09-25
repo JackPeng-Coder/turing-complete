@@ -90,7 +90,12 @@ export function createSignalTable(capacity = 65_536): SignalTable {
         for (let i = 0; i < width; i += 1) out |= table.slots[base + i]! << i;
         return out;
       }
-      const bytes = new Uint8Array(width / 8);
+      // `Math.ceil`, not `width / 8`: the two must agree with `assertWidth`,
+      // which accepts `Math.ceil(width / 8)` bytes on the way in. Flooring
+      // here drops the partial high byte of e.g. a 12-bit port (bits 8-11),
+      // and the mismatch is misdiagnosed downstream as an oscillating circuit
+      // (1-byte read-back vs 2-byte output => `changed` stays true forever).
+      const bytes = new Uint8Array(Math.ceil(width / 8));
       for (let i = 0; i < width; i += 1) {
         if (table.slots[base + i]) bytes[i >> 3]! |= 1 << (i & 7);
       }
