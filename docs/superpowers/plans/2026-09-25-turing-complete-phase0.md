@@ -3929,7 +3929,7 @@ git commit -m "feat(levels): add chapter 1 levels 7-12 with reference solutions"
 - Consumes: `Graph`、`LevelSpec`、`GradeResult`
 - Produces:
   - `src/app/commands.ts`：`interface Command { readonly label: string; do(g: Graph): void; undo(g: Graph): void }`、`class CommandStack { push(c: Command, g: Graph): void; undo(g: Graph): boolean; redo(g: Graph): boolean; canUndo(): boolean; canRedo(): boolean; clear(): void; readonly depth: number }`
-  - `src/app/progress.ts`：`interface LevelRecord { passed: boolean; best: Metrics | null; stars: 0 | 1 | 3 }`、`interface Progress { version: 1; levels: Record<string, LevelRecord> }`、`const PLUMBING = ['level_input', 'level_output'] as const`、`const SCORE_WEIGHTS = { delay: 4, tick: 8 } as const`、`function emptyProgress(): Progress`、`function isUnlocked(p: Progress, levelId: string, order: readonly string[]): boolean`、`function unlockedComponents(p: Progress, levels: readonly LevelSpec[]): Set<string>`、`function paletteDefsFor(p: Progress, levels: readonly LevelSpec[], level: LevelSpec): string[]`、`function plumbingOf(level: LevelSpec): string[]`、`function applyGrade(p: Progress, level: LevelSpec, result: GradeResult): Progress`（纯函数，返回新对象）
+  - `src/app/progress.ts`：`interface LevelRecord { passed: boolean; best: Metrics | null; stars: 0 | 1 | 3 }`、`interface Progress { version: 1; levels: Record<string, LevelRecord> }`、`const PLUMBING = ['level_input', 'level_output'] as const`、`const SCORE_WEIGHTS = { delay: 4, tick: 8 } as const`、`function emptyProgress(): Progress`、`function isUnlocked(p: Progress, levelId: string, order: readonly string[]): boolean`、`function resumePointOf(p: Progress, order: readonly string[]): string`、`function unlockedComponents(p: Progress, levels: readonly LevelSpec[]): Set<string>`、`function paletteDefsFor(p: Progress, levels: readonly LevelSpec[], level: LevelSpec): string[]`、`function applyGrade(p: Progress, level: LevelSpec, result: GradeResult): Progress`（纯函数，返回新对象）
   - `src/persist/storage.ts`：`const STORAGE_KEY = 'tc.progress.v1'`、`function loadProgress(initialComponents: readonly string[]): Progress`、`function saveProgress(p: Progress): void`、`function exportProgress(p: Progress): string`、`function importProgress(json: string): Progress`、`function migrate(raw: unknown): Progress`
 
 - [ ] **Step 1: 写失败测试 `test/app/progress.test.ts`**
@@ -3941,6 +3941,7 @@ import {
   emptyProgress,
   isUnlocked,
   paletteDefsFor,
+  resumePointOf,
   unlockedComponents,
 } from '../../src/app/progress';
 import type { GradeResult } from '../../src/levels/grader';
@@ -3986,6 +3987,34 @@ describe('isUnlocked', () => {
   });
   it('throws for ids outside the order', () => {
     expect(() => isUnlocked(emptyProgress(), 'zzz', order)).toThrow(/unknown level/i);
+  });
+});
+
+describe('resumePointOf', () => {
+  const order = ['a', 'b', 'c'];
+  const pass: GradeResult = {
+    passed: true,
+    metrics: { gate: 1, delay: 1, tick: 0 },
+    score: 5,
+    stars: 3,
+    failures: [],
+    issues: [],
+  };
+
+  it('starts at the first level', () => {
+    expect(resumePointOf(emptyProgress(), order)).toBe('a');
+  });
+
+  it('advances past a passed level', () => {
+    const p = applyGrade(emptyProgress(), { ...level, id: 'a' }, pass);
+    expect(resumePointOf(p, order)).toBe('b');
+  });
+
+  it('stays at the newest level when everything is passed', () => {
+    const p1 = applyGrade(emptyProgress(), { ...level, id: 'a' }, pass);
+    const p2 = applyGrade(p1, { ...level, id: 'b' }, pass);
+    const p3 = applyGrade(p2, { ...level, id: 'c' }, pass);
+    expect(resumePointOf(p3, order)).toBe('c');
   });
 });
 
@@ -4081,6 +4110,14 @@ export function isUnlocked(
   if (index === 0) return true;
   const previous = order[index - 1]!;
   return progress.levels[previous]?.passed === true;
+}
+
+/** First reachable level that has not been passed; the last level if all are. */
+export function resumePointOf(progress: Progress, order: readonly string[]): string {
+  for (const id of order) {
+    if (isUnlocked(progress, id, order) && progress.levels[id]?.passed !== true) return id;
+  }
+  return order[order.length - 1]!;
 }
 
 /**
@@ -5161,7 +5198,7 @@ function cell(text: string): HTMLTableCellElement {
 }
 ```
 
-`src/main.ts`：
+`src/main.ts`——本任务先立骨架：画板、调色板、真值表、存档、切关逻辑都到位，**地图与叙事浮层留到 Task 12 接**（`onOpenMap` 先注册成空实现，`showBriefing` 函数先写在这里但只做占位调用）：
 
 ```ts
 import './ui/style.css';
@@ -5177,8 +5214,6 @@ import { applyGrade, resumePointOf, type Progress } from './app/progress';
 import { mountShell } from './ui/shell';
 import { mountPalette } from './ui/palette';
 import { mountTruthTable } from './ui/truthTable';
-import { mountMap } from './ui/map';
-import { narrativeFor } from './ui/narrative';
 import { renderBoard } from './ui/board/render';
 import { attachBoardInput } from './ui/board/interact';
 import type { LevelSpec } from './levels/spec';
@@ -5241,7 +5276,6 @@ if (app) {
       status: null,
     });
     showScreen('board');
-    showBriefing(narrativeFor(levelId).before);
   };
 
   const regrade = (): void => {
@@ -5252,18 +5286,15 @@ if (app) {
       progress = applyGrade(p, l, result);
       saveProgress(progress);
       store.set({ progress });
-      showBriefing(narrativeFor(l.id).after);
     }
   };
 
-  const mapRender = mountMap(mapScreen, store, openLevel);
+  // Task 12 replaces this with the real chapter map.
+  const openMap = (): void => {
+    showScreen('map');
+  };
 
-  mountShell(app, store, {
-    onOpenMap: () => {
-      showScreen('map');
-      mapRender.render();
-    },
-  });
+  mountShell(app, store, { onOpenMap: openMap });
   mountPalette(boardScreen, store, onPick);
   mountTruthTable(boardScreen, store);
   attachBoardInput(canvas, store, stack, { onChange: regrade });
@@ -5278,23 +5309,7 @@ if (app) {
     if (!boardScreen.hidden) renderBoard(canvas, store, store.get().camera);
   });
 
-  showBriefing(narrativeFor(level.id).before);
   renderBoard(canvas, store, store.get().camera);
-}
-
-/** Original narrative briefing. It never participates in grading. */
-function showBriefing(text: { zh: string; en: string }): void {
-  document.querySelector('.briefing')?.remove();
-  const panel = document.createElement('div');
-  panel.className = 'briefing';
-  const body = document.createElement('p');
-  body.textContent = text.zh;
-  body.lang = 'zh-CN';
-  const start = document.createElement('button');
-  start.textContent = '开始';
-  start.addEventListener('click', () => panel.remove());
-  panel.append(body, start);
-  document.body.append(panel);
 }
 ```
 
@@ -5790,46 +5805,94 @@ describe('narrative coverage', () => {
 });
 ```
 
-- [ ] **Step 8: 把地图接进关卡切换（`main.ts` 已在 Task 11 写好骨架）**
+- [ ] **Step 8: 把地图与叙事接进 `main.ts`**
 
-Task 11 的 `main.ts` 已经包含 `openLevel`、`showScreen`、`showBriefing` 与 `resumePoint`。这一步只做两件事：
+Task 11 的 `main.ts` 留了一个空实现的 `openMap` 占位。本步做四处改动：
 
-1. 确认 `.map-tile` 的点击真的会调用 `openLevel`（`mountMap(mapScreen, store, openLevel)`）。
-2. 确认 `resumePoint` 的选择正确：**第一个「已解锁但未通过」的关卡**，而不是「最后一个已解锁的关卡」。追加一条单元测试锁死它：
+1) 顶部加两个 import：
 
 ```ts
-// test/app/progress.test.ts
-import { resumePointOf } from '../../src/app/progress';
-
-describe('resumePointOf', () => {
-  const order = ['a', 'b', 'c'];
-  it('starts at the first level', () => {
-    expect(resumePointOf(emptyProgress(), order)).toBe('a');
-  });
-  it('advances past a passed level', () => {
-    const p = applyGrade(emptyProgress(), { ...level, id: 'a' }, pass);
-    expect(resumePointOf(p, order)).toBe('b');
-  });
-  it('stays at the newest level when everything is passed', () => {
-    const p1 = applyGrade(emptyProgress(), { ...level, id: 'a' }, pass);
-    const p2 = applyGrade(p1, { ...level, id: 'b' }, pass);
-    const p3 = applyGrade(p2, { ...level, id: 'c' }, pass);
-    expect(resumePointOf(p3, order)).toBe('c');
-  });
-});
+import { mountMap } from './ui/map';
+import { narrativeFor } from './ui/narrative';
 ```
 
-因此 `src/app/progress.ts` 需要导出 `resumePointOf`，并由 `main.ts` 使用它（Task 11 里的同名局部函数换成这个导出）：
+2) 在文件末尾（`if (app)` 块之后）加上叙事浮层。它只显示原创简报，不参与评分：
 
 ```ts
-/** First reachable level that has not been passed; the last level if all are. */
-export function resumePointOf(progress: Progress, order: readonly string[]): string {
-  for (const id of order) {
-    if (isUnlocked(progress, id, order) && progress.levels[id]?.passed !== true) return id;
-  }
-  return order[order.length - 1]!;
+/** Original narrative briefing. It never participates in grading. */
+function showBriefing(text: { zh: string; en: string }): void {
+  document.querySelector('.briefing')?.remove();
+  const panel = document.createElement('div');
+  panel.className = 'briefing';
+  const body = document.createElement('p');
+  body.textContent = text.zh;
+  body.lang = 'zh-CN';
+  const start = document.createElement('button');
+  start.textContent = '开始';
+  start.addEventListener('click', () => panel.remove());
+  panel.append(body, start);
+  document.body.append(panel);
 }
 ```
+
+3) 在 `if (app)` 块内、`renderBoard(...)` 之前加一行，让进入应用时就弹出当前关的简报：
+
+```ts
+  showBriefing(narrativeFor(level.id).before);
+```
+
+4) 把 `openMap` 占位换成真实地图，并让切关 / 通关都弹简报：
+
+```ts
+  const openLevel = (levelId: string): void => {
+    const next = getLevel(levelId);
+    stack.clear();
+    store.set({
+      level: next,
+      graph: emptyGraph(next.id),
+      selected: [],
+      lastGrade: null,
+      status: null,
+    });
+    showScreen('board');
+    showBriefing(narrativeFor(levelId).before);
+  };
+
+  const regrade = (): void => {
+    const { graph: g, level: l, progress: p } = store.get();
+    const result = grade(g, registry, l);
+    store.set({ lastGrade: result });
+    if (result.passed) {
+      progress = applyGrade(p, l, result);
+      saveProgress(progress);
+      store.set({ progress });
+      showBriefing(narrativeFor(l.id).after);
+    }
+  };
+
+  const mapRender = mountMap(mapScreen, store, openLevel);
+
+  mountShell(app, store, {
+    onOpenMap: () => {
+      showScreen('map');
+      mapRender.render();
+    },
+  });
+```
+
+- [ ] **Step 9: 运行全部测试与冒烟，确认通过**
+
+Run: `pnpm test` 然后 `pnpm smoke`
+Expected: 两者都通过
+
+- [ ] **Step 10: 提交**
+
+```bash
+git add src/ui/map.ts src/ui/narrative.ts src/ui/style.css src/main.ts playwright.config.ts test/smoke/ui.spec.ts test/ui/panels.test.ts
+git commit -m "feat(ui): add chapter map, original narrative shell and playwright smoke test"
+```
+
+> `resumePointOf` 的单元测试在 Task 10 就写好了（`test/app/progress.test.ts`），`main.ts` 在 Task 11 就调用了它。本任务只把地图与叙事接上。
 
 - [ ] **Step 8: 运行全部测试与冒烟，确认通过**
 
