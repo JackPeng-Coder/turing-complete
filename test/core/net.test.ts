@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { createRegistry } from '../../src/core/registry';
-import type { ComponentDef } from '../../src/core/registry';
+import type { ComponentDef, Registry } from '../../src/core/registry';
 import { UnstableCircuitError } from '../../src/core/errors';
 import type { PortValue } from '../../src/core/signal';
 import { SETTLE_LIMIT, Simulation, compile, delayOf } from '../../src/core/net';
@@ -276,6 +276,207 @@ describe('Simulation', () => {
     sim.reset();
     expect(sim.tickCount).toBe(0);
     expect(sim.read(net.outputBase(`${delay.id}.out`), 1)).toBe(0);
+  });
+});
+
+/**
+ * A source the test drives directly through its output slot: `level_input` at an
+ * arbitrary width. `evaluate` writes nothing on purpose, so whatever the test
+ * wrote into the slot survives the settle sweep -- which is how these tests put
+ * a live, toggling signal in the slots next to a pin under test.
+ */
+function feedDef(width: number): ComponentDef {
+  return {
+    id: `feed${width}`,
+    name: { zh: '测试源', en: 'Test Feed' },
+    category: 'wide',
+    inputs: [],
+    outputs: [{ id: 'out', width }],
+    cost: 0,
+    sequential: false,
+    stateBytes: 0,
+    evaluate: () => {},
+  };
+}
+
+/** Copies its one input pin to its one output pin, bit for bit, at any width. */
+function passDef(width: number): ComponentDef {
+  return {
+    id: `pass${width}`,
+    name: { zh: '直通', en: 'Pass' },
+    category: 'wide',
+    inputs: [{ id: 'in', width }],
+    outputs: [{ id: 'out', width }],
+    cost: 1,
+    sequential: false,
+    stateBytes: 0,
+    evaluate: (i, o) => {
+      o[0] = typeof i[0] === 'number' ? i[0] : toNumber(i[0] ?? 0);
+    },
+  };
+}
+
+interface WideFixture {
+  readonly graph: Graph;
+  readonly registry: Registry;
+}
+
+/**
+ * `bit.out -> wide.in`, i.e. a 1-bit output driving an 8-bit input, with a
+ * directly driven 8-bit feed sitting in the slots right after the driver.
+ *
+ * Slot order is what makes this a reproduction rather than an arbitrary shape.
+ * Instances are allocated in document order and, within an instance, inputs
+ * before outputs, so this document gives:
+ *
+ *   `bit.in` 0, `bit.out` 1, `feed.out` 2..9, `wide.in` 10..17, `wide.out` 18..25
+ *
+ * `bit.out` therefore sits directly against the seven live bits of `feed.out`,
+ * which is exactly the layout the old read (`getPort(drive[wide.in], 8)`, eight
+ * consecutive slots from the driver) turned into silent corruption.
+ */
+function narrowDriverFixture(): WideFixture {
+  const registry = createRegistry([...BASE_DEFS, feedDef(8), passDef(1), passDef(8)]);
+  const g = emptyGraph();
+  const bit = addInstance(g, 'pass1', 0, 0, 'bit');
+  const feed = addInstance(g, 'feed8', 0, 40, 'feed');
+  const wide = addInstance(g, 'pass8', 0, 80, 'wide');
+  connect(g, { inst: bit.id, port: 'out' }, { inst: wide.id, port: 'in' });
+  return { graph: g, registry };
+}
+
+describe('wide ports', () => {
+  it('shows only the driving bit when a 1-bit output feeds an 8-bit input beside a live signal', () => {
+    // The reproduction of the silent corruption. `wide.in` is driven by one bit
+    // and is 8 bits wide, so its read must be `bit` in position 0 and zeros
+    // above -- not the seven slots that happen to follow the driver in the
+    // table, which here hold `feed`'s live bits.
+    const { graph, registry: reg } = narrowDriverFixture();
+    const net = compile(graph, reg);
+    const sim = new Simulation(net, reg);
+    const feed = net.outputBase('feed.out');
+    const bitIn = net.inputBase('bit.in');
+    const observed = net.outputBase('wide.out');
+
+    // The reproduction depends on that adjacency; assert it rather than trust
+    // the allocation order documented above.
+    expect(feed).toBe(net.outputBase('bit.out') + 1);
+
+    for (const [feedValue, bit] of [
+      [0xff, 1],
+      [0xff, 0],
+      [0x00, 1],
+      [0x00, 0],
+    ] as const) {
+      sim.reset();
+      sim.write(feed, 8, feedValue); // the neighbouring pin toggles 0xff <-> 0x00
+      sim.write(bitIn, 1, bit);
+      sim.settle();
+      expect(toNumber(sim.read(observed, 8)), `feed=${feedValue} bit=${bit}`).toBe(bit);
+    }
+  });
+
+  it('takes only the low bit when an 8-bit output drives a 1-bit input', () => {
+    const reg = createRegistry([...BASE_DEFS, feedDef(8), passDef(1)]);
+    const g = emptyGraph();
+    const feed = addInstance(g, 'feed8', 0, 0, 'feed');
+    const one = addInstance(g, 'pass1', 0, 40, 'one');
+    connect(g, { inst: feed.id, port: 'out' }, { inst: one.id, port: 'in' });
+    const net = compile(g, reg);
+    const sim = new Simulation(net, reg);
+    const feedBase = net.outputBase('feed.out');
+
+    expect(net.inputBase('one.in')).toBe(feedBase);
+    for (const value of [0x00, 0x01, 0x42, 0xab, 0xfe, 0xff]) {
+      sim.write(feedBase, 8, value);
+      sim.settle();
+      expect(toNumber(sim.read(net.outputBase('one.out'), 1)), `value=${value}`).toBe(value & 1);
+      expect(toNumber(sim.read(net.inputBase('one.in'), 1)), `value=${value}`).toBe(value & 1);
+    }
+  });
+
+  it('transfers every bit when an 8-bit output drives an 8-bit input', () => {
+    const reg = createRegistry([...BASE_DEFS, feedDef(8), passDef(8)]);
+    const g = emptyGraph();
+    const feed = addInstance(g, 'feed8', 0, 0, 'feed');
+    const wide = addInstance(g, 'pass8', 0, 40, 'wide');
+    connect(g, { inst: feed.id, port: 'out' }, { inst: wide.id, port: 'in' });
+    const net = compile(g, reg);
+    const sim = new Simulation(net, reg);
+    const feedBase = net.outputBase('feed.out');
+
+    // Equal widths are a contiguous run of the driver's own slots, so the pin
+    // reads them directly.
+    expect(net.inputBase('wide.in')).toBe(feedBase);
+    for (const value of [0x00, 0x01, 0x55, 0x80, 0xab, 0xff]) {
+      sim.write(feedBase, 8, value);
+      sim.settle();
+      expect(toNumber(sim.read(net.outputBase('wide.out'), 8)), `value=${value}`).toBe(value);
+      expect(toNumber(sim.read(net.inputBase('wide.in'), 8)), `value=${value}`).toBe(value);
+    }
+  });
+
+  it('hands back a read region that belongs to one pin and is fresh after settle', () => {
+    const { graph, registry: reg } = narrowDriverFixture();
+    const net = compile(graph, reg);
+    const sim = new Simulation(net, reg);
+    const feed = net.outputBase('feed.out');
+    const bitIn = net.inputBase('bit.in');
+    const base = net.inputBase('wide.in');
+
+    // Not the driver's base: `read(driverBase, 8)` would sweep up the seven live
+    // slots that follow it, which is the corruption this task removes.
+    expect(base).not.toBe(net.outputBase('bit.out'));
+
+    sim.write(feed, 8, 0xff);
+    sim.write(bitIn, 1, 1);
+    sim.settle();
+    expect(toNumber(sim.read(base, 8))).toBe(1); // bit 0 only, no extra call needed
+
+    sim.write(feed, 8, 0x00); // the neighbour changes; the pin does not
+    sim.settle();
+    expect(toNumber(sim.read(base, 8))).toBe(1);
+
+    sim.write(bitIn, 1, 0);
+    sim.settle();
+    expect(toNumber(sim.read(base, 8))).toBe(0); // refreshed by that settle
+    // Coherent with what the pin's own consumer sees, bit for bit.
+    expect(toNumber(sim.read(base, 8))).toBe(toNumber(sim.read(net.outputBase('wide.out'), 8)));
+  });
+
+  it('zero-extends a narrower driver into a 12-bit input', () => {
+    // Widths above 8 read back as bytes, so this covers the other branch of the
+    // gather (and of the region refresh): bits 8..11 have no driver and are 0.
+    const reg = createRegistry([...BASE_DEFS, feedDef(8), passDef(12)]);
+    const g = emptyGraph();
+    const feed = addInstance(g, 'feed8', 0, 0, 'feed');
+    const wide = addInstance(g, 'pass12', 0, 40, 'wide');
+    connect(g, { inst: feed.id, port: 'out' }, { inst: wide.id, port: 'in' });
+    const net = compile(g, reg);
+    const sim = new Simulation(net, reg);
+    const feedBase = net.outputBase('feed.out');
+
+    for (const value of [0x00, 0x01, 0xab, 0xff]) {
+      sim.write(feedBase, 8, value);
+      sim.settle();
+      expect(toNumber(sim.read(net.outputBase('wide.out'), 12)), `value=${value}`).toBe(value);
+      expect(toNumber(sim.read(net.inputBase('wide.in'), 12)), `value=${value}`).toBe(value);
+    }
+  });
+
+  it('materialises a region only for a pin whose driver is narrower', () => {
+    // Equal widths: out(8) + in(8) + out(8) pin bits and no region.
+    const same = createRegistry([...BASE_DEFS, feedDef(8), passDef(8)]);
+    const sameGraph = emptyGraph();
+    const src = addInstance(sameGraph, 'feed8', 0, 0, 'feed');
+    const dst = addInstance(sameGraph, 'pass8', 0, 40, 'wide');
+    connect(sameGraph, { inst: src.id, port: 'out' }, { inst: dst.id, port: 'in' });
+    expect(compile(sameGraph, same).slotCount).toBe(24);
+
+    // Narrower driver: the same circuit plus one 8-bit region for the wide input
+    // (2 + 8 + 16 pin bits, + 8 region bits).
+    const { graph, registry: reg } = narrowDriverFixture();
+    expect(compile(graph, reg).slotCount).toBe(34);
   });
 });
 

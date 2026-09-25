@@ -11,7 +11,7 @@ const MIN_CAPACITY = 64;
 
 /**
  * A flattened, evaluated circuit: one slot per bit of every pin, plus the
- * mapping from pins to slots.
+ * mapping from pins to slots, plus a read region for the pins that need one.
  *
  * The netlist is a value object owned by `Simulation` (the two are tied together
  * by a private `WeakMap`); callers address slots, never names, so a hot loop
@@ -25,21 +25,36 @@ export interface Netlist {
    */
   readonly instanceCount: number;
   readonly expandedCount: number;
-  /** Bits allocated (one slot per bit of every pin). */
+  /** Bits allocated: one slot per bit of every pin, plus every read region. */
   readonly slotCount: number;
   /**
    * `drive[slot]` is the slot `slot` reads its value from: the identity for
-   * every slot except a wired input pin, which reads the output pin driving it.
-   * Resolving wires up front keeps the settle loop branch-free.
+   * every slot except a wired input pin bit, which reads the output pin bit
+   * driving it. Resolving wires up front keeps the settle loop branch-free.
+   *
+   * It covers the pin slots only. A bit no wire claimed keeps its own slot --
+   * an input pin's slots are never written by the kernel, so such a bit reads
+   * 0 -- and a materialised read region is not addressed through `drive`.
    */
   readonly drive: Int32Array;
   /** Expanded instance key -> origin instance id in the document. */
   readonly refs: Map<string, string>;
   /**
-   * Slot the kernel reads (and a driver writes) for the input pin
-   * `"<instId>.<pinId>"`: its driver slot. For an unwired pin that is the pin's
-   * own slot, which is always zero unless the caller writes it -- so an unwired
-   * input reads 0 and a level can still drive it directly.
+   * Slot base of a **contiguous** read region for the input pin
+   * `"<instId>.<pinId>"`, so `read(inputBase(key), pin.width)` is coherent.
+   *
+   * Usually that is the driver's own base: an unwired pin reads its own slots
+   * (which is why a level can still drive one directly), and a driver as wide as
+   * the pin is one contiguous run of slots. A driver *narrower* than the pin is
+   * neither, so `compile` materialises a region of the pin's own width and this
+   * returns that instead. Returning the driver's base in that case would make
+   * the caller read the slots that physically follow the driver -- other pins'
+   * signals, silently.
+   *
+   * A region is republished from the settled table at the end of every `settle`,
+   * so a caller reads it after settling without asking for anything extra. It is
+   * a read alias only: writing into a region does not drive the pin. To drive a
+   * level input, write the `level_input` output slot (`outputBase`), as before.
    */
   inputBase(key: string): number;
   /** Slot of the output pin `"<instId>.<pinId>"`. */
@@ -69,14 +84,43 @@ interface OutputPin {
   readonly width: number;
 }
 
+/** A contiguous slot range that `inputBase` can hand to a range-reading caller. */
+interface ReadRegion {
+  /** Base of the region: what `inputBase` reports for the pin. */
+  readonly base: number;
+  readonly width: number;
+  /** Slot base of the input pin whose bits the region mirrors. */
+  readonly src: number;
+}
+
 interface NetInternals {
   readonly table: SignalTable;
   readonly instances: readonly CompiledInstance[];
   readonly outputPins: readonly OutputPin[];
+  readonly readRegions: readonly ReadRegion[];
 }
 
 /** Ties a netlist to the storage `compile` built for it, without a public field. */
 const INTERNALS = new WeakMap<Netlist, NetInternals>();
+
+/**
+ * The single driver base every bit of `[base, base + width)` reads from, or -1
+ * when those bits do not form one contiguous run.
+ *
+ * The identity answer (`base` itself) counts as a run on purpose: an unwired pin
+ * reads its own slots, which is what lets a caller write an unwired input
+ * directly. A run starting anywhere else is a driver covering the whole pin, so
+ * reading `width` slots from there is exactly the pin's value. A narrower driver
+ * leaves its tail pointing at the pin's own slots (see the identity default in
+ * `compile`), which no single base can describe -- that pin needs a region.
+ */
+function contiguousRun(drive: Int32Array, base: number, width: number): number {
+  const first = drive[base]!;
+  for (let bit = 1; bit < width; bit += 1) {
+    if (drive[base + bit] !== first + bit) return -1;
+  }
+  return first;
+}
 
 /**
  * Capacity for `graph`, derived from the circuit instead of the table default.
@@ -84,18 +128,26 @@ const INTERNALS = new WeakMap<Netlist, NetInternals>();
  * `createSignalTable`'s 65,536-slot default cannot hold the spec's
  * 20,000-instance budget: 20,000 two-input gates occupy 60,000 slots and a
  * single three-input gate overruns it. The estimate is exact plus a quarter of
- * headroom, so the requirement is not a knife edge; `alloc` still throws a named
- * `RangeError` rather than growing the buffer if it were ever wrong.
+ * headroom, plus the most a read region could ever need (one per driven input
+ * pin wider than 1 bit, which is the only kind that can require one), so the
+ * requirement is not a knife edge; `alloc` still throws a named `RangeError`
+ * rather than growing the buffer if it were ever wrong.
  */
 function capacityFor(graph: Graph, registry: Registry): number {
+  const driven = new Set<string>();
+  for (const wire of graph.wires) driven.add(`${wire.to.inst}.${wire.to.port}`);
   let slots = 0;
+  let regions = 0;
   for (const inst of graph.instances) {
     // `validateGraph` has already rejected unknown def ids, so `get` cannot throw.
     const def = registry.get(inst.def);
-    for (const pin of def.inputs) slots += pin.width;
+    for (const pin of def.inputs) {
+      slots += pin.width;
+      if (pin.width > 1 && driven.has(`${inst.id}.${pin.id}`)) regions += pin.width;
+    }
     for (const pin of def.outputs) slots += pin.width;
   }
-  return Math.max(MIN_CAPACITY, Math.ceil(slots * 1.25) + 16);
+  return Math.max(MIN_CAPACITY, Math.ceil(slots * 1.25) + regions + 16);
 }
 
 /**
@@ -104,6 +156,10 @@ function capacityFor(graph: Graph, registry: Registry): number {
  * Error-severity issues are fatal (the circuit is meaningless); warnings are
  * accepted, because an unwired input legally reads 0 and only the simulator can
  * tell whether a feedback loop settles.
+ *
+ * Pin widths are taken from the def as written; a later task resolves
+ * per-instance width overrides, and every width-dependent step below (allocation,
+ * `drive`, the regions, the reads) goes through these same values.
  */
 export function compile(graph: Graph, registry: Registry): Netlist {
   const errors: GraphIssue[] = validateGraph(graph, registry).filter(
@@ -115,17 +171,12 @@ export function compile(graph: Graph, registry: Registry): Netlist {
   const instances: CompiledInstance[] = [];
   const refs = new Map<string, string>();
   const byId = new Map<string, CompiledInstance>();
-  const inputBases = new Map<string, number>();
   const outputBases = new Map<string, number>();
   const outputPins: OutputPin[] = [];
 
   for (const inst of graph.instances) {
     const def = registry.get(inst.def);
-    const inputs = def.inputs.map((pin) => {
-      const base = table.alloc(pin.width);
-      inputBases.set(`${inst.id}.${pin.id}`, base);
-      return base;
-    });
+    const inputs = def.inputs.map((pin) => table.alloc(pin.width));
     const outPin: number[] = [];
     const outputs = def.outputs.map((pin) => {
       const base = table.alloc(pin.width);
@@ -148,10 +199,11 @@ export function compile(graph: Graph, registry: Registry): Netlist {
   }
 
   // Start from the identity so an unwired input reads its own (zero) slot, then
-  // point every wired input at the output pin that drives it. Giving each
+  // point every wired input bit at the output pin bit that drives it. Giving each
   // unwired pin its own slot rather than sharing one zero slot is what lets a
-  // caller write an unwired input directly -- and it keeps `slotCount` equal to
-  // the pin bits the circuit actually has.
+  // caller write an unwired input directly -- and it is also what makes the bits
+  // a narrow driver does not cover read 0: they keep pointing at their own slots,
+  // which the kernel never writes.
   const drive = new Int32Array(table.size);
   for (let slot = 0; slot < drive.length; slot += 1) drive[slot] = slot;
   for (const wire of graph.wires) {
@@ -167,6 +219,33 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     for (let bit = 0; bit < width; bit += 1) drive[toBase + bit] = fromBase + bit;
   }
 
+  // `drive` answers "which single slot drives this bit", which is all a per-bit
+  // read needs. A caller reads a *range* instead (`read(inputBase(key), width)`),
+  // and there the driver is the wrong answer whenever it is narrower than the
+  // pin: the read would run off the end of the driver into the slots that
+  // physically follow it -- other pins' live signals -- rather than the pin's own
+  // zero bits. So for every input pin whose bits are not already one contiguous
+  // run of slots, materialise a region of that pin's width and report that. The
+  // common cases (an unwired pin, a driver as wide as the pin) alias their slots
+  // directly and allocate nothing.
+  const readRegions: ReadRegion[] = [];
+  const readBases = new Map<string, number>();
+  for (const inst of instances) {
+    for (let p = 0; p < inst.inputs.length; p += 1) {
+      const base = inst.inputs[p]!;
+      const width = inst.def.inputs[p]!.width;
+      const key = `${inst.key}.${inst.def.inputs[p]!.id}`;
+      const run = contiguousRun(drive, base, width);
+      if (run >= 0) {
+        readBases.set(key, run);
+        continue;
+      }
+      const regionBase = table.alloc(width);
+      readRegions.push({ base: regionBase, width, src: base });
+      readBases.set(key, regionBase);
+    }
+  }
+
   const instanceIds = instances.map((i) => i.key);
   const instanceDefs = instances.map((i) => i.def.id);
   const baseOf = (map: Map<string, number>, kind: string, key: string): number => {
@@ -180,13 +259,13 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     slotCount: table.size,
     drive,
     refs,
-    inputBase: (key) => drive[baseOf(inputBases, 'input', key)]!,
+    inputBase: (key) => baseOf(readBases, 'input', key),
     outputBase: (key) => baseOf(outputBases, 'output', key),
     instanceIds: () => instanceIds,
     instanceDefs: () => instanceDefs,
     outputKeys: () => [...outputBases.keys()],
   };
-  INTERNALS.set(net, { table, instances, outputPins });
+  INTERNALS.set(net, { table, instances, outputPins, readRegions });
   return net;
 }
 
@@ -210,6 +289,7 @@ export class Simulation {
   readonly #drive: Int32Array;
   readonly #instances: readonly CompiledInstance[];
   readonly #outputPins: readonly OutputPin[];
+  readonly #readRegions: readonly ReadRegion[];
   /** Private state of every instance, indexed like `#instances`. */
   readonly #state: Uint8Array[];
   /** Output values staged by the current settle sweep, indexed like `#outputPins`. */
@@ -225,6 +305,7 @@ export class Simulation {
     this.#drive = net.drive;
     this.#instances = internals.instances;
     this.#outputPins = internals.outputPins;
+    this.#readRegions = internals.readRegions;
     this.#state = internals.instances.map((i) => new Uint8Array(i.def.stateBytes));
     this.#staged = new Array<PortValue | undefined>(internals.outputPins.length).fill(undefined);
   }
@@ -262,15 +343,56 @@ export class Simulation {
     }
   }
 
-  /** Reads each input pin through its pre-resolved driver slot. */
+  /**
+   * Assembles a pin's value one bit at a time, following `drive` per bit.
+   *
+   * Deliberately NOT `getPort(drive[base], width)`: that reads `width`
+   * *consecutive* slots from wherever the driver happens to sit, so a driver
+   * narrower than the pin pulls in the slots allocated after it -- other pins'
+   * signals. Here a bit with no driver of its own falls back (through `drive`)
+   * to the pin's own slot, which the kernel never writes, and so reads 0.
+   *
+   * The number/bytes split mirrors `SignalTable.getPort`, so a def sees the same
+   * value form at every width.
+   */
+  #gather(base: number, width: number): PortValue {
+    const slots = this.#table.slots;
+    if (width <= 8) {
+      let out = 0;
+      for (let bit = 0; bit < width; bit += 1) {
+        if (slots[this.#drive[base + bit]!] === 1) out |= 1 << bit;
+      }
+      return out;
+    }
+    const bytes = new Uint8Array(Math.ceil(width / 8));
+    for (let bit = 0; bit < width; bit += 1) {
+      if (slots[this.#drive[base + bit]!] === 1) bytes[bit >> 3]! |= 1 << (bit & 7);
+    }
+    return bytes;
+  }
+
+  /** Reads each input pin bit by bit through its pre-resolved driver slots. */
   #readInputs(inst: CompiledInstance, scratch: PortValue[]): void {
     for (let p = 0; p < inst.inputs.length; p += 1) {
-      const base = inst.inputs[p]!;
-      scratch[p] = this.#table.getPort(this.#drive[base]!, inst.def.inputs[p]!.width);
+      scratch[p] = this.#gather(inst.inputs[p]!, inst.def.inputs[p]!.width);
     }
     // Keep the scratch exactly as long as this instance's pin list, so a shorter
     // instance never sees values left behind by a longer one.
     scratch.length = inst.inputs.length;
+  }
+
+  /**
+   * Republishes every materialised read region from the values just settled.
+   *
+   * `inputBase` hands out a slot range and the caller then reads it whenever it
+   * likes, with nothing to tell it a fresh gather is needed -- so a region has to
+   * be current by the time `settle` returns. One pass over the regions (not over
+   * the instances) keeps this off the sweep's critical path.
+   */
+  #refreshReadRegions(): void {
+    for (const region of this.#readRegions) {
+      this.#table.setPort(region.base, region.width, this.#gather(region.src, region.width));
+    }
   }
 
   /**
@@ -313,6 +435,10 @@ export class Simulation {
    * cannot fake a fixed point -- with in-place (Gauss-Seidel) evaluation a ring
    * of two inverters "converges" to a self-consistent-looking 1/0 pair, which
    * would be reported as stable.
+   *
+   * On success the materialised read regions are refreshed last, so a caller that
+   * reads through `inputBase` right after `settle` sees the settled values
+   * without having to ask for anything extra.
    */
   settle(): SettleReport {
     const inputs: PortValue[] = [];
@@ -347,7 +473,10 @@ export class Simulation {
         this.#table.setPort(pin.base, pin.width, value);
         changed = true;
       }
-      if (!changed) return { iterations: iteration + 1, stable: true };
+      if (!changed) {
+        this.#refreshReadRegions();
+        return { iterations: iteration + 1, stable: true };
+      }
     }
     throw new UnstableCircuitError(
       SETTLE_LIMIT,
