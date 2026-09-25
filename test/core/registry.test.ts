@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS, DEF_IDS } from '../../src/core/defs/index';
+import { WIDE_DEF_IDS } from '../../src/core/defs/wide';
 import { extractField, insertField, packBits, unpackBits } from '../../src/core/fields';
 
 // `evaluate(inputs, outputs, state, ctx)`: `state` is the instance's private
@@ -172,12 +173,20 @@ describe('base defs: extra coverage', () => {
     return out[0];
   };
 
-  it('declares 1-bit pins everywhere', () => {
+  it('declares 1-bit pins on every def outside the wide family', () => {
+    // Phase 0 shipped only 1-bit parts, and every def it shipped still is one.
+    // The wide family (Task 3) is where a pin wider than one bit first appears,
+    // and `defs-wide.test.ts` pins its exact pin widths against the task brief's
+    // table -- a stronger statement than this loop makes, so these defs are
+    // excluded here rather than having this invariant weakened to "some pins".
+    const wide = new Set<string>(WIDE_DEF_IDS);
     for (const d of r.all()) {
+      if (wide.has(d.id)) continue;
       for (const p of [...d.inputs, ...d.outputs]) {
         expect(p.width, `${d.id}.${p.id}`).toBe(1);
       }
     }
+    expect(r.byCategory('wide').length).toBeGreaterThan(0);
   });
 
   it('reserves one state byte per output slot for storage elements only', () => {

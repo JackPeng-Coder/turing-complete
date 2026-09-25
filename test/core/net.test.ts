@@ -56,7 +56,14 @@ describe('compile', () => {
     expect(new Simulation(net, registry).settle().stable).toBe(true);
   });
 
-  it.each([0, -1, 1.5, Number.NaN])(
+  // `4097` is one past the documented cap and `MAX_SAFE_INTEGER` is what a
+  // hand-authored width looks like when it is not hand-authored at all: the
+  // first would allocate a table far larger than any level needs, the second
+  // makes `capacityFor` ask for more bytes than a `Uint8Array` can hold, so the
+  // `RangeError` from the allocation would escape `compile` -- and from there
+  // `createSim`, `runChecks` and `grade` -- instead of surfacing as the
+  // catchable `CircuitValidationError` this test pins.
+  it.each([0, -1, 1.5, Number.NaN, 4097, Number.MAX_SAFE_INTEGER])(
     'rejects a malformed params.width (%s) as a validation issue',
     (width) => {
       // An instance width feeds slot allocation, so a value `alloc` cannot take

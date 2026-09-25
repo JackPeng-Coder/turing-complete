@@ -1,4 +1,5 @@
 import type { ComponentDef } from '../registry';
+import { WIDE_DEF_IDS, createWideDefs } from './wide';
 
 const gate = (
   id: string,
@@ -50,7 +51,7 @@ const source = (id: string, zh: string, en: string, value: 0 | 1): ComponentDef 
   },
 });
 
-export const DEF_IDS = [
+const PHASE0_DEF_IDS = [
   'const_on',
   'const_off',
   'nand',
@@ -67,6 +68,15 @@ export const DEF_IDS = [
   'level_input',
   'level_output',
 ] as const;
+
+/**
+ * Every def id the game ships: phase 0's one-bit parts, then the wide family.
+ *
+ * The wide ids are not repeated here -- `wide.ts` owns them next to the defs
+ * they name, and `test/core/defs-wide.test.ts` pins that the two lists agree, so
+ * a wide def can never be registered under an id that level data cannot spell.
+ */
+export const DEF_IDS = [...PHASE0_DEF_IDS, ...WIDE_DEF_IDS] as const;
 
 export type DefId = (typeof DEF_IDS)[number];
 
@@ -164,4 +174,8 @@ export const BASE_DEFS: readonly ComponentDef[] = [
       if (i[0] === 1) state[0] = i[1] === 1 ? 1 : 0;
     },
   },
+
+  // The wide (8-bit) family. Registered at the default width -- 8 is the only
+  // width this phase opens; `createWideDefs(width)` is the hook for 16/32/64.
+  ...createWideDefs(),
 ];

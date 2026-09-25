@@ -61,6 +61,15 @@ export type IssueCode =
   | 'feedback-loop';
 
 /**
+ * Largest `params.width` a document may set, in bits.
+ *
+ * A width multiplies every pin of an instance and is reserved for up front, so
+ * the ceiling is what keeps a malformed document from asking the signal table
+ * for an allocation it cannot serve -- see the check in `validateGraph`.
+ */
+export const MAX_PARAM_WIDTH = 4096;
+
+/**
  * A defect found in a graph.
  *
  * `error` means the circuit is meaningless and the simulator would either crash
@@ -196,18 +205,26 @@ export function validateGraph(g: Graph, registry: Registry): GraphIssue[] {
   // for the same reason an unknown def is: allowed through, it would reach
   // `table.alloc` and raise a bare `RangeError` out of the grading path instead
   // of surfacing as a `CircuitValidationError` the caller already handles.
-  // Nothing else in `params` is read by the kernel yet, so nothing else is
-  // judged here.
+  //
+  // The bound is two-sided on purpose. `Number.isSafeInteger` alone accepts
+  // `1e9`, and a width is not just a number of slots for one pin: `capacityFor`
+  // reserves `slots * 1.25 + regions + 16` BYTES before `alloc` runs at all, so
+  // a hand-authored 1e9 pin asks for a typed array of over a gigabyte and the
+  // `RangeError` comes from that allocation -- escaping `compile` exactly as the
+  // bare `alloc` error would have. 4096 is far above any pin the game ships (8
+  // in this phase, 64 at most in phase 5) and keeps the whole table comfortably
+  // small, so a width above it is a malformed document, not a large circuit.
   for (const inst of g.instances) {
     const width = inst.params.width;
-    if (width === undefined || (Number.isSafeInteger(width) && width > 0)) continue;
+    if (width === undefined) continue;
+    if (Number.isSafeInteger(width) && width > 0 && width <= MAX_PARAM_WIDTH) continue;
     issues.push({
       severity: 'error',
       code: 'invalid-params',
       inst: inst.id,
       message: {
-        zh: `元件 ${inst.id} 的参数 width 无效：${String(width)}（必须是正整数）`,
-        en: `Instance ${inst.id} has an invalid width parameter: ${String(width)} (must be a positive integer)`,
+        zh: `元件 ${inst.id} 的参数 width 无效：${String(width)}（必须是 1 到 ${MAX_PARAM_WIDTH} 之间的整数）`,
+        en: `Instance ${inst.id} has an invalid width parameter: ${String(width)} (must be a positive integer no greater than ${MAX_PARAM_WIDTH})`,
       },
     });
   }
