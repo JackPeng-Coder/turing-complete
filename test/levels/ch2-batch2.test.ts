@@ -56,9 +56,11 @@ import {
  *    components, level 22's delay), both of which are records about the source
  *    rather than pass conditions -- see the dedicated block at the end, which
  *    measures both on the reference solutions.
- *  * the first `full_adder` reward, whose def is not registered yet: the walk
- *    below treats it as an ordinary unlocked id, and the level comments record
- *    the seam.
+ *  * the `full_adder` reward, whose def was missing when this batch was authored
+ *    and landed in `523a7b9` (`src/core/defs/index.ts`, 9 NAND equivalents on the
+ *    `FULL_ADDER` basis `wide.ts` prices `add8` with): the walk below treats it
+ *    as an ordinary unlocked id, and the level comments carry the history and the
+ *    two levels that offer it.
  *
  * The starter set is imported rather than restated (`STARTER_COMPONENTS` is the
  * same constant `paletteDefsFor` filters with), exactly as the chapter-1 and
@@ -466,8 +468,10 @@ describe('chapter 2, levels 18-22', () => {
     // Not a restatement of the palettes but of the claims their comments make:
     // levels 18/19/22 are wired from the splitter and the maker level 13
     // unlocked; levels 20 and 21 have no pin wider than one bit, so an eight-bit
-    // part has nothing to attach to (batch 1's level-14 call); and level 22 does
-    // not offer the two parts that would answer it in one row.
+    // part has nothing to attach to (batch 1's level-14 call); level 22 does not
+    // offer the one part that would answer it in one row (`add8`), and does offer
+    // `full_adder` -- whose eight-instance cascade is the level's own subject --
+    // plus the seven byte operators levels 18 and 19 unlocked.
     for (const level of [L18, L19, L22]) {
       expect(level.allowedComponents, `${level.id} cannot split a byte`).toContain('splitter');
       expect(level.allowedComponents, `${level.id} cannot pack a byte`).toContain('maker');
@@ -498,8 +502,23 @@ describe('chapter 2, levels 18-22', () => {
       ).toEqual([]);
     }
     expect(L22.allowedComponents).not.toContain('add8');
-    expect(L22.allowedComponents).not.toContain('full_adder');
     expect(L21.allowedComponents).not.toContain('full_adder');
+    // The other side of the same decision: level 22 offers the part, so the
+    // cascade can be built from level 20's reward, and the seven byte operators
+    // the earlier levels unlocked are not quietly dropped from its shelf.
+    expect(L22.allowedComponents).toContain('full_adder');
+    for (const def of ['and8', 'or8', 'nand8', 'nor8', 'xor8', 'xnor8', 'not8']) {
+      expect(L22.allowedComponents, `level 22 drops ${def}`).toContain(def);
+    }
+  });
+
+  it('rewards an id the registry actually implements', () => {
+    // What the module note used to get wrong at level 20: the reward was an id
+    // with no def behind it, which no palette could ever show. The def landed in
+    // `523a7b9`, and this holds the note to it -- a reward that stops resolving
+    // is invisible content, and the level comments now describe it as live.
+    expect(L20.rewards?.components).toEqual(['full_adder']);
+    expect(registry.has('full_adder'), 'full_adder is not registered').toBe(true);
   });
 });
 
@@ -806,6 +825,32 @@ describe("level 21's five-component construction is the reference it names", () 
     expect(result.metrics).toEqual({ gate: 15, delay: 3, tick: 0 });
     expect(result.stars).toBe(3);
   });
+
+  it('records why the registered drop-in is withheld: it scores the target in one drop', () => {
+    // The amended ruling's reason, measured instead of argued. `full_adder` is
+    // level 20's reward and this level's exact I/O, so one instance answers the
+    // whole eight-row table; at the registered 9-NAND cell it measures 9 gates
+    // and 1 delay, which is inside the 15-and-3 target -- three stars for a part
+    // the player never builds. That is why the palette withholds it here and
+    // offers it at 20 and 22, and the level's comment says so.
+    const level = specOf('ch2-21-full-adder');
+    expect(level.allowedComponents).not.toContain('full_adder');
+    const dropped = grade(
+      build([
+        { kind: 'input', name: 'a' },
+        { kind: 'input', name: 'b' },
+        { kind: 'input', name: 'cin' },
+        { kind: 'part', def: 'full_adder', id: 'fa', from: ['a', 'b', 'cin'] },
+        { kind: 'output', name: 'OUT_sum', from: 'fa.sum' },
+        { kind: 'output', name: 'OUT_cout', from: 'fa.cout' },
+      ]),
+      registry,
+      level,
+    );
+    expect(dropped.failures, JSON.stringify(dropped.failures)).toEqual([]);
+    expect(dropped.metrics).toEqual({ gate: 9, delay: 1, tick: 0 });
+    expect(dropped.stars).toBe(3);
+  });
 });
 
 describe("level 22's delay target is measured, and the source's 35 is not it", () => {
@@ -819,6 +864,56 @@ describe("level 22's delay target is measured, and the source's 35 is not it", (
     const result = grade(rippleAdderReference(), registry, specOf('ch2-22-adding-bytes'));
     expect(result.metrics.delay).toBeLessThanOrEqual(35);
     expect(result.metrics).toEqual({ gate: 120, delay: 17, tick: 0 });
+  });
+});
+
+describe("level 22 offers level 20's `full_adder`, and the drop-in is measured", () => {
+  /** Eight `full_adder` instances rippling into each other: the cascade, dropped in. */
+  function fullAdderCascade(): Graph {
+    const nodes: Node[] = [
+      { kind: 'input', name: 'a', width: 8 },
+      { kind: 'input', name: 'b', width: 8 },
+      { kind: 'input', name: 'cin' },
+      { kind: 'part', def: 'splitter', id: 'sa', from: ['a'] },
+      { kind: 'part', def: 'splitter', id: 'sb', from: ['b'] },
+    ];
+    let carry = 'cin';
+    const sums: string[] = [];
+    for (let bit = 0; bit < 8; bit += 1) {
+      nodes.push({
+        kind: 'part',
+        def: 'full_adder',
+        id: `fa${bit}`,
+        from: [`sa.b${bit}`, `sb.b${bit}`, carry],
+      });
+      sums.push(`fa${bit}.sum`);
+      carry = `fa${bit}.cout`;
+    }
+    nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: sums });
+    nodes.push({ kind: 'output', name: 'OUT_out', from: 'mk', width: 8 });
+    nodes.push({ kind: 'output', name: 'OUT_cout', from: carry, width: 1 });
+    return build(nodes);
+  }
+
+  it('scores 72 and 8 against the reference 120 and 17, and three stars either way', () => {
+    // The amended ruling offers the part here and withholds it at level 21,
+    // because one instance cannot answer an eight-bit adder while eight of them
+    // and the carry chain between them ARE the cascade this level asks for. The
+    // measurement is what the level's comment promises, taken rather than
+    // restated: 8 x 9 = 72 NAND equivalents on a path eight deep, CHEAPER than
+    // the hand-wired reference's 120 and 17, so the target does not separate the
+    // two constructions -- it is the reference's own measurement, and the
+    // drop-in is another correct ripple adder inside it.
+    const level = specOf('ch2-22-adding-bytes');
+    expect(level.allowedComponents).toContain('full_adder');
+    const dropped = grade(fullAdderCascade(), registry, level);
+    expect(dropped.failures, JSON.stringify(dropped.failures)).toEqual([]);
+    expect(dropped.metrics).toEqual({ gate: 72, delay: 8, tick: 0 });
+    expect(dropped.stars).toBe(3);
+
+    const built = grade(rippleAdderReference(), registry, level);
+    expect(level.threeStar).toEqual(built.metrics);
+    expect(dropped.metrics.gate).toBeLessThan(built.metrics.gate);
   });
 });
 

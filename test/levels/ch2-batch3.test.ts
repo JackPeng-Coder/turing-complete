@@ -1152,4 +1152,38 @@ describe('the decoder rewards are generated per width, and no reference drops on
     expect(result.metrics).toEqual(L25.threeStar);
     expect(result.stars).toBe(3);
   });
+
+  it("lets level 26's own reward score the target, and it beats the target's depth", () => {
+    // The second case of the same rule, one width up, and the one the module
+    // header used to miss: `decoder3` is level 26's OWN reward, so
+    // `paletteDefsFor` offers it before the level is passed, and one instance
+    // wired straight from `sel` to the level's output answers the whole
+    // three-to-eight table. Measured rather than described, because the level's
+    // comment states these numbers: 27 gate equivalents -- the same 27 the
+    // reference's shared minterm tree costs, since the registered part's
+    // `gateCost` IS that tree -- on a path ONE gate deep, against the level's
+    // 27-and-3 target. It therefore ties the gate count and beats the depth, and
+    // scores three stars: the price of the own-reward rule, recorded in the
+    // comment rather than withdrawn from the palette.
+    expect(L26.rewards?.components).toContain('decoder3');
+    expect(L26.allowedComponents).toContain('decoder3');
+    expect(L26.threeStar).toEqual({ gate: 27, delay: 3, tick: 0 });
+
+    const graph = build([
+      { kind: 'input', name: 'sel', width: 3 },
+      { kind: 'part', def: 'decoder3', id: 'dec', from: ['sel'] },
+      { kind: 'output', from: 'dec', width: 8 },
+    ]);
+    const result = grade(graph, registry, L26);
+    expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
+    expect(result.metrics).toEqual({ gate: 27, delay: 1, tick: 0 });
+    expect(result.stars).toBe(3);
+
+    // And the reference is still the thing the target measures: the drop-in
+    // ties it on gates and is shallower, which is what the comment says.
+    const built = grade(solutions['ch2-26-3-bit-decoder']!(), registry, L26);
+    expect(L26.threeStar).toEqual(built.metrics);
+    expect(result.metrics.gate).toBe(built.metrics.gate);
+    expect(result.metrics.delay).toBeLessThan(built.metrics.delay);
+  });
 });

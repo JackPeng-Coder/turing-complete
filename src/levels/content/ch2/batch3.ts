@@ -45,20 +45,31 @@ import { truthTable, type LevelIo } from '../../tables';
  *    sequence to cover them.
  *
  * THE PALETTE RULE, inherited from batch 2 and used once more here: a level
- * offers the parts unlocked at or before it whose pins can attach to something
- * on it, plus its own rewards, MINUS any part that is not its own reward and
- * would answer the level by itself. Level 24 uses that subtraction on `neg8` --
- * one component with exactly the level's I/O shape, whose documented cell IS the
+ * offers the parts its shelf carries and the player has unlocked at or before it,
+ * plus its own rewards, MINUS any part that is not its own reward and would
+ * answer the level by itself. Level 24 uses that subtraction on `neg8` -- one
+ * component with exactly the level's I/O shape, whose documented cell IS the
  * circuit the level teaches -- and says so in its own comment. `full_adder`
- * (level 20's reward, now registered) stays out of every palette here for batch
- * 2's reason, recorded in that file's module note: it is offered nowhere but its
- * own level, so no target in this batch is measured from a part a level would
- * rather have answered with. Nothing else here needed that subtraction -- and
- * the one part a level in this batch both offers and is answered by is level
- * 25's OWN reward, `decoder1`, now that the family is registered: that is batch
- * 2's own-reward half of the rule rather than an exception to it (level 13's
- * splitter and level 20's `full_adder` are the same case), and that level's
- * comment states what the drop-in scores.
+ * (level 20's reward, registered, and offered by levels 20 and 22) stays out of
+ * every palette here, and nothing in this batch needs it: levels 23, 24 and 27
+ * are byte-wide, and the two decoder levels select rather than add, so no target
+ * in this batch is measured from a part a level would rather have answered with.
+ *
+ * TWO LEVELS IN THIS BATCH ARE ANSWERED BY THEIR OWN REWARDS, one width apart,
+ * and both say so in their own comments rather than leaving a reader to find it:
+ * level 25 offers `decoder1` (one drop-in scores the target exactly -- 1 gate, 1
+ * delay, three stars) and level 26 offers `decoder3` (measured at 27 gates, 1
+ * delay, three stars against that level's 27-and-3 target: the drop-in ties the
+ * gate count and beats the depth, because the registered part's minterm tree IS
+ * the tree level 26 teaches). Offering a level its own rewards before it is
+ * passed is batch 2's own-reward half of the rule -- level 13's splitter and
+ * level 20's `full_adder` are the same case -- rather than an exception to it, so
+ * these are recorded prices and not holes: the drop-in is what a player who
+ * already owns the part can reach for, and each level still teaches the circuit
+ * it hands out. Neither reward is withdrawn, and level 26's comment gives the
+ * reason: withdrawing `decoder3` there would leave a registered part that no
+ * level offers at all, which is the dead-content defect level 22's `full_adder`
+ * decision exists to avoid.
  *
  * THE DECODER REWARDS NAME DEFS THAT NOW EXIST. `decoder1` (level 25) and
  * `decoder3` (level 26) were reward DATA when this batch was written -- a legal
@@ -80,9 +91,9 @@ import { truthTable, type LevelIo } from '../../tables';
  * score -- `three-star targets are the reference solutions own metrics` in the
  * test file is what holds that to a number rather than a promise.
  *
- * NOT JOINED YET: `ch2/index.ts` assembles the chapter and still lists batch 1
- * alone, so this file is reachable only through its own test until the chapter
- * assembly task appends it.
+ * JOINED THROUGH ONE PLACE: the chapter is assembled in `ch2/index.ts`, the only
+ * module under `src/` that imports a batch file, so this file reaches the game
+ * through that list and through nothing else; its own test grades it directly.
  */
 
 /**
@@ -416,15 +427,17 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * one-to-two decoding: one select bit, two one-hot outputs. ALSO SOURCED, from
    * the catalog rather than from a level name: the compendium's component list
    * for this chapter has `decoder1`, `decoder2` and `decoder3`, while no level
-   * name introduces the catalog's `2-Bit Decoder`. The 2-bit decoder is therefore
-   * the same generator one width up -- registered as `decoder2` -- rather than a
-   * second hand-written part, which is what this level's brief tells the player.
+   * name introduces the catalog's `2-Bit Decoder`.
    *
    * AUTHORED: the `sel:1 -> out:2` shape; the two rows (built by `truthTable`,
    * which refuses to leave a declared output pin uncompared); the measured
    * three-star target (ONE NAND equivalent on a path one gate deep: bit 0 is a
    * `not` of the select bit, bit 1 is the select bit, and the `maker` that packs
-   * the two bits into the level's 2-bit output is wiring); and the palette.
+   * the two bits into the level's 2-bit output is wiring); the palette; and the
+   * MECHANISM the catalog entry is realised by, which is this replica's design
+   * rather than the source's: the 2-bit decoder is the same generator one width
+   * up -- registered as `decoder2` -- rather than a second hand-written part,
+   * which is what this level's brief tells the player.
    *
    * THE WIDTH QUESTION, RESOLVED -- recorded because a reviewer will ask, and
    * because an earlier revision of this file answered it wrongly. The registered
@@ -471,6 +484,9 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * listed: the level teaches the part it hands out, and the drop-in is what a
    * player who already owns it uses to replay. `decoder2` is a different case --
    * it is not this level's reward at all -- which is the whole of the distinction.
+   * Level 26 is the same case one width up (`decoder3` answers that level in one
+   * drop for 27 gates and 1 delay, recorded in its own comment and measured in the
+   * test file), and the module header names both.
    */
   {
     id: 'ch2-25-1-bit-decoder',
@@ -498,16 +514,17 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * ch2-26-3-bit-decoder -- 3 Bit Decoder / 3 位解码器
    *
    * SOURCED: the name in both languages, its position (26th), and the concept --
-   * three-to-eight decoding, the same generator as level 25 one width up (see
-   * that level's note on the family: `decoder3` is `createDecoderDef(3)`, the
-   * same part definition as its `decoder1`).
+   * three-to-eight decoding: three select bits, one of eight output lines high.
    *
    * AUTHORED: the `sel:3 -> out:8` shape; the eight rows; the measured three-star
    * target; and the palette. The palette offers `splitter` and `maker` because
    * this level's pins are wide enough to attach to them -- the 3-bit select has
    * to be split before any gate can read one of its bits, and the eight one-bit
    * results have to be packed back into the level's 8-bit output. (Level 25 has
-   * one-bit pins and offers neither.)
+   * one-bit pins and offers neither.) THE PART'S DEFINITION IS AUTHORED TOO, and
+   * it is a mechanism of this replica rather than a fact about the source:
+   * `decoder3` is `createDecoderDef(3)`, the same generator as level 25's
+   * `decoder1` one width up -- see that level's note on the family.
    *
    * THE REFERENCE IS THE TWO-LEVEL TREE, and that is the level's lesson: decode
    * the low two select bits into four minterms (two NOTs and four ANDs), then
@@ -518,6 +535,28 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * measured in the test file, and the gate target is what makes it one star. So
    * the target says what the level teaches: share the low decode, do not rebuild
    * it eight times.
+   *
+   * `decoder3` IS OFFERED HERE, AND IT ANSWERS THE LEVEL IN ONE DROP-IN -- the
+   * same recorded price level 25 pays for `decoder1`, one width up, and stated as
+   * a measurement rather than a worry: one instance of this level's OWN reward,
+   * wired straight from `sel` to the level's output, scores `gate: 27, delay: 1,
+   * tick: 0` and three stars against this level's 27-and-3 target. The 27 is not a
+   * coincidence and is worth reading twice: the registered part's `gateCost` IS
+   * the shared minterm tree this level teaches (3 NOTs, 4 ANDs, 8 ANDs), so the
+   * drop-in ties the gate target exactly and beats its depth, because the target's
+   * 3 is a hand-wired tree's path while the part publishes in one node.
+   *
+   * WITHDRAWING THE PART WAS THE ALTERNATIVE AND IS REFUSED DELIBERATELY. A level
+   * offering its own reward is batch 2's rule rather than a loophole (level 13's
+   * `splitter` cannot build its own level without it, and level 20 offers the
+   * `full_adder` it hands out), so the part stays -- and the cost of withdrawing
+   * is worse than the price of keeping it: no other level in this chapter lists
+   * `decoder3` either, so removing it here would leave a registered, priced part
+   * that NO level offers at all, which is the dead-content defect level 22's
+   * `full_adder` decision exists to avoid. What the level still teaches is the
+   * tree it hands out; what the drop-in buys is a one-drop replay for a player who
+   * can already see the part in their palette, which the reward rule accepts on
+   * every level it applies to and level 25's comment sets out at length.
    */
   {
     id: 'ch2-26-3-bit-decoder',

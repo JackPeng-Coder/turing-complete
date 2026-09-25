@@ -267,7 +267,9 @@ function u(value: number, w: number): number {
 export function toUint(v: PortValue | undefined, w: number): number {
   if (v === undefined) return 0;
   if (typeof v === 'number') return u(v, w);
-  // Four bytes is all a `number` carries exactly; wider pins are phase 5's.
+  // At most four bytes are read because the carrier this module publishes is 32
+  // bits (`MAX_WIDE_WIDTH`) -- not because of the `number` type, which stays
+  // exact well past that. Wider pins are phase 5's.
   let out = 0;
   for (let i = Math.min(v.length, 4) - 1; i >= 0; i -= 1) out = out * 256 + (v[i] ?? 0);
   return u(out, w);
@@ -840,14 +842,17 @@ export function createWideDefs(width: number = DEFAULT_WIDE_WIDTH): readonly Com
 // the registered widths come from the literal list below and `createWideDefs`
 // never grows a decoder.
 //
-// ONE-HOT OUTPUT. The value published is `1 << sel`: bit `sel` high and every
+// ONE-HOT OUTPUT. The value published is `2 ** sel`: bit `sel` high and every
 // other bit low. That is what a decoder is FOR -- turning an address into a
-// one-of-N select line -- and the level data states the same expectation at both
-// widths (`truthTable(io, { out: ({ sel }) => 1 << (sel ?? 0) })`). Publishing
-// `sel` instead would be a wire wearing a decoder's pins: it agrees with the
-// one-hot reading at sel 0 and 1 and disagrees everywhere above, which is the
-// "pass-through decoder" that level 26's test file measures as a failure. Do not
-// "simplify" this to the select value.
+// one-of-N select line -- and the level data states the same contract at both
+// widths as `truthTable(io, { out: ({ sel }) => 1 << (sel ?? 0) })`. The two
+// spellings agree for every select the level data can reach and diverge only
+// where `<<` breaks: the def publishes `2 ** sel` because a 5-bit select reaches
+// bit 31 and `<<` converts through int32 (see `createDecoderDef` below).
+// Publishing `sel` instead would be a wire wearing a decoder's pins: it agrees
+// with the one-hot reading at sel 0 and 1 and disagrees everywhere above, which
+// is the "pass-through decoder" that level 26's test file measures as a failure.
+// Do not "simplify" this to the select value.
 //
 // COST. `cost` is 1 -- the delay unit every operator pays (spec §3.2), because the
 // part is one node however many minterms it expands to. `gateCost` is the minterm
@@ -857,8 +862,13 @@ export function createWideDefs(width: number = DEFAULT_WIDE_WIDTH): readonly Com
 
 /**
  * Widest select field this generator will build: `out` is `2 ** w` bits, and
- * `2 ** 5 = 32` is the widest value a `number` carries exactly (`MAX_WIDE_WIDTH`
- * is the same ceiling applied to a data width).
+ * w = 5 is therefore a 32-bit output -- the ceiling is this project's port
+ * carrier, not the `number` type. Javascript integers are exact to `2 ** 53`, so
+ * a wider decoder is not an arithmetic impossibility; what stops it is
+ * `MAX_WIDE_WIDTH` above, the 32-bit width every operator here carries in a
+ * `number`, which is the same reason `createWideDefs` never grows one (see the
+ * section note). A part whose output pin this project has no carrier for is not
+ * a part this phase can register.
  *
  * A width outside `1..DECODER_MAX_WIDTH` is REFUSED rather than clamped, which is
  * the opposite of `clampWidth` and is deliberate: clamping a request for a 6-bit
