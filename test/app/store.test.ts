@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createStore } from '../../src/app/store';
+import type { AppState, DragState } from '../../src/app/store';
+import { emptyProgress } from '../../src/app/progress';
+import { BASE_DEFS } from '../../src/core/defs';
+import { emptyGraph } from '../../src/core/graph';
+import { createRegistry } from '../../src/core/registry';
+import { getLevel } from '../../src/levels/index';
+import type { Camera } from '../../src/ui/board/view';
 
 interface Demo {
   count: number;
@@ -92,5 +99,78 @@ describe('createStore', () => {
     store.set({ count: 1 });
 
     expect(calls).toEqual(['a', 'b']);
+  });
+});
+
+/**
+ * `AppState` / `DragState` now live in `src/app/store.ts` (see the Task 10
+ * follow-up fix), so the concrete state is driven through the generic container
+ * here as well: the declarations are exercised, not merely present. The generic
+ * behaviours themselves are covered above.
+ */
+describe('AppState through createStore', () => {
+  const appState = (): AppState => ({
+    level: getLevel('ch1-01-crude-awakening'),
+    graph: emptyGraph(),
+    registry: createRegistry(BASE_DEFS),
+    progress: emptyProgress(),
+    camera: { x: 0, y: 0, zoom: 1 },
+    selected: [],
+    dragging: null,
+    lastGrade: null,
+    status: null,
+  });
+
+  it('reads back the initial AppState', () => {
+    const state = appState();
+    const store = createStore<AppState>(state);
+
+    expect(store.get()).toBe(state);
+  });
+
+  it('set of selected and camera notifies subscribers and is visible through get()', () => {
+    const store = createStore<AppState>(appState());
+    const seen: Array<{ selected: string[]; camera: Camera }> = [];
+    store.subscribe((s) => seen.push({ selected: s.selected, camera: s.camera }));
+
+    store.set({ selected: ['i1', 'i2'] });
+    store.set({ camera: { x: 40, y: -10, zoom: 2 } });
+
+    expect(store.get().selected).toEqual(['i1', 'i2']);
+    expect(store.get().camera).toEqual({ x: 40, y: -10, zoom: 2 });
+    expect(seen).toEqual([
+      { selected: ['i1', 'i2'], camera: { x: 0, y: 0, zoom: 1 } },
+      { selected: ['i1', 'i2'], camera: { x: 40, y: -10, zoom: 2 } },
+    ]);
+  });
+
+  it('the unsubscribe returned by subscribe stops delivery', () => {
+    const store = createStore<AppState>(appState());
+    let calls = 0;
+    const unsubscribe = store.subscribe(() => {
+      calls += 1;
+    });
+
+    store.set({ selected: ['i1'] });
+    unsubscribe();
+    store.set({ selected: [] });
+
+    expect(calls).toBe(1);
+    expect(store.get().selected).toEqual([]);
+  });
+
+  it('carries every DragState variant through a set', () => {
+    const store = createStore<AppState>(appState());
+    const drags: DragState[] = [
+      { kind: 'instance', ids: ['i1'], offsetX: 4, offsetY: -2 },
+      { kind: 'wire', fromInst: 'i1', fromPort: 'out' },
+      { kind: 'pan', lastX: 10, lastY: 20 },
+      { kind: 'marquee', x0: 1, y0: 2, x1: 3, y1: 4 },
+    ];
+
+    for (const dragging of drags) {
+      store.set({ dragging });
+      expect(store.get().dragging).toBe(dragging);
+    }
   });
 });

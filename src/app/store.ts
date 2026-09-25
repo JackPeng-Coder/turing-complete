@@ -2,9 +2,9 @@
  * Minimal observable state container.
  *
  * This is the app layer's whole state mechanism: no state library, no
- * immutability helper (Phase 0 ships zero runtime dependencies). The concrete
- * application state -- level, graph, camera, selection -- is declared by the UI
- * layer that owns those types, and is passed in here as the type parameter:
+ * immutability helper (Phase 0 ships zero runtime dependencies). The container
+ * stays generic; the one concrete state this app has, `AppState`, is declared
+ * below and passed in here as the type parameter:
  *
  * ```ts
  * const store = createStore<AppState>(appState);
@@ -17,6 +17,33 @@
  * Suppressing it on an unchanged reference would silently swallow the re-render
  * for an in-place edit; one redundant render is the cheaper mistake.
  */
+import type { Graph } from '../core/graph';
+import type { Registry } from '../core/registry';
+import type { GradeResult } from '../levels/grader';
+import type { LevelSpec } from '../levels/spec';
+import type { Progress } from './progress';
+import type { Camera } from '../ui/board/view';
+
+/** What the pointer is currently doing on the board. */
+export type DragState =
+  | { kind: 'instance'; ids: string[]; offsetX: number; offsetY: number }
+  | { kind: 'wire'; fromInst: string; fromPort: string }
+  | { kind: 'pan'; lastX: number; lastY: number }
+  | { kind: 'marquee'; x0: number; y0: number; x1: number; y1: number };
+
+/** The application's whole observable state. */
+export interface AppState {
+  level: LevelSpec;
+  graph: Graph;
+  registry: Registry;
+  progress: Progress;
+  camera: Camera;
+  selected: string[];
+  dragging: DragState | null;
+  lastGrade: GradeResult | null;
+  status: { zh: string; en: string } | null;
+}
+
 export interface Store<S extends object> {
   /** Current state; treat it as read-only. */
   get(): S;
