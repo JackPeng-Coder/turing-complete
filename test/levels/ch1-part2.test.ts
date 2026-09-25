@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { STARTER_COMPONENTS } from '../../src/app/progress';
 import type { Graph } from '../../src/core/graph';
+import { DEFAULT_FUZZ_ROUNDS } from '../../src/levels/checks';
 import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
 import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
 import { grade } from '../../src/levels/grader';
@@ -37,6 +38,14 @@ describe('chapter 1 levels 7-12', () => {
   });
 
   it('gives every level a check with something to compare', () => {
+    // Every kind `LevelCheck` declares is handled, and the final `else` refuses a
+    // kind this file does not know instead of falling out of the loop. This loop
+    // used to handle only `truth-table` and `script` with no `else`, so a
+    // `constraint`, a `fuzz` or a `custom` check -- and any kind a newer kernel
+    // adds -- passed it vacuously. The same five branches are in
+    // `ch1-part1.test.ts` and in `ch2-batch1.test.ts`, whose copy is itself
+    // tested against synthetic vacuous checks (hoisting all three into one
+    // fixture would need a file outside this task's declared scope).
     for (const level of CH1_PART2) {
       expect(level.checks.length, `${level.id} has no checks`).toBeGreaterThan(0);
       for (const check of level.checks) {
@@ -44,6 +53,53 @@ describe('chapter 1 levels 7-12', () => {
           expect(check.rows?.length ?? 0, `${level.id} has an empty truth table`).toBeGreaterThan(0);
         } else if (check.kind === 'script') {
           expect(check.steps.length, `${level.id} has an empty script`).toBeGreaterThan(0);
+        } else if (check.kind === 'constraint') {
+          expect(
+            check.rule.inputs.length,
+            `${level.id} has a constraint with no inputs`,
+          ).toBeGreaterThan(0);
+          if (check.rule.kind === 'at-least') {
+            // A count of 0 is satisfied by every input vector, so the rule would
+            // compare nothing.
+            expect(
+              check.rule.count,
+              `${level.id} has an at-least constraint every vector satisfies`,
+            ).toBeGreaterThan(0);
+          }
+        } else if (check.kind === 'fuzz') {
+          // `rounds` is optional by contract -- omitting it means
+          // `DEFAULT_FUZZ_ROUNDS` -- so the invariant is on the EFFECTIVE count,
+          // read from the checker's own constant. A check that would run no
+          // rounds compares nothing; restating the default here would let the
+          // two drift.
+          const rounds = check.rounds ?? DEFAULT_FUZZ_ROUNDS;
+          expect(
+            Number.isInteger(rounds) && rounds > 0,
+            `${level.id} declares fuzz rounds=${String(check.rounds)}`,
+          ).toBe(true);
+          // A pin with no function bound to it is a pin the check never
+          // compares, in either direction.
+          for (const pin of level.io.inputs) {
+            expect(
+              typeof check.inputs[pin.id],
+              `${level.id} has no fuzz input function for pin ${pin.id}`,
+            ).toBe('function');
+          }
+          for (const pin of level.io.outputs) {
+            expect(
+              typeof check.outputs[pin.id],
+              `${level.id} has no fuzz expectation for pin ${pin.id}`,
+            ).toBe('function');
+          }
+        } else if (check.kind === 'custom') {
+          expect(
+            typeof check.id === 'string' && check.id !== '',
+            `${level.id} has a custom check with no id to look up`,
+          ).toBe(true);
+        } else {
+          throw new Error(
+            `${level.id} has a check of unknown kind ${String((check as { kind?: unknown }).kind)}`,
+          );
         }
       }
     }
