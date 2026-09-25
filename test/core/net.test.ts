@@ -3,7 +3,7 @@ import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/gra
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { createRegistry } from '../../src/core/registry';
 import type { ComponentDef, Registry } from '../../src/core/registry';
-import { UnstableCircuitError } from '../../src/core/errors';
+import { CircuitValidationError, UnstableCircuitError } from '../../src/core/errors';
 import type { PortValue } from '../../src/core/signal';
 import { SETTLE_LIMIT, Simulation, compile, delayOf } from '../../src/core/net';
 
@@ -55,6 +55,29 @@ describe('compile', () => {
     expect(net.slotCount).toBeGreaterThan(65_536);
     expect(new Simulation(net, registry).settle().stable).toBe(true);
   });
+
+  it.each([0, -1, 1.5, Number.NaN])(
+    'rejects a malformed params.width (%s) as a validation issue',
+    (width) => {
+      // An instance width feeds slot allocation, so a value `alloc` cannot take
+      // has to be reported like an unknown def -- as a `GraphIssue` that
+      // `compile` turns into a catchable `CircuitValidationError` -- rather than
+      // allowed to reach `table.alloc`, which throws a bare `RangeError` out of
+      // the level-grading path.
+      const g = emptyGraph();
+      addInstance(g, 'level_input', 0, 0, 'feed').params.width = width;
+      let caught: unknown;
+      try {
+        compile(g, registry);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(CircuitValidationError);
+      expect((caught as CircuitValidationError).issues.map((issue) => issue.code)).toEqual([
+        'invalid-params',
+      ]);
+    },
+  );
 });
 
 describe('Simulation', () => {
@@ -477,6 +500,179 @@ describe('wide ports', () => {
     // (2 + 8 + 16 pin bits, + 8 region bits).
     const { graph, registry: reg } = narrowDriverFixture();
     expect(compile(graph, reg).slotCount).toBe(34);
+  });
+});
+
+/**
+ * `bit.out -> wide.in`, where EVERY width above one comes from `params.width`
+ * rather than from a def: `bit` is a 1-bit `pass1`, `feed` is a `level_input`
+ * whose one-bit def pin is widened to 8, and `wide` is another `pass1` raised to
+ * 8 bits. Slot order is the same as `narrowDriverFixture`'s, because instances
+ * are allocated in document order with inputs before outputs:
+ *
+ *   `bit.in` 0, `bit.out` 1, `feed.out` 2..9, `wide.in` 10..17, `wide.out` 18..25
+ *
+ * `bit.out` therefore sits directly against the seven live bits of `feed.out`,
+ * so this is the Task-1 reproduction with the width resolved per instance.
+ */
+function paramsWideFixture(): WideFixture {
+  const registry = createRegistry([...BASE_DEFS, passDef(1)]);
+  const g = emptyGraph();
+  const bit = addInstance(g, 'pass1', 0, 0, 'bit');
+  const feed = addInstance(g, 'level_input', 0, 40, 'feed');
+  feed.params.width = 8;
+  const wide = addInstance(g, 'pass1', 0, 80, 'wide');
+  wide.params.width = 8;
+  connect(g, { inst: bit.id, port: 'out' }, { inst: wide.id, port: 'in' });
+  return { graph: g, registry };
+}
+
+describe('per-instance pin widths', () => {
+  it('resolves a pin width from the instance over the def', () => {
+    // `level_input.out` is declared 1 bit wide; this instance says 8, and that
+    // is what the netlist allocates, reports and lets a caller write.
+    const g = emptyGraph();
+    const feed = addInstance(g, 'level_input', 0, 0, 'feed');
+    feed.params.width = 8;
+    const net = compile(g, registry);
+    const sim = new Simulation(net, registry);
+    const base = net.outputBase('feed.out');
+
+    expect(net.outputWidth('feed.out')).toBe(8);
+    expect(net.slotCount).toBe(8);
+    sim.write(base, 8, 0xa5);
+    sim.settle();
+    expect(toNumber(sim.read(base, 8))).toBe(0xa5);
+  });
+
+  it('leaves every width at the def default when the instance sets no params', () => {
+    // The Phase-0 regression, pinned by hand as well as by the whole existing
+    // suite: an instance with empty params is allocated, sized and reported
+    // exactly as its def declares.
+    const g = emptyGraph();
+    const feed = addInstance(g, 'level_input', 0, 0, 'feed');
+    const sink = addInstance(g, 'level_output', 0, 40, 'OUT');
+    connect(g, { inst: feed.id, port: 'out' }, { inst: sink.id, port: 'in' });
+    const net = compile(g, registry);
+
+    expect(net.outputWidth('feed.out')).toBe(1);
+    expect(net.inputWidth('OUT.in')).toBe(1);
+    expect(net.outputWidth('OUT.mirror')).toBe(1);
+    // feed.out + OUT.in + OUT.mirror, one bit each.
+    expect(net.slotCount).toBe(3);
+  });
+
+  it('reports an unknown pin by name and direction', () => {
+    const g = emptyGraph();
+    const feed = addInstance(g, 'level_input', 0, 0, 'feed');
+    feed.params.width = 8;
+    const net = compile(g, registry);
+    expect(() => net.inputWidth('feed.out')).toThrow(/no such input pin: feed\.out/);
+    expect(() => net.outputWidth('feed.in')).toThrow(/no such output pin: feed\.in/);
+  });
+
+  it('gathers a params-wide pin per bit when its driver is narrower', () => {
+    const { graph, registry: reg } = paramsWideFixture();
+    const net = compile(graph, reg);
+    const sim = new Simulation(net, reg);
+    const feed = net.outputBase('feed.out');
+    const bitIn = net.inputBase('bit.in');
+    const observed = net.outputBase('wide.out');
+
+    expect(net.inputWidth('wide.in')).toBe(8);
+    // The reproduction depends on that adjacency; assert it rather than trust
+    // the allocation order documented above.
+    expect(feed).toBe(net.outputBase('bit.out') + 1);
+
+    for (const [feedValue, bit] of [
+      [0xff, 1],
+      [0xff, 0],
+      [0x00, 1],
+      [0x00, 0],
+    ] as const) {
+      sim.reset();
+      sim.write(feed, 8, feedValue); // the neighbouring pin toggles 0xff <-> 0x00
+      sim.write(bitIn, 1, bit);
+      sim.settle();
+      expect(toNumber(sim.read(observed, 8)), `feed=${feedValue} bit=${bit}`).toBe(bit);
+    }
+  });
+
+  it('gives a params-wide pin a coherent 8-bit region when its driver is narrower', () => {
+    const { graph, registry: reg } = paramsWideFixture();
+    const net = compile(graph, reg);
+    const sim = new Simulation(net, reg);
+    const feed = net.outputBase('feed.out');
+    const bitIn = net.inputBase('bit.in');
+    const base = net.inputBase('wide.in');
+
+    // Sized from `params.width`, and not the driver's base: `read(driver, 8)`
+    // would sweep up the seven live slots that follow the one-bit driver.
+    expect(net.inputWidth('wide.in')).toBe(8);
+    expect(base).not.toBe(net.outputBase('bit.out'));
+    // 2 + 8 + 16 pin bits, plus one 8-bit region.
+    expect(net.slotCount).toBe(34);
+
+    sim.write(feed, 8, 0xff);
+    sim.write(bitIn, 1, 1);
+    sim.settle();
+    expect(toNumber(sim.read(base, 8))).toBe(1); // bit 0 only, no extra call needed
+
+    sim.write(feed, 8, 0x00); // the neighbour changes; the pin does not
+    sim.settle();
+    expect(toNumber(sim.read(base, 8))).toBe(1);
+
+    sim.write(bitIn, 1, 0);
+    sim.settle();
+    expect(toNumber(sim.read(base, 8))).toBe(0); // refreshed by that settle
+    // Coherent with what the pin's own consumer sees, bit for bit.
+    expect(toNumber(sim.read(base, 8))).toBe(toNumber(sim.read(net.outputBase('wide.out'), 8)));
+  });
+
+  it('reads a params-wide pin straight from an equally wide driver', () => {
+    const reg = createRegistry([...BASE_DEFS, passDef(1)]);
+    const g = emptyGraph();
+    const feed = addInstance(g, 'level_input', 0, 0, 'feed');
+    feed.params.width = 8;
+    const wide = addInstance(g, 'pass1', 0, 40, 'wide');
+    wide.params.width = 8;
+    connect(g, { inst: feed.id, port: 'out' }, { inst: wide.id, port: 'in' });
+    const net = compile(g, reg);
+    const sim = new Simulation(net, reg);
+
+    // Equal widths are one contiguous run of the driver's own slots, so nothing
+    // is materialised and the pin reads the driver's base directly.
+    expect(net.inputBase('wide.in')).toBe(net.outputBase('feed.out'));
+    expect(net.slotCount).toBe(24);
+    for (const value of [0x00, 0x01, 0x55, 0x80, 0xab, 0xff]) {
+      sim.write(net.outputBase('feed.out'), 8, value);
+      sim.settle();
+      expect(toNumber(sim.read(net.outputBase('wide.out'), 8)), `value=${value}`).toBe(value);
+      expect(toNumber(sim.read(net.inputBase('wide.in'), 8)), `value=${value}`).toBe(value);
+    }
+  });
+
+  it('reserves table capacity for params-derived widths and their read regions', () => {
+    // The capacity is fixed at compile time, so it has to be derived from the
+    // SAME widths the allocation loop uses -- read regions included. 24 one-bit
+    // sources driving 24 eight-bit `pass1` instances need 17*24 pin slots plus
+    // 8*24 region slots = 600. A capacity computed from the def widths (or from
+    // the params widths but without the regions) is smaller than that, so
+    // `alloc` would throw "signal table is full" instead of the circuit
+    // compiling -- a wrongly sized region, one step earlier.
+    const reg = createRegistry([...BASE_DEFS, passDef(1)]);
+    const g = emptyGraph();
+    const count = 24;
+    for (let i = 0; i < count; i += 1) {
+      const src = addInstance(g, 'level_input', 0, i * 40, `src${i}`);
+      const dst = addInstance(g, 'pass1', 0, i * 40 + 20, `dst${i}`);
+      dst.params.width = 8;
+      connect(g, { inst: src.id, port: 'out' }, { inst: dst.id, port: 'in' });
+    }
+    const net = compile(g, reg);
+
+    expect(net.slotCount).toBe(count * 25);
+    expect(new Simulation(net, reg).settle().stable).toBe(true);
   });
 });
 

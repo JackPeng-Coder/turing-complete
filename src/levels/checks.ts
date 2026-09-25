@@ -17,6 +17,15 @@ export interface LevelIo {
   readOutput(name: string): number;
   tick(): void;
   readonly sim: Simulation;
+  /**
+   * A level pin whose compiled width disagrees with `spec.io`, if any.
+   *
+   * Set only when such a pin is *present* in the circuit: nothing can be written
+   * to it or read from it without crossing a pin boundary, so `createSim` treats
+   * the circuit as unbound. Absent pins are not reported here -- an incomplete
+   * board still grades, with those pins reading 0 as they always have.
+   */
+  readonly mismatch?: string;
 }
 
 /**
@@ -44,16 +53,38 @@ function fitsPort(value: number, width: number): boolean {
  * level input; a `level_output` instance whose id is `OUT` (single output) or
  * `OUT_<pinId>` (multi-output) mirrors that level output.
  *
- * Widths come from the level spec, so multi-bit level pins work without any
- * special-casing in the caller.
+ * Every base and width comes from the COMPILED pin (`net.outputWidth` /
+ * `net.inputWidth`), which is the instance's `params.width` when it sets one and
+ * the def's declared width otherwise. The def alone is never enough: both
+ * `level_input` and `level_output` declare 1-bit pins, so a level's 8-bit pin
+ * exists in the table only because the instance carrying it says so.
+ *
+ * A pin that is present but compiled at a width other than `spec.io`'s is
+ * reported in `mismatch` and binds nothing. Writing it at the spec width would
+ * run across the neighbouring slots and writing it at the compiled width would
+ * silently drop the high bits; neither is the value the level asked for, so the
+ * check fails loudly instead (`runChecks` maps this to `missing-io`). A pin whose
+ * instance is absent is NOT a mismatch: it keeps its Phase-0 behaviour of
+ * reading 0 and swallowing writes, so a half-built board still grades.
  */
 export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): LevelIo {
   const inputSlots = new Map<string, { base: number; width: number }>();
   const outputSlots = new Map<string, { base: number; width: number }>();
+  const mismatches: string[] = [];
+
+  const noteMismatch = (key: string, compiled: number, declared: number): void => {
+    mismatches.push(`${key} is ${compiled}-bit in the circuit but the level declares ${declared}`);
+  };
 
   for (const pin of spec.io.inputs) {
+    const key = `IN_${pin.id}.out`;
     try {
-      inputSlots.set(pin.id, { base: net.outputBase(`IN_${pin.id}.out`), width: pin.width });
+      const width = net.outputWidth(key);
+      if (width !== pin.width) {
+        noteMismatch(key, width, pin.width);
+        continue;
+      }
+      inputSlots.set(pin.id, { base: net.outputBase(key), width });
     } catch {
       /* pin not present in this circuit: it will read as 0 */
     }
@@ -64,7 +95,14 @@ export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): Lev
     const keys = outputPins.length === 1 ? ['OUT.in'] : [`OUT_${pin.id}.in`, 'OUT.in'];
     for (const key of keys) {
       try {
-        outputSlots.set(pin.id, { base: net.inputBase(key), width: pin.width });
+        const width = net.inputWidth(key);
+        if (width !== pin.width) {
+          // Present but mis-sized: that is the disagreement to report, not a
+          // reason to go looking for another naming convention.
+          noteMismatch(key, width, pin.width);
+          break;
+        }
+        outputSlots.set(pin.id, { base: net.inputBase(key), width });
         break;
       } catch {
         /* try the next candidate */
@@ -77,7 +115,7 @@ export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): Lev
     return Array.from(v).reduce((acc, byte, i) => acc + byte * 2 ** (8 * i), 0);
   };
 
-  return {
+  const io: LevelIo = {
     sim,
     reset: () => sim.reset(),
     tick: () => {
@@ -103,6 +141,11 @@ export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): Lev
       return toNumber(sim.read(slot.base, slot.width));
     },
   };
+
+  // `exactOptionalPropertyTypes` rejects handing an explicit `undefined` to an
+  // optional property, so the field is only present when there is something to
+  // report.
+  return mismatches.length === 0 ? io : { ...io, mismatch: mismatches.join('; ') };
 }
 
 function enumerateInputs(spec: LevelSpec): Array<Record<string, number>> {
@@ -325,6 +368,12 @@ function failure(
   return { check: check.kind, inputs, expected, actual, tick, reason };
 }
 
+/**
+ * Why a check had no evaluable circuit: the settle loop ran away (`unstable`),
+ * `compile` refused the graph (`invalid`), or the graph's level I/O does not
+ * match the level's declared pins (`missing-io`, see `bindLevelIo`). Each maps
+ * onto the `CheckFailure` reason of the same name.
+ */
 interface AttemptFail {
   error: 'unstable' | 'invalid' | 'missing-io';
 }
@@ -343,6 +392,10 @@ function createSim(
     const net = compile(graph, registry);
     const sim = new Simulation(net, registry);
     const io = bindLevelIo(sim, net, spec);
+    // The circuit's level I/O is present but sized against the level: no value
+    // can cross such a pin intact, so the circuit is unbound rather than run at
+    // whichever of the two widths happens to look right.
+    if (io.mismatch !== undefined) return { error: 'missing-io' };
     return { io };
   } catch (e) {
     if (e instanceof UnstableCircuitError) return { error: 'unstable' };

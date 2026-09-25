@@ -1,13 +1,27 @@
-import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
+import { addInstance, connect, emptyGraph, type Graph, type Instance } from '../../src/core/graph';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { createRegistry } from '../../src/core/registry';
 
 export const registry = createRegistry(BASE_DEFS);
 
 export type Node =
-  | { readonly kind: 'input'; readonly name: string }
+  | { readonly kind: 'input'; readonly name: string; readonly width?: number }
   | { readonly kind: 'part'; readonly def: string; readonly id: string; readonly from: readonly string[] }
-  | { readonly kind: 'output'; readonly name?: string; readonly from: string };
+  | { readonly kind: 'output'; readonly name?: string; readonly from: string; readonly width?: number };
+
+/**
+ * Carries a declared level-pin width onto its instance.
+ *
+ * `level_input` / `level_output` declare 1-bit pins, so the width a level's pin
+ * actually has exists only on the instance (`params.width`) -- these are exactly
+ * the values the palette's drop path writes (`ui/board/interact.ts`). Leaving
+ * `width` out means the def's 1 bit, which is what every Phase-0 circuit built
+ * by this fixture relies on. Wide *components* need nothing here: Task 3's wide
+ * defs declare their own pin widths.
+ */
+function setWidth(inst: Instance, width: number | undefined): void {
+  if (width !== undefined) inst.params.width = width;
+}
 
 /**
  * Builds a circuit from a flat declaration list.
@@ -18,7 +32,10 @@ export type Node =
  * from a single source.
  *
  * Level inputs are instances named `IN_<name>`; level outputs are instances
- * named `OUT` (single output) or `OUT_<name>` (multi-output).
+ * named `OUT` (single output) or `OUT_<name>` (multi-output). Either may declare
+ * the width of its level pin, and it is written to the instance as
+ * `params.width` so `levels/checks.ts` can bind it at the width the level asks
+ * for.
  */
 export function build(nodes: readonly Node[]): Graph {
   const g = emptyGraph();
@@ -28,12 +45,16 @@ export function build(nodes: readonly Node[]): Graph {
 
   for (const node of nodes) {
     if (node.kind === 'input') {
-      inputIds.set(node.name, addInstance(g, 'level_input', 0, 0, `IN_${node.name}`).id);
+      const inst = addInstance(g, 'level_input', 0, 0, `IN_${node.name}`);
+      setWidth(inst, node.width);
+      inputIds.set(node.name, inst.id);
     } else if (node.kind === 'part') {
       partIds.set(node.id, addInstance(g, node.def, 120, 0).id);
     } else {
       const name = node.name ?? 'OUT';
-      outputIds.set(name, addInstance(g, 'level_output', 240, 0, name).id);
+      const inst = addInstance(g, 'level_output', 240, 0, name);
+      setWidth(inst, node.width);
+      outputIds.set(name, inst.id);
     }
   }
 

@@ -1,7 +1,7 @@
 import { CircuitValidationError, UnstableCircuitError } from './errors';
-import { validateGraph, type Graph, type GraphIssue } from './graph';
+import { validateGraph, type Graph, type GraphIssue, type Instance } from './graph';
 import { assertWidth, createSignalTable, type PortValue, type SignalTable } from './signal';
-import type { ComponentDef, Registry } from './registry';
+import type { ComponentDef, PinDef, Registry } from './registry';
 
 /** Iteration cap for the settle loop. A combinational loop exhausts it. */
 export const SETTLE_LIMIT = 512;
@@ -32,16 +32,18 @@ export interface Netlist {
    * every slot except a wired input pin bit, which reads the output pin bit
    * driving it. Resolving wires up front keeps the settle loop branch-free.
    *
-   * It covers the pin slots only. A bit no wire claimed keeps its own slot --
-   * an input pin's slots are never written by the kernel, so such a bit reads
-   * 0 -- and a materialised read region is not addressed through `drive`.
+   * It covers the pin slots only. A bit no wire claimed keeps its own slot, so
+   * such a bit reads 0 unless a caller writes that slot -- which is how an
+   * unwired input is driven directly. A materialised read region is not
+   * addressed through `drive`.
    */
   readonly drive: Int32Array;
   /** Expanded instance key -> origin instance id in the document. */
   readonly refs: Map<string, string>;
   /**
    * Slot base of a **contiguous** read region for the input pin
-   * `"<instId>.<pinId>"`, so `read(inputBase(key), pin.width)` is coherent.
+   * `"<instId>.<pinId>"`, so `read(inputBase(key), inputWidth(key))` is
+   * coherent.
    *
    * Usually that is the driver's own base: an unwired pin reads its own slots
    * (which is why a level can still drive one directly), and a driver as wide as
@@ -59,6 +61,18 @@ export interface Netlist {
   inputBase(key: string): number;
   /** Slot of the output pin `"<instId>.<pinId>"`. */
   outputBase(key: string): number;
+  /**
+   * Width of the input pin `"<instId>.<pinId>"`, in bits, as compiled.
+   *
+   * This is the width the pin's slots were allocated at and the width its read
+   * region holds, which is `params.width` when the instance sets one and the
+   * def's declared width otherwise -- see `effectiveWidth`. A caller that reads
+   * a pin as a *range* has to use this rather than the def's width, or it reads
+   * past a region that was sized from the instance.
+   */
+  inputWidth(key: string): number;
+  /** Width of the output pin `"<instId>.<pinId>"`, in bits, as compiled. */
+  outputWidth(key: string): number;
   /** Expanded instance ids, in evaluation order. */
   instanceIds(): readonly string[];
   /** Def ids of the expanded instances, in evaluation order. */
@@ -67,14 +81,36 @@ export interface Netlist {
   outputKeys(): readonly string[];
 }
 
+/**
+ * Width of `pin` on `inst`: the instance's own override, else what the def says.
+ *
+ * `ComponentDef` declares exactly one width per `PinDef`, so a single
+ * `params.width` covers every pin of that instance -- the wide output of a
+ * `level_input`, both pins of a `level_output`, every input and output of a
+ * gate. There is deliberately no per-pin-name syntax: nothing needs one yet, and
+ * inventing one here would put a second, unenforced source of width in the
+ * document.
+ *
+ * `validateGraph` has already rejected a `params.width` that is not a positive
+ * integer, so `alloc`'s own width guard can never fire from a width resolved
+ * here.
+ */
+function effectiveWidth(inst: Instance, pin: PinDef): number {
+  return inst.params.width ?? pin.width;
+}
+
 interface CompiledInstance {
   readonly key: string;
   readonly origin: string;
   readonly def: ComponentDef;
   /** Slot base of each input pin, in `def.inputs` order. */
   readonly inputs: readonly number[];
+  /** Width of each input pin, resolved per instance; parallel to `inputs`. */
+  readonly inputWidths: readonly number[];
   /** Slot base of each output pin, in `def.outputs` order. */
   readonly outputs: readonly number[];
+  /** Width of each output pin, resolved per instance; parallel to `outputs`. */
+  readonly outputWidths: readonly number[];
   /** Index of each output pin in the netlist-wide output pin list. */
   readonly outPin: readonly number[];
 }
@@ -132,6 +168,11 @@ function contiguousRun(drive: Int32Array, base: number, width: number): number {
  * pin wider than 1 bit, which is the only kind that can require one), so the
  * requirement is not a knife edge; `alloc` still throws a named `RangeError`
  * rather than growing the buffer if it were ever wrong.
+ *
+ * Every width here is the *resolved* one (`effectiveWidth`), the same values
+ * `compile` allocates from. Sizing this from the def widths would reserve less
+ * than the allocation loop and the regions actually take, and the table would
+ * overrun on a circuit that is perfectly legal.
  */
 function capacityFor(graph: Graph, registry: Registry): number {
   const driven = new Set<string>();
@@ -142,10 +183,11 @@ function capacityFor(graph: Graph, registry: Registry): number {
     // `validateGraph` has already rejected unknown def ids, so `get` cannot throw.
     const def = registry.get(inst.def);
     for (const pin of def.inputs) {
-      slots += pin.width;
-      if (pin.width > 1 && driven.has(`${inst.id}.${pin.id}`)) regions += pin.width;
+      const width = effectiveWidth(inst, pin);
+      slots += width;
+      if (width > 1 && driven.has(`${inst.id}.${pin.id}`)) regions += width;
     }
-    for (const pin of def.outputs) slots += pin.width;
+    for (const pin of def.outputs) slots += effectiveWidth(inst, pin);
   }
   return Math.max(MIN_CAPACITY, Math.ceil(slots * 1.25) + regions + 16);
 }
@@ -157,9 +199,12 @@ function capacityFor(graph: Graph, registry: Registry): number {
  * accepted, because an unwired input legally reads 0 and only the simulator can
  * tell whether a feedback loop settles.
  *
- * Pin widths are taken from the def as written; a later task resolves
- * per-instance width overrides, and every width-dependent step below (allocation,
- * `drive`, the regions, the reads) goes through these same values.
+ * A pin's width is `inst.params.width` when the instance sets one, otherwise the
+ * width the def declares -- see `effectiveWidth`. Every width-dependent step
+ * below (slot allocation, `drive`, the read regions, the per-bit reads, the
+ * write-back and the capacity reservation) goes through those resolved values,
+ * because a pin allocated at one width and read at another is exactly the silent
+ * corruption this kernel exists to keep out.
  */
 export function compile(graph: Graph, registry: Registry): Netlist {
   const errors: GraphIssue[] = validateGraph(graph, registry).filter(
@@ -173,16 +218,23 @@ export function compile(graph: Graph, registry: Registry): Netlist {
   const byId = new Map<string, CompiledInstance>();
   const outputBases = new Map<string, number>();
   const outputPins: OutputPin[] = [];
+  const inputWidths = new Map<string, number>();
+  const outputWidths = new Map<string, number>();
 
   for (const inst of graph.instances) {
     const def = registry.get(inst.def);
-    const inputs = def.inputs.map((pin) => table.alloc(pin.width));
+    const inWidths = def.inputs.map((pin) => effectiveWidth(inst, pin));
+    const outWidths = def.outputs.map((pin) => effectiveWidth(inst, pin));
+    const inputs = inWidths.map((width) => table.alloc(width));
+    def.inputs.forEach((pin, i) => inputWidths.set(`${inst.id}.${pin.id}`, inWidths[i]!));
     const outPin: number[] = [];
-    const outputs = def.outputs.map((pin) => {
-      const base = table.alloc(pin.width);
+    const outputs = outWidths.map((width, i) => {
+      const pin = def.outputs[i]!;
+      const base = table.alloc(width);
       outputBases.set(`${inst.id}.${pin.id}`, base);
+      outputWidths.set(`${inst.id}.${pin.id}`, width);
       outPin.push(outputPins.length);
-      outputPins.push({ base, width: pin.width });
+      outputPins.push({ base, width });
       return base;
     });
     const compiled: CompiledInstance = {
@@ -190,7 +242,9 @@ export function compile(graph: Graph, registry: Registry): Netlist {
       origin: inst.id,
       def,
       inputs,
+      inputWidths: inWidths,
       outputs,
+      outputWidths: outWidths,
       outPin,
     };
     refs.set(inst.id, inst.id);
@@ -215,7 +269,9 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     if (fromPin < 0 || toPin < 0) continue; // unknown ports are fatal too
     const fromBase = from.outputs[fromPin]!;
     const toBase = to.inputs[toPin]!;
-    const width = Math.min(from.def.outputs[fromPin]!.width, to.def.inputs[toPin]!.width);
+    // Both sides resolved per instance: a driver and a pin may each be wider (or
+    // narrower) than their def declares.
+    const width = Math.min(from.outputWidths[fromPin]!, to.inputWidths[toPin]!);
     for (let bit = 0; bit < width; bit += 1) drive[toBase + bit] = fromBase + bit;
   }
 
@@ -233,7 +289,7 @@ export function compile(graph: Graph, registry: Registry): Netlist {
   for (const inst of instances) {
     for (let p = 0; p < inst.inputs.length; p += 1) {
       const base = inst.inputs[p]!;
-      const width = inst.def.inputs[p]!.width;
+      const width = inst.inputWidths[p]!;
       const key = `${inst.key}.${inst.def.inputs[p]!.id}`;
       const run = contiguousRun(drive, base, width);
       if (run >= 0) {
@@ -253,6 +309,11 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     if (base === undefined) throw new Error(`no such ${kind} pin: ${key}`);
     return base;
   };
+  const widthOf = (map: Map<string, number>, kind: string, key: string): number => {
+    const width = map.get(key);
+    if (width === undefined) throw new Error(`no such ${kind} pin: ${key}`);
+    return width;
+  };
   const net: Netlist = {
     instanceCount: instances.length,
     expandedCount: instances.length,
@@ -261,6 +322,8 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     refs,
     inputBase: (key) => baseOf(readBases, 'input', key),
     outputBase: (key) => baseOf(outputBases, 'output', key),
+    inputWidth: (key) => widthOf(inputWidths, 'input', key),
+    outputWidth: (key) => widthOf(outputWidths, 'output', key),
     instanceIds: () => instanceIds,
     instanceDefs: () => instanceDefs,
     outputKeys: () => [...outputBases.keys()],
@@ -329,8 +392,10 @@ export class Simulation {
    * `evaluate` does this too (and `settle` calls it), so this only exists so
    * that a def with state but no `evaluate` still holds, and so that a caller
    * reading right after `reset`/`tick` sees the held value. It is only correct
-   * while each state byte maps to one 1-bit output pin, which holds for
-   * `delay_line` and `mem1`; wide registers in a later phase need a publish hook.
+   * while each state byte maps to one 1-bit value, which holds for `delay_line`
+   * and `mem1`; wide registers in a later phase need a publish hook. The write
+   * still covers the pin's whole resolved width -- a `1` published onto a pin an
+   * instance widened to 8 bits is `0b00000001`, not a stale high byte.
    */
   #publishState(): void {
     for (let i = 0; i < this.#instances.length; i += 1) {
@@ -338,7 +403,7 @@ export class Simulation {
       if (!inst.def.sequential) continue;
       const state = this.#state[i]!;
       for (let p = 0; p < inst.outputs.length; p += 1) {
-        this.#table.setBit(inst.outputs[p]!, state[p] === 1 ? 1 : 0);
+        this.#table.setPort(inst.outputs[p]!, inst.outputWidths[p]!, state[p] === 1 ? 1 : 0);
       }
     }
   }
@@ -374,7 +439,7 @@ export class Simulation {
   /** Reads each input pin bit by bit through its pre-resolved driver slots. */
   #readInputs(inst: CompiledInstance, scratch: PortValue[]): void {
     for (let p = 0; p < inst.inputs.length; p += 1) {
-      scratch[p] = this.#gather(inst.inputs[p]!, inst.def.inputs[p]!.width);
+      scratch[p] = this.#gather(inst.inputs[p]!, inst.inputWidths[p]!);
     }
     // Keep the scratch exactly as long as this instance's pin list, so a shorter
     // instance never sees values left behind by a longer one.

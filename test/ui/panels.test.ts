@@ -2,10 +2,12 @@
 import { describe, expect, it } from 'vitest';
 import { createStore, type AppState, type Store } from '../../src/app/store';
 import { emptyProgress, applyGrade, type Progress } from '../../src/app/progress';
+import { CommandStack } from '../../src/app/commands';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { addInstance, connect, emptyGraph } from '../../src/core/graph';
 import { getLevel, LEVELS } from '../../src/levels/index';
+import type { LevelSpec } from '../../src/levels/spec';
 import { grade } from '../../src/levels/grader';
 import { mountPalette } from '../../src/ui/palette';
 import { mountTruthTable } from '../../src/ui/truthTable';
@@ -13,7 +15,7 @@ import { mountShell } from '../../src/ui/shell';
 import { mountMap } from '../../src/ui/map';
 import { NARRATIVE, narrativeFor } from '../../src/ui/narrative';
 import { THEME } from '../../src/ui/theme';
-import { levelIoInstanceId } from '../../src/ui/board/interact';
+import { attachBoardInput, levelIoPlacement } from '../../src/ui/board/interact';
 
 const registry = createRegistry(BASE_DEFS);
 
@@ -163,18 +165,18 @@ describe('shell bar', () => {
 describe('level io placement', () => {
   it('names the single level output OUT', () => {
     const level = getLevel('ch1-01-crude-awakening');
-    expect(levelIoInstanceId(level, emptyGraph(level.id), 'level_output')).toBe('OUT');
+    expect(levelIoPlacement(level, emptyGraph(level.id), 'level_output')?.id).toBe('OUT');
   });
 
   it('hands out one level input per declared pin, then stops naming them', () => {
     const level = getLevel('ch1-02-nand-gate');
     const g = emptyGraph(level.id);
-    expect(levelIoInstanceId(level, g, 'level_input')).toBe('IN_a');
+    expect(levelIoPlacement(level, g, 'level_input')?.id).toBe('IN_a');
     addInstance(g, 'level_input', 0, 0, 'IN_a');
-    expect(levelIoInstanceId(level, g, 'level_input')).toBe('IN_b');
+    expect(levelIoPlacement(level, g, 'level_input')?.id).toBe('IN_b');
     addInstance(g, 'level_input', 0, 0, 'IN_b');
     // every level input is placed: an extra part falls back to a plain id
-    expect(levelIoInstanceId(level, g, 'level_input')).toBeUndefined();
+    expect(levelIoPlacement(level, g, 'level_input')).toBeUndefined();
   });
 
   it('names the four outputs of the binary racer in pin order', () => {
@@ -182,7 +184,7 @@ describe('level io placement', () => {
     const g = emptyGraph(level.id);
     const ids: string[] = [];
     for (let i = 0; i < 4; i += 1) {
-      const id = levelIoInstanceId(level, g, 'level_output');
+      const id = levelIoPlacement(level, g, 'level_output')?.id;
       expect(id).toBeDefined();
       ids.push(id!);
       addInstance(g, 'level_output', 0, 0, id);
@@ -192,14 +194,15 @@ describe('level io placement', () => {
 
   it('leaves ordinary gates to the graph id allocator', () => {
     const level = getLevel('ch1-04-and-gate');
-    expect(levelIoInstanceId(level, emptyGraph(level.id), 'nand')).toBeUndefined();
+    expect(levelIoPlacement(level, emptyGraph(level.id), 'nand')).toBeUndefined();
   });
 
   it('makes level 1 pass with two palette placements and one wire', () => {
     const level = getLevel('ch1-01-crude-awakening');
     const g = emptyGraph(level.id);
     const source = addInstance(g, 'const_on', 0, 0);
-    const sink = addInstance(g, 'level_output', 128, 0, levelIoInstanceId(level, g, 'level_output'));
+    const placement = levelIoPlacement(level, g, 'level_output');
+    const sink = addInstance(g, 'level_output', 128, 0, placement?.id);
     connect(g, { inst: source.id, port: 'out' }, { inst: sink.id, port: 'in' });
 
     expect(sink.id).toBe('OUT');
@@ -207,6 +210,68 @@ describe('level io placement', () => {
     expect(result.failures).toEqual([]);
     expect(result.passed).toBe(true);
     expect(result.stars).toBe(3);
+  });
+
+  /** A chapter-2-shaped level: one 8-bit input, one 8-bit output. */
+  function wideLevel(): LevelSpec {
+    return {
+      ...getLevel('ch1-02-nand-gate'),
+      id: 'test-wide-io',
+      io: { inputs: [{ id: 'a', width: 8 }], outputs: [{ id: 'out', width: 8 }] },
+    };
+  }
+
+  /** Arms `defId` in the palette and clicks empty board space with it. */
+  function drop(canvas: HTMLCanvasElement, defId: string, x: number, y: number): void {
+    canvas.dataset.pendingDef = defId;
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { clientX: x, clientY: y, button: 0 }));
+  }
+
+  it('carries each level pin width into the placement', () => {
+    const level = wideLevel();
+    expect(levelIoPlacement(level, emptyGraph(level.id), 'level_input')).toEqual({
+      id: 'IN_a',
+      width: 8,
+    });
+    expect(levelIoPlacement(level, emptyGraph(level.id), 'level_output')).toEqual({
+      id: 'OUT',
+      width: 8,
+    });
+  });
+
+  it('writes that width into params when the part is dropped on the board', () => {
+    // The id alone is not enough. `compile` sizes a pin from `params.width`, and
+    // `bindLevelIo` refuses a bound pin compiled at a width the level does not
+    // declare -- so a drop that named the part without sizing it would leave the
+    // game's own board ungradable, with an 8-bit level input one bit wide.
+    const level = wideLevel();
+    const store = createStore<AppState>({
+      level,
+      graph: emptyGraph(level.id),
+      registry,
+      progress: emptyProgress(),
+      camera: { x: 0, y: 0, zoom: 1 },
+      selected: [],
+      dragging: null,
+      lastGrade: null,
+      status: null,
+    });
+    const canvas = document.createElement('canvas');
+    // jsdom 28 has PointerEvent but no pointer capture, and the handler captures
+    // the pointer as its first act: stub that gap so the drop is reachable.
+    canvas.setPointerCapture = () => {};
+    const detach = attachBoardInput(canvas, store, new CommandStack(), { onChange: () => {} });
+    try {
+      drop(canvas, 'level_input', 40, 40);
+      drop(canvas, 'level_output', 400, 40);
+    } finally {
+      detach();
+    }
+
+    expect(store.get().graph.instances.map((inst) => [inst.id, inst.params.width])).toEqual([
+      ['IN_a', 8],
+      ['OUT', 8],
+    ]);
   });
 });
 

@@ -56,6 +56,7 @@ export type IssueCode =
   | 'unknown-instance'
   | 'unknown-port'
   | 'multiple-drivers'
+  | 'invalid-params'
   | 'dangling-input'
   | 'feedback-loop';
 
@@ -154,12 +155,14 @@ function pinIds(pins: readonly PinDef[]): Set<string> {
 }
 
 /**
- * Reports every structural defect in `g`, in a fixed order: unknown defs and
- * bad wire endpoints first, then multi-driven inputs, then the graph-wide
- * feedback scan, then unwired inputs.
+ * Reports every structural defect in `g`, in a fixed order: unknown defs, then
+ * malformed instance parameters, then bad wire endpoints, then multi-driven
+ * inputs, then the graph-wide feedback scan, then unwired inputs.
  *
  * Never throws and never mutates: an unknown def is reported as an issue rather
- * than allowed to reach `registry.get`, which throws.
+ * than allowed to reach `registry.get`, which throws, and a malformed
+ * `params.width` likewise rather than allowed to reach the signal table's
+ * `alloc`, which throws.
  */
 export function validateGraph(g: Graph, registry: Registry): GraphIssue[] {
   const issues: GraphIssue[] = [];
@@ -187,6 +190,27 @@ export function validateGraph(g: Graph, registry: Registry): GraphIssue[] {
 
   const defs = new Map<string, ReturnType<Registry['get']> | null>();
   for (const inst of g.instances) defs.set(inst.id, defOf(inst));
+
+  // A per-instance width override is resolved by `compile` and feeds straight
+  // into slot allocation, so a value `alloc` cannot take has to be reported here
+  // for the same reason an unknown def is: allowed through, it would reach
+  // `table.alloc` and raise a bare `RangeError` out of the grading path instead
+  // of surfacing as a `CircuitValidationError` the caller already handles.
+  // Nothing else in `params` is read by the kernel yet, so nothing else is
+  // judged here.
+  for (const inst of g.instances) {
+    const width = inst.params.width;
+    if (width === undefined || (Number.isSafeInteger(width) && width > 0)) continue;
+    issues.push({
+      severity: 'error',
+      code: 'invalid-params',
+      inst: inst.id,
+      message: {
+        zh: `元件 ${inst.id} 的参数 width 无效：${String(width)}（必须是正整数）`,
+        en: `Instance ${inst.id} has an invalid width parameter: ${String(width)} (must be a positive integer)`,
+      },
+    });
+  }
 
   const drivenInputs = new Map<string, string[]>();
   for (const wire of g.wires) {

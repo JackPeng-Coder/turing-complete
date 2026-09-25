@@ -26,35 +26,53 @@ export interface BoardInputOptions {
   onChange(): void;
 }
 
+/** The instance id a freshly placed level-IO part takes, and the pin's width. */
+export interface LevelIoPlacement {
+  /** `IN_<pinId>`, `OUT` or `OUT_<pinId>`, in pin order. */
+  readonly id: string;
+  /** Width the level declares for that pin, in bits. */
+  readonly width: number;
+}
+
 /**
- * Instance id a freshly placed level IO part must carry.
+ * The level-IO binding a freshly placed part must carry, or `undefined`.
  *
  * `levels/checks.ts` binds a circuit to its level by instance id: `IN_<pin>` for
  * a level input, `OUT` for a single-output level and `OUT_<pin>` for a
- * multi-output one. A part dropped from the palette would otherwise be named
- * by the graph's own allocator (`i1`, `i2`, …), never bind, and make every
- * level unpassable -- so placement hands out the conventional ids in pin order
- * and falls back to the allocator only once the level's pins are all placed
- * (a spare `level_input` is a legal, if redundant, part).
+ * multi-output one. A part dropped from the palette would otherwise be named by
+ * the graph's own allocator (`i1`, `i2`, …), never bind, and make every level
+ * unpassable -- so placement hands out the conventional ids in pin order and
+ * falls back to the allocator only once the level's pins are all placed (a spare
+ * `level_input` is a legal, if redundant, part).
+ *
+ * The width comes back with the id because it is part of the same binding, and
+ * only this function knows which pin the id refers to: `level_input` and
+ * `level_output` declare 1-bit pins, so an 8-bit level pin exists only if the
+ * instance placed for it says `params.width = 8`. Guessing it back from the id
+ * string would be a second, unenforced source of truth.
  */
-export function levelIoInstanceId(
+export function levelIoPlacement(
   level: LevelSpec,
   graph: Graph,
   defId: string,
-): string | undefined {
+): LevelIoPlacement | undefined {
   const taken = new Set(graph.instances.map((inst) => inst.id));
   if (defId === 'level_input') {
     for (const pin of level.io.inputs) {
       const id = `IN_${pin.id}`;
-      if (!taken.has(id)) return id;
+      if (!taken.has(id)) return { id, width: pin.width };
     }
     return undefined;
   }
   if (defId === 'level_output') {
-    const ids =
-      level.io.outputs.length === 1 ? ['OUT'] : level.io.outputs.map((pin) => `OUT_${pin.id}`);
-    for (const id of ids) {
-      if (!taken.has(id)) return id;
+    const pins = level.io.outputs;
+    if (pins.length === 1) {
+      const pin = pins[0]!;
+      return taken.has('OUT') ? undefined : { id: 'OUT', width: pin.width };
+    }
+    for (const pin of pins) {
+      const id = `OUT_${pin.id}`;
+      if (!taken.has(id)) return { id, width: pin.width };
     }
   }
   return undefined;
@@ -94,13 +112,20 @@ export function attachBoardInput(
     // the row the player then drags along to wire it up.
     const x = snap(world.x);
     const y = snap(world.y - INSTANCE_HEIGHT / 2);
-    const id = levelIoInstanceId(store.get().level, store.get().graph, defId);
+    const placement = levelIoPlacement(store.get().level, store.get().graph, defId);
     let created: string | null = null;
     stack.push(
       {
         label: `add ${defId}`,
         do: (g) => {
-          created = addInstance(g, defId, x, y, id).id;
+          const inst = addInstance(g, defId, x, y, placement?.id);
+          // The binding is the id AND the width: `compile` sizes a pin from
+          // `params.width ?? def.pin.width`, and `bindLevelIo` refuses a pin
+          // compiled at a width the level does not declare. A dropped 8-bit
+          // level input that carried only the id would therefore be one bit
+          // wide and make the level's own board ungradable.
+          if (placement) inst.params.width = placement.width;
+          created = inst.id;
         },
         undo: (g) => {
           if (created) removeInstance(g, created);

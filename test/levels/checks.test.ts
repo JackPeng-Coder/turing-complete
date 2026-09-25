@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
 import { BASE_DEFS } from '../../src/core/defs/index';
+import { Simulation, compile } from '../../src/core/net';
 import { createRegistry, type ComponentDef } from '../../src/core/registry';
+import type { PortValue } from '../../src/core/signal';
+import { grade } from '../../src/levels/grader';
 import type { LevelSpec } from '../../src/levels/spec';
-import { generateRows, countTicksUsed, runChecks } from '../../src/levels/checks';
+import { bindLevelIo, generateRows, countTicksUsed, runChecks } from '../../src/levels/checks';
+import { build } from '../fixtures/build';
 
 const registry = createRegistry(BASE_DEFS);
 
@@ -382,5 +386,148 @@ describe('constraint check', () => {
     connect(g, { inst: inB.id, port: 'out' }, { inst: or.id, port: 'b' });
     connect(g, { inst: or.id, port: 'out' }, { inst: out.id, port: 'in' });
     expect(runChecks(g, registry, parity).passed).toBe(false);
+  });
+});
+
+const toNumber = (v: PortValue): number =>
+  typeof v === 'number' ? v : Array.from(v).reduce((acc, byte, i) => acc + byte * 2 ** (8 * i), 0);
+
+/** Copies its one 8-bit input pin to its one 8-bit output pin; not shipped. */
+const pass8: ComponentDef = {
+  id: 'pass8',
+  name: { zh: '八位直通', en: '8-Bit Pass' },
+  category: 'wide',
+  inputs: [{ id: 'in', width: 8 }],
+  outputs: [{ id: 'out', width: 8 }],
+  cost: 1,
+  sequential: false,
+  stateBytes: 0,
+  evaluate: (i, o) => {
+    o[0] = toNumber(i[0] ?? 0);
+  },
+};
+
+const wideRegistry = createRegistry([...BASE_DEFS, pass8]);
+
+/**
+ * An 8-bit level: one `a` pin and one `out` pin, both 8 bits wide.
+ *
+ * `level_input` / `level_output` declare 1-bit pins, so the width a level needs
+ * lives on the INSTANCE (`params.width`) -- which is the half of spec §3.3 the
+ * kernel has to honour. The rows are generated from the level's own pin widths,
+ * so all 256 values are covered rather than a hand-picked handful.
+ */
+const wideIo: LevelSpec['io'] = {
+  inputs: [{ id: 'a', width: 8 }],
+  outputs: [{ id: 'out', width: 8 }],
+};
+
+const wideSpec: LevelSpec = {
+  ...andSpec,
+  id: 'test-wide-level',
+  chapter: 2,
+  io: wideIo,
+  threeStar: { gate: 1, delay: 1, tick: 0 },
+  checks: [
+    { kind: 'truth-table', rows: generateRows({ ...andSpec, io: wideIo }, ({ a }) => a ?? 0) },
+  ],
+};
+
+/** `IN_a --pass8--> OUT` at 8 bits, with each level pin's width on its instance. */
+function wideSolution(widths: { input?: number; output?: number } = {}): Graph {
+  const g = emptyGraph();
+  const inA = addInstance(g, 'level_input', 0, 0, 'IN_a');
+  const pass = addInstance(g, 'pass8', 60, 0);
+  const out = addInstance(g, 'level_output', 120, 0, 'OUT');
+  if (widths.input !== undefined) inA.params.width = widths.input;
+  if (widths.output !== undefined) out.params.width = widths.output;
+  connect(g, { inst: inA.id, port: 'out' }, { inst: pass.id, port: 'in' });
+  connect(g, { inst: pass.id, port: 'out' }, { inst: out.id, port: 'in' });
+  return g;
+}
+
+describe('level I/O width binding', () => {
+  it('carries an 8-bit level input through an 8-bit component and back out', () => {
+    // The defect this replaces: `level_input` is a 1-bit def, so before the
+    // widths were resolved per instance the guard would write eight bits into
+    // one level input's slot and across its neighbours' slots.
+    const outcome = runChecks(wideSolution({ input: 8, output: 8 }), wideRegistry, wideSpec);
+    expect(outcome.failures).toEqual([]);
+    expect(outcome.passed).toBe(true);
+  });
+
+  it('makes every 8-bit value round trip, not just the low bit', () => {
+    const net = compile(wideSolution({ input: 8, output: 8 }), wideRegistry);
+    const sim = new Simulation(net, wideRegistry);
+    const io = bindLevelIo(sim, net, wideSpec);
+    expect(io.mismatch).toBeUndefined();
+
+    io.reset();
+    for (const value of [0x00, 0x01, 0x55, 0x80, 0xab, 0xff]) {
+      io.writeInput('a', value);
+      sim.settle();
+      expect(io.readOutput('out'), `value=${value}`).toBe(value);
+    }
+  });
+
+  it('refuses a bound level input whose compiled width disagrees with the spec', () => {
+    // `IN_a` left at the def's 1 bit against a level pin declared 8 bits: the
+    // write would run past the pin's slots, so the check fails loudly (and
+    // without throwing out of `runChecks`) instead of corrupting the table.
+    const outcome = runChecks(wideSolution({ output: 8 }), wideRegistry, wideSpec);
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures[0]?.reason).toBe('missing-io');
+  });
+
+  it('refuses a bound level output whose compiled width disagrees with the spec', () => {
+    const outcome = runChecks(wideSolution({ input: 8 }), wideRegistry, wideSpec);
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures[0]?.reason).toBe('missing-io');
+  });
+
+  it('names the pin and both widths in the mismatch it reports', () => {
+    const net = compile(wideSolution({ input: 8 }), wideRegistry);
+    const io = bindLevelIo(new Simulation(net, wideRegistry), net, wideSpec);
+    expect(io.mismatch).toContain('OUT.in');
+    expect(io.mismatch).toContain('1');
+    expect(io.mismatch).toContain('8');
+  });
+
+  it('keeps the Phase-0 behaviour for a level pin the circuit does not contain', () => {
+    // No `IN_a` and no `OUT` at all: nothing to compare, nothing to report, and
+    // the pins read 0 / swallow writes exactly as they did in Phase 0.
+    const g = emptyGraph();
+    addInstance(g, 'pass8', 0, 0, 'pass');
+    const net = compile(g, wideRegistry);
+    const io = bindLevelIo(new Simulation(net, wideRegistry), net, wideSpec);
+    expect(io.mismatch).toBeUndefined();
+    expect(() => io.writeInput('a', 0xff)).not.toThrow();
+    expect(io.readOutput('out')).toBe(0);
+  });
+
+  it('binds an 8-bit level built by the build() fixture', () => {
+    // The fixture is how chapter 2's reference solutions will declare their
+    // level I/O, so it has to put each pin's width on the instance the same way
+    // a palette drop does -- otherwise every one of those levels would report
+    // the mismatch guarded above.
+    const g = build([
+      { kind: 'input', name: 'a', width: 8 },
+      { kind: 'output', from: 'a', width: 8 },
+    ]);
+    expect(g.instances.map((inst) => [inst.id, inst.params.width])).toEqual([
+      ['IN_a', 8],
+      ['OUT', 8],
+    ]);
+    expect(runChecks(g, registry, wideSpec).passed).toBe(true);
+  });
+
+  it('grades as a passable, three-star level at 8 bits', () => {
+    // The whole grading entry point rather than the check loop alone: the
+    // metrics are computed from the same graph and `threeStar` compares against
+    // them, so a wide level has to be winnable, not merely checkable.
+    const result = grade(wideSolution({ input: 8, output: 8 }), wideRegistry, wideSpec);
+    expect(result.failures).toEqual([]);
+    expect(result.passed).toBe(true);
+    expect(result.stars).toBe(3);
   });
 });
