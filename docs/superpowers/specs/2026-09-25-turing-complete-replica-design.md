@@ -100,8 +100,8 @@ interface ComponentDef {
 
 | 章节 | 解锁组件 |
 |---|---|
-| Ch1 基础逻辑 | `const_on` `const_off` `nand` `not` `and` `or` `nor` `xor` `xnor` `and3` `or3` `switch` `delay_line` |
-| Ch2 算术与存储 | `full_adder` `decoder1` `decoder2` `decoder3` `mem1` `reg8` `counter8` `mux8` `switch8` `splitter` `maker` `const8` `add8` `neg8` `and8` `or8` `not8` `nand8` `nor8` `xor8` `xnor8` `less_s` `less_u` `equal8` `shift_l8` `shift_r8` `ashr8` `rot_l8` `rot_r8` `mul8` `div8` `delay8` |
+| Ch1 基础逻辑 | `const_on` `const_off` `nand` `not` `and` `or` `nor` `xor` `xnor` `and3` `or3` `delay_line` |
+| Ch2 算术与存储 | `switch` `full_adder` `decoder1` `decoder2` `decoder3` `mem1` `reg8` `counter8` `mux8` `switch8` `splitter` `maker` `const8` `add8` `neg8` `and8` `or8` `not8` `nand8` `nor8` `xor8` `xnor8` `less_s` `less_u` `equal8` `shift_l8` `shift_r8` `ashr8` `rot_l8` `rot_r8` `mul8` `div8` `delay8` |
 | Ch3 CPU（OVERTURE） | `alu8` `regfile6` `instr_decoder` `pc8` `ram_prog` `halt` |
 | Ch4 编程 | 无新元件；解锁汇编 IDE 与调试器 |
 | Ch5 CPU2（LEG） | `ram256` `addr_reg` `ram_dual` `ram_fast` `ram_latency` |
@@ -112,6 +112,10 @@ interface ComponentDef {
 **关于栈**：`stack` **不是内核元件**。栈在源资料里由 LEG 的 RAM + ADDR 寄存器实现（从 RAM 末字节向下生长）。玩家在第 6 章亲手用 `ram256` + `addr_reg` 搭出来——这正是《栈》关卡要教的东西。把它做成内置元件会直接抹掉这一关的意义。
 
 **关于宽位组件**：16/32/64 位组件不是 60 多个独立内核实现，而是**同一套算子的宽度参数化**（`add8` / `add16` / `add32` / `add64` 共享一份定义生成器）。Ch6 完成后解锁宽位版本。
+
+**关于 `switch`**：源资料把它列在第 1 章，但第 1 章 12 关没有任何一关需要条件通断。为了让「元件只在真正用到时才出现」这条教学原则成立，`switch` 顺延到第 2 章，与 `switch8` 一起在第 32 关《1 位开关》解锁。
+
+**关卡 I/O 绑定约定**（实施计划中确定）：关卡不靠引脚同名绑定——引脚名由组件定义固定，改不了。`level_input` / `level_output` 是两个专用的 plumbing 元件（`hidden`，不进解锁体系、永远可用），实例 id 为 `IN_<引脚名>` 与 `OUT`（单输出）或 `OUT_<引脚名>`（多输出）。多比特引脚由实例 `params.width` 覆盖。
 
 ### 3.4 自定义组件（蓝图）
 
@@ -152,11 +156,14 @@ interface Simulation {
   load(graph: ComponentGraph): void;
   settle(): SettleReport;          // { iterations, stable, error? }
   tick(): void;                    // 时钟沿 + 稳定化
-  read(instanceId: string, portId: string): SignalValue;
+  read(slotBase: number, width: number): PortValue;
+  write(slotBase: number, width: number, v: PortValue): void;
   reset(): void;
   snapshot(): SimSnapshot;         // 用于渲染与调试
 }
 ```
+
+> **按槽位而非按名字读写**（实施计划中修正）：内核暴露的是槽位编号，引脚名到槽位的解析由 `Netlist` 承担——`net.inputBase('i3.a')` / `net.outputBase('i3.out')`。这样关卡绑定与评分器各自只解析一次名字，热路径上不再有字符串查找。
 
 `load` 接受已展开的图。展开器 `expand(graph, registry)` 负责把自定义组件与宽位组件内联，并产出 `Map<baseInstanceId, InstanceRef>` 供评分器统计代价。
 
@@ -181,9 +188,13 @@ interface Simulation {
     "inputs":  [{ "id": "a", "width": 1 }, { "id": "b", "width": 1 }],
     "outputs": [{ "id": "out", "width": 1 }]
   },
-  "tests": [
-    { "kind": "truth-table", "complete": true },
-    { "kind": "script", "steps": [ /* 时序用例 */ ] }
+  "checks": [
+    { "kind": "truth-table", "rows": [
+      { "inputs": { "a": 0, "b": 0 }, "outputs": { "out": 0 } },
+      { "inputs": { "a": 0, "b": 1 }, "outputs": { "out": 0 } },
+      { "inputs": { "a": 1, "b": 0 }, "outputs": { "out": 0 } },
+      { "inputs": { "a": 1, "b": 1 }, "outputs": { "out": 1 } }
+    ]}
   ],
   "targets": {
     "pass": {},
@@ -197,11 +208,13 @@ interface Simulation {
 
 | kind | 用途 | 覆盖关卡举例 |
 |---|---|---|
-| `truth-table` | 穷举全部输入组合（或给定部分行）比对期望输出 | 所有逻辑门、加器、解码器 |
+| `truth-table` | 显式给出全部输入组合与期望输出（**不允许省略 rows**，否则任何电路都会"通过"） | 所有逻辑门、加器、解码器 |
 | `script` | 逐拍驱动输入、在指定拍断言输出与内部状态 | 延迟线、锁存器、计数器、CPU、总线 |
 | `constraint` | 断言全局性质（如「4 个输入中至少 2 个为高」），由内核构造穷举向量 | 奇数个信号、成对的麻烦、信号计数 |
 | `fuzz` | 随机向量 + 固定种子，重复 N 轮 | 8 位运算、ALU |
 | `custom` | 关卡专属脚本钩子 | 迷宫、跳舞机、AI 对决、太空入侵 |
+
+> **实施分期**：阶段 0（第 1 章 12 关）只落地 `truth-table` / `script` / `constraint` 三种。`fuzz` 与 `custom` 必须分别在开始第 2 章（8 位运算）与第 3 章（CPU）之前实现。
 
 `custom` 是逃生舱，但必须只依赖内核公开接口，且必须能离线跑通（不抓网络、不读真实时间）。
 
