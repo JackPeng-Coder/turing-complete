@@ -253,7 +253,12 @@ describe('an empty circuit fails every level instead of throwing', () => {
 
 describe('the chapter 1 registry', () => {
   it('orders the whole chapter by level id', () => {
-    expect(LEVEL_ORDER).toEqual([...CH1_PART1, ...CH1_PART2].map((l) => l.id));
+    // Scoped to chapter 1's own twelve, exactly as `ch1-part1.test.ts` scopes its
+    // half: `LEVEL_ORDER` is the whole game now that chapter 2 is joined, and the
+    // game's total length is not this file's business -- chapter 1's order and
+    // ids are, and those are unchanged.
+    const chapter1 = [...CH1_PART1, ...CH1_PART2].map((l) => l.id);
+    expect(LEVEL_ORDER.slice(0, chapter1.length)).toEqual(chapter1);
   });
 
   it('resolves a level from either half of the chapter', () => {
@@ -265,6 +270,9 @@ describe('the chapter 1 registry', () => {
     expect(levelsOfChapter(1).map((l) => l.index)).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
     ]);
-    expect(levelsOfChapter(2)).toEqual([]);
+    // As in `ch1-part1.test.ts`: the `levelsOfChapter(2)` emptiness claim that
+    // used to sit here described the unjoined chapter, and chapter assembly made
+    // it false. Chapter 1's own listing above is unchanged, and chapter 2 is
+    // covered by `test/levels/unlock-chain.test.ts`.
   });
 });

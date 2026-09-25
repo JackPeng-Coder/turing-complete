@@ -10,6 +10,7 @@ import { LEVELS, LEVEL_ORDER, getLevel } from '../../src/levels/index';
 import type { Metrics } from '../../src/levels/grader';
 import { SCORE_WEIGHTS, gateCost, grade, scoreOf, starsOf } from '../../src/levels/grader';
 import { build } from '../fixtures/build';
+import { CH2_REFERENCES } from '../fixtures/ch2-references';
 
 const registry = createRegistry(BASE_DEFS);
 
@@ -384,7 +385,11 @@ describe('phase-0 regression: the chapter-1 reference scores are frozen', () => 
  *
  * It walks the SHIPPED level set (`LEVELS`, assembled by `src/levels/index.ts`),
  * not this file's table, so a level that ships later without a reference circuit
- * here fails the coverage case instead of being silently skipped.
+ * here fails the coverage case instead of being silently skipped. Chapter 2 is
+ * joined now, so the circuits come from two places -- this file's chapter-1 map
+ * and the shared chapter-2 fixture -- and the walk covers all 38 ids. It covered
+ * twelve before the join, which is the walk working as designed rather than a
+ * gap: it can only check the levels that ship.
  *
  * This is what fix round 2 turned on: pricing the built-in `and`/`or` on the NAND
  * basis moved `ch1-06` (2 -> 4), `ch1-10` (2 -> 6) and `ch1-11` (2 -> 4) past
@@ -393,17 +398,20 @@ describe('phase-0 regression: the chapter-1 reference scores are frozen', () => 
  * they still satisfy the levels they belong to.
  */
 describe('every shipped level: its reference solution meets its own three-star bounds', () => {
+  /** Chapter 1 from this file, chapter 2 from `test/fixtures/ch2-references.ts`. */
+  const shippedReference: Record<string, () => Graph> = { ...ch1Reference, ...CH2_REFERENCES };
+
   it('has a reference circuit for every shipped level', () => {
     expect(LEVELS.length).toBeGreaterThan(0);
-    const missing = LEVELS.map((l) => l.id).filter((id) => !(id in ch1Reference));
-    expect(missing, `no reference circuit in this file for: ${missing.join(', ')}`).toEqual([]);
+    const missing = LEVELS.map((l) => l.id).filter((id) => !(id in shippedReference));
+    expect(missing, `no reference circuit for: ${missing.join(', ')}`).toEqual([]);
   });
 
   for (const id of LEVEL_ORDER) {
     it(`${id} meets every bound its level declares`, () => {
       const level = getLevel(id);
-      const make = ch1Reference[id];
-      expect(make, `${id} has no reference circuit in this file`).toBeDefined();
+      const make = shippedReference[id];
+      expect(make, `${id} has no reference circuit`).toBeDefined();
       if (!make) return;
       const result = grade(make(), registry, level);
       expect(result.failures, JSON.stringify(result.failures)).toEqual([]);

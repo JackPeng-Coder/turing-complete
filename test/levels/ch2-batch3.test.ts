@@ -24,6 +24,7 @@ import type {
   TruthRow,
 } from '../../src/levels/spec';
 import { build, registry, type Node } from '../fixtures/build';
+import { CH2_BATCH3_REFERENCES, bits, logicEngine } from '../fixtures/ch2-references';
 
 /**
  * Chapter 2's third batch: levels 23-27 -- two's complement, the decoders and
@@ -554,237 +555,17 @@ describe('every level carries its sourced-vs-authored data comment', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Reference solutions
-// ---------------------------------------------------------------------------
-
-/** The eight `stem<bit>` ids a byte-wide maker is fed, low bit first. */
-function bits(stem: string): string[] {
-  return Array.from({ length: 8 }, (_, bit) => `${stem}${bit}`);
-}
-
 /**
- * Level 23's reference: the magnitude of a two's-complement byte.
+ * This batch's reference circuits, from the shared fixture.
  *
- * `abs(a) = (a XOR m) + m`, where `m` is the sign bit spread over all eight
- * positions: for a non-negative `a` the mask is 0 and this is `a + 0`; for a
- * negative one it is `(255 - a) + 1`, which is `-a` modulo 256. The `+ m` is the
- * whole trick -- subtracting 255 and adding 1 are the same eight-bit operation,
- * so the sign bit itself is the carry-in.
- *
- * Measured: one `xor8` (32) and one `add8` (72) = 104 NAND equivalents, two
- * gates deep; the splitter and the maker that spread the sign are wiring and
- * cost nothing on either metric.
+ * They were defined here until chapter 2 was assembled and the whole-set walk
+ * (`test/levels/level-buildability.test.ts`) needed all 26 chapter-2 circuits at
+ * once: the definitions moved to `test/fixtures/ch2-references.ts` and each batch
+ * test imports its own slice back. Nothing this file asserts changed -- the three
+ * blocks below still grade every circuit against the level it is filed under, so
+ * a circuit that stops passing its own level still fails here, loudly.
  */
-function absReference(): Graph {
-  const sign = 'sa.b7';
-  return build([
-    { kind: 'input', name: 'a', width: 8 },
-    { kind: 'part', def: 'splitter', id: 'sa', from: ['a'] },
-    {
-      kind: 'part',
-      def: 'maker',
-      id: 'mask',
-      from: Array.from({ length: 8 }, () => sign),
-    },
-    { kind: 'part', def: 'xor8', id: 'flip', from: ['a', 'mask'] },
-    { kind: 'part', def: 'const_off', id: 'z', from: [] },
-    { kind: 'part', def: 'add8', id: 'plus', from: ['flip', 'z', sign] },
-    { kind: 'output', from: 'plus', width: 8 },
-  ]);
-}
-
-/**
- * Level 24's reference: the level's own lesson, invert and add one.
- *
- * `~a + 1` with the byte NOT and the byte adder -- 8 + 72 = 80 NAND
- * equivalents, two gates deep. This is the construction the level's teaching
- * line names, and (per its data comment) the palette withholds `neg8`, whose
- * documented cell IS this circuit (8 NOTs + 8 full adders) and which would
- * therefore tie it on gates and beat it on delay.
- */
-function negateReference(): Graph {
-  return build([
-    { kind: 'input', name: 'a', width: 8 },
-    { kind: 'part', def: 'not8', id: 'flip', from: ['a'] },
-    { kind: 'part', def: 'const_off', id: 'z', from: [] },
-    { kind: 'part', def: 'const_on', id: 'one', from: [] },
-    { kind: 'part', def: 'add8', id: 'plus', from: ['flip', 'z', 'one'] },
-    { kind: 'output', from: 'plus', width: 8 },
-  ]);
-}
-
-/**
- * Level 25's reference: bit 0 is `NOT sel`, bit 1 is `sel`.
- *
- * One NAND equivalent, one gate deep: the Maker that packs the two bits into the
- * level's 2-bit output is wiring.
- */
-function oneBitDecoderReference(): Graph {
-  return build([
-    { kind: 'input', name: 'sel' },
-    { kind: 'part', def: 'not', id: 'n', from: ['sel'] },
-    { kind: 'part', def: 'const_off', id: 'z', from: [] },
-    { kind: 'part', def: 'maker', id: 'mk', from: ['n', 'sel', 'z'] },
-    { kind: 'output', from: 'mk', width: 2 },
-  ]);
-}
-
-/**
- * Level 26's reference: the two-level tree.
- *
- * The low two select bits are decoded into four minterms (`b2` is not needed
- * yet), and each of those is then combined with `b2` or its inverse -- three
- * NOTs, four ANDs, eight ANDs = 27 NAND equivalents, three gates deep. The flat
- * alternative, eight 3-input ANDs each taking all three literals, is 35 gates
- * on a path two deep, and the level's target is what separates them (it is
- * measured in `the decode targets separate the constructions they measure`).
- */
-function threeBitDecoderReference(): Graph {
-  const s0 = 'sp.b0';
-  const s1 = 'sp.b1';
-  const s2 = 'sp.b2';
-  const nodes: Node[] = [
-    { kind: 'input', name: 'sel', width: 3 },
-    { kind: 'part', def: 'splitter', id: 'sp', from: ['sel'] },
-    { kind: 'part', def: 'not', id: 'n0', from: [s0] },
-    { kind: 'part', def: 'not', id: 'n1', from: [s1] },
-    { kind: 'part', def: 'not', id: 'n2', from: [s2] },
-    // The four minterms of the low pair, in one-hot order.
-    { kind: 'part', def: 'and', id: 'lo0', from: ['n0', 'n1'] },
-    { kind: 'part', def: 'and', id: 'lo1', from: [s0, 'n1'] },
-    { kind: 'part', def: 'and', id: 'lo2', from: ['n0', s1] },
-    { kind: 'part', def: 'and', id: 'lo3', from: [s0, s1] },
-  ];
-  for (let out = 0; out < 8; out += 1) {
-    nodes.push({
-      kind: 'part',
-      def: 'and',
-      id: `o${out}`,
-      from: [`lo${out % 4}`, out < 4 ? 'n2' : s2],
-    });
-  }
-  nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: bits('o') });
-  nodes.push({ kind: 'output', from: 'mk', width: 8 });
-  return build(nodes);
-}
-
-/** How one reference-shaped logic engine differs from the level's spec. */
-interface EngineOptions {
-  /** Where the shift amount comes from: the spec's low three bits, or the whole byte. */
-  readonly amount?: 'low3' | 'byte';
-  /** What opcode 7 computes: the spec's arithmetic shift, or the logical one. */
-  readonly op7?: 'ashr' | 'logical';
-  /** Wire opcode `k`'s output to the next opcode's result instead of its own. */
-  readonly breakOp?: number;
-}
-
-/** One 2:1 mux in gates: `NAND(NAND(a, ~s), NAND(b, s))`, with `~s` shared. */
-function muxNodes(id: string, a: string, b: string, s: string, ns: string): Node[] {
-  return [
-    { kind: 'part', def: 'nand', id: `${id}a`, from: [a, ns] },
-    { kind: 'part', def: 'nand', id: `${id}b`, from: [b, s] },
-    { kind: 'part', def: 'nand', id: `${id}o`, from: [`${id}a`, `${id}b`] },
-  ];
-}
-
-/**
- * Level 27's reference: all eight results, then a 2:1-mux tree per bit.
- *
- * Eight results are computed in parallel from the level's own inputs -- `and8`,
- * `or8`, `xor8`, `not8`, `add8`, `add8(a, ~b, 1)`, `shift_l8` and `ashr8` -- and
- * each output bit is selected by a three-level tree of 2:1 muxes driven by
- * `op0`, `op1`, `op2` in that order. Fifty-six muxes at three NANDs each plus
- * the three inverters of the op bits is 171 gate equivalents on top of the 497
- * the eight results cost.
- *
- * The shift amount is `b`'s low three bits and costs no gate: a splitter hands
- * out `b0..b2` and a maker packs them back with zeroes above.
- *
- * The three options are what the counterexample blocks vary -- the level's own
- * reference takes all three defaults.
- */
-function logicEngine(options: EngineOptions = {}): Graph {
-  const amountId = 'amt';
-  const amountRef = options.amount === 'byte' ? 'b' : amountId;
-  const nodes: Node[] = [
-    { kind: 'input', name: 'a', width: 8 },
-    { kind: 'input', name: 'b', width: 8 },
-    { kind: 'input', name: 'op', width: 8 },
-    { kind: 'part', def: 'splitter', id: 'sa', from: ['a'] },
-    { kind: 'part', def: 'splitter', id: 'sb', from: ['b'] },
-    { kind: 'part', def: 'splitter', id: 'sop', from: ['op'] },
-    { kind: 'part', def: 'const_off', id: 'z', from: [] },
-    { kind: 'part', def: 'const_on', id: 'one', from: [] },
-    // The three opcode bits and their inverses, shared by all 56 muxes.
-    { kind: 'part', def: 'not', id: 'nop0', from: ['sop.b0'] },
-    { kind: 'part', def: 'not', id: 'nop1', from: ['sop.b1'] },
-    { kind: 'part', def: 'not', id: 'nop2', from: ['sop.b2'] },
-    // The eight results, in opcode order.
-    { kind: 'part', def: 'and8', id: 'r0', from: ['a', 'b'] },
-    { kind: 'part', def: 'or8', id: 'r1', from: ['a', 'b'] },
-    { kind: 'part', def: 'xor8', id: 'r2', from: ['a', 'b'] },
-    { kind: 'part', def: 'not8', id: 'r3', from: ['a'] },
-    { kind: 'part', def: 'add8', id: 'r4', from: ['a', 'b', 'z'] },
-    { kind: 'part', def: 'not8', id: 'nbb', from: ['b'] },
-    { kind: 'part', def: 'add8', id: 'r5', from: ['a', 'nbb', 'one'] },
-    // `b & 7` as wiring: the low three bits, zeroes above.
-    { kind: 'part', def: 'maker', id: amountId, from: ['sb.b0', 'sb.b1', 'sb.b2', 'z'] },
-    { kind: 'part', def: 'shift_l8', id: 'r6', from: ['a', amountRef] },
-    {
-      kind: 'part',
-      def: options.op7 === 'logical' ? 'shift_r8' : 'ashr8',
-      id: 'r7',
-      from: ['a', amountRef],
-    },
-  ];
-
-  // One splitter per result, so every bit of every result can be selected.
-  const results = Array.from({ length: 8 }, (_, op) => `r${op}`);
-  if (options.breakOp !== undefined) {
-    // A wiring change, not a new part: opcode k's mux input becomes opcode
-    // (k + 1)'s result, which is what makes this a circuit wrong on exactly one
-    // opcode. The result it no longer uses stays in the graph (and in the gate
-    // count) with its output unread.
-    results[options.breakOp] = `r${(options.breakOp + 1) % 8}`;
-  }
-  for (let op = 0; op < 8; op += 1) {
-    nodes.push({ kind: 'part', def: 'splitter', id: `s${op}`, from: [results[op]!] });
-  }
-
-  const selects = [
-    { s: 'sop.b0', ns: 'nop0' },
-    { s: 'sop.b1', ns: 'nop1' },
-    { s: 'sop.b2', ns: 'nop2' },
-  ];
-  const outBits: string[] = [];
-  for (let bit = 0; bit < 8; bit += 1) {
-    // Level 1 pairs opcodes that differ in op0, level 2 pairs those groups by
-    // op1, and level 3 -- one mux -- decides by op2.
-    let level = Array.from({ length: 8 }, (_, op) => `s${op}.b${bit}`);
-    for (const [stage, { s, ns }] of selects.entries()) {
-      const next: string[] = [];
-      for (let pair = 0; pair < level.length / 2; pair += 1) {
-        const id = `mux${bit}_${stage}_${pair}`;
-        nodes.push(...muxNodes(id, level[pair * 2]!, level[pair * 2 + 1]!, s, ns));
-        next.push(`${id}o`);
-      }
-      level = next;
-    }
-    outBits.push(level[0]!);
-  }
-  nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: outBits });
-  nodes.push({ kind: 'output', from: 'mk', width: 8 });
-  return build(nodes);
-}
-
-const solutions: Record<string, () => Graph> = {
-  'ch2-23-negative-numbers': absReference,
-  'ch2-24-signed-negator': negateReference,
-  'ch2-25-1-bit-decoder': oneBitDecoderReference,
-  'ch2-26-3-bit-decoder': threeBitDecoderReference,
-  'ch2-27-logic-engine': () => logicEngine(),
-};
+const solutions: Record<string, () => Graph> = CH2_BATCH3_REFERENCES;
 
 describe('reference solutions pass with three stars', () => {
   for (const [id, make] of Object.entries(solutions)) {

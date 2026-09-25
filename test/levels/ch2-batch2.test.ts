@@ -24,6 +24,14 @@ import type {
   TruthRow,
 } from '../../src/levels/spec';
 import { build, registry, type Node } from '../fixtures/build';
+import {
+  CH2_BATCH2_REFERENCES,
+  bits,
+  byteNotReference,
+  byteOrReference,
+  fullAdderReference,
+  rippleAdderReference,
+} from '../fixtures/ch2-references';
 
 /**
  * Chapter 2's second batch: levels 18-22 -- the byte operators and the adders.
@@ -538,126 +546,17 @@ describe('every level carries its sourced-vs-authored data comment', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Reference solutions
-// ---------------------------------------------------------------------------
-
 /**
- * `a | b`, bit by bit: two splitters, eight one-bit ORs, one maker.
+ * This batch's reference circuits, from the shared fixture.
  *
- * 8 x 3 = 24 NAND equivalents at depth 1. The `or8` this level's own reward
- * hands out ties it exactly (24 and 1 on the same basis), which is asserted in
- * `the byte operators tie the circuits the levels ask for` below.
+ * They were defined here until chapter 2 was assembled and the whole-set walk
+ * (`test/levels/level-buildability.test.ts`) needed all 26 chapter-2 circuits at
+ * once: the definitions moved to `test/fixtures/ch2-references.ts` and each batch
+ * test imports its own slice back. Nothing this file asserts changed -- the three
+ * blocks below still grade every circuit against the level it is filed under, so
+ * a circuit that stops passing its own level still fails here, loudly.
  */
-function byteOrReference(): Graph {
-  const nodes: Node[] = [
-    { kind: 'input', name: 'a', width: 8 },
-    { kind: 'input', name: 'b', width: 8 },
-    { kind: 'part', def: 'splitter', id: 'sa', from: ['a'] },
-    { kind: 'part', def: 'splitter', id: 'sb', from: ['b'] },
-  ];
-  for (let bit = 0; bit < 8; bit += 1) {
-    nodes.push({
-      kind: 'part',
-      def: 'or',
-      id: `o${bit}`,
-      from: [`sa.b${bit}`, `sb.b${bit}`],
-    });
-  }
-  nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: bits('o') });
-  nodes.push({ kind: 'output', from: 'mk', width: 8 });
-  return build(nodes);
-}
-
-/** `~a`, bit by bit: one splitter, eight NOTs, one maker. 8 gates at depth 1. */
-function byteNotReference(): Graph {
-  const nodes: Node[] = [
-    { kind: 'input', name: 'a', width: 8 },
-    { kind: 'part', def: 'splitter', id: 'sa', from: ['a'] },
-  ];
-  for (let bit = 0; bit < 8; bit += 1) {
-    nodes.push({ kind: 'part', def: 'not', id: `n${bit}`, from: [`sa.b${bit}`] });
-  }
-  nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: bits('n') });
-  nodes.push({ kind: 'output', from: 'mk', width: 8 });
-  return build(nodes);
-}
-
-/** The eight `stem<bit>` ids a byte-wide maker is fed, low bit first. */
-function bits(stem: string): string[] {
-  return Array.from({ length: 8 }, (_, bit) => `${stem}${bit}`);
-}
-
-/**
- * One full adder out of five gates: `sum` is the two XORs, `cout` is the OR of
- * the two carry terms. This is the construction level 21's source achievement
- * names (five components), which is why it is written the long way rather than
- * as `add8` or a registered `full_adder` -- neither is offered on that level.
- */
-function fullAdderNodes(bit: string, a: string, b: string, cin: string): Node[] {
-  return [
-    { kind: 'part', def: 'xor', id: `t${bit}`, from: [a, b] },
-    { kind: 'part', def: 'and', id: `g${bit}`, from: [a, b] },
-    { kind: 'part', def: 'xor', id: `s${bit}`, from: [`t${bit}`, cin] },
-    { kind: 'part', def: 'and', id: `p${bit}`, from: [`t${bit}`, cin] },
-    { kind: 'part', def: 'or', id: `c${bit}`, from: [`g${bit}`, `p${bit}`] },
-  ];
-}
-
-/** Level 21's reference: that one full adder, on the level's three pins. */
-function fullAdderReference(): Graph {
-  return build([
-    { kind: 'input', name: 'a' },
-    { kind: 'input', name: 'b' },
-    { kind: 'input', name: 'cin' },
-    ...fullAdderNodes('', 'a', 'b', 'cin'),
-    { kind: 'output', name: 'OUT_sum', from: 's' },
-    { kind: 'output', name: 'OUT_cout', from: 'c' },
-  ]);
-}
-
-/**
- * Level 22's reference: eight hand-built full adders in a ripple chain.
- *
- * Every number in that level's `threeStar` comes from this circuit measured by
- * `grade()`, and `three-star targets are the reference solutions own metrics`
- * below is what holds the data to it.
- */
-function rippleAdderReference(): Graph {
-  const nodes: Node[] = [
-    { kind: 'input', name: 'a', width: 8 },
-    { kind: 'input', name: 'b', width: 8 },
-    { kind: 'input', name: 'cin' },
-    { kind: 'part', def: 'splitter', id: 'sa', from: ['a'] },
-    { kind: 'part', def: 'splitter', id: 'sb', from: ['b'] },
-  ];
-  let carry = 'cin';
-  for (let bit = 0; bit < 8; bit += 1) {
-    nodes.push(...fullAdderNodes(String(bit), `sa.b${bit}`, `sb.b${bit}`, carry));
-    carry = `c${bit}`;
-  }
-  nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: bits('s') });
-  nodes.push({ kind: 'output', name: 'OUT_out', from: 'mk', width: 8 });
-  nodes.push({ kind: 'output', name: 'OUT_cout', from: carry, width: 1 });
-  return build(nodes);
-}
-
-const solutions: Record<string, () => Graph> = {
-  'ch2-18-byte-or': byteOrReference,
-  'ch2-19-byte-not': byteNotReference,
-  // sum = a XOR b, carry = a AND b: two gates, the smallest half adder there is.
-  'ch2-20-half-adder': () =>
-    build([
-      { kind: 'input', name: 'a' },
-      { kind: 'input', name: 'b' },
-      { kind: 'part', def: 'xor', id: 'sum', from: ['a', 'b'] },
-      { kind: 'part', def: 'and', id: 'carry', from: ['a', 'b'] },
-      { kind: 'output', name: 'OUT_sum', from: 'sum' },
-      { kind: 'output', name: 'OUT_carry', from: 'carry' },
-    ]),
-  'ch2-21-full-adder': fullAdderReference,
-  'ch2-22-adding-bytes': rippleAdderReference,
-};
+const solutions: Record<string, () => Graph> = CH2_BATCH2_REFERENCES;
 
 describe('reference solutions pass with three stars', () => {
   for (const [id, make] of Object.entries(solutions)) {

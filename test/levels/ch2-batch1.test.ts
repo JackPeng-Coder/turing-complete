@@ -17,6 +17,7 @@ import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
 import { grade } from '../../src/levels/grader';
 import type { LevelCheck, LevelSpec, TruthRow } from '../../src/levels/spec';
 import { build, registry } from '../fixtures/build';
+import { CH2_BATCH1_REFERENCES } from '../fixtures/ch2-references';
 
 /**
  * Chapter 2's first batch: levels 13-17.
@@ -196,8 +197,12 @@ describe('chapter 2, levels 13-17', () => {
     ]);
   });
 
-  it('is what the chapter assembly is built from', () => {
-    expect(CH2_LEVELS).toEqual([...CH2_BATCH1]);
+  it('is the first slice of the assembled chapter', () => {
+    // The chapter is all four batches now, so this batch's claim is about its
+    // PLACE in the join rather than about the join being this batch alone. The
+    // whole-chapter shape -- 26 levels, indices 13-38, contiguous and unique --
+    // is `test/levels/unlock-chain.test.ts`'s, and it walks every batch.
+    expect(CH2_LEVELS.slice(0, CH2_BATCH1.length)).toEqual([...CH2_BATCH1]);
   });
 
   it('shapes every level exactly as the brief fixes it', () => {
@@ -501,95 +506,17 @@ describe('every level carries its sourced-vs-authored data comment', () => {
   }
 });
 
-const solutions: Record<string, () => Graph> = {
-  // splitter + three XORs: one per pair, then the pair results.
-  'ch2-13-odd-number-of-signals': () =>
-    build([
-      { kind: 'input', name: 'a', width: 4 },
-      { kind: 'part', def: 'splitter', id: 'sp', from: ['a'] },
-      { kind: 'part', def: 'xor', id: 'p01', from: ['sp.b0', 'sp.b1'] },
-      { kind: 'part', def: 'xor', id: 'p23', from: ['sp.b2', 'sp.b3'] },
-      { kind: 'part', def: 'xor', id: 'parity', from: ['p01', 'p23'] },
-      { kind: 'output', from: 'parity' },
-    ]),
-  // (a&b) | (c&d) | ((a|b)&(c|d)): the six pairs, in three terms.
-  'ch2-14-double-trouble': () =>
-    build([
-      { kind: 'input', name: 'a' },
-      { kind: 'input', name: 'b' },
-      { kind: 'input', name: 'c' },
-      { kind: 'input', name: 'd' },
-      { kind: 'part', def: 'and', id: 'ab', from: ['a', 'b'] },
-      { kind: 'part', def: 'and', id: 'cd', from: ['c', 'd'] },
-      { kind: 'part', def: 'or', id: 'a_or_b', from: ['a', 'b'] },
-      { kind: 'part', def: 'or', id: 'c_or_d', from: ['c', 'd'] },
-      { kind: 'part', def: 'and', id: 'cross', from: ['a_or_b', 'c_or_d'] },
-      { kind: 'part', def: 'or3', id: 'at_least_two', from: ['ab', 'cd', 'cross'] },
-      { kind: 'output', from: 'at_least_two' },
-    ]),
-  // Two half adders, then the two partial sums added the same way.
-  'ch2-15-binary-racer': () =>
-    build([
-      { kind: 'input', name: 'a', width: 4 },
-      { kind: 'part', def: 'splitter', id: 'sp', from: ['a'] },
-      { kind: 'part', def: 'xor', id: 's01', from: ['sp.b0', 'sp.b1'] },
-      { kind: 'part', def: 'and', id: 'c01', from: ['sp.b0', 'sp.b1'] },
-      { kind: 'part', def: 'xor', id: 's23', from: ['sp.b2', 'sp.b3'] },
-      { kind: 'part', def: 'and', id: 'c23', from: ['sp.b2', 'sp.b3'] },
-      { kind: 'part', def: 'xor', id: 'bit0', from: ['s01', 's23'] },
-      { kind: 'part', def: 'and', id: 'carry', from: ['s01', 's23'] },
-      { kind: 'part', def: 'xor', id: 'carries', from: ['c01', 'c23'] },
-      { kind: 'part', def: 'xor', id: 'bit1', from: ['carries', 'carry'] },
-      { kind: 'part', def: 'and', id: 'bit2', from: ['c01', 'c23'] },
-      { kind: 'part', def: 'const_off', id: 'z', from: [] },
-      {
-        kind: 'part',
-        def: 'maker',
-        id: 'mk',
-        from: ['bit0', 'bit1', 'bit2', 'z', 'z', 'z', 'z', 'z'],
-      },
-      { kind: 'output', width: 3, from: 'mk' },
-    ]),
-  // The same tree, on four separate pins.
-  'ch2-16-counting-signals': () =>
-    build([
-      { kind: 'input', name: 'a' },
-      { kind: 'input', name: 'b' },
-      { kind: 'input', name: 'c' },
-      { kind: 'input', name: 'd' },
-      { kind: 'part', def: 'xor', id: 's01', from: ['a', 'b'] },
-      { kind: 'part', def: 'and', id: 'c01', from: ['a', 'b'] },
-      { kind: 'part', def: 'xor', id: 's23', from: ['c', 'd'] },
-      { kind: 'part', def: 'and', id: 'c23', from: ['c', 'd'] },
-      { kind: 'part', def: 'xor', id: 'bit0', from: ['s01', 's23'] },
-      { kind: 'part', def: 'and', id: 'carry', from: ['s01', 's23'] },
-      { kind: 'part', def: 'xor', id: 'carries', from: ['c01', 'c23'] },
-      { kind: 'part', def: 'xor', id: 'bit1', from: ['carries', 'carry'] },
-      { kind: 'part', def: 'and', id: 'bit2', from: ['c01', 'c23'] },
-      { kind: 'part', def: 'const_off', id: 'z', from: [] },
-      {
-        kind: 'part',
-        def: 'maker',
-        id: 'mk',
-        from: ['bit0', 'bit1', 'bit2', 'z', 'z', 'z', 'z', 'z'],
-      },
-      { kind: 'output', width: 3, from: 'mk' },
-    ]),
-  // A left shift is wiring: every bit of a moves up one slot, bit 0 is 0.
-  'ch2-17-double-the-number': () =>
-    build([
-      { kind: 'input', name: 'a', width: 8 },
-      { kind: 'part', def: 'splitter', id: 'sp', from: ['a'] },
-      { kind: 'part', def: 'const_off', id: 'z', from: [] },
-      {
-        kind: 'part',
-        def: 'maker',
-        id: 'mk',
-        from: ['z', 'sp.b0', 'sp.b1', 'sp.b2', 'sp.b3', 'sp.b4', 'sp.b5', 'sp.b6'],
-      },
-      { kind: 'output', width: 8, from: 'mk' },
-    ]),
-};
+/**
+ * This batch's reference circuits, from the shared fixture.
+ *
+ * They were defined here until chapter 2 was assembled and the whole-set walk
+ * (`test/levels/level-buildability.test.ts`) needed all 26 chapter-2 circuits at
+ * once: the definitions moved to `test/fixtures/ch2-references.ts` and each batch
+ * test imports its own slice back. Nothing this file asserts changed -- the three
+ * blocks below still grade every circuit against the level it is filed under, so
+ * a circuit that stops passing its own level still fails here, loudly.
+ */
+const solutions: Record<string, () => Graph> = CH2_BATCH1_REFERENCES;
 
 /** Circuits a player would plausibly build and that must be rejected. */
 const wrong: Record<string, () => Graph> = {

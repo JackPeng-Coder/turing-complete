@@ -292,6 +292,13 @@ describe('the level registry', () => {
     expect(levelsOfChapter(1).slice(0, CH1_PART1.length).map((l) => l.index)).toEqual([
       1, 2, 3, 4, 5, 6,
     ]);
-    expect(levelsOfChapter(2)).toEqual([]);
+    // `expect(levelsOfChapter(2)).toEqual([])` used to sit here. It was a claim
+    // about the UNJOINED chapter -- true only while chapter 2 was written but not
+    // appended -- and chapter assembly made it false by construction
+    // (`content/index.ts` appends chapter 2's 26 levels, 13-38). Nothing about
+    // chapter 1's registry changed, and chapter 2's shape is asserted where it
+    // belongs: contiguous indices and the whole-set join check in
+    // `test/levels/unlock-chain.test.ts` and
+    // `test/levels/level-buildability.test.ts`.
   });
 });

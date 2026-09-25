@@ -12,16 +12,20 @@ A from-scratch, from-NAND-to-CPU educational puzzle game that reimplements the *
 LevelHead's *Turing Complete*: you start with one primitive gate and build your way up, gate by gate,
 towards a working CPU.
 
-## What works today (Phase 0)
+## What works today (Phases 0–1)
 
 - **Chapter 1 — 12 levels**, from the NAND gate to a 4-bit binary reader.
+- **Chapter 2 — 26 levels (13–38)**: parity and counting, the byte operators, half and full
+  adders, two's complement, decoders, a logic-engine capstone, and the storage half — switch,
+  delay, clock source, selector, register, RAM and counter.
 - A **canvas wiring board**: place parts, drag wires, pan and zoom.
 - **Live truth-table checking** as you build.
 - **Gate / delay / tick scoring**, with a three-star target for every level.
 - **Progress saved to `localStorage`**, so a refresh keeps your stars.
 - A **chapter map** for navigating levels and seeing what is unlocked.
 
-Chapters 2–7 (arithmetic, memory, the OVERTURE and LEG CPUs, assembly) are planned but not built yet.
+Chapters 3–7 (the OVERTURE and LEG CPUs, programming, the assembly challenges and the sandbox) are
+planned but not built yet.
 
 ## Running it
 
@@ -69,7 +73,7 @@ Screenshots are written under `test-results/`, which Playwright wipes at the sta
 ```
 src/
   core/     simulator: signals, component registry + definitions, graph/netlist, settle & tick
-  levels/   LevelSpec types, checks, grader, and content/ (12 chapter-1 levels)
+  levels/   LevelSpec types, checks, grader, and content/ (38 levels: chapters 1–2)
   app/      application state, command/undo stack, progress
   ui/       DOM shell + Canvas board, palette, truth table, chapter map
   persist/  localStorage save and load
@@ -78,7 +82,7 @@ test/       Vitest unit/level tests and the Playwright smoke specs
 
 ## Contributing / scope
 
-Phase 0 covers chapter 1 only (12 levels). The full plan — 7 chapters, 82 levels, up to a working
+Phases 0–1 cover chapters 1–2 (38 of the plan's 82 levels). The full plan — 7 chapters, 82 levels, up to a working
 CPU and assembly challenges — is in [`docs/superpowers/plans/`](docs/superpowers/plans/); the design
 spec it follows is in [`docs/superpowers/specs/`](docs/superpowers/specs/).
 

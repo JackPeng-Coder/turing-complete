@@ -13,6 +13,7 @@ import { grade, type GradeResult } from '../../src/levels/grader';
 import { LEVELS, LEVEL_ORDER } from '../../src/levels/index';
 import type { LevelSpec } from '../../src/levels/spec';
 import { build, registry } from '../fixtures/build';
+import { CH2_REFERENCES } from '../fixtures/ch2-references';
 
 /**
  * The whole-set machine check: can the palette the app hands a first-time player
@@ -35,37 +36,33 @@ import { build, registry } from '../fixtures/build';
  * `allowedComponents` here would let this check and the app drift apart, which
  * is the failure mode it exists to catch.
  *
- * CHAPTER 2 IS NOT JOINED YET, so the shipped set below is `LEVELS` plus the
- * chapter-2 batches that exist but are not in it (`CH2_LEVELS`, the batch join
- * point). Until assembly lands -- a later task's job -- that means this walk
- * covers chapter 1 (joined, and reachable in the game) plus chapter 2 levels
- * 13-17 (shipped level data, reachable only through `CH2_LEVELS`). When
- * `content/index.ts` appends `CH2_LEVELS`, the filter below drops to nothing and
- * exactly the same tests cover all 17 ids with no edit to this file; a later
- * batch's levels join the walk the moment they are added to `CH2_LEVELS`.
+ * BOTH CHAPTERS ARE JOINED NOW, so the shipped set is `LEVELS` -- all 38 ids, no
+ * filter and no sibling list. This file used to carry a `NOT_JOINED_YET` slice
+ * (`CH2_LEVELS` filtered against `LEVEL_ORDER`) that covered chapter 2's
+ * written-but-unreachable levels; `content/index.ts` now appends that same
+ * array, the filter matched nothing, and it is gone. The join is asserted rather
+ * than assumed, by the `the assembled set` block below: 38 levels, chapter-2
+ * indices 13-38 contiguous and unique, and no id twice.
  *
- * THE REFERENCE SOLUTIONS ARE FILED HERE, deliberately. The per-chapter test
- * files keep their own copies -- they are what each level's three-star target is
- * measured from -- and this task may not edit the chapter-1 test files, so the
- * whole-set view has to carry the graphs it walks. The copy cannot rot quietly:
- * a test below grades every filed reference against the level it is filed under,
- * and the walk fails loudly if one stops passing. Hoisting the copies into
- * `test/fixtures/` is the cleanup once assembly lands.
+ * THE REFERENCE SOLUTIONS COME FROM TWO PLACES, and the asymmetry is scope
+ * rather than taste. Chapter 2's 26 graphs moved to
+ * `test/fixtures/ch2-references.ts`, which the four batch tests now share (that
+ * file's header explains the move); chapter 1's twelve are still written out
+ * below, because this task may not edit the chapter-1 test files that own them.
+ * Either way the copies cannot rot quietly: the tests below grade every filed
+ * reference against the level it is filed under, and the walk fails loudly if
+ * one stops passing.
  */
 
 /**
- * Chapter-2 levels that are shipped data but not in the game's order yet.
+ * Every level the repository ships, in the game's order.
  *
- * Assembly is a later task's file (`src/levels/content/index.ts`); this is the
- * one place that knows about the difference, so the walk can cover the levels
- * that exist without pretending they are reachable.
+ * `LEVELS` IS the game's order -- `levels/index.ts` re-exports `ALL_LEVELS`,
+ * which is chapter 1 followed by chapter 2 -- so nothing here re-sorts or
+ * re-filters it. A walk that derived its own order could agree with itself while
+ * disagreeing with the app, which is the failure this file exists to catch.
  */
-const NOT_JOINED_YET: readonly LevelSpec[] = CH2_LEVELS.filter(
-  (level) => !LEVEL_ORDER.includes(level.id),
-);
-
-/** Every level the repository ships, in the game's order: joined first, pending after it. */
-const SHIPPED: readonly LevelSpec[] = [...LEVELS, ...NOT_JOINED_YET];
+const SHIPPED: readonly LevelSpec[] = LEVELS;
 
 /** The shipped level with this id, or a loud failure -- `find` returns `undefined`. */
 function specOf(id: string): LevelSpec {
@@ -127,13 +124,15 @@ function paletteAt(index: number): Set<string> {
 }
 
 /**
- * Every shipped level's reference solution, copied from the test file that owns
- * it (see this file's header for why the copy exists and what keeps it honest).
+ * Every shipped level's reference solution.
  *
- * They are the graphs each level's three-star target was measured from, which is
- * what makes "the palette can build the reference" the right thing to assert:
- * the reference is the circuit a player is expected to reach, so a palette that
- * cannot build it cannot pass the level.
+ * Chapter 1's twelve are copied from the test files that own them (see this
+ * file's header for why the copy exists and what keeps it honest) and are the
+ * graphs each level's three-star target was measured from, which is what makes
+ * "the palette can build the reference" the right thing to assert: the reference
+ * is the circuit a player is expected to reach, so a palette that cannot build
+ * it cannot pass the level. Chapter 2's 26 are the shared fixture's, one entry
+ * per level in index order.
  */
 const REFERENCE_SOLUTIONS: Record<string, () => Graph> = {
   'ch1-01-crude-awakening': () =>
@@ -231,94 +230,46 @@ const REFERENCE_SOLUTIONS: Record<string, () => Graph> = {
       { kind: 'output', name: 'OUT_out1', from: 'b1' },
       { kind: 'output', name: 'OUT_out0', from: 'b0' },
     ]),
-  // splitter + three XORs: one per pair, then the pair results.
-  'ch2-13-odd-number-of-signals': () =>
-    build([
-      { kind: 'input', name: 'a', width: 4 },
-      { kind: 'part', def: 'splitter', id: 'sp', from: ['a'] },
-      { kind: 'part', def: 'xor', id: 'p01', from: ['sp.b0', 'sp.b1'] },
-      { kind: 'part', def: 'xor', id: 'p23', from: ['sp.b2', 'sp.b3'] },
-      { kind: 'part', def: 'xor', id: 'parity', from: ['p01', 'p23'] },
-      { kind: 'output', from: 'parity' },
-    ]),
-  // (a&b) | (c&d) | ((a|b)&(c|d)): the six pairs, in three terms.
-  'ch2-14-double-trouble': () =>
-    build([
-      { kind: 'input', name: 'a' },
-      { kind: 'input', name: 'b' },
-      { kind: 'input', name: 'c' },
-      { kind: 'input', name: 'd' },
-      { kind: 'part', def: 'and', id: 'ab', from: ['a', 'b'] },
-      { kind: 'part', def: 'and', id: 'cd', from: ['c', 'd'] },
-      { kind: 'part', def: 'or', id: 'a_or_b', from: ['a', 'b'] },
-      { kind: 'part', def: 'or', id: 'c_or_d', from: ['c', 'd'] },
-      { kind: 'part', def: 'and', id: 'cross', from: ['a_or_b', 'c_or_d'] },
-      { kind: 'part', def: 'or3', id: 'at_least_two', from: ['ab', 'cd', 'cross'] },
-      { kind: 'output', from: 'at_least_two' },
-    ]),
-  // Two half adders, then the two partial sums added the same way.
-  'ch2-15-binary-racer': () =>
-    build([
-      { kind: 'input', name: 'a', width: 4 },
-      { kind: 'part', def: 'splitter', id: 'sp', from: ['a'] },
-      { kind: 'part', def: 'xor', id: 's01', from: ['sp.b0', 'sp.b1'] },
-      { kind: 'part', def: 'and', id: 'c01', from: ['sp.b0', 'sp.b1'] },
-      { kind: 'part', def: 'xor', id: 's23', from: ['sp.b2', 'sp.b3'] },
-      { kind: 'part', def: 'and', id: 'c23', from: ['sp.b2', 'sp.b3'] },
-      { kind: 'part', def: 'xor', id: 'bit0', from: ['s01', 's23'] },
-      { kind: 'part', def: 'and', id: 'carry', from: ['s01', 's23'] },
-      { kind: 'part', def: 'xor', id: 'carries', from: ['c01', 'c23'] },
-      { kind: 'part', def: 'xor', id: 'bit1', from: ['carries', 'carry'] },
-      { kind: 'part', def: 'and', id: 'bit2', from: ['c01', 'c23'] },
-      { kind: 'part', def: 'const_off', id: 'z', from: [] },
-      {
-        kind: 'part',
-        def: 'maker',
-        id: 'mk',
-        from: ['bit0', 'bit1', 'bit2', 'z', 'z', 'z', 'z', 'z'],
-      },
-      { kind: 'output', width: 3, from: 'mk' },
-    ]),
-  // The same tree, on four separate pins.
-  'ch2-16-counting-signals': () =>
-    build([
-      { kind: 'input', name: 'a' },
-      { kind: 'input', name: 'b' },
-      { kind: 'input', name: 'c' },
-      { kind: 'input', name: 'd' },
-      { kind: 'part', def: 'xor', id: 's01', from: ['a', 'b'] },
-      { kind: 'part', def: 'and', id: 'c01', from: ['a', 'b'] },
-      { kind: 'part', def: 'xor', id: 's23', from: ['c', 'd'] },
-      { kind: 'part', def: 'and', id: 'c23', from: ['c', 'd'] },
-      { kind: 'part', def: 'xor', id: 'bit0', from: ['s01', 's23'] },
-      { kind: 'part', def: 'and', id: 'carry', from: ['s01', 's23'] },
-      { kind: 'part', def: 'xor', id: 'carries', from: ['c01', 'c23'] },
-      { kind: 'part', def: 'xor', id: 'bit1', from: ['carries', 'carry'] },
-      { kind: 'part', def: 'and', id: 'bit2', from: ['c01', 'c23'] },
-      { kind: 'part', def: 'const_off', id: 'z', from: [] },
-      {
-        kind: 'part',
-        def: 'maker',
-        id: 'mk',
-        from: ['bit0', 'bit1', 'bit2', 'z', 'z', 'z', 'z', 'z'],
-      },
-      { kind: 'output', width: 3, from: 'mk' },
-    ]),
-  // A left shift is wiring: every bit of a moves up one slot, bit 0 is 0.
-  'ch2-17-double-the-number': () =>
-    build([
-      { kind: 'input', name: 'a', width: 8 },
-      { kind: 'part', def: 'splitter', id: 'sp', from: ['a'] },
-      { kind: 'part', def: 'const_off', id: 'z', from: [] },
-      {
-        kind: 'part',
-        def: 'maker',
-        id: 'mk',
-        from: ['z', 'sp.b0', 'sp.b1', 'sp.b2', 'sp.b3', 'sp.b4', 'sp.b5', 'sp.b6'],
-      },
-      { kind: 'output', width: 8, from: 'mk' },
-    ]),
+  // Chapter 2, levels 13-38, from the shared fixture the batch tests also use.
+  ...CH2_REFERENCES,
 };
+
+describe('the assembled set is chapter 1 then chapter 2, in order', () => {
+  it('ships 38 levels with no id twice', () => {
+    // The join's arithmetic, and the two halves of it. A duplicate id would not
+    // change either length -- `LEVEL_ORDER` is a list of ids, so the game would
+    // simply have two levels by that name and one of them unreachable -- which
+    // is exactly why uniqueness is asserted rather than implied by the count.
+    expect(LEVELS.length).toBe(38);
+    expect(LEVEL_ORDER.length).toBe(38);
+    expect(new Set(LEVEL_ORDER).size).toBe(38);
+  });
+
+  it('keeps chapter 2 whole, in index order, exactly where its own join put it', () => {
+    // `CH2_LEVELS` is the chapter's own entry point (`content/ch2/index.ts`), so
+    // this is the claim that matters about the join: what the chapter says it
+    // exports, in the order it says it, is what the game's order contains --
+    // nothing lost, nothing reordered, nothing doubled.
+    const inGame = LEVELS.filter((level) => level.chapter === 2);
+    expect(inGame.map((level) => level.id)).toEqual(CH2_LEVELS.map((level) => level.id));
+    expect(inGame).toHaveLength(26);
+    // Contiguous AND unique: 13..38 with no gap and no repeat, which is what
+    // `isUnlocked` (the immediate predecessor) assumes when it walks the order.
+    expect(inGame.map((level) => level.index)).toEqual(
+      Array.from({ length: 26 }, (_, offset) => 13 + offset),
+    );
+    expect(new Set(inGame.map((level) => level.index)).size).toBe(26);
+  });
+
+  it('puts chapter 1 first, and only chapter 1', () => {
+    // The join appends; it does not merge or interleave. This is the half of the
+    // claim that stops a chapter-2 level landing in the middle of chapter 1.
+    expect(LEVELS.filter((level) => level.chapter === 1)).toHaveLength(12);
+    expect(LEVEL_ORDER.slice(0, 12)).toEqual(
+      LEVELS.filter((level) => level.chapter === 1).map((level) => level.id),
+    );
+  });
+});
 
 describe('every shipped level can build its own reference solution', () => {
   it('files a reference solution for every shipped level', () => {

@@ -27,6 +27,12 @@ import type {
   TruthRow,
 } from '../../src/levels/spec';
 import { build, registry, type Node } from '../fixtures/build';
+import {
+  CH2_BATCH4_REFERENCES,
+  bits,
+  circularDependencyReference,
+  delayedLinesReference,
+} from '../fixtures/ch2-references';
 
 /**
  * Chapter 2's fourth batch: levels 28-38 -- the storage and timing half of the
@@ -182,11 +188,6 @@ function sameInputs(a: ScriptStep, b: ScriptStep): boolean {
   const pins = new Set([...Object.keys(a.inputs ?? {}), ...Object.keys(b.inputs ?? {})]);
   for (const pin of pins) if (driven(a, pin) !== driven(b, pin)) return false;
   return true;
-}
-
-/** The eight `stem<bit>` ids a byte-wide maker is fed, low bit first. */
-function bits(stem: string): string[] {
-  return Array.from({ length: 8 }, (_, bit) => `${stem}${bit}`);
 }
 
 /**
@@ -853,38 +854,6 @@ describe('every level carries its sourced-vs-authored data comment', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Reference solutions
-// ---------------------------------------------------------------------------
-
-/**
- * Level 28's reference: the loop, closed through a Delay Line.
- *
- * `next = (set AND value) OR (NOT set AND out)`, with `out` the Delay Line's
- * published state -- deliberately built from two Switches rather than an AND
- * plus a NOT plus an AND, because the Switch is one delay unit while the AND
- * cell is two, and the carry path through `set` is what sets this level's delay
- * (the `switch` is offered on this level).
- *
- * Measured: `not` (1) + two `switch` (2 each) + `or` (3) = 8 NAND equivalents on
- * a path three components deep, with the Delay Line free on both metrics. The
- * graph really does contain a feedback loop -- `validateGraph` reports it as a
- * warning -- which is what makes this reference the one the level's stability
- * assertion is about.
- */
-function circularDependencyReference(): Graph {
-  return build([
-    { kind: 'input', name: 'set' },
-    { kind: 'input', name: 'value' },
-    { kind: 'part', def: 'not', id: 'nset', from: ['set'] },
-    { kind: 'part', def: 'switch', id: 'take', from: ['value', 'set'] },
-    { kind: 'part', def: 'switch', id: 'hold', from: ['d', 'nset'] },
-    { kind: 'part', def: 'or', id: 'next', from: ['take', 'hold'] },
-    { kind: 'part', def: 'delay_line', id: 'd', from: ['next'] },
-    { kind: 'output', from: 'd' },
-  ]);
-}
-
 /** The packaged version of the same latch: `mem1`, whose pins are this level's. */
 function mem1Latch(): Graph {
   return build([
@@ -892,15 +861,6 @@ function mem1Latch(): Graph {
     { kind: 'input', name: 'value' },
     { kind: 'part', def: 'mem1', id: 'm', from: ['set', 'value'] },
     { kind: 'output', from: 'm' },
-  ]);
-}
-
-/** Level 29's reference: the 8-bit Delay Line this level hands out. */
-function delayedLinesReference(): Graph {
-  return build([
-    { kind: 'input', name: 'a', width: 8 },
-    { kind: 'part', def: 'delay8', id: 'd', from: ['a'] },
-    { kind: 'output', width: 8, from: 'd' },
   ]);
 }
 
@@ -930,34 +890,6 @@ function reg8AsDelay(): Graph {
 }
 
 /**
- * Level 30's reference: the clock source.
- *
- * `next = out XOR enable` fed back into a 1-Bit Memory whose `set` is tied high,
- * so every edge samples it. XOR with 1 is "invert", XOR with 0 is "keep", so the
- * same gate is both the oscillation and the gate -- which is why the level costs
- * one XOR (4 NAND equivalents, one delay unit deep) and nothing else.
- */
-function oddTicksReference(): Graph {
-  return build([
-    { kind: 'input', name: 'enable' },
-    { kind: 'part', def: 'const_on', id: 'one', from: [] },
-    { kind: 'part', def: 'mem1', id: 'm', from: ['one', 'next'] },
-    { kind: 'part', def: 'xor', id: 'next', from: ['m', 'enable'] },
-    { kind: 'output', from: 'm' },
-  ]);
-}
-
-/** Level 31's reference: one XOR is conditional inversion. */
-function bitInverterReference(): Graph {
-  return build([
-    { kind: 'input', name: 'a' },
-    { kind: 'input', name: 'inv' },
-    { kind: 'part', def: 'xor', id: 'x', from: ['a', 'inv'] },
-    { kind: 'output', from: 'x' },
-  ]);
-}
-
-/**
  * The same function spelled as a sum of products: `(a AND NOT inv) OR (NOT a AND
  * inv)`.
  *
@@ -979,16 +911,6 @@ function sumOfProductsInverter(): Graph {
   ]);
 }
 
-/** Level 32's reference: one AND is the conditional pass. */
-function bitSwitchReference(): Graph {
-  return build([
-    { kind: 'input', name: 'a' },
-    { kind: 'input', name: 'on' },
-    { kind: 'part', def: 'and', id: 'g', from: ['a', 'on'] },
-    { kind: 'output', from: 'g' },
-  ]);
-}
-
 /** The chapter's own part for the same circuit: the 1-bit Switch. */
 function switchPart(): Graph {
   return build([
@@ -996,17 +918,6 @@ function switchPart(): Graph {
     { kind: 'input', name: 'on' },
     { kind: 'part', def: 'switch', id: 's', from: ['a', 'on'] },
     { kind: 'output', from: 's' },
-  ]);
-}
-
-/** Level 33's and level 34's reference: the 8-Bit Multiplexer. */
-function selectorReference(): Graph {
-  return build([
-    { kind: 'input', name: 'a', width: 8 },
-    { kind: 'input', name: 'b', width: 8 },
-    { kind: 'input', name: 'sel' },
-    { kind: 'part', def: 'mux8', id: 'm', from: ['a', 'b', 'sel'] },
-    { kind: 'output', width: 8, from: 'm' },
   ]);
 }
 
@@ -1040,16 +951,6 @@ function gateBuiltSelector(): Graph {
   return build(nodes);
 }
 
-/** Level 35's reference: the 1-Bit Memory, whose `set` is the load enable. */
-function savingGracefullyReference(): Graph {
-  return build([
-    { kind: 'input', name: 'd' },
-    { kind: 'input', name: 'load' },
-    { kind: 'part', def: 'mem1', id: 'm', from: ['load', 'd'] },
-    { kind: 'output', from: 'm' },
-  ]);
-}
-
 /**
  * Level 35's hand-built alternative: the same loop level 28's reference builds,
  * wired to this level's pin names (`d` / `load`).
@@ -1071,17 +972,6 @@ function savingGracefullyByLoop(): Graph {
   ]);
 }
 
-/** Level 36's reference: the 8-Bit Register this level's reward list introduces. */
-function savingBytesReference(): Graph {
-  return build([
-    { kind: 'input', name: 'd', width: 8 },
-    { kind: 'input', name: 'load' },
-    { kind: 'part', def: 'const_off', id: 'z', from: [] },
-    { kind: 'part', def: 'reg8', id: 'r', from: ['d', 'load', 'z'] },
-    { kind: 'output', width: 8, from: 'r' },
-  ]);
-}
-
 /** The same byte-wide conditional write, one 1-Bit Memory per bit. */
 function eightOneBitMemories(): Graph {
   const nodes: Node[] = [
@@ -1094,50 +984,6 @@ function eightOneBitMemories(): Graph {
   }
   nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: bits('m') });
   nodes.push({ kind: 'output', width: 8, from: 'mk' });
-  return build(nodes);
-}
-
-/** Level 37's reference: the 256-byte RAM, which is the whole little box. */
-function littleBoxReference(): Graph {
-  return build([
-    { kind: 'input', name: 'd', width: 8 },
-    { kind: 'input', name: 'addr', width: 8 },
-    { kind: 'input', name: 'load' },
-    { kind: 'part', def: 'ram8', id: 'm', from: ['d', 'addr', 'load'] },
-    { kind: 'output', width: 8, from: 'm' },
-  ]);
-}
-
-/**
- * Level 38's reference: the register plus a hand-built incrementer.
- *
- * `bit0 = NOT x0`, `bit_i = x_i XOR c_i`, `c_(i+1) = x_i AND c_i` with `c_1 = x0`;
- * the last carry is never needed because there is no carry-out pin. That is one
- * NOT, seven XORs and six ANDs -- measured 41 NAND equivalents on a path seven
- * components deep -- wired into the register's `d`, with `en` on `load` and the
- * level's `reset` on `reset` (so `reset` beats `en` by the register's own rule,
- * with no extra gate).
- */
-function counterReference(): Graph {
-  const nodes: Node[] = [
-    { kind: 'input', name: 'en' },
-    { kind: 'input', name: 'reset' },
-    { kind: 'part', def: 'reg8', id: 'r', from: ['mk', 'en', 'reset'] },
-    { kind: 'part', def: 'splitter', id: 'sp', from: ['r'] },
-    { kind: 'part', def: 'not', id: 'b0', from: ['sp.b0'] },
-  ];
-  const outBits = ['b0'];
-  let carry = 'sp.b0';
-  for (let bit = 1; bit < 8; bit += 1) {
-    nodes.push({ kind: 'part', def: 'xor', id: `b${bit}`, from: [`sp.b${bit}`, carry] });
-    outBits.push(`b${bit}`);
-    if (bit < 7) {
-      nodes.push({ kind: 'part', def: 'and', id: `c${bit}`, from: [`sp.b${bit}`, carry] });
-      carry = `c${bit}`;
-    }
-  }
-  nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: outBits });
-  nodes.push({ kind: 'output', width: 8, from: 'r' });
   return build(nodes);
 }
 
@@ -1164,19 +1010,17 @@ function counterPart(): Graph {
   ]);
 }
 
-const solutions: Record<string, () => Graph> = {
-  'ch2-28-circular-dependency': circularDependencyReference,
-  'ch2-29-delayed-lines': delayedLinesReference,
-  'ch2-30-odd-ticks': oddTicksReference,
-  'ch2-31-bit-inverter': bitInverterReference,
-  'ch2-32-bit-switch': bitSwitchReference,
-  'ch2-33-input-selector': selectorReference,
-  'ch2-34-the-bus': selectorReference,
-  'ch2-35-saving-gracefully': savingGracefullyReference,
-  'ch2-36-saving-bytes': savingBytesReference,
-  'ch2-37-little-box': littleBoxReference,
-  'ch2-38-counter': counterReference,
-};
+/**
+ * This batch's reference circuits, from the shared fixture.
+ *
+ * They were defined here until chapter 2 was assembled and the whole-set walk
+ * (`test/levels/level-buildability.test.ts`) needed all 26 chapter-2 circuits at
+ * once: the definitions moved to `test/fixtures/ch2-references.ts` and each batch
+ * test imports its own slice back. Nothing this file asserts changed -- the three
+ * blocks below still grade every circuit against the level it is filed under, so
+ * a circuit that stops passing its own level still fails here, loudly.
+ */
+const solutions: Record<string, () => Graph> = CH2_BATCH4_REFERENCES;
 
 describe('reference solutions pass with three stars', () => {
   for (const [id, make] of Object.entries(solutions)) {

@@ -81,22 +81,22 @@ test/
 
 **顺序调整说明（重要）**：源资料把《或非门》(NOR) 排在第 5、《或门》(OR) 排在第 6，但 NOR 的常规解法依赖 OR 或依赖德摩根律的 NOT+NAND，两种前置都在它后面。为保证「每关只依赖已解锁组件」这条硬规则，本计划把 **OR 与 NOR 对调**，其余顺序不动。关卡仍是纯数据，若你想恢复原顺序，只改 `content/ch1/*.ts` 的 `index` 与顺序即可。
 
-**表格说明**：下表只是速览，**权威定义是 Task 8 / Task 9 里的代码块**（即 `src/levels/content/ch1/*.ts`）。表格与代码块冲突时一律以代码块为准。「上」指上一行（上一关）的允许组件。
+**表格说明**：下表由 `src/levels/content/ch1/*.ts` 的关卡数据**重新生成**（第 1 阶段收尾、第 2 章装配时），不再手写——旧表的 `gate`/`delay` 目标列停在 NAND 计价修正之前（第 6、10、11 关），第 12 关的「解锁」列还漏掉了 `mem1`。列含义：「上」指上一行（上一关）的允许组件，「同上」表示与上一关相同；`level_input` / `level_output` 是每关都有的 plumbing 元件，不列出；「验证器」列是检查种类与三星目标。**权威定义始终是关卡数据本身**，本表只是速览；`test/levels/level-buildability.test.ts` 与 `test/levels/unlock-chain.test.ts` 是它的机器检查。
 
 | # | id | 名称 | 允许组件 | 输入/输出 | 验证器 | 解锁 |
 |---|---|---|---|---|---|---|
-| 1 | `ch1-01-crude-awakening` | 原力觉醒 | `const_on` `const_off` | 无 / `out:1` | truth-table（恒为 1） | `nand` |
-| 2 | `ch1-02-nand-gate` | 与非门 | `nand` | `a,b` / `out` | truth-table | `not` |
-| 3 | `ch1-03-not-gate` | 非门 | `nand` | `a` / `out` | truth-table | `and` |
-| 4 | `ch1-04-and-gate` | 与门 | `nand` `not` | `a,b` / `out` | truth-table | `or` |
-| 5 | `ch1-05-or-gate` | 或门 | `nand` `not` `and` | `a,b` / `out` | truth-table | `nor` |
-| 6 | `ch1-06-nor-gate` | 或非门 | `nand` `not` `and` `or` | `a,b` / `out` | truth-table，三星 `gate:2` `delay:2` | `const_on` `const_off` |
-| 7 | `ch1-07-always-on` | 高电平 | `const_on` | 无 / `out` | truth-table（恒为 1） | `delay_line` `xor` |
-| 8 | `ch1-08-second-tick` | 第二刻 | 上 + `delay_line` | 无 / `out` | script（tick 0/1 为 0，tick 2/3 为 1；三星 `tick:3`） | `and3` |
-| 9 | `ch1-09-xor-gate` | 异或门 | 上 + `nand` `not` `and` `or` `and3` | `a,b` / `out` | truth-table，三星 `gate:4` | `or3` |
-| 10 | `ch1-10-bigger-or-gate` | 三路或门 | 上 + `xor` | `a,b,c` / `out` | truth-table，三星 `gate:2` `delay:2` | `xnor` |
-| 11 | `ch1-11-bigger-and-gate` | 三路与门 | 上 + `or3` | `a,b,c` / `out` | truth-table，三星 `gate:2` `delay:2` | — |
-| 12 | `ch1-12-binary-racer` | 二进制速算 | 全部 | `b3..b0` / `out3..out0` | truth-table（b3..b0 穷举 0–15，四位直通） | — |
+| 1 | `ch1-01-crude-awakening` | 原力觉醒 | `const_on` `const_off` | 无 / out | truth-table，三星 `gate:0` `delay:0` `tick:0` | `nand` |
+| 2 | `ch1-02-nand-gate` | 与非门 | `nand` | a,b / out | truth-table，三星 `gate:1` `delay:1` `tick:0` | `not` |
+| 3 | `ch1-03-not-gate` | 非门 | 同上 | a / out | truth-table，三星 `gate:1` `delay:1` `tick:0` | `and` |
+| 4 | `ch1-04-and-gate` | 与门 | 上 + `not` | a,b / out | truth-table，三星 `gate:2` `delay:2` `tick:0` | `or` |
+| 5 | `ch1-05-or-gate` | 或门 | 上 + `and` | a,b / out | truth-table，三星 `gate:3` `delay:2` `tick:0` | `nor` |
+| 6 | `ch1-06-nor-gate` | 或非门 | 上 + `or` | a,b / out | truth-table，三星 `gate:4` `delay:2` `tick:0` | `const_on` `const_off` |
+| 7 | `ch1-07-always-on` | 高电平 | `const_on` | 无 / out | truth-table，三星 `gate:0` `delay:0` `tick:0` | `delay_line` `xor` |
+| 8 | `ch1-08-second-tick` | 第二刻 | 上 + `delay_line` | 无 / out | script，三星 `gate:0` `delay:0` `tick:3` | `and3` |
+| 9 | `ch1-09-xor-gate` | 异或门 | 上 + `nand` `not` `and` `or` `and3` | a,b / out | truth-table，三星 `gate:4` `delay:3` `tick:0` | `or3` |
+| 10 | `ch1-10-bigger-or-gate` | 三路或门 | 上 + `xor` | a,b,c / out | truth-table，三星 `gate:6` `delay:2` `tick:0` | `xnor` |
+| 11 | `ch1-11-bigger-and-gate` | 三路与门 | 上 + `or3` | a,b,c / out | truth-table，三星 `gate:4` `delay:2` `tick:0` | — |
+| 12 | `ch1-12-binary-racer` | 二进制速算 | 上 + `xnor` | b3,b2,b1,b0 / out3,out2,out1,out0 | truth-table，三星 `gate:0` `delay:0` `tick:0` | `mem1` |
 
 **第 12 关的重新设计**：源资料的《二进制速算》是限时小游戏（源资料同时提到《负数》也是限时小游戏）。限时玩法要求真实时钟，而全局约束禁止验证器依赖真实时间。本阶段把它实现为**确定性版**：关卡生成 4 位目标数并要求玩家用 4 个输入位复现它，逐用例穷举 0–15，全部一致才算通过——保留了「快速读二进制」的教学目的，同时可回归测试。
 
