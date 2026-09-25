@@ -31,9 +31,14 @@ export interface SignalTable {
  * pinned to what a `number` can actually stage instead of admitting a value the
  * writer would silently truncate. A `Uint8Array` is the carrier above 32 bits,
  * and `assertWidth` sizes it for the full width.
+ *
+ * Both arms reject negatives, and `v >= 0` is no more redundant on the fast path
+ * than the bound is: `setPort`'s number branch runs the value through `ToUint32`,
+ * so an accepted `-1` would be staged as `0xffff_ffff` -- a negative
+ * reinterpreted as a full unsigned port rather than refused.
  */
 function fitsWidth(v: number, width: number): boolean {
-  if (width >= 32) return v <= 0xffff_ffff;
+  if (width >= 32) return v >= 0 && v <= 0xffff_ffff;
   return v >= 0 && v < 2 ** width;
 }
 

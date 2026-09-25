@@ -122,14 +122,19 @@ export function clampWidth(width: number | undefined): number {
  * `2 ** w - 1` is exact for every `w` up to 32 (doubles stay exact well past
  * `2 ** 32`), so no width needs a special case.
  *
- * RECORDED LIMITATION, NOT FIXED HERE: correcting this mask is necessary but not
- * sufficient for a 31-bit port to work end to end. `fitsWidth` (`core/signal.ts`)
- * bounds a narrow value with `v < 1 << width`, and `1 << 31` is `-2 ** 31`, so
- * `assertWidth(v, 31)` rejects EVERY value -- `assertWidth(0, 31)` throws today.
- * Widths 1..30 and 32 are unaffected. The repair is one line in that guard
- * (`v < 2 ** width`), but `signal.ts` is outside this task's file scope, so the
- * defect is recorded here rather than edited: the two returns below are correct,
- * and a caller at width 31 still cannot stage them.
+ * The form is required, not stylistic: `(1 << w) - 1` goes negative at `w = 31`
+ * (`1 << 31` is `-2 ** 31`), and a negative mask is exactly what made a 31-bit port
+ * unstageable while `fitsWidth` (`core/signal.ts`) still bounded a narrow value with
+ * `v < 1 << width`. That matching guard was fixed in the same phase (`c830f50`: it now
+ * reads `v >= 0 && v < 2 ** width`), so width 31 stages these masks normally -- the
+ * limitation this paragraph used to record is resolved, and `2 ** w - 1` is still the
+ * required form. What still bounds the top of the admitted range is `MAX_WIDE_WIDTH` =
+ * 32 together with the `number` carrier `maskOf` returns: `maskOf(32)` is
+ * `0xffff_ffff`, the widest mask any caller here asks for and the widest value
+ * `fitsWidth` admits, so `w > 32` is the `Uint8Array` path's business (the old
+ * `(1 << width) - 1` form also survives in `core/fields.ts`'s `extractField` /
+ * `insertField`, a dormant pair with no `src/` caller that is recorded here and not
+ * touched).
  */
 function maskOf(w: number): number {
   return 2 ** w - 1;

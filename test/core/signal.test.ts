@@ -150,6 +150,28 @@ describe('assertWidth', () => {
     expect(() => assertWidth(0x1_0000_0000, 32)).toThrow(/does not fit a 32-bit port/);
   });
 
+  it('rejects a negative value at width 32, so the fast path is non-negative too', () => {
+    // The `width >= 32` arm read `v <= 0xffff_ffff`, with none of the narrow arm's
+    // `v >= 0`, so it admitted negatives -- and it is the only arm widths 32 and up
+    // ever reach. `setPort`'s number branch then runs the value through `ToUint32`,
+    // so `-1` was accepted and read back as `0xffff_ffff`: a negative number
+    // reinterpreted as a full unsigned port instead of refused. Both arms carry
+    // `v >= 0` now. Width 33 is asserted as well because it is the SAME arm (the
+    // reachable path above 32, where the number writer carries at most 32 bits).
+    expect(() => assertWidth(-1, 32)).toThrow(/does not fit a 32-bit port/);
+    expect(() => assertWidth(-1, 33)).toThrow(/does not fit a 33-bit port/);
+    expect(() => assertWidth(0, 32)).not.toThrow();
+    expect(() => assertWidth(0xffff_ffff, 32)).not.toThrow();
+    expect(() => assertWidth(0x1_0000_0000, 32)).toThrow(/does not fit a 32-bit port/);
+
+    // And the symptom itself, at the table: the refused write leaves the port at 0
+    // rather than staging `-1` as 32 ones.
+    const t = createSignalTable();
+    const base = t.alloc(32);
+    expect(() => t.setPort(base, 32, -1)).toThrow(/does not fit a 32-bit port/);
+    expect(t.getPort(base, 32)).toEqual(new Uint8Array([0, 0, 0, 0]));
+  });
+
   it('bounds 0, 1 and 2 ** width - 1 in and 2 ** width out at every width 1..32', () => {
     // The sweep is the point. Widths 1-30 and 32 were all correct under
     // `1 << width`; 31 alone was broken, so a test that picks one width -- the
