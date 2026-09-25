@@ -2,7 +2,7 @@ import { CircuitValidationError, UnstableCircuitError } from '../core/errors';
 import type { Graph } from '../core/graph';
 import { Simulation, compile, type Netlist } from '../core/net';
 import type { Registry } from '../core/registry';
-import { formatPort, type PortValue } from '../core/signal';
+import { assertWidth, formatPort, type PortValue } from '../core/signal';
 import type {
   CheckFailure,
   CheckOutcome,
@@ -17,6 +17,24 @@ export interface LevelIo {
   readOutput(name: string): number;
   tick(): void;
   readonly sim: Simulation;
+}
+
+/**
+ * True when `value` is representable on a `width`-bit pin.
+ *
+ * Delegates to the kernel's own `assertWidth` instead of duplicating its bounds,
+ * so "what the level layer will write" and "what the signal table accepts" can
+ * never drift apart: every value this rejects is one that would have thrown.
+ */
+function fitsPort(value: number, width: number): boolean {
+  try {
+    assertWidth(value, width);
+    return true;
+  } catch {
+    // `assertWidth` throws RangeError and nothing else; a value that does not
+    // fit is data, not a bug.
+    return false;
+  }
 }
 
 /**
@@ -68,6 +86,15 @@ export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): Lev
     writeInput(name: string, value: number): void {
       const slot = inputSlots.get(name);
       if (!slot) return;
+      if (!fitsPort(value, slot.width)) {
+        // Authored level data is untrusted input: a row may name a value the pin
+        // cannot hold (`{ a: 2 }` or `{ a: 0.5 }` on a 1-bit pin). Reject the
+        // write -- deterministically, leaving the pin at the zero default that
+        // `reset()` established, exactly like a pin the circuit does not contain
+        // -- rather than let `Simulation.write` raise a RangeError out of
+        // `runChecks` and `grade()` on every board edit.
+        return;
+      }
       sim.write(slot.base, slot.width, value);
     },
     readOutput(name: string): number {
@@ -236,7 +263,12 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
     } catch (e) {
       if (e instanceof UnstableCircuitError) {
         failures.push(failure(check, {}, {}, {}, io.sim.tickCount, 'unstable'));
-      } else if (e instanceof CircuitValidationError) {
+      } else if (e instanceof CircuitValidationError || e instanceof RangeError) {
+        // `RangeError` is the kernel's "this value does not fit this port"
+        // signal (`assertWidth`), and level data is hand-authored: absorb it as
+        // a failed check so nothing thrown from inside a check can escape
+        // `runChecks` into the board-edit path. `'invalid'` already means "this
+        // circuit/spec cannot be evaluated as declared".
         failures.push(failure(check, {}, {}, {}, io.sim.tickCount, 'invalid'));
       } else {
         throw e;

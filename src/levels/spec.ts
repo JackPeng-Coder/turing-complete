@@ -16,7 +16,17 @@ export interface TruthRow {
 
 export interface TruthTableCheck {
   readonly kind: 'truth-table';
-  /** Omitted means "exhaustively enumerate every input combination". */
+  /**
+   * The rows to compare against, stated explicitly.
+   *
+   * Omitting `rows`, or passing an empty array, is a hard `missing-rows`
+   * failure -- it is NOT "exhaustively enumerate every input combination". A
+   * table with no expectations would compare nothing and pass every circuit
+   * ever built, so a level must supply its rows. To build them from per-pin
+   * expectation functions, enumerate the inputs with `generateRows` and assign
+   * the result here; enumeration only ever happens to PRODUCE rows, never
+   * because they were left out.
+   */
   readonly rows?: readonly TruthRow[];
 }
 
