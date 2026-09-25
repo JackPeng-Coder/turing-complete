@@ -118,12 +118,11 @@ export const BASE_DEFS: readonly ComponentDef[] = [
     hidden: true,
   },
 
-  // Storage elements. Their output is the value the kernel publishes from the
-  // instance's private `state` before every settle -- not a function of the
-  // current inputs. `Simulation.settle()` skips every `sequential` def and
-  // `Simulation.tick()` calls `clockEdge` with a throwaway output array, so the
-  // two functions below are unreachable in the simulator; they exist so a def
-  // still behaves coherently when it is driven directly (as the unit tests do).
+  // Storage elements. `evaluate` publishes the value held in `state` and must
+  // never read its inputs; `clockEdge` samples the inputs into `state` and must
+  // never write outputs. The kernel publishes state at `reset()` / `tick()`,
+  // and every other settle pass goes through the generic `evaluate` path -- so
+  // a delay line holds its value for a full tick instead of becoming a wire.
   {
     id: 'delay_line',
     name: { zh: '延迟线', en: 'Delay Line' },
@@ -133,16 +132,14 @@ export const BASE_DEFS: readonly ComponentDef[] = [
     cost: 0,
     sequential: true,
     stateBytes: 1,
-    evaluate: (i, o) => {
-      // Stand-alone re-publish of the freshly sampled value. The edge below may
-      // have sampled a different value since the last settle, so this mirrors
-      // the current input rather than reading `state`, which `evaluate` has no
-      // access to. Never reached through the kernel.
-      o[0] = i[0] === 1 ? 1 : 0;
+    evaluate: (_i, o, state) => {
+      // Publish the held value. NOTE: this must NOT read `i` -- a delay line
+      // that mirrors its input is just a wire.
+      o[0] = state?.[0] === 1 ? 1 : 0;
     },
     clockEdge: (i, _o, state) => {
-      // Sample, and nothing else: the output must keep the pre-edge value until
-      // the kernel publishes the new state.
+      // Sample, and nothing else: the output keeps the pre-edge value until the
+      // state is published.
       state[0] = i[0] === 1 ? 1 : 0;
     },
   },
@@ -159,15 +156,12 @@ export const BASE_DEFS: readonly ComponentDef[] = [
     cost: 0,
     sequential: true,
     stateBytes: 1,
-    evaluate: () => {
-      // Hold: the kernel publishes `state[0]` into output slot 0. Never reached
-      // through the kernel.
+    evaluate: (_i, o, state) => {
+      // Hold: publish the stored bit and ignore both inputs.
+      o[0] = state?.[0] === 1 ? 1 : 0;
     },
-    clockEdge: (i, o, state) => {
+    clockEdge: (i, _o, state) => {
       if (i[0] === 1) state[0] = i[1] === 1 ? 1 : 0;
-      // Mirror the held value so the def is self-consistent when driven
-      // stand-alone. The kernel ignores this `o` (it re-publishes `state`).
-      o[0] = state[0] === 1 ? 1 : 0;
     },
   },
 ];

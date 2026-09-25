@@ -29,9 +29,30 @@ export interface ComponentDef {
   readonly cost: number;
   /** Storage elements sample on the clock edge and do not add combinational delay. */
   readonly sequential: boolean;
-  /** Combinational transfer function. Must be pure: reads inputs, writes outputs. */
-  readonly evaluate?: (inputs: readonly PortValue[], outputs: PortValue[], ctx: EvalContext) => void;
-  /** Storage update, applied at the clock edge from pre-edge inputs. */
+  /**
+   * Combinational transfer function: reads inputs, writes outputs, must be pure.
+   *
+   * Storage elements use it to PUBLISH the value they are holding: they read
+   * `state` (the third parameter) and must never read `inputs`, otherwise a
+   * delay line degrades into a wire. Combination components ignore `state` and
+   * keep the two-argument `(i, o) => …` shape.
+   *
+   * `state` is typed `Uint8Array | undefined` rather than `Uint8Array` so that
+   * a storage element cannot pretend it always has state. It is a required
+   * parameter, not an optional one -- TypeScript rejects omitting it -- so
+   * combinational call sites pass `undefined` explicitly.
+   */
+  readonly evaluate?: (
+    inputs: readonly PortValue[],
+    outputs: PortValue[],
+    state: Uint8Array | undefined,
+    ctx: EvalContext,
+  ) => void;
+  /**
+   * Storage update, applied at the clock edge from pre-edge inputs.
+   * Samples into `state` only -- it must not write `outputs`, which are
+   * published by `evaluate` (and by the kernel at reset/tick).
+   */
   readonly clockEdge?: (
     inputs: readonly PortValue[],
     outputs: PortValue[],

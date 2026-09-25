@@ -3,6 +3,12 @@ import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS, DEF_IDS } from '../../src/core/defs/index';
 import { extractField, insertField, packBits, unpackBits } from '../../src/core/fields';
 
+// `evaluate(inputs, outputs, state, ctx)`: `state` is the instance's private
+// storage, placed third. Only storage elements read it -- every combinational
+// def ignores it, so its call sites pass `undefined` (the parameter cannot be
+// omitted: `state: Uint8Array | undefined` is required, which is what forces a
+// storage def to say out loud that it has no state to read).
+
 describe('registry', () => {
   it('registers every base def and can look them up', () => {
     const r = createRegistry(BASE_DEFS);
@@ -72,7 +78,7 @@ describe('base defs', () => {
       [1, 1, 0],
     ] as const) {
       const out: (number | Uint8Array)[] = [0];
-      def.evaluate!([a, b], out, { tick: 0 });
+      def.evaluate!([a, b], out, undefined, { tick: 0 });
       expect(out[0], `nand(${a},${b})`).toBe(want);
     }
   });
@@ -81,13 +87,13 @@ describe('base defs', () => {
     const and3 = r.get('and3');
     const or3 = r.get('or3');
     const o1: (number | Uint8Array)[] = [0];
-    and3.evaluate!([1, 1, 1], o1, { tick: 0 });
+    and3.evaluate!([1, 1, 1], o1, undefined, { tick: 0 });
     expect(o1[0]).toBe(1);
-    and3.evaluate!([1, 0, 1], o1, { tick: 0 });
+    and3.evaluate!([1, 0, 1], o1, undefined, { tick: 0 });
     expect(o1[0]).toBe(0);
-    or3.evaluate!([0, 0, 1], o1, { tick: 0 });
+    or3.evaluate!([0, 0, 1], o1, undefined, { tick: 0 });
     expect(o1[0]).toBe(1);
-    or3.evaluate!([0, 0, 0], o1, { tick: 0 });
+    or3.evaluate!([0, 0, 0], o1, undefined, { tick: 0 });
     expect(o1[0]).toBe(0);
   });
 
@@ -101,10 +107,10 @@ describe('base defs', () => {
       [1, 1],
     ] as const) {
       const ox: (number | Uint8Array)[] = [0];
-      xor.evaluate!([a, b], ox, { tick: 0 });
+      xor.evaluate!([a, b], ox, undefined, { tick: 0 });
       expect(ox[0], `xor(${a},${b})`).toBe(a ^ b);
       const on: (number | Uint8Array)[] = [0];
-      xnor.evaluate!([a, b], on, { tick: 0 });
+      xnor.evaluate!([a, b], on, undefined, { tick: 0 });
       expect(on[0], `xnor(${a},${b})`).toBe(a ^ b ? 0 : 1);
     }
   });
@@ -112,11 +118,15 @@ describe('base defs', () => {
   it('propagates undefined inputs as zero', () => {
     const nand = r.get('nand');
     const out: (number | Uint8Array)[] = [0];
-    nand.evaluate!([0, undefined as unknown as number], out, { tick: 0 });
+    nand.evaluate!([0, undefined as unknown as number], out, undefined, { tick: 0 });
     expect(out[0]).toBe(1);
   });
 
-  it('delay_line samples its input on the clock edge, starting at 0', () => {
+  // The two tests below pin the storage contract: `evaluate` PUBLISHES the held
+  // value and ignores its inputs; `clockEdge` SAMPLES inputs into state only and
+  // never writes outputs. Every `evaluate` input below is deliberately the
+  // opposite of the held value, so a def that mirrors its input fails them.
+  it('delay_line holds its value: evaluate publishes state and ignores its input', () => {
     const def = r.get('delay_line');
     const state = new Uint8Array(def.stateBytes);
     const out: (number | Uint8Array)[] = [0];
@@ -124,20 +134,29 @@ describe('base defs', () => {
     def.clockEdge!([1], out, state, { tick: 0 });
     expect(state[0]).toBe(1);
     expect(out[0]).toBe(0); // output still holds the pre-edge value
-    def.evaluate!([1], out, { tick: 0 });
+    // The input is 0, the OPPOSITE of the held 1: publishing is all `evaluate`
+    // may do here, so a mirroring implementation would drop the output to 0.
+    def.evaluate!([0], out, state, { tick: 0 });
     expect(out[0]).toBe(1);
+    // The next edge samples the low input; only then does the output follow.
+    def.clockEdge!([0], out, state, { tick: 1 });
+    expect(state[0]).toBe(0);
+    def.evaluate!([1], out, state, { tick: 1 });
+    expect(out[0]).toBe(0);
   });
 
-  it('mem1 holds its value until write is asserted on a clock edge', () => {
+  it('mem1 publishes its latched bit and ignores its inputs', () => {
     const def = r.get('mem1');
     const state = new Uint8Array(def.stateBytes);
     const out: (number | Uint8Array)[] = [0];
     // inputs: [set, value]
     def.clockEdge!([0, 1], out, state, { tick: 0 });
-    expect(state[0]).toBe(0);
+    expect(state[0]).toBe(0); // `set` low: nothing is written
     def.clockEdge!([1, 1], out, state, { tick: 1 });
-    expect(state[0]).toBe(1);
-    def.evaluate!([0, 0], out, { tick: 1 });
+    expect(state[0]).toBe(1); // the write is latched into state
+    expect(out[0]).toBe(0); // and `clockEdge` must not touch the outputs
+    // All inputs are zero here: a real memory still publishes the latched 1.
+    def.evaluate!([0, 0], out, state, { tick: 1 });
     expect(out[0]).toBe(1);
   });
 });
@@ -149,7 +168,7 @@ describe('base defs: extra coverage', () => {
   const r = createRegistry(BASE_DEFS);
   const evalTo = (id: string, inputs: number[]): number | Uint8Array | undefined => {
     const out: (number | Uint8Array)[] = [0];
-    r.get(id).evaluate!(inputs, out, { tick: 0 });
+    r.get(id).evaluate!(inputs, out, undefined, { tick: 0 });
     return out[0];
   };
 

@@ -617,7 +617,7 @@ git commit -m "feat(core): add bit-level signal table and ports"
 - Produces:
   - `interface PinDef { readonly id: string; readonly width: number; readonly label?: { zh: string; en: string } }`
   - `interface EvalContext { readonly tick: number }`
-  - `interface ComponentDef { readonly id: string; readonly name: { zh: string; en: string }; readonly category: ComponentCategory; readonly inputs: readonly PinDef[]; readonly outputs: readonly PinDef[]; readonly cost: number; readonly sequential: boolean; readonly evaluate?: (i: readonly PortValue[], o: PortValue[], ctx: EvalContext) => void; readonly clockEdge?: (i: readonly PortValue[], o: PortValue[], s: Uint8Array, ctx: EvalContext) => void; readonly stateBytes: number; readonly hidden?: boolean }`
+  - `interface ComponentDef { readonly id: string; readonly name: { zh: string; en: string }; readonly category: ComponentCategory; readonly inputs: readonly PinDef[]; readonly outputs: readonly PinDef[]; readonly cost: number; readonly sequential: boolean; readonly evaluate?: (i: readonly PortValue[], o: PortValue[], state: Uint8Array | undefined, ctx: EvalContext) => void; readonly clockEdge?: (i: readonly PortValue[], o: PortValue[], state: Uint8Array, ctx: EvalContext) => void; readonly stateBytes: number; readonly hidden?: boolean }`
   - `type ComponentCategory = 'logic1' | 'memory1' | 'wide' | 'io' | 'display' | 'probe' | 'level'`
   - `interface Registry { get(id: string): ComponentDef; has(id: string): boolean; all(): readonly ComponentDef[]; byCategory(c: ComponentCategory): readonly ComponentDef[]; register(def: ComponentDef): void; readonly size: number }`
   - `function createRegistry(defs?: readonly ComponentDef[]): Registry`
@@ -626,6 +626,14 @@ git commit -m "feat(core): add bit-level signal table and ports"
   - `function extractField(value: number, offset: number, width: number): number`
   - `function insertField(value: number, offset: number, width: number, field: number): number`
   - `const BASE_DEFS: readonly ComponentDef[]`
+
+> **`evaluate` 必须接收 `state`**（对初稿的修正，Task 3 实测发现的真实缺陷）。存储元件的输出只能来自它保存的值；若 `evaluate` 拿不到 `state`，它就只能去读当前输入——那样「延迟线」会退化成一根直通的缓冲器。实测证据：`clockEdge` 把 1 存进 state 后，再调 `evaluate([0], …)`，输出立刻变成 0，而真正的延迟线此刻必须仍然输出 1。
+>
+> 因此约定是：**`evaluate` 对存储元件 = 把保持的值发布到输出**；`clockEdge` **只改 state，不写输出**。
+>
+> `state` 声明为**可选参数** `Uint8Array | undefined`，有两个好处：纯组合元件（所有门）忽略它即可，测试里现存的 `def.evaluate!([a, b], out, { tick: 0 })` 调用**一个都不用改**（TS 允许实参少于形参）；而存储元件在类型上被要求处理 `undefined`，不会假装自己拿到了状态。
+>
+> 另一条 Task 3 实测结论：`const_on` / `const_off` 的 `category` 是 `'io'`，不是 `'logic1'`——测试要求 `byCategory('logic1')` 不包含 `const_on`。初稿的代码块写成 `logic1`，与自己的测试矛盾。
 
 - [ ] **Step 1: 写失败测试 `test/core/registry.test.ts`**
 
@@ -1055,11 +1063,14 @@ export const BASE_DEFS: readonly ComponentDef[] = [
     cost: 0,
     sequential: true,
     stateBytes: 1,
-    evaluate: (_i, o, _ctx) => {
-      // The held value is published by the kernel before settle(); eval keeps
-      // the output stable by reading what the kernel already wrote.
+    evaluate: (_i, o, state) => {
+      // Publish the held value. NOTE: this must NOT read `i` -- a delay line
+      // that mirrors its input is just a wire.
+      o[0] = state?.[0] === 1 ? 1 : 0;
     },
     clockEdge: (i, _o, state) => {
+      // Sample only. The kernel publishes the new state during the settle that
+      // follows the edge, which is what keeps a single tick of latency.
       state[0] = i[0] === 1 ? 1 : 0;
     },
   },
@@ -1076,8 +1087,9 @@ export const BASE_DEFS: readonly ComponentDef[] = [
     cost: 0,
     sequential: true,
     stateBytes: 1,
-    evaluate: () => {
-      // published by the kernel from private state
+    evaluate: (_i, o, state) => {
+      // Hold: publish the stored bit and ignore both inputs.
+      o[0] = state?.[0] === 1 ? 1 : 0;
     },
     clockEdge: (i, _o, state) => {
       if (i[0] === 1) state[0] = i[1] === 1 ? 1 : 0;
@@ -1086,7 +1098,9 @@ export const BASE_DEFS: readonly ComponentDef[] = [
 ];
 ```
 
-> `delay_line` 与 `mem1` 的输出在 `settle()` 期间由内核从 `state` 发布（见 Task 5）。它们的 `evaluate` 是空操作，这是刻意的：输出只由状态决定，不由当前输入组合决定。
+> **存储元件的分工**（初稿在这里写错了，Task 3 实测纠正）：`evaluate` 负责**发布保持的值**，`clockEdge` 负责**采样新值到 state**。初稿把 `evaluate` 写成空操作、让内核在每次 settle 前统一发布 state——那样内核的 `#publishState()` 就与 `evaluate` 争夺写同一个输出槽，而且根本没法表达「输入变了但还没到时钟沿，输出必须不变」。现在内核只在 `reset()` 与 `tick()` 里发布，`settle()` 走通用的 `evaluate` 路径。
+>
+> `state` 是可选参数，所以门的 `evaluate` 可以继续写成 `(i, o) => …`，Task 3 的测试里那些 `def.evaluate!([a, b], out, { tick: 0 })` 调用一个都不用改。
 
 - [ ] **Step 6: 运行测试，确认通过**
 
@@ -1864,13 +1878,20 @@ export class Simulation {
 
   settle(): SettleReport {
     const scratch: PortValue[] = [];
+    const out: PortValue[] = [];
     for (let iter = 0; iter < SETTLE_LIMIT; iter += 1) {
       let changed = false;
-      for (const inst of this.#instances) {
-        if (inst.def.sequential || !inst.def.evaluate) continue;
+      // Unlike an earlier draft, this does NOT skip sequential defs. A storage
+      // element's evaluate() republishes the value it is holding (and ignores
+      // its inputs), so evaluating it is a no-op once the kernel has published
+      // its state -- and skipping it would be wrong for any def that publishes
+      // from state on its own schedule.
+      for (let index = 0; index < this.#instances.length; index += 1) {
+        const inst = this.#instances[index]!;
+        if (!inst.def.evaluate) continue;
         this.#readInputs(inst, scratch);
-        const out: PortValue[] = [];
-        inst.def.evaluate(scratch, out, { tick: this.#tickCount });
+        out.length = 0;
+        inst.def.evaluate(scratch, out, this.#state[index], { tick: this.#tickCount });
         for (let p = 0; p < inst.outputs.length; p += 1) {
           const base = inst.outputs[p]!;
           const width = inst.def.outputs[p]!.width;
@@ -2071,6 +2092,35 @@ describe('Simulation', () => {
     expect(sim.read(out, 1)).toBe(1); // one edge later the input has arrived
   });
 
+  it('a delay line holds its sampled value when its input changes', () => {
+    // This is the test that pins the storage semantics. The sim's own
+    // level-input slot drives the delay line, so the input can be flipped
+    // between settles without a clock edge.
+    const g = emptyGraph();
+    const feed = addInstance(g, 'level_input', 0, 0);
+    const delay = addInstance(g, 'delay_line', 40, 0);
+    connect(g, { inst: feed.id, port: 'out' }, { inst: delay.id, port: 'in' });
+    const net = compile(g, registry);
+    const sim = new Simulation(net, registry);
+    const feedSlot = net.outputBase(`${feed.id}.out`);
+    const out = net.outputBase(`${delay.id}.out`);
+
+    sim.reset();
+    sim.write(feedSlot, 1, 1); // raise the input
+    sim.settle();
+    expect(sim.read(out, 1)).toBe(0); // still holding the old 0: no edge yet
+
+    sim.tick(); // first edge samples the raised input
+    expect(sim.read(out, 1)).toBe(1);
+
+    sim.write(feedSlot, 1, 0); // drop the input again
+    sim.settle();
+    expect(sim.read(out, 1)).toBe(1); // must STILL read 1 until the next edge
+
+    sim.tick(); // second edge samples the dropped input
+    expect(sim.read(out, 1)).toBe(0);
+  });
+
   it('reset clears state and the tick counter', () => {
     const g = emptyGraph();
     const src = addInstance(g, 'const_on', 0, 0);
@@ -2086,6 +2136,8 @@ describe('Simulation', () => {
   });
 });
 ```
+
+> `a delay line holds its sampled value when its input changes` 是**本计划里最重要的一条时序测试**。初版没有它，`delay_line` 的 `evaluate` 就去读当前输入，于是延迟线退化成了直通缓冲器——而所有测试照样全绿，因为唯一那条 delay 测试只用了恒定的 1 作为输入。这条测试用可翻转的 `level_input` 当作驱动器，把「没有时钟沿就不许改输出」钉死。
 
 > 修掉上面 `propagates through a chain` 里的注释错误：`nand(1,1)=0`，`not(0)=1`，期望值是 **1**。实现前先把断言改成 `1` 并删掉行尾错误注释。
 
