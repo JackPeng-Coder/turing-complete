@@ -837,15 +837,22 @@ export function createWideDefs(width: number = DEFAULT_WIDE_WIDTH): readonly Com
 //
 // COST: FREE ON BOTH METRICS, AND THAT IS A RULING RATHER THAN AN OVERSIGHT.
 // The gate metric measures what the PLAYER BUILT, not what the platform
-// PROVIDES: a built-in part is one of the primitives the player assembles, so it
-// is not charged, while anything wired up out of those primitives is. That is
-// what makes "drop in the unlocked part instead of rebuilding it" score better,
-// and it is why a 256-byte `ram8` is 0 NAND equivalents rather than its
-// expansion -- 2,048 stored bits at a latch cell of a few NANDs each, before a
-// single address decoder is priced -- which would dwarf a level's whole gate
-// budget and make any gate target involving storage meaningless. A player who
-// wants storage to COST gates builds the latch from `mem1` and the gates on the
-// palette, and pays for every one of them. So `gateCost` stays ABSENT on
+// PROVIDES, and being built in is NOT what makes a def free: `gateCost()`
+// charges every placed instance the count its def states, and the built-in
+// primitives state counts like anything else -- `nand` 1, `not` 1, `and` 2,
+// `or` 3 (the basis table in `defs/index.ts`), `and8` 16, `add8` 72 (above).
+// What is free is the `?? def.cost` fallback, and that fallback is 0 for exactly
+// four kinds of def: a rail, a level connector, a wire-like packer (`splitter`,
+// `maker`), and a STORAGE ELEMENT. Storage is that fourth exception, not
+// built-in parts generally. That storage exception is what makes dropping in the
+// unlocked part score better than rebuilding it from gates, and it is why a
+// 256-byte `ram8` is 0 NAND equivalents rather than its expansion -- 2,048
+// stored bits at a latch cell of a few NANDs each, before a single address
+// decoder is priced -- which would dwarf a level's whole gate budget and make
+// any gate target involving storage meaningless. A player who wants storage to
+// COST gates builds the latch from palette gates instead -- the cross-coupled
+// pair is two `nand`s or two `nor`s, plus whatever gates the enable and write
+// logic need -- and pays for every one of them. So `gateCost` stays ABSENT on
 // `delay8`, `reg8`, `counter8` and `ram8`; pricing them is not an improvement to
 // make later.
 //

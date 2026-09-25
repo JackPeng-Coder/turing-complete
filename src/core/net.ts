@@ -235,8 +235,12 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     // escape the check pipeline instead of becoming a failed `'invalid'` check.
     // The issue taxonomy has no "the def itself is broken" code and the code list
     // lives in `graph.ts`, so the closest existing code is used -- and the ISSUE
-    // names the def, which is where the diagnosis lives:
-    // `CircuitValidationError`'s own message is only the list of codes.
+    // names the def, so the diagnosis is in the error's own `issues`:
+    // `CircuitValidationError`'s message is only the list of codes. That detail
+    // survives wherever the throw is caught directly; the level checker collapses
+    // it -- `createSim` maps it to a bare `{ error: 'invalid' }` and `runChecks`
+    // pushes a failure with no issue attached (`levels/checks.ts`) -- so nothing
+    // in that path names the def.
     if (def.sequential && def.stateBytes > 0 && !def.evaluate) {
       throw new CircuitValidationError([
         {
