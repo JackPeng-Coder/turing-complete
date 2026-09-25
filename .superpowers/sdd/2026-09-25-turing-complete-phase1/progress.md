@@ -112,5 +112,51 @@ Task 6's "unregistered id is a hard failure" are the two places the plan deliber
 mandates a strong assertion — they mirror the `missing-rows` lesson and the review rubric
 treats them as required, not as defects.
 
+## Environment constraints on execution
+
+Ruling: the per-role model selection the SDD skill mandates cannot be honoured in this
+session. The `subagent` tool exposes no model/provider parameter, and DSH's model config
+(`~/.dsh/profiles/desktop/cordis.yml`) was not read for a set of valid names. Every
+implementer and reviewer therefore runs on the session's default model. I am recording
+this rather than silently ignoring it, because the skill calls an omitted model a defect
+that "silently defeats" the section. — Cost if wrong: none to correctness; the cost is
+that cheap mechanical tasks are not run on a cheaper tier, so this phase is slower and
+more expensive than the skill intends. Fixable only by a change to the harness.
+
+## Worktree setup: a junction is not enough
+
+Ruling: the worktree gets its **own real `node_modules`**, not a junction to the parent's.
+The junction worked for `pnpm test` (baseline 239 passed) but **broke `pnpm smoke`**: pnpm
+runs a `runDepsStatusCheck` before scripts, reads the parent's `.modules.yaml` whose
+`virtualStoreDir` points at the parent, concludes the modules are stale, and tries to
+purge them — then aborts with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` because this
+shell has no TTY. That is a Task 12 blocker found early and cheaply.
+`pnpm install --prefer-offline` in the worktree fixed it in **1.2 s** (85 packages, all
+reused from the store, 0 downloaded), and `pnpm smoke` then reported **2 passed (5.6s)**
+from the worktree path, regenerating `test-results/smoke-*.png`.
+— Cost if wrong: the worktree holds its own ~85-package tree instead of sharing one. Space
+only; no behavioural difference, and it removes a whole class of stale-store confusion.
+
 ## Task status
+
+Task 1: complete (commits 2a2cece..c4fb3ab, review clean — no Critical, no Important).
+Task 1: minor (deferred): net.ts:35-37 — the edited comment states a wire-less bit "reads 0"
+  unconditionally, but a caller does write those slots to drive an unwired input. Fixed as
+  a one-line comment correction in Task 2's dispatch (comment-only; controller-authored).
+Task 1: minor (deferred): net.ts:231-245 — the defined 0 above a narrow driver is inherited
+  from never-written identity slots rather than enforced. Unreachable in-tree; hardening it
+  with a driven-bit mask would make a partially driven pin behave differently from a fully
+  unwired one, which is intentionally write-through. Recommendation to the final review: stand.
+Task 1: minor (deferred): test/core/net.test.ts:467-482 pins exact slotCount (24/34). The
+  property that matters is asserted directly at :425-429; the counts are the brittle half and
+  are expected to need updating when Task 2 re-sizes regions.
+Task 1: minor (deferred): test/core/net.test.ts:419-446 covers region refresh after settle()
+  but not after tick(), and the script checker reads outputs after ticks. Correct via
+  `tick() -> settle()`; coverage gap only.
+Task 1: review ⚠️ carried into Task 2 (named risk, not a Task 1 gap): `levels/checks.ts:67-68`
+  reads `net.inputBase('OUT_<pin>.in')` at LEVEL-SPEC width while `compile` sizes the region at
+  DEF width. Task 2 must route the effective width through the region loop (`net.ts:231-245`)
+  AND `capacityFor` (`net.ts:137-150`), and keep spec/def widths in agreement, or a
+  `read(pin.width)` runs past a def-sized region. Carried verbatim into Task 2's dispatch.
+Task 2: BASE `c4fb3ab`.
 
