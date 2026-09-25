@@ -7,6 +7,15 @@ coverage/
 playwright-report/
 test-results/
 
+# The SDD scratch directory holds per-task briefs, implementer reports, and
+# review-package diffs -- all regenerable intermediates, none of them source.
+# The one exception is the ledger: it is the durable record of what each task
+# did, what its reviewers found, and every ruling made along the way.
+.superpowers/*
+!.superpowers/sdd/
+.superpowers/sdd/*
+!.superpowers/sdd/**/progress.md
+
 # User-supplied research input. Kept on disk as source material, but never
 # shipped: it quotes the original game's dialogue verbatim, and the project
 # claims (see README.md) to contain none of the original's text.
