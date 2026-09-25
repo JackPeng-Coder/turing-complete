@@ -9,6 +9,10 @@ export interface Narrative {
  * Original narrative shell. The source material describes an alien abduction
  * framing; this replica keeps the framing but writes its own character and
  * lines, and draws no characters at all.
+ *
+ * The voice belongs to 考核者 / The Assessor: the name is ours, like the lines,
+ * because the original game's named characters are not reused (§1.4 of the
+ * design spec).
  */
 export const NARRATIVE: Readonly<Record<string, Narrative>> = {
   'ch1-01-crude-awakening': {
@@ -59,7 +63,7 @@ export const NARRATIVE: Readonly<Record<string, Narrative>> = {
     after: { zh: '你第一次让信号「等」了一下。', en: 'For the first time, you made a signal wait.' },
   },
   'ch1-09-xor-gate': {
-    before: { zh: '「四个与非门。监督者认为这是衡量悟性的标准。」', en: 'Four NANDs. The Overseer considers this the measure of a mind.' },
+    before: { zh: '「四个与非门。考核者认为这是衡量悟性的标准。」', en: 'Four NANDs. The Assessor considers this the measure of a mind.' },
     after: { zh: '你在墙上刻下了四道划痕。', en: 'You scratch four marks into the wall.' },
   },
   'ch1-10-bigger-or-gate': {
@@ -89,7 +93,7 @@ export const NARRATIVE: Readonly<Record<string, Narrative>> = {
 export function narrativeFor(levelId: string): Narrative {
   return (
     NARRATIVE[levelId] ?? {
-      before: { zh: '监督者没有留下说明。', en: 'The Overseer left no instructions.' },
+      before: { zh: '考核者没有留下说明。', en: 'The Assessor left no instructions.' },
       after: { zh: '电路安静地运转着。', en: 'The circuit runs quietly.' },
     }
   );
