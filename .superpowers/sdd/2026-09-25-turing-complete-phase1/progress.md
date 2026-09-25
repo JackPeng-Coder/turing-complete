@@ -205,5 +205,8 @@ from the artifacts and had to re-derive the type-safety argument by hand. The co
 the logs is one redirect; the cost of not keeping them is a reviewer spending its budget
 re-doing a verifiable check. — Cost if wrong: a few KB of scratch per task.
 
-Task 3: BASE `6cdb37b`.
+Task 3: BASE `e27d81a` (new convention, adopted from here on: commit all controller
+  bookkeeping FIRST, then take BASE = HEAD immediately before dispatching. This makes the
+  review range exactly the implementer's commits plus nothing else, and removes the repeated
+  BASE corrections Tasks 1 and 2 needed).
 
