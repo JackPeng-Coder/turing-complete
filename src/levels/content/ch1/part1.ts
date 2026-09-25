@@ -45,8 +45,8 @@ export const CH1_PART1: readonly LevelSpec[] = [
     index: 2,
     name: { zh: '与非门', en: 'NAND Gate' },
     brief: {
-      zh: '监督者给了你一块芯片：只有两个输入同时为高时，输出才是低。它叫与非门。',
-      en: 'The Overseer hands you one chip: its output drops low only when both inputs are high.',
+      zh: '考核者给了你一块芯片：只有两个输入同时为高时，输出才是低。它叫与非门。',
+      en: 'The Assessor hands you one chip: its output drops low only when both inputs are high.',
     },
     hint: {
       zh: '关卡输入要用「关卡输入」元件接出来，实例名必须是 IN_a 和 IN_b；输出实例名是 OUT。',

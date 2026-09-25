@@ -101,8 +101,8 @@ export const CH1_PART2: readonly LevelSpec[] = [
     index: 9,
     name: { zh: '异或门', en: 'XOR Gate' },
     brief: {
-      zh: '两个输入不同时输出高。四个与非门就够了——监督者显然知道这件事。',
-      en: 'High when the inputs differ. Four NANDs are enough, and the Overseer knows it.',
+      zh: '两个输入不同时输出高。四个与非门就够了——考核者显然知道这件事。',
+      en: 'High when the inputs differ. Four NANDs are enough, and the Assessor knows it.',
     },
     hint: {
       zh: 'NAND(a,b) 的结果再分别和 a、b 各与非一次，最后把两个结果与非起来。',
