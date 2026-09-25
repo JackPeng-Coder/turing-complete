@@ -228,10 +228,27 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     // a pin. That is a defect in the DEF rather than in the circuit, and this is
     // the only place a graph and a catalog meet -- so it is refused here, loudly,
     // instead of holding zero in silence.
+    //
+    // Refused as a `CircuitValidationError` rather than a plain `Error`, because
+    // the level checker re-throws anything that is neither that nor
+    // `UnstableCircuitError` (`levels/checks.ts`): a bare `Error` from here would
+    // escape the check pipeline instead of becoming a failed `'invalid'` check.
+    // The issue taxonomy has no "the def itself is broken" code and the code list
+    // lives in `graph.ts`, so the closest existing code is used -- and the ISSUE
+    // names the def, which is where the diagnosis lives:
+    // `CircuitValidationError`'s own message is only the list of codes.
     if (def.sequential && def.stateBytes > 0 && !def.evaluate) {
-      throw new Error(
-        `${def.id}: a storage element must declare evaluate() to publish what it holds`,
-      );
+      throw new CircuitValidationError([
+        {
+          severity: 'error',
+          code: 'invalid-params',
+          inst: inst.id,
+          message: {
+            zh: `${def.id}: 存储元件必须声明 evaluate() 才能发布其所存的值`,
+            en: `${def.id}: a storage element must declare evaluate() to publish what it holds`,
+          },
+        },
+      ]);
     }
     const inWidths = def.inputs.map((pin) => effectiveWidth(inst, pin));
     const outWidths = def.outputs.map((pin) => effectiveWidth(inst, pin));

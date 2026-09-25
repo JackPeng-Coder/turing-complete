@@ -259,6 +259,16 @@ describe('base defs: extra coverage', () => {
         expect(d.stateBytes * 8, d.id).toBeGreaterThanOrEqual(outputBits);
       }
     }
+    // ...but the inequality above is the WIDE rule, loosened for a 256-byte
+    // `ram8`, and it must not cost phase 0 its exactness: the two 1-bit memories
+    // hold exactly one state byte each, one bit per output pin, which is the
+    // layout their `evaluate` publishes and the reason they need no more. Pinned
+    // by def id rather than by category -- `memory1` is a palette-grouping
+    // question and these two are the phase-0 contract.
+    for (const id of ['delay_line', 'mem1']) {
+      expect(r.get(id).stateBytes, id).toBe(1);
+      expect(r.get(id).outputs.length, id).toBe(1);
+    }
   });
 
   it('matches an independently written truth table for every gate', () => {

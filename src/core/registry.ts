@@ -65,10 +65,12 @@ export interface ComponentDef {
    *
    * Storage elements use it to PUBLISH the value they are holding: they read
    * `state` (the third parameter) and must never read `inputs`, otherwise a
-   * delay line degrades into a wire. One input IS read by one storage element:
-   * a memory's read ADDRESS (`ram8.addr`), which only SELECTS among the bytes
-   * already held in `state` and can never itself become the published value --
-   * see the def. Nothing else on a storage element's input side may be read.
+   * delay line degrades into a wire. The exception is exactly one input that
+   * only SELECTS among bytes already in `state`, and nothing else: a memory's
+   * read ADDRESS (`ram8.addr`), which is an index into `state`, never a value
+   * that could become the published byte -- every byte it selects is one a
+   * clock edge wrote (see the def). Any second input read, or an address read
+   * as a value rather than an index, is the wire this rule forbids.
    * Combination components ignore `state` and keep the two-argument
    * `(i, o) => …` shape.
    *

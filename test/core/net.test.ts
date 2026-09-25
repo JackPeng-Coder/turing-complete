@@ -367,6 +367,63 @@ function storageFixture(def: string): {
 }
 
 /**
+ * A combinational pass-through that RECORDS the value it read on every sweep.
+ *
+ * `evaluate` runs once per settle sweep, so the head of `seen` is what the table
+ * held when that settle's first sweep began -- which is what makes the pass
+ * observable at all: `#publishState` writes the held value into the table before
+ * the sweep starts, so a watcher downstream of a storage element reads the
+ * post-edge value in the first sweep rather than the pre-edge one. Nothing else
+ * can see the difference (the sweep republishes through `evaluate` regardless),
+ * which is why the two `#publishState` tests below are built on this def.
+ */
+function watcherDef(id: string, width: number, seen: number[]): ComponentDef {
+  return {
+    id,
+    name: { zh: '观察器', en: 'Watcher' },
+    category: 'wide',
+    inputs: [{ id: 'in', width }],
+    outputs: [{ id: 'out', width }],
+    cost: 1,
+    sequential: false,
+    stateBytes: 0,
+    evaluate: (i, o) => {
+      const value = toNumber(i[0] ?? 0);
+      seen.push(value);
+      o[0] = value;
+    },
+  };
+}
+
+/**
+ * A storage element that publishes the COMPLEMENT of the bit it holds.
+ *
+ * A legal def -- `evaluate` reads `state` and never an input -- and the only
+ * shape that makes the RESET half of the pre-seed observable. `reset()` zeroes
+ * the table and every state byte together, so a def that publishes its zero
+ * state (`delay8`, `reg8`, `counter8`) publishes a value the cleared table
+ * already holds and the pass leaves no trace. This one publishes 1 from a zeroed
+ * state, so whether the first sweep of `reset()`'s settle reads 1 or 0 is
+ * exactly whether the pass ran.
+ */
+const invertingLatchDef: ComponentDef = {
+  id: 'latch_not',
+  name: { zh: '反相锁存器', en: 'Inverting Latch' },
+  category: 'memory1',
+  inputs: [{ id: 'in', width: 1 }],
+  outputs: [{ id: 'out', width: 1 }],
+  cost: 0,
+  sequential: true,
+  stateBytes: 1,
+  evaluate: (_i, o, state) => {
+    o[0] = state?.[0] === 1 ? 0 : 1;
+  },
+  clockEdge: (i, _o, state) => {
+    state[0] = i[0] === 1 ? 1 : 0;
+  },
+};
+
+/**
  * The stateful half of the wide family, through the kernel.
  *
  * Three of these are the acceptance classes the phase names -- a latch, an
@@ -445,6 +502,84 @@ describe('wide storage', () => {
     expect(p.out('unit.out'), 'held between edges').toBe(0xabc);
     sim.tick();
     expect(p.out('unit.out')).toBe(0xfff);
+  });
+
+  it('pre-seeds the held byte into the table before the settle that follows a tick', () => {
+    // `#publishState` is a PRE-SEED, not a second copy of the correctness: the
+    // settle that follows every `tick()` republishes through `evaluate` anyway,
+    // which is why reverting the pass to the old `state[p]` -> pin `p` body
+    // leaves the rest of this file green. What the pass buys is the ordering the
+    // kernel documents -- a caller reading right after `reset`/`tick` sees the
+    // held value without waiting on the sweep -- and the watcher def observes it
+    // from inside the settle: the FIRST sweep already reads the post-edge byte
+    // instead of the pre-edge one.
+    const seen: number[] = [];
+    const reg = createRegistry([...BASE_DEFS, watcherDef('watcher8', 8, seen)]);
+    const { graph, out, in: pin } = storageFixture('delay8');
+    const watch = addInstance(graph, 'watcher8', 480, 0, 'watch');
+    connect(graph, { inst: 'unit', port: 'out' }, { inst: watch.id, port: 'in' });
+    const net = compile(graph, reg);
+    const sim = new Simulation(net, reg);
+    const p = probe(sim, net);
+
+    sim.reset();
+    p.set(pin('a'), 0xa5);
+    sim.settle();
+    expect(p.out(out), 'no edge yet').toBe(0x00);
+
+    // Only the settle of the tick below is observed.
+    seen.length = 0;
+    const report = sim.tick();
+    expect(p.out(out), 'the held byte, right after the edge').toBe(0xa5);
+    // The pass wrote 0xa5 into the output's slots before the sweep began, so the
+    // first sweep already reads it. Break or delete the pass and this reads
+    // 0x00: the settled value stays 0xa5 either way, which is why nothing else
+    // in the suite fails.
+    expect(seen[0], 'the first sweep after the edge already read the held byte').toBe(0xa5);
+    // The same fact read a second way: the pre-seed carries the byte to the
+    // watcher in sweep 1 and commits it there, so the settle confirms in sweep 2.
+    // Without the pass, sweep 1 still carries the pre-edge 0x00 and the settle
+    // needs a third sweep.
+    expect(report.iterations, 'the pre-seed spends a sweep and saves one').toBe(2);
+    expect(report.stable).toBe(true);
+  });
+
+  it('pre-seeds a storage output whose zeroed state publishes a 1, before reset() settles', () => {
+    // The reset half of the same property, and the reason it needs an invented
+    // def: `reset()` clears the table and the state together, so a holder that
+    // publishes 0 from a zero state has nothing to pre-seed into a zeroed slot.
+    // This def publishes the complement of the bit it holds, so the value the
+    // first sweep of `reset()`'s settle reads is 1 with the pass and 0 without
+    // it -- while the settled value is 1 either way, because the sweep
+    // republishes through `evaluate` regardless.
+    const seen: number[] = [];
+    const reg = createRegistry([
+      ...BASE_DEFS,
+      invertingLatchDef,
+      watcherDef('watcher1', 1, seen),
+    ]);
+    const g = emptyGraph();
+    const feed = addInstance(g, 'level_input', 0, 0, 'IN');
+    const latch = addInstance(g, 'latch_not', 80, 0, 'unit');
+    const watch = addInstance(g, 'watcher1', 160, 0, 'watch');
+    connect(g, { inst: feed.id, port: 'out' }, { inst: latch.id, port: 'in' });
+    connect(g, { inst: latch.id, port: 'out' }, { inst: watch.id, port: 'in' });
+    const net = compile(g, reg);
+    const sim = new Simulation(net, reg);
+    const p = probe(sim, net);
+
+    sim.reset();
+    expect(seen[0], 'the first sweep of reset() already read the published 1').toBe(1);
+    expect(p.out('unit.out'), 'and reset() settles on it').toBe(1);
+
+    // The tick half of the same contract, on the same def: the edge samples the
+    // 1 and the complement is published before the settle, so again the first
+    // sweep sees it.
+    p.set('IN.out', 1);
+    seen.length = 0;
+    sim.tick();
+    expect(seen[0], 'the first sweep after the edge already read the published 0').toBe(0);
+    expect(p.out('unit.out'), 'and the settle agrees: 1 held, 0 published').toBe(0);
   });
 
   it('holds its byte between the input flip and the next clock edge (latch)', () => {
@@ -821,7 +956,24 @@ describe('wide storage', () => {
     const withMute = createRegistry([...BASE_DEFS, mute]);
     const g = emptyGraph();
     addInstance(g, 'mute_store', 0, 0);
-    expect(() => compile(g, withMute)).toThrow(/mute_store/);
+    // A `CircuitValidationError`, not a bare `Error`: the level checker re-throws
+    // anything that is neither that nor `UnstableCircuitError`, so a def-authoring
+    // mistake has to arrive as a validation issue to become a failed `'invalid'`
+    // check instead of escaping `runChecks` into the board-edit path. The issue
+    // names both the instance and the def, which the error's own message (a list
+    // of issue codes) does not.
+    let caught: unknown;
+    try {
+      compile(g, withMute);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(CircuitValidationError);
+    const issues = (caught as CircuitValidationError).issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.inst).toBe('i1');
+    expect(issues[0]!.message.en).toMatch(/mute_store/);
+    expect(issues[0]!.message.en).toMatch(/evaluate/);
   });
 });
 

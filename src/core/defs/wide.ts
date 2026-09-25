@@ -835,14 +835,28 @@ export function createWideDefs(width: number = DEFAULT_WIDE_WIDTH): readonly Com
 // the one def that had no `evaluate` to do that. So the mapping from state to
 // pin is stated once, here, next to the state it describes.
 //
-// COST: FREE ON BOTH METRICS. `cost` is 0, because a storage element cuts the
-// combinational path in both directions and contributes no DELAY unit (Global
-// Constraint 4: `delayOf` charges it nothing, its cost shows up in the tick
-// metric instead). `gateCost` is left to the `?? cost` fallback for the same
-// reason phase 0 left it there on `delay_line` and `mem1`: storage is zero on
-// BOTH metrics, and a second explicit 0 would only give the two zeroes a way to
-// drift apart. `mux8` is the one combinational part in this section and states
-// its count -- 8 x MUX2 -- with the operators above.
+// COST: FREE ON BOTH METRICS, AND THAT IS A RULING RATHER THAN AN OVERSIGHT.
+// The gate metric measures what the PLAYER BUILT, not what the platform
+// PROVIDES: a built-in part is one of the primitives the player assembles, so it
+// is not charged, while anything wired up out of those primitives is. That is
+// what makes "drop in the unlocked part instead of rebuilding it" score better,
+// and it is why a 256-byte `ram8` is 0 NAND equivalents rather than its
+// expansion -- 2,048 stored bits at a latch cell of a few NANDs each, before a
+// single address decoder is priced -- which would dwarf a level's whole gate
+// budget and make any gate target involving storage meaningless. A player who
+// wants storage to COST gates builds the latch from `mem1` and the gates on the
+// palette, and pays for every one of them. So `gateCost` stays ABSENT on
+// `delay8`, `reg8`, `counter8` and `ram8`; pricing them is not an improvement to
+// make later.
+//
+// For `cost` -- the delay metric -- the same answer has its own reason: a
+// storage element cuts the combinational path in both directions and contributes
+// no DELAY unit (Global Constraint 4: `delayOf` charges it nothing; its cost
+// shows up in the tick metric instead). The `?? cost` fallback is left in place
+// for the same reason phase 0 left it there on `delay_line` and `mem1`: storage
+// is zero on BOTH metrics, and a second explicit 0 would only give the two
+// zeroes a way to drift apart. `mux8` is the one combinational part in this
+// section and states its count -- 8 x MUX2 -- with the operators above.
 // ---------------------------------------------------------------------------
 
 /**
