@@ -35,9 +35,11 @@ export function scoreOf(m: Metrics): number {
  * wide component is deliberately one unit of delay (spec §3.2) while expanding
  * to many NAND equivalents here -- an `add8` is 1 delay but 72 gates.
  *
- * A def that states no `gateCost` falls back to `cost`, which is what every
- * 1-bit phase-0 def wants (a NAND is one NAND equivalent, a source is zero) and
- * what keeps every chapter-1 score unchanged.
+ * The `?? def.cost` fallback is for defs whose two values genuinely agree and are
+ * zero on both: a rail, a level connector, a wire-like packer, a storage element.
+ * It is NOT the 1-bit default -- a 1-bit `and` is 2 NAND equivalents and an `or`
+ * is 3 (see the basis table in `defs/index.ts`), and those gates state their own
+ * counts. `test/core/registry.test.ts` fails if a gate ever stops stating one.
  */
 export function gateCost(graph: Graph, registry: Registry): number {
   let total = 0;

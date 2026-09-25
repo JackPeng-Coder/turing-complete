@@ -1,6 +1,41 @@
 import type { ComponentDef } from '../registry';
 import { WIDE_DEF_IDS, createWideDefs } from './wide';
 
+// ---------------------------------------------------------------------------
+// GATE COST: the 1-bit NAND-equivalent basis, the same one `wide.ts` prices its
+// bit-sliced cells against.
+//
+// The unit is one 2-input NAND (spec §5.4: 展开时每个基础门的贡献 = 1). `cost`
+// is the DELAY unit and stays 1 for every gate below; `gateCost` is how many
+// 2-input NANDs the gate expands to in a standard all-NAND construction:
+//
+//   gate | NANDs | construction
+//   -----|-------|------------------------------------------------------------
+//   NAND |   1   | the unit
+//   NOT  |   1   | NAND(a, a)
+//   AND  |   2   | NAND(a, b) -> NOT
+//   OR   |   3   | NOT a, NOT b, NAND(~a, ~b)                 [De Morgan]
+//   NOR  |   4   | NOT(or) = OR's three NANDs plus one inverter
+//   XOR  |   4   | the classic four-NAND cell
+//   XNOR |   5   | XOR -> NOT
+//   AND3 |   4   | AND(a, b) (2), then AND(ab, c) (2). Three cannot do it: the
+//        |       | third NAND would invert a product of two signals already in
+//        |       | hand, and no such product is ~(abc).
+//   OR3  |   6   | NOT a, NOT b, NOT c, then a 3-input NAND (itself 3) = 6. The
+//        |       | cascade or(or(a, b), c) is also 3 + 3 = 6.
+//
+// These are documented constructions, not proven minima -- AND3 is the one with
+// a minimality argument, sketched above. `cost` and `gateCost` coincide only for
+// NAND and NOT, and every gate below therefore states BOTH: an `and` worth a
+// single NAND equivalent was the bug this table fixes, since one bit of `and8`
+// is worth 2 on the very same basis.
+// ---------------------------------------------------------------------------
+const NAND = 1;
+const NOT = 1;
+const AND = 2;
+const OR = 3;
+const XOR = 4;
+
 const gate = (
   id: string,
   zh: string,
@@ -8,6 +43,8 @@ const gate = (
   inputs: number,
   /** Expected output per input pattern; the index IS the input vector. */
   table: readonly number[],
+  /** NAND equivalents: 2-input NANDs in this gate's standard all-NAND cell. */
+  gateCost: number,
 ): ComponentDef => {
   if (table.length !== 1 << inputs) {
     throw new Error(`${id}: expected ${1 << inputs} truth-table entries, got ${table.length}`);
@@ -21,12 +58,11 @@ const gate = (
       width: 1,
     })),
     outputs: [{ id: 'out', width: 1 }],
-    // `cost` only: for a 1-bit NAND-based gate the delay unit and the
-    // NAND-equivalent gate count are the same number, so `ComponentDef.gateCost`
-    // is left unstated and the gate metric falls back to `cost`. Stating one here
-    // would move a chapter-1 score (see `test/levels/grader.test.ts`, which
-    // freezes all twelve).
+    // The DELAY unit, one per node (spec §3.2). The gate metric does not read
+    // this -- it reads `gateCost`, whose numbers are in the table above and at
+    // each call site below.
     cost: 1,
+    gateCost,
     sequential: false,
     stateBytes: 0,
     evaluate: (i, o) => {
@@ -42,6 +78,9 @@ const gate = (
 // pins this down by asserting that `byCategory('logic1')` does not contain
 // `const_on`. Nothing downstream groups the palette by category (the level's
 // `allowedComponents` decides that), so this only affects the grouping label.
+//
+// 0 on BOTH metrics -- a rail is not a gate -- so this is one of the defs that
+// legitimately leaves `gateCost` to the `?? cost` fallback.
 const source = (id: string, zh: string, en: string, value: 0 | 1): ComponentDef => ({
   id,
   name: { zh, en },
@@ -93,15 +132,21 @@ export const BASE_DEFS: readonly ComponentDef[] = [
   // input `a` as bit 0, so index 0b10 means a=0, b=1. Writing them out makes
   // every gate auditable at a glance instead of requiring the reader to
   // evaluate a boolean expression in their head.
-  gate('nand', '与非门', 'NAND', 2, [1, 1, 1, 0]),
-  gate('not', '非门', 'NOT', 1, [1, 0]),
-  gate('and', '与门', 'AND', 2, [0, 0, 0, 1]),
-  gate('or', '或门', 'OR', 2, [0, 1, 1, 1]),
-  gate('nor', '或非门', 'NOR', 2, [1, 0, 0, 0]),
-  gate('xor', '异或门', 'XOR', 2, [0, 1, 1, 0]),
-  gate('xnor', '同或门', 'XNOR', 2, [1, 0, 0, 1]),
-  gate('and3', '三路与门', '3-Pin AND', 3, [0, 0, 0, 0, 0, 0, 0, 1]),
-  gate('or3', '三路或门', '3-Pin OR', 3, [0, 1, 1, 1, 1, 1, 1, 1]),
+  //
+  // The last argument is the gate metric (NAND equivalents, per the table
+  // above); the comment on each line is that number's construction, so no count
+  // here has to be taken on trust.
+  gate('nand', '与非门', 'NAND', 2, [1, 1, 1, 0], NAND),
+  gate('not', '非门', 'NOT', 1, [1, 0], NOT), // NAND(a, a)
+  gate('and', '与门', 'AND', 2, [0, 0, 0, 1], AND), // NAND(a, b) -> NOT
+  gate('or', '或门', 'OR', 2, [0, 1, 1, 1], OR), // NOT a, NOT b, NAND(~a, ~b)
+  gate('nor', '或非门', 'NOR', 2, [1, 0, 0, 0], OR + NOT), // NOT(or)
+  gate('xor', '异或门', 'XOR', 2, [0, 1, 1, 0], XOR), // the four-NAND cell
+  gate('xnor', '同或门', 'XNOR', 2, [1, 0, 0, 1], XOR + NOT), // NOT(xor)
+  // Two ANDs: AND(a, b) then AND(ab, c). AND3 is minimal at 4 (see the table).
+  gate('and3', '三路与门', '3-Pin AND', 3, [0, 0, 0, 0, 0, 0, 0, 1], 2 * AND),
+  // NOT a, NOT b, NOT c, then a 3-input NAND; the OR cascade also totals 6.
+  gate('or3', '三路或门', '3-Pin OR', 3, [0, 1, 1, 1, 1, 1, 1, 1], 2 * OR),
 
   // Level IO plumbing. Always available in the palette; never unlocked.
   {
@@ -183,8 +228,10 @@ export const BASE_DEFS: readonly ComponentDef[] = [
   // The wide (8-bit) family. Registered at the default width -- 8 is the only
   // width this phase opens; `createWideDefs(width)` is the hook for 16/32/64.
   //
-  // These are the defs that DO state `gateCost`: a wide part is one delay unit
-  // and many NAND equivalents, so the two metrics stop agreeing here. The
-  // numbers and their constructions live next to each def in `wide.ts`.
+  // The same NAND basis as the gates above, scaled by the width: `and8` is 8 x
+  // AND = 16, `add8` is 8 full adders = 72. The constructions live next to each
+  // def in `wide.ts`, and `test/core/defs-wide.test.ts` cross-checks its
+  // per-bit cells against these 1-bit gates, so the two tables cannot drift
+  // into two different bases.
   ...createWideDefs(),
 ];

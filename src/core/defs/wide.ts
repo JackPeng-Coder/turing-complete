@@ -118,10 +118,17 @@ function maskOf(w: number): number {
 // 54 whether it is built as (XNOR × 8 → AND tree) or as (XOR × 8 → OR tree →
 // NOT), which is a useful sign that 54 is not an artifact of one drawing.
 //
-// Exact for the widths the game registers -- 8 now, and phase 5's 16/32/64: all
-// powers of two, which is what makes a `shiftStages(w)`-stage barrel the right
-// shape. `clampWidth` also admits other widths; a derived count there is the
-// same construction's arithmetic, not a claim that the construction is optimal.
+// The same basis prices the registered 1-bit gates in `defs/index.ts` -- NAND 1,
+// NOT 1, AND 2, OR 3, NOR 4, XOR 4, XNOR 5, AND3 4, OR3 6 -- and
+// `test/core/defs-wide.test.ts` cross-checks this file's per-bit cells against
+// those defs, so an `and8` bit and a built-in `and` can never be priced two
+// different ways again.
+//
+// Documented for the widths the game registers -- 8 now, and phase 5's 16/32/64:
+// all powers of two, which is what makes a `shiftStages(w)`-stage barrel the
+// right shape. `clampWidth` also admits other widths; a derived count there is
+// the same construction's arithmetic, not a claim that the construction is
+// optimal.
 // ---------------------------------------------------------------------------
 
 const NAND = 1;
@@ -307,7 +314,12 @@ function shiftLeftOp(a: number, amount: number, w: number): number {
   return u(u(a, w) << s, w);
 }
 
-/** Logical right shift: zeros shift in from the top. Amount >= `w` gives 0. */
+/**
+ * Logical right shift: zeros shift in from the top. Amount >= `w` gives 0.
+ *
+ * `ashr8` is the arithmetic shift and deliberately does NOT follow this rule --
+ * see `shiftRightArithmeticOp`.
+ */
 function shiftRightOp(a: number, amount: number, w: number): number {
   const s = u(amount, w);
   if (s >= w) return 0;
@@ -316,9 +328,15 @@ function shiftRightOp(a: number, amount: number, w: number): number {
 
 /**
  * Arithmetic right shift: the sign bit replicates, so a negative pattern stays
- * negative. An amount of `w` or more fills with the sign bit (`0xff` for a
- * negative byte) rather than giving 0 -- that is what makes `ashr8` the signed
- * counterpart of `shift_r8` instead of a duplicate of it.
+ * negative.
+ *
+ * DELIBERATELY EXCLUDED from the "`shift_*` with `amount >= w` gives 0" rule that
+ * `shiftLeftOp` / `shiftRightOp` follow. That rule is the LOGICAL shifts' edge
+ * behaviour; applying it here would make `ashr8` a duplicate of `shift_r8` on
+ * exactly the inputs the sign fill exists for. `ashr8` shifts arithmetically, so
+ * an amount of `w` or more fills with the sign bit (`0xff` for a negative byte,
+ * `0` for a positive one) -- ratified behaviour, not an oversight. Do not "fix"
+ * this to 0.
  */
 function shiftRightArithmeticOp(a: number, amount: number, w: number): number {
   const s = u(amount, w);

@@ -6,6 +6,7 @@ import { createRegistry, type ComponentDef } from '../../src/core/registry';
 import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
 import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
 import type { LevelSpec } from '../../src/levels/spec';
+import { LEVELS, LEVEL_ORDER, getLevel } from '../../src/levels/index';
 import type { Metrics } from '../../src/levels/grader';
 import { SCORE_WEIGHTS, gateCost, grade, scoreOf, starsOf } from '../../src/levels/grader';
 import { build } from '../fixtures/build';
@@ -314,15 +315,23 @@ const ch1Reference: Record<string, () => Graph> = {
 };
 
 /**
- * The metrics and score of each reference solution, captured from the PRE-CHANGE
- * tree (commit `a57908a`, before `gateCost` existed) and asserted as literals.
+ * The metrics and score of each reference solution, captured from the pre-change
+ * tree (commit `a57908a`), and updated ONLY where fix round 2 moved them by
+ * pricing the built-in 1-bit gates as the NAND equivalents they are:
+ * `ch1-06` gate 2 -> 4 (its reference is OR + NOT, and OR is 3), `ch1-10`
+ * gate 2 -> 6 (two ORs) and `ch1-11` gate 2 -> 4 (two ANDs). Each of those three
+ * levels' `threeStar.gate` was raised to the measured value in the same round,
+ * because a target its own reference solution fails is a defect -- the principle
+ * the shipping-set check at the bottom of this file now enforces mechanically.
  *
- * A number moving here is a finding against the change that moved it, NOT a
- * number to re-baseline: phase-0 defs state no `gateCost`, so the gate metric
- * falls back to their `cost` and every one of these twelve results must be
- * byte-identical. If a future wide-family edit moves one of these, the metric
- * has leaked out of the wide defs and into phase 0 -- which is the whole thing
- * the `cost` / `gateCost` split exists to prevent.
+ * Every DELAY and TICK literal here is still the pre-change value and must stay
+ * that way: `cost` is the delay unit and fix round 2 did not touch it (`test/core/
+ * defs-wide.test.ts` pins the wide family's delay at one unit per operator, and
+ * the nine 1-bit gates are still `cost: 1`).
+ *
+ * A fourth number moving here is a finding against the change that moved it, NOT
+ * a number to re-baseline: the delay/tick columns must be byte-identical to
+ * `a57908a`, and the gate column moves only when the NAND basis itself changes.
  */
 const CH1_REFERENCE: Record<string, { readonly metrics: Metrics; readonly score: number }> = {
   'ch1-01-crude-awakening': { metrics: { gate: 0, delay: 0, tick: 0 }, score: 0 },
@@ -330,18 +339,18 @@ const CH1_REFERENCE: Record<string, { readonly metrics: Metrics; readonly score:
   'ch1-03-not-gate': { metrics: { gate: 1, delay: 1, tick: 0 }, score: 5 },
   'ch1-04-and-gate': { metrics: { gate: 2, delay: 2, tick: 0 }, score: 10 },
   'ch1-05-or-gate': { metrics: { gate: 3, delay: 2, tick: 0 }, score: 11 },
-  'ch1-06-nor-gate': { metrics: { gate: 2, delay: 2, tick: 0 }, score: 10 },
+  'ch1-06-nor-gate': { metrics: { gate: 4, delay: 2, tick: 0 }, score: 12 },
   'ch1-07-always-on': { metrics: { gate: 0, delay: 0, tick: 0 }, score: 0 },
   // Sequential-only: no combinational depth at all, and the two delay lines
   // show up as ticks instead.
   'ch1-08-second-tick': { metrics: { gate: 0, delay: 0, tick: 3 }, score: 24 },
   'ch1-09-xor-gate': { metrics: { gate: 4, delay: 3, tick: 0 }, score: 16 },
-  'ch1-10-bigger-or-gate': { metrics: { gate: 2, delay: 2, tick: 0 }, score: 10 },
-  'ch1-11-bigger-and-gate': { metrics: { gate: 2, delay: 2, tick: 0 }, score: 10 },
+  'ch1-10-bigger-or-gate': { metrics: { gate: 6, delay: 2, tick: 0 }, score: 14 },
+  'ch1-11-bigger-and-gate': { metrics: { gate: 4, delay: 2, tick: 0 }, score: 12 },
   'ch1-12-binary-racer': { metrics: { gate: 0, delay: 0, tick: 0 }, score: 0 },
 };
 
-describe('phase-0 regression: the chapter-1 reference scores do not move', () => {
+describe('phase-0 regression: the chapter-1 reference scores are frozen', () => {
   const levels = [...CH1_PART1, ...CH1_PART2];
   const byId = new Map(levels.map((l) => [l.id, l]));
 
@@ -364,20 +373,63 @@ describe('phase-0 regression: the chapter-1 reference scores do not move', () =>
       // so a typo in either literal cannot pass as "one of them is right".
       expect(result.score).toBe(scoreOf(frozen.metrics));
     });
+  }
+});
 
-    it(`${id} still meets every three-star target`, () => {
-      const level = byId.get(id) as LevelSpec;
+/**
+ * The phase-0 principle this file now enforces mechanically: **a level's
+ * `threeStar` bounds must be met by that level's own reference solution** (phase
+ * 0 tightened several targets precisely because they were LOOSER than the
+ * reference; a target the reference FAILS is a defect, not a fixture).
+ *
+ * It walks the SHIPPED level set (`LEVELS`, assembled by `src/levels/index.ts`),
+ * not this file's table, so a level that ships later without a reference circuit
+ * here fails the coverage case instead of being silently skipped.
+ *
+ * This is what fix round 2 turned on: pricing the built-in `and`/`or` on the NAND
+ * basis moved `ch1-06` (2 -> 4), `ch1-10` (2 -> 6) and `ch1-11` (2 -> 4) past
+ * their old targets, and the targets were recalibrated to the measured values in
+ * the level data. The frozen table above says what the numbers ARE; this says
+ * they still satisfy the levels they belong to.
+ */
+describe('every shipped level: its reference solution meets its own three-star bounds', () => {
+  it('has a reference circuit for every shipped level', () => {
+    expect(LEVELS.length).toBeGreaterThan(0);
+    const missing = LEVELS.map((l) => l.id).filter((id) => !(id in ch1Reference));
+    expect(missing, `no reference circuit in this file for: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  for (const id of LEVEL_ORDER) {
+    it(`${id} meets every bound its level declares`, () => {
+      const level = getLevel(id);
+      const make = ch1Reference[id];
+      expect(make, `${id} has no reference circuit in this file`).toBeDefined();
+      if (!make) return;
       const result = grade(make(), registry, level);
+      expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
+      expect(result.passed).toBe(true);
       const target = level.threeStar;
       expect(target, `${id} declares no three-star targets`).toBeDefined();
-      if (target?.gate !== undefined) {
-        expect(result.metrics.gate, `${id} gate`).toBeLessThanOrEqual(target.gate);
+      if (!target) return;
+      // Each bound is compared directly, with both numbers in the message: the
+      // rule is "the reference MEETS the target", so a failure has to name the
+      // measured value and the target it beat.
+      const { gate, delay, tick } = result.metrics;
+      if (target.gate !== undefined) {
+        expect(gate, `${id} gate: reference ${gate} > target ${target.gate}`).toBeLessThanOrEqual(
+          target.gate,
+        );
       }
-      if (target?.delay !== undefined) {
-        expect(result.metrics.delay, `${id} delay`).toBeLessThanOrEqual(target.delay);
+      if (target.delay !== undefined) {
+        expect(
+          delay,
+          `${id} delay: reference ${delay} > target ${target.delay}`,
+        ).toBeLessThanOrEqual(target.delay);
       }
-      if (target?.tick !== undefined) {
-        expect(result.metrics.tick, `${id} tick`).toBeLessThanOrEqual(target.tick);
+      if (target.tick !== undefined) {
+        expect(tick, `${id} tick: reference ${tick} > target ${target.tick}`).toBeLessThanOrEqual(
+          target.tick,
+        );
       }
       expect(result.stars, `metrics=${JSON.stringify(result.metrics)}`).toBe(3);
     });

@@ -156,7 +156,8 @@ export const CH1_PART2: readonly LevelSpec[] = [
     io: IO_ABC,
     checks: [truthTable(IO_ABC, { out: ({ a, b, c }) => (a || b || c ? 1 : 0) })],
     // Three-star target = the reference solution's own metrics; the reference scores exactly it.
-    threeStar: { gate: 2, delay: 2, tick: 0 },
+    // Gate = 6, not 2: the reference cascades two ORs, 3 NAND equivalents each.
+    threeStar: { gate: 6, delay: 2, tick: 0 },
     rewards: { components: ['xnor'] },
   },
   {
@@ -185,7 +186,8 @@ export const CH1_PART2: readonly LevelSpec[] = [
     io: IO_ABC,
     checks: [truthTable(IO_ABC, { out: ({ a, b, c }) => (a && b && c ? 1 : 0) })],
     // Three-star target = the reference solution's own metrics; the reference scores exactly it.
-    threeStar: { gate: 2, delay: 2, tick: 0 },
+    // Gate = 4, not 2: the reference cascades two ANDs, 2 NAND equivalents each.
+    threeStar: { gate: 4, delay: 2, tick: 0 },
   },
   {
     id: 'ch1-12-binary-racer',

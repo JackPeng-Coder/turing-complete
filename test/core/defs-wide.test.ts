@@ -264,6 +264,33 @@ describe('wide defs: the brief\'s contract', () => {
     expect(gate('rot_r8')).toBe(gate('rot_l8'));
   });
 
+  it('prices each bit-sliced cell on the same NAND basis as the registered 1-bit gate', () => {
+    // The finding fix round 2 answered: one bit of `and8` is the same AND cell as
+    // the built-in `and`, so the two cannot be priced differently (the built-ins
+    // used to fall through `?? cost` and be worth 1). `nand8`/`not8` are in the
+    // table for completeness -- both numbers are 1 either way, so they are not
+    // evidence of anything.
+    const oneBit = (id: string): number => {
+      const count = registry.get(id).gateCost;
+      if (count === undefined) throw new Error(`no gateCost on the 1-bit gate ${id}`);
+      return count;
+    };
+    const cells: readonly (readonly [string, string])[] = [
+      ['and8', 'and'],
+      ['or8', 'or'],
+      ['nand8', 'nand'],
+      ['nor8', 'nor'],
+      ['xor8', 'xor'],
+      ['xnor8', 'xnor'],
+      ['not8', 'not'],
+    ];
+    for (const [wide, one] of cells) {
+      expect(registry.get(wide).gateCost, `${wide} vs ${DEFAULT_WIDE_WIDTH} x ${one}`).toBe(
+        DEFAULT_WIDE_WIDTH * oneBit(one),
+      );
+    }
+  });
+
   it('scales every count with the width the generator is asked for', () => {
     const at = (width: number, id: string): number => {
       const def = createWideDefs(width).find((d) => d.id === id);

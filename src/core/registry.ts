@@ -45,10 +45,17 @@ export interface ComponentDef {
    * unit of delay but 72 NAND equivalents, so this cannot share a field with
    * `cost`.
    *
-   * Absent means "same as `cost`". That default is exactly right for the 1-bit
-   * phase-0 family -- a NAND-based gate IS one NAND equivalent, and a source or
-   * a level connector is zero -- so leaving it out keeps every existing level's
-   * score byte-identical. Defs whose part is worth more than one NAND state it.
+   * It is also not "one per gate": the NAND basis prices a 1-bit `and` at 2 and
+   * an `or` at 3 (the table is in `defs/index.ts`), and a wide part scales with
+   * its width -- one bit of `and8` is those same 2 NANDs, so the part is 16. The
+   * two numbers coincide for `nand` and `not` only, and every gate states this
+   * field explicitly so no count is inherited by accident.
+   *
+   * Absent means "same as `cost`", which is a real case rather than a legacy
+   * default: a rail (`const_on`), a level connector, a wire-like packer and the
+   * storage elements are zero on BOTH metrics, so a second explicit 0 would only
+   * give the two zeroes a way to drift apart. Any def whose part is worth more
+   * than one NAND states the field.
    */
   readonly gateCost?: number;
   /** Storage elements sample on the clock edge and do not add combinational delay. */
