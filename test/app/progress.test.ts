@@ -37,7 +37,26 @@ const level: LevelSpec = {
 };
 
 const other: LevelSpec = { ...level, id: 'ch1-03-not-gate', index: 3, allowedComponents: ['nand', 'not', 'level_input', 'level_output'] };
-const levels = [level, other];
+
+/**
+ * A level that hands out nothing, offering one part (`xor`) that no level in
+ * this fixture rewards.
+ *
+ * `rewards` is dropped rather than set to `undefined`: `exactOptionalPropertyTypes`
+ * distinguishes an absent key from a present-but-undefined one, and the app reads
+ * it with `level.rewards?.components ?? []`. Without this third level the
+ * "filters down to what is unlocked" assertion cannot be stated at all any more,
+ * because `level` and `other` both reward parts they list (see the tests below).
+ */
+const { rewards: _ownRewards, ...unrewarded } = level;
+const gated: LevelSpec = {
+  ...unrewarded,
+  id: 'ch1-04-and-gate',
+  index: 4,
+  allowedComponents: ['xor', 'level_input', 'level_output'],
+};
+
+const levels = [level, other, gated];
 
 const pass: GradeResult = {
   passed: true,
@@ -114,11 +133,53 @@ describe('unlockedComponents', () => {
     expect(unlockedComponents(p, levels).has('not')).toBe(true);
   });
 
-  it('paletteDefsFor filters the level list down to what is unlocked', () => {
-    expect(paletteDefsFor(emptyProgress(), levels, other)).toEqual([
+  it('does not treat an unpassed level own reward as earned', () => {
+    // The "a level may build with its own rewards" rule lives in `paletteDefsFor`
+    // and only there. If it leaked into this function, a save would gain parts
+    // from levels the player has never passed -- and every later level's gating
+    // would be measured against parts nobody earned.
+    expect(unlockedComponents(emptyProgress(), levels).has('nand')).toBe(false);
+  });
+});
+
+describe('paletteDefsFor', () => {
+  it('filters the level list down to what is unlocked', () => {
+    // `xor` is offered by `gated` and rewarded by nobody, so it is filtered out;
+    // the plumbing is in the starter set and survives. (This assertion used to be
+    // stated with `other`, whose own rewards now put `nand`/`not` in its palette
+    // -- the next test is that rule, and `gated` is what keeps this one about
+    // filtering alone.)
+    expect(paletteDefsFor(emptyProgress(), levels, gated)).toEqual([
       'level_input',
       'level_output',
     ]);
+  });
+
+  it('offers a level its own rewards, before they are earned', () => {
+    // A level's own reward is offered to BUILD with: the player meets the part in
+    // the level that needs it. Level 13 is the case this exists for -- its parity
+    // puzzle cannot be built without the `splitter` it rewards, because every
+    // chapter-1 part has 1-bit pins and a wire from a 4-bit input copies bit 0
+    // alone -- so without this rule a first-time palette cannot solve the level
+    // it is a palette for.
+    expect(paletteDefsFor(emptyProgress(), levels, other)).toEqual([
+      'nand',
+      'not',
+      'level_input',
+      'level_output',
+    ]);
+  });
+
+  it('keeps a reward the level does not offer out of its palette', () => {
+    // The other half of the rule, and the reason it is safe: the level's own list
+    // is still the upper bound. `not` is `level`'s own reward, so the rule above
+    // unlocks it -- and it stays out anyway, because that level does not list it.
+    const palette = paletteDefsFor(emptyProgress(), levels, level);
+    expect(palette).toEqual(['nand', 'level_input', 'level_output']);
+    expect(palette).not.toContain('not');
+  });
+
+  it('adds a passed level rewards to the next level palette', () => {
     const p = applyGrade(emptyProgress(), level, pass);
     expect(paletteDefsFor(p, levels, other)).toEqual(['nand', 'not', 'level_input', 'level_output']);
   });

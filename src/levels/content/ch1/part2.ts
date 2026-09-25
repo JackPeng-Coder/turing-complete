@@ -230,5 +230,19 @@ export const CH1_PART2: readonly LevelSpec[] = [
       }),
     ],
     threeStar: { gate: 0, delay: 0, tick: 0 },
+    // `mem1` is chapter 1's last hand-out, and this is where it has to happen:
+    // chapter 2's latch level ("Circular Dependency") is built from a 1-bit
+    // memory, and no earlier level's puzzle has any use for one. Before this
+    // reward existed, `mem1` was defined in `core/defs/index.ts` and rewarded by
+    // no level anywhere, so it could never appear in any palette and that level
+    // could not be built at all.
+    //
+    // The capstone is a plausible place for a first memory to appear: "read the
+    // nibble at a glance, then forward it" is one wire away from "hold a bit",
+    // and this level's own palette does not change -- it does not list `mem1`,
+    // and a level's palette stays bounded by its `allowedComponents`. Rewards are
+    // not scored either (`grade()` reads the checks and the `threeStar` metrics,
+    // never `rewards`), so no chapter-1 score or target moves with this line.
+    rewards: { components: ['mem1'] },
   },
 ];

@@ -115,15 +115,20 @@ export const CH2_BATCH1: readonly LevelSpec[] = [
    * refuses to build one that leaves a declared output pin uncompared), the
    * measured three-star target, and the three rewards.
    *
-   * KNOWN SEAM, recorded here because no change to level data can fix it:
-   * `splitter`, `maker` and `const8` are this level's own rewards, and
-   * `paletteDefsFor` (`src/app/progress.ts`) offers the rewards of PASSED levels
-   * only -- so a first-time player's palette for level 13 lacks the splitter,
-   * which is the only part that can expose bits 1-3 of `a` (every chapter-1 part
-   * has 1-bit pins, and a wire from a 4-bit output to a 1-bit input copies bit 0
-   * and nothing else). Either the level being played must also offer its own
-   * rewards, or these three rewards must move to an earlier level; see
-   * task-8-report.md.
+   * THIS LEVEL'S OWN REWARDS ARE WHAT IT BUILDS WITH, and that is now the app's
+   * rule rather than a seam: `paletteDefsFor` (`src/app/progress.ts`) adds a
+   * level's own rewards to the unlocked set before filtering by
+   * `allowedComponents`, because the parts a level hands out are the parts its
+   * puzzle was designed around. It has to be, here: `splitter`, `maker` and
+   * `const8` are this level's own rewards, and a first-time palette without the
+   * splitter cannot build the level at all -- the splitter is the only part that
+   * can expose bits 1-3 of `a` (every chapter-1 part has 1-bit pins, and a wire
+   * from a 4-bit output to a 1-bit input copies bit 0 and nothing else). While
+   * the helper offered the rewards of PASSED levels only, this level was
+   * unplayable on the first attempt; `test/levels/level-buildability.test.ts`
+   * now walks every shipped level for exactly that, and `test/app/progress.test.ts`
+   * states both halves of the rule (own rewards are offered; a reward outside
+   * `allowedComponents` still stays out).
    */
   {
     id: 'ch2-13-odd-number-of-signals',

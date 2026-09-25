@@ -104,13 +104,39 @@ export function unlockedComponents(
  *
  * The level's own palette is the upper bound: a reward that this level does not
  * offer stays out of it, so the player can only build what the level allows.
+ *
+ * A level's OWN rewards are offered to build with, before the level is passed.
+ * The parts a level hands out are the parts its puzzle was designed around, so
+ * withholding them until the player has already solved it is backwards. Level 13
+ * is the case that named the rule: its parity puzzle cannot be built without the
+ * `splitter` it rewards -- every chapter-1 part has 1-bit pins, and a wire from
+ * the 4-bit input copies bit 0 alone -- so a first-time palette that omitted it
+ * could not build the level it was a palette for.
+ *
+ * The asymmetry with `allowedComponents` is deliberate and load-bearing. A
+ * level's own reward is offered to *build* with, but the palette still stays
+ * bounded by that level's own list, so a part the level does not offer stays out
+ * even once it is unlocked: level 12 rewards `mem1` without listing it, and its
+ * palette is unchanged by that. The other half -- that a level may not offer a
+ * part no level at or before it hands out -- is not enforced here at all, and
+ * cannot be: it is a property of the level data, and
+ * `test/levels/level-buildability.test.ts` walks every shipped level for it.
+ *
+ * This is a NO-OP for chapter 1, verified rather than assumed: no chapter-1
+ * level lists its own reward, and every chapter-1 reference solution draws only
+ * on parts an earlier level rewards. `test/app/progress.test.ts` states the rule
+ * for a synthetic level, and the buildability walk's `chapter 1 palettes are
+ * unchanged` block pins both halves of that claim on the shipped data.
  */
 export function paletteDefsFor(
   progress: Progress,
   levels: readonly LevelSpec[],
   level: LevelSpec,
 ): string[] {
-  const unlocked = unlockedComponents(progress, levels);
+  const unlocked = new Set([
+    ...unlockedComponents(progress, levels),
+    ...(level.rewards?.components ?? []),
+  ]);
   return level.allowedComponents.filter((def) => unlocked.has(def));
 }
 

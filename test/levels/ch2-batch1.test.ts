@@ -691,6 +691,14 @@ describe('three-star targets are the reference solutions own metrics', () => {
 });
 
 describe('reference solutions are buildable from the palette they are graded against', () => {
+  // NOTE, because this is the assertion that let the level-13 defect through: it
+  // checks the level's LIST, not the palette the app computes. `offered` is
+  // `allowedComponents`, so it says "the level lists every part its reference
+  // uses" -- true of level 13 all along, while its first-time palette (the list
+  // intersected with what was unlocked) had no splitter in it and the level could
+  // not be built. The palette version of this check lives in
+  // `test/levels/level-buildability.test.ts`, which walks every shipped level and
+  // calls `paletteDefsFor` instead of re-deriving it.
   for (const [id, make] of Object.entries(solutions)) {
     it(id, () => {
       const offered = new Set(specOf(id).allowedComponents);
@@ -746,16 +754,19 @@ describe('level 17 is solvable by arithmetic too, for fewer stars', () => {
   });
 });
 
-describe('the level-13 unlock seam', () => {
+describe('level 13 is where the wide parts first appear', () => {
   it('offers exactly its own rewards as parts no earlier level unlocks', () => {
-    // NOT an assertion that this is fine -- it is the one seam this batch hands
-    // to Task 7 (chapter assembly and unlock-chain validation). Level 13 is the
-    // first level whose puzzle needs a wide part, so `splitter`/`maker`/`const8`
-    // are its own rewards, and `paletteDefsFor` offers the rewards of PASSED
-    // levels only: a first-time player's palette for level 13 lacks the splitter
-    // its parity puzzle cannot be built without. See the data comment on level
-    // 13 and task-8-report.md. If the fix moves those rewards to an earlier
-    // level, this test fails and should be deleted with them.
+    // This is no longer a defect, and the reason it is still asserted: `splitter`
+    // is the only part that can expose bits 1-3 of this level's 4-bit input
+    // (every chapter-1 part has 1-bit pins, and `compile()` wires at
+    // `min(fromWidth, toWidth)`, so a wire from the wide input copies bit 0
+    // alone). While `paletteDefsFor` offered the rewards of PASSED levels only,
+    // that made the level unplayable on a first attempt; the fix is that a level's
+    // own rewards are offered in its own palette. `test/app/progress.test.ts`
+    // states the rule and `test/levels/level-buildability.test.ts` proves the
+    // palette can build this level's reference -- this test pins the DATA half:
+    // these three parts arrive here and nowhere earlier, so if a later revision
+    // moves them to an earlier level, this fails and should move with them.
     const unlockedBefore = new Set<string>(STARTER_COMPONENTS);
     for (const level of [...CH1_PART1, ...CH1_PART2]) {
       for (const def of level.rewards?.components ?? []) unlockedBefore.add(def);
