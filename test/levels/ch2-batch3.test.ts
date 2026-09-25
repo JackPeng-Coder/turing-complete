@@ -35,7 +35,7 @@ import { build, registry, type Node } from '../fixtures/build';
  * design, which is why each level carries a data comment saying which is which;
  * the marker block below checks that the comments exist and that the three
  * notes this batch owes a reader are in them (level 23's change of KIND, level
- * 25's width-parametrised decoder, and level 27's authored opcode table).
+ * 25's per-width decoder family, and level 27's authored opcode table).
  *
  * TWO THINGS THIS FILE CARRIES THAT THE EARLIER BATCHES' DO NOT:
  *
@@ -424,16 +424,34 @@ describe('chapter 2, levels 23-27', () => {
     }
   });
 
-  it('tells the player the decoder is width-parametrised', () => {
-    // Level 25's reward is a width-parametrised part: `decoder1` and the
-    // catalog's `2-Bit Decoder` (which no level name introduces) are the same
-    // definition at different widths, so the brief has to say that widening the
-    // part is how a player gets the 2-bit form -- and it has to name the knob,
-    // `params.width`.
-    expect(L25.brief.zh).toContain('params.width');
-    expect(L25.brief.en).toContain('params.width');
-    expect(L25.brief.zh).toContain('2 位解码器');
+  it('tells the player the decoder comes in widths, and names the parts', () => {
+    // The family is GENERATED PER WIDTH -- `createDecoderDef(w)` in `wide.ts`,
+    // registered as `decoder1` / `decoder2` / `decoder3` -- and the instance
+    // width knob cannot stand in for that: `params.width` resolves as
+    // `inst.params.width ?? pin.width` for EVERY pin of an instance
+    // (`net.ts`, `effectiveWidth`), while a decoder's pins must differ (`sel` is
+    // `w` bits, `out` is `2 ** w`). So the brief has to do what the engine does:
+    // name the parts. `decoder1` is the 1-to-2 form this level asks for, and
+    // `decoder2` is the 2-to-4 form a later circuit drops in.
+    for (const brief of [L25.brief.en, L25.brief.zh]) {
+      expect(brief).toContain('decoder1');
+      expect(brief).toContain('decoder2');
+    }
+    // Each form is stated as the width it decodes, in both languages, and the
+    // catalog's own name for the wider one is kept -- it is the name the source
+    // gives the part no level introduces.
+    expect(L25.brief.en).toContain('1-to-2');
+    expect(L25.brief.en).toContain('2-to-4');
     expect(L25.brief.en).toContain('2-bit decoder');
+    expect(L25.brief.zh).toContain('2 路输出');
+    expect(L25.brief.zh).toContain('4 路输出');
+    expect(L25.brief.zh).toContain('2 位解码器');
+    // And the mechanism the engine cannot honour is GONE from the brief, not
+    // merely joined by the right one: a level that offered `params.width = 2` as
+    // a way to a 4-output decoder would be teaching a knob this kernel does not
+    // have. This is the assertion that fails if the old wording comes back.
+    expect(L25.brief.en).not.toContain('params.width');
+    expect(L25.brief.zh).not.toContain('params.width');
   });
 
   it('hands out the parts the brief assigns to each level', () => {
@@ -510,12 +528,13 @@ describe('every level carries its sourced-vs-authored data comment', () => {
     expect(l23).toContain('kind');
   });
 
-  it('records the width-parametrised decoder and how widths resolve', () => {
-    // Level 25's reward is the same definition at two widths, and the kernel's
-    // rule for a width override is one line in `net.ts` -- so the comment has to
-    // name `params.width` and record that ONE override covers EVERY pin of the
-    // instance, which is what makes the brief's "widen the part" a statement
-    // about the part's width rather than a per-pin trick.
+  it('records the per-width decoder family and why a width parameter cannot do it', () => {
+    // The family is generated per width, and the kernel's rule for a width
+    // override is one line in `net.ts` -- so the comment has to name
+    // `params.width` and record that ONE override covers EVERY pin of the
+    // instance, which is what makes the rejected mechanism impossible rather
+    // than merely unfashionable. It also has to name the resolution: the
+    // registered family, and `decoder2` as the catalog's 2-Bit Decoder.
     const l25 = comments.get('ch2-25-1-bit-decoder') ?? '';
     expect(l25).toContain('params.width');
     expect(l25).toContain('decoder2');
@@ -1302,15 +1321,15 @@ describe('the targets separate the constructions they measure', () => {
   });
 });
 
-describe('the two decoder rewards are one width-parametrised definition', () => {
+describe('the decoder rewards are generated per width, and no reference drops one in', () => {
   it('wires both decoder levels from gates, not from a decoder drop-in', () => {
-    // `decoder1` and `decoder3` are reward DATA and no decoder def is registered
-    // in this phase (`src/core/defs/` has none), so a level's palette can list
-    // the id -- the unlock walk is over ids, not defs -- while `ui/palette.ts`
-    // drops it for having no def. What this asserts is the consequence the data
-    // comments describe: neither decoder level's reference depends on that def
-    // existing, so both keep working whatever the task that registers the family
-    // decides, and no target here was measured from a part that is not there.
+    // `decoder1` and `decoder3` are the ids levels 25 and 26 hand out, and the
+    // family they belong to is registered now (`DECODER_DEF_IDS`, one part per
+    // width, generated in `src/core/defs/wide.ts`). What this asserts is what
+    // the data comments describe, and it is a fact about this batch rather than
+    // about the registry: neither decoder level's reference solution depends on
+    // the drop-in -- both are wired from gates -- so no target here was measured
+    // from a part a player would have to own before the level that hands it out.
     for (const id of ['decoder1', 'decoder2', 'decoder3']) {
       for (const [levelId, make] of Object.entries(solutions)) {
         const uses = make().instances.filter((inst) => inst.def === id);
@@ -1322,5 +1341,34 @@ describe('the two decoder rewards are one width-parametrised definition', () => 
       expect(level.allowedComponents, `${level.id} offers a decoder`).not.toContain('decoder1');
       expect(level.allowedComponents).not.toContain('decoder3');
     }
+    // Level 25 names `decoder2` to the player and deliberately does not offer
+    // it: no level unlocks it, and wired to this level's one-bit select it would
+    // answer the level's own two-row table by itself (the level's data comment
+    // records both reasons). Pinned here so the decision has to be made again
+    // rather than drifted out of.
+    expect(L25.brief.en).toContain('decoder2');
+    expect(L25.allowedComponents).not.toContain('decoder2');
+  });
+
+  it("lets level 25's own reward score the target, which is the own-reward rule", () => {
+    // The level's comment states this measurement, so it is taken here rather
+    // than described. `decoder1` is the level's OWN reward and `paletteDefsFor`
+    // offers a level its own rewards before it is passed (batch 2's rule, the
+    // same case as level 13's `splitter` and level 20's `full_adder`), so a
+    // player can drop the part in and score exactly what the NOT-and-Maker
+    // reference scores: one NAND equivalent, one unit of delay, three stars.
+    // That is why the reward is listed and `decoder2` -- not this level's reward
+    // at all -- is not; the distinction is the rule's, not an inconsistency.
+    expect(L25.rewards?.components).toContain('decoder1');
+    expect(L25.allowedComponents).toContain('decoder1');
+    const graph = build([
+      { kind: 'input', name: 'sel' },
+      { kind: 'part', def: 'decoder1', id: 'dec', from: ['sel'] },
+      { kind: 'output', from: 'dec', width: 2 },
+    ]);
+    const result = grade(graph, registry, L25);
+    expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
+    expect(result.metrics).toEqual(L25.threeStar);
+    expect(result.stars).toBe(3);
   });
 });

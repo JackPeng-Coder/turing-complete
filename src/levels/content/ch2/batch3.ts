@@ -30,11 +30,13 @@ import { truthTable, type LevelIo } from '../../tables';
  *    number) is kept, the form is replaced. That is a deliberate change of kind,
  *    not a translation, and it is recorded as such -- batch 1 did the same thing
  *    to level 15 (`Binary Racer`, the other timed mini-game in the chapter).
- *  * LEVEL 25'S DECODER IS WIDTH-PARAMETRISED, and the kernel's width rule does
- *    not let one width literal do everything (see that level's comment: two of
- *    the batch's rewards name parts no def registers yet, so the brief's claim
- *    about widening the part is a claim about the part as the source defines it,
- *    with the engine's half of the story recorded next to it).
+ *  * LEVEL 25'S DECODER COMES IN WIDTHS, ONE PART PER WIDTH -- and the kernel
+ *    has no per-instance knob that stands in for that. The family is generated
+ *    (`decoder1` / `decoder2` / `decoder3`, one `createDecoderDef(w)` each), so
+ *    the level's brief names the ids a player drops in rather than a width
+ *    parameter; that level's comment records the rejected mechanism and the
+ *    resolution, because an earlier revision of this batch shipped the wrong
+ *    story (`params.width = 2` giving the catalog's 2-bit decoder).
  *  * LEVEL 27 HAS AN AUTHORED INSTRUCTION SET. The source says only "用或门和非门
  *    构建完整逻辑运算集" -- build the complete set of logical operations -- and
  *    enumerates no opcodes at all. The eight values in that level's comment, and
@@ -51,16 +53,24 @@ import { truthTable, type LevelIo } from '../../tables';
  * (level 20's reward, now registered) stays out of every palette here for batch
  * 2's reason, recorded in that file's module note: it is offered nowhere but its
  * own level, so no target in this batch is measured from a part a level would
- * rather have answered with. Nothing else in this batch is answered by a single
- * unlocked part.
+ * rather have answered with. Nothing else here needed that subtraction -- and
+ * the one part a level in this batch both offers and is answered by is level
+ * 25's OWN reward, `decoder1`, now that the family is registered: that is batch
+ * 2's own-reward half of the rule rather than an exception to it (level 13's
+ * splitter and level 20's `full_adder` are the same case), and that level's
+ * comment states what the drop-in scores.
  *
- * REWARDS THAT NAME NO DEF ARE NORMAL HERE. `decoder1` (level 25) and `decoder3`
- * (level 26) are unlock DATA: no def of either id is registered in this phase.
- * That is a legal state rather than a hole -- a reward is an id, the unlock walk
- * is over ids, and `ui/palette` drops an id `registry.has` refuses, so the part
- * is simply invisible until a task registers the family. Every reference in the
- * test file is wired from gates instead, so a later task can register the decoder
- * family without moving any number in this file.
+ * THE DECODER REWARDS NAME DEFS THAT NOW EXIST. `decoder1` (level 25) and
+ * `decoder3` (level 26) were reward DATA when this batch was written -- a legal
+ * state rather than a hole, because a reward is an id, the unlock walk is over
+ * ids, and `ui/palette` drops an id `registry.has` refuses. The family has since
+ * been registered (`DECODER_DEF_IDS`: `decoder1` / `decoder2` / `decoder3`,
+ * generated per width in `src/core/defs/wide.ts`), and no number in this file
+ * moved when it landed: every reference in the test file is wired from gates, so
+ * the levels do not depend on the parts they hand out. `decoder2` is the 2-to-4
+ * form, the family member no level name introduces: it is registered and
+ * offered by no level's palette, and level 25's comment records why it is not in
+ * that level's.
  *
  * EVERY LEVEL HERE IS PURELY COMBINATIONAL, so `tick` is 0 on every three-star
  * target, for the same reason batches 1 and 2 state it: no check in this batch
@@ -406,10 +416,9 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * one-to-two decoding: one select bit, two one-hot outputs. ALSO SOURCED, from
    * the catalog rather than from a level name: the compendium's component list
    * for this chapter has `decoder1`, `decoder2` and `decoder3`, while no level
-   * name introduces the catalog's `2-Bit Decoder` -- so `decoder1` and `decoder2`
-   * are THE SAME DEFINITION at different widths, not two parts, and the 2-bit
-   * decoder is this level's reward widened. That is what this level's brief tells
-   * the player.
+   * name introduces the catalog's `2-Bit Decoder`. The 2-bit decoder is therefore
+   * the same generator one width up -- registered as `decoder2` -- rather than a
+   * second hand-written part, which is what this level's brief tells the player.
    *
    * AUTHORED: the `sel:1 -> out:2` shape; the two rows (built by `truthTable`,
    * which refuses to leave a declared output pin uncompared); the measured
@@ -417,22 +426,51 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * `not` of the select bit, bit 1 is the select bit, and the `maker` that packs
    * the two bits into the level's 2-bit output is wiring); and the palette.
    *
-   * THE WIDTH CLAIM, AND WHAT THE KERNEL DOES WITH IT -- recorded here because a
-   * reviewer will ask. `params.width` is the only per-instance knob the kernel
-   * has, and it resolves a pin as `inst.params.width ?? pin.width` for EVERY pin
-   * of the instance (`src/core/net.ts`, `effectiveWidth`): one width literal
-   * covers the whole part. So a def declaring `sel: 1 / out: 2` compiled at
-   * `params.width = 2` has BOTH pins two bits wide, which is not the catalog's
-   * 2-bit decoder (`sel: 2 / out: 4`) -- a single width literal cannot make the
-   * two pins differ, and the pins of a decoder MUST differ, because the output
-   * count is `2 ** width`. The brief states the part's width parameterisation as
-   * the source defines it (`params.width = 2` gives the 2-bit decoder); how that
-   * width reaches two differently-sized pins is the decision of the task that
-   * registers the family, and the shape this kernel can express is the one
-   * `createWideDefs(width)` already uses for the operators -- one definition,
-   * generated per width, `decoder1` / `decoder2` / `decoder3`. No def of either
-   * id exists in this phase, so both are reward data and nothing here depends on
-   * them.
+   * THE WIDTH QUESTION, RESOLVED -- recorded because a reviewer will ask, and
+   * because an earlier revision of this file answered it wrongly. The registered
+   * family is generated PER WIDTH: `createDecoderDef(w)` builds one part with
+   * `sel: w` in and `out: 2 ** w` out, `DECODER_WIDTHS` registers w = 1, 2 and
+   * 3, and the ids that come out are `decoder1`, `decoder2` and `decoder3`. The
+   * brief says exactly that: the decoder comes in widths, one part each, and a
+   * player who wants a 4-output decoder drops in `decoder2`.
+   *
+   * WHY `params.width` IS NOT, AND CANNOT BE, THE MECHANISM -- kept here so
+   * nobody tries it again. `params.width` is the only per-instance knob the
+   * kernel has, and it resolves a pin as `inst.params.width ?? pin.width` for
+   * EVERY pin of the instance (`src/core/net.ts`, `effectiveWidth`): one width
+   * literal covers the whole part. A def declaring `sel: 1 / out: 2` compiled at
+   * `params.width = 2` therefore has BOTH pins two bits wide -- `sel: 2 /
+   * out: 2`, which is not the catalog's 2-bit decoder (`sel: 2 / out: 4`). A
+   * decoder's two pins MUST differ (the output count is `2 ** width`), so no
+   * instance knob can express one; the width has to be a parameter of the DEF,
+   * which is exactly how `createWideDefs(width)` builds the operators and
+   * `createDecoderDef(width)` builds this family. `params.width` moves a part's
+   * pins together; it can never move them apart.
+   *
+   * WHY `decoder2` IS NOT IN THIS LEVEL'S PALETTE, although the brief mentions
+   * it. Two reasons, either of which would be enough. (1) No level unlocks it: a
+   * palette part is one the chapter has already handed out, and `decoder2` is
+   * the family member no level name introduces -- level 25 rewards `decoder1` and
+   * level 26 `decoder3`, and `test/levels/ch2-batch3.test.ts` walks the unlock
+   * order and refuses a palette entry nothing has unlocked by then. (2) It would
+   * answer this level by itself: `decoder2`'s select pin is two bits and the
+   * level's `sel` is one, so the second select bit is simply unwired (an unwired
+   * pin reads 0) and `out`'s low two bits are `1 << sel` -- this level's whole
+   * two-row table, from a part the player never builds. The brief names it as the
+   * form available later, not as an answer here.
+   *
+   * `decoder1` IS OFFERED HERE, AND THAT IS THE OWN-REWARD RULE RATHER THAN A
+   * CONTRADICTION OF THE PARAGRAPH ABOVE. Batch 2's palette rule subtracts only
+   * parts that are NOT the level's own reward, and `paletteDefsFor` hands a level
+   * its own rewards before it is passed (level 13's `splitter` and level 20's
+   * `full_adder` are the same case) -- so a player CAN drop `decoder1` straight
+   * in and score the target exactly: measured, `gate: 1, delay: 1, tick: 0`,
+   * three stars, the same numbers the NOT-and-Maker reference scores, because a
+   * one-NAND tree and the one NOT it is built from are the same one gate. That is
+   * the price of the rule rather than an oversight, and it is why the reward stays
+   * listed: the level teaches the part it hands out, and the drop-in is what a
+   * player who already owns it uses to replay. `decoder2` is a different case --
+   * it is not this level's reward at all -- which is the whole of the distinction.
    */
   {
     id: 'ch2-25-1-bit-decoder',
@@ -440,8 +478,8 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
     index: 25,
     name: { zh: '1 位解码器', en: '1 Bit Decoder' },
     brief: {
-      zh: '一个选择位 sel 决定 out 的哪一位为高：sel 为 0 时第 0 位为高（out 读作 1），sel 为 1 时第 1 位为高（out 读作 2）。这颗解码器是按宽度参数化的元件：把它的宽度参数 params.width 设成 2，同一份定义就是源资料目录里的「2 位解码器」——2 位选择、4 路输出；那个 2 位解码器没有任何关卡为它命名，它就是这颗元件加宽之后的样子。',
-      en: 'One select bit decides which bit of out goes high: sel 0 lights bit 0 (out reads 1) and sel 1 lights bit 1 (out reads 2). This decoder is a width-parametrised part: set its width parameter, params.width, to 2 and the same definition is the 2-bit decoder in the source catalog -- two select bits, four outputs. No level name introduces that 2-bit decoder; it is this part, widened.',
+      zh: '解码器把一个选择值变成一条为高的输出线，而且是按宽度分档的：一档一颗元件。这一关要做的是 decoder1，也就是 1 位选择、2 路输出的那一颗——sel 为 0 时第 0 位为高（out 读作 1），sel 为 1 时第 1 位为高（out 读作 2）。2 位选择、4 路输出的那一颗是 decoder2，也就是源资料目录里的「2 位解码器」：没有任何关卡为它命名，以后哪一关需要 4 路输出，直接把它放进去就行。',
+      en: 'A decoder turns a select value into one high output line, and it comes in widths: one part per width. This level asks for decoder1, the 1-to-2 form -- sel 0 lights bit 0 (out reads 1) and sel 1 lights bit 1 (out reads 2). The 2-to-4 form is decoder2: two select bits, four output lines, the catalog\'s 2-bit decoder, which no level name introduces and which a later circuit can drop in as it is.',
     },
     hint: {
       zh: '两个输出位里，第 0 位就是 sel 取反，第 1 位就是 sel 本身；用位合并器把这两条线拼成 2 位，一个非门就够了。',
@@ -460,9 +498,9 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * ch2-26-3-bit-decoder -- 3 Bit Decoder / 3 位解码器
    *
    * SOURCED: the name in both languages, its position (26th), and the concept --
-   * three-to-eight decoding, the same part as level 25 one width up (see that
-   * level's note on the width-parametrised family; `decoder3` is `decoder1` at
-   * width 3).
+   * three-to-eight decoding, the same generator as level 25 one width up (see
+   * that level's note on the family: `decoder3` is `createDecoderDef(3)`, the
+   * same part definition as its `decoder1`).
    *
    * AUTHORED: the `sel:3 -> out:8` shape; the eight rows; the measured three-star
    * target; and the palette. The palette offers `splitter` and `maker` because

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BASE_DEFS, DEF_IDS } from '../../src/core/defs/index';
 import {
+  DECODER_DEF_IDS,
   DEFAULT_WIDE_WIDTH,
   MAX_WIDE_WIDTH,
   WIDE_DEF_IDS,
@@ -136,6 +137,43 @@ const STORAGE_CONTRACT: readonly (ContractRow & {
 
 const STORAGE_IDS = STORAGE_CONTRACT.map((row) => row.id);
 
+/**
+ * Every id the wide module registers, read from the module's own exported id
+ * tuples -- the same three `defs/index.ts` builds `DEF_IDS` from -- instead of
+ * being typed out here.
+ *
+ * THIS REPLACES A HAND-MAINTAINED LIST THAT A GENERATED FAMILY BROKE. The
+ * category assertion below used to expect `[...WIDE_OP_IDS, ...STORAGE_IDS]`,
+ * where `WIDE_OP_IDS` is derived from the CONTRACT table above and `STORAGE_IDS`
+ * from the storage one: two lists a human keeps in step, checked against defs a
+ * generator produces. The decoder family landed as a third generated tuple in
+ * `wide.ts` (`DECODER_DEF_IDS`, registered from `DECODER_WIDTHS`) and the
+ * assertion failed on three ids the family's author had no reason to know were
+ * listed in a test file. Deriving the set from the tuples means the expectation
+ * moves with the module, and a fourth generated family needs its tuple added to
+ * this one expression rather than a list of ids re-typed by hand.
+ *
+ * IT IS STILL AN ASSERTION, AND NOT A TAUTOLOGY, because of where these ids come
+ * from: the module's REGISTRATION TUPLES, not the registered defs' own
+ * `category` fields and not `byCategory('wide')`. An expectation built from
+ * either of those would move with the bug -- a part filed under the wrong
+ * category would drop out of the expected set and out of `byCategory('wide')` at
+ * the same time, and the assertion would pass on exactly the mistake it exists
+ * to catch. Here a mis-filed part is still missing from `byCategory('wide')`
+ * while remaining in this set, so the assertion fails.
+ */
+const WIDE_MODULE_IDS = [...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS, ...DECODER_DEF_IDS] as const;
+
+/**
+ * `WIDE_MODULE_IDS` minus `const8`, the module's ONE deliberate exception: it is
+ * a constant source with no inputs, filed with `const_on` / `const_off` under
+ * `io` rather than with the gates. The exception is filtered out here and
+ * asserted directly below (`const8` is the only id in the module's tuples that
+ * is not `wide`), so it is stated rather than smuggled in by a list that happens
+ * not to name it.
+ */
+const WIDE_CATEGORY_IDS = WIDE_MODULE_IDS.filter((id) => id !== 'const8');
+
 /** Runs a def the way `settle` does: inputs in, outputs staged, no state. */
 function evalDef(def: ComponentDef, inputs: readonly PortValue[]): PortValue[] {
   const outputs: PortValue[] = [];
@@ -218,12 +256,19 @@ describe('wide defs: the brief\'s contract', () => {
 
   it('categorizes every wide part as wide and const8 as a source', () => {
     const r = createRegistry(BASE_DEFS);
-    // The storage family is built at eight bits too, so it belongs to `wide`
-    // alongside the operators: `memory1` is phase 0's ONE-BIT memory group
-    // (`delay_line`, `mem1`) and there is no `memory8`.
-    expect(r.byCategory('wide').map((d) => d.id).sort()).toEqual(
-      [...WIDE_OP_IDS, ...STORAGE_IDS].sort(),
-    );
+    // The expected set is the wide module's own registration tuples -- the
+    // operators, the storage family (built at eight bits too, so it belongs to
+    // `wide` alongside them: `memory1` is phase 0's ONE-BIT memory group,
+    // `delay_line` and `mem1`, and there is no `memory8`) and the decoders.
+    // See `WIDE_MODULE_IDS`: it is derived, because the hand-maintained version
+    // of this line could not know about a family it had never heard of.
+    expect(r.byCategory('wide').map((d) => d.id).sort()).toEqual([...WIDE_CATEGORY_IDS].sort());
+    // The same membership stated as the exception it is, so it can never quietly
+    // become two: exactly `const8` is registered under a category that is not
+    // `wide`. A decoder filed as `logic1`, or a byte operator filed as `io`,
+    // joins this list and fails -- including when the id is still in the set
+    // above, which is what keeps the derived expectation honest.
+    expect(WIDE_MODULE_IDS.filter((id) => r.get(id).category !== 'wide')).toEqual(['const8']);
     // `const8` has no inputs and only drives a level, so it belongs with
     // `const_on` / `const_off` rather than with the gates.
     expect(r.get('const8').category).toBe('io');
