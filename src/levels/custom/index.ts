@@ -12,15 +12,18 @@ import type { LevelIo } from '../checks';
  *  * `io`/`spec` and nothing else. No network, no real time, no DOM: a custom
  *    checker has to run offline, in the same process, while the player edits.
  *  * failure records must follow `CheckFailure`'s shape and key their
- *    `inputs` / `expected` / `actual` by the level's own pin ids, because that
- *    is what the failure table renders. A record that does not is treated as a
- *    malformed outcome and the check fails as `invalid` -- the player sees a
- *    reason, never a broken panel.
+ *    `inputs` / `expected` / `actual` by the level's own pin ids, with finite
+ *    numbers as values, because that is what the failure table renders. A record
+ *    that does not -- an unknown pin id, a `NaN` or a string, a missing field --
+ *    is treated as a malformed outcome and the check fails as `invalid`: the
+ *    player sees a reason, never a broken panel or a silent zero.
  *
  * `runChecks` calls a checker once per check, on a `Simulation` of its own, and
  * adopts the returned outcome: `ticksUsed` is merged into the run's tick metric
  * with `Math.max`, and any failure record it returns makes the check fail even
  * if it also claimed `passed: true` (contradictions fail safe, never open).
+ * Because that tick count feeds the star rating, it is part of the checker's
+ * contract: it is reviewed together with the checker, like the verdicts are.
  */
 
 export type CustomChecker = (io: LevelIo, spec: LevelSpec) => CheckOutcome;

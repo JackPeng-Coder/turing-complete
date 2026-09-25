@@ -9,6 +9,7 @@ import {
   type CustomChecker,
 } from '../../src/levels/custom/index';
 import { grade } from '../../src/levels/grader';
+import { FAILURE_REASONS } from '../../src/levels/spec';
 import type {
   CheckFailure,
   CheckOutcome,
@@ -375,7 +376,23 @@ describe('runChecks / fuzz', () => {
       withChecks({ ...addLevel, io: { inputs: [], outputs: ADD_IO.outputs } }, [addCheck]),
     );
     expect(outcome.passed).toBe(false);
+    expect(outcome.failures[0]?.check).toBe('fuzz');
     expect(outcome.failures[0]?.reason).toBe('missing-vectors');
+    expect(outcome.failures[0]?.detail).toContain('no input pins');
+  });
+
+  it('refuses a fuzz check on a level with no output pins to compare against', () => {
+    // The sibling of the case above: a level can be vacuous in either
+    // direction, and both are reported before any authored function is bound.
+    const outcome = runChecks(
+      addCircuit(),
+      registry,
+      withChecks({ ...addLevel, io: { inputs: ADD_IO.inputs, outputs: [] } }, [addCheck]),
+    );
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures[0]?.check).toBe('fuzz');
+    expect(outcome.failures[0]?.reason).toBe('missing-vectors');
+    expect(outcome.failures[0]?.detail).toContain('no output pins');
   });
 
   it('refuses a fuzz check with a function missing for one of the level pins', () => {
@@ -643,6 +660,35 @@ describe('runChecks / custom', () => {
       },
       'not a known failure reason',
     ],
+    [
+      'a failure record keyed by a pin this level does not have',
+      {
+        passed: false,
+        failures: [{ check: 'custom', inputs: { nope: 1 }, expected: {}, actual: {}, tick: 0 }],
+        ticksUsed: 0,
+      },
+      'not a pin of this level',
+    ],
+    [
+      'a failure record with a non-numeric value',
+      {
+        passed: false,
+        failures: [{ check: 'custom', inputs: {}, expected: { out: '1' }, actual: {}, tick: 0 }],
+        ticksUsed: 0,
+      },
+      'expected a finite number',
+    ],
+    [
+      'a failure record with a NaN value',
+      {
+        passed: false,
+        failures: [
+          { check: 'custom', inputs: {}, expected: {}, actual: { out: Number.NaN }, tick: 0 },
+        ],
+        ticksUsed: 0,
+      },
+      'expected a finite number',
+    ],
   ])('turns %s outcome into a recorded invalid failure', (_label, value, fragment) => {
     const id = `malformed-${_label}`;
     useChecker(id, () => value as CheckOutcome);
@@ -679,6 +725,53 @@ describe('runChecks / custom', () => {
     expect(outcome.failures[0]?.detail).toContain('without a failure record');
   });
 
+  it.each([...FAILURE_REASONS])('adopts a failure record whose reason is %s', (reason) => {
+    // The list validation uses is derived from the type, so every reason the
+    // type declares has to be a legal thing for a checker to say. A reason
+    // added to the union but not to the array would otherwise be rejected as
+    // "malformed" the moment a checker used it.
+    const id = `reason-${reason}`;
+    const record: CheckFailure = {
+      check: 'custom',
+      inputs: { a: 1, b: 2 },
+      expected: { out: 3 },
+      actual: { out: 0 },
+      tick: 0,
+      reason,
+    };
+    useChecker(id, () => ({ passed: false, failures: [record], ticksUsed: 0 }));
+    const outcome = runChecks(andCircuit(), registry, customSpec(id));
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures).toEqual([record]);
+  });
+
+  it.each(['passed', 'failures', 'ticksUsed'] as const)(
+    'records a failure when an outcome accessor for %s throws',
+    (field) => {
+      // A hostile outcome is level-adjacent code: reading it is exactly as
+      // untrusted as calling the checker, so the throw has to become a failure
+      // rather than escape `runChecks` (the outer catch rethrows anything that
+      // is not a kernel error, and the board edits on every keystroke).
+      const id = `hostile-${field}`;
+      useChecker(id, () => {
+        const outcome = { passed: true, failures: [], ticksUsed: 0 } as Record<string, unknown>;
+        Object.defineProperty(outcome, field, {
+          get() {
+            throw new TypeError(`${field} accessor exploded`);
+          },
+        });
+        return outcome as unknown as CheckOutcome;
+      });
+      const spec = customSpec(id);
+      expect(() => runChecks(andCircuit(), registry, spec)).not.toThrow();
+      const outcome = runChecks(andCircuit(), registry, spec);
+      expect(outcome.passed).toBe(false);
+      expect(outcome.failures[0]?.reason).toBe('invalid');
+      expect(outcome.failures[0]?.detail).toContain('accessor exploded');
+      expect(() => grade(andCircuit(), registry, spec)).not.toThrow();
+    },
+  );
+
   it('runs truth-table, fuzz and custom checks in one spec', () => {
     useChecker('sweep-and', sweepAnd);
     const spec = withChecks(andLevel, [
@@ -713,5 +806,57 @@ describe('runChecks / custom', () => {
     expect(outcome.passed).toBe(false);
     expect(outcome.failures[0]?.reason).toBe('invalid');
     expect(outcome.failures[0]?.detail).toContain('mystery');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// spec.checks is level data too
+// ---------------------------------------------------------------------------
+
+describe('runChecks / unreadable check entries', () => {
+  // `spec.checks` is typed, but level data reaches the kernel untyped: an entry
+  // that is `null` (or that carries no string `kind`) has to become a recorded
+  // failure. Reading `check.kind` for it used to throw a `TypeError` out of
+  // `runChecks` -- straight into the board-edit path.
+  it.each<[string, unknown, string]>([
+    ['a null entry', null, 'is null'],
+    ['an undefined entry', undefined, 'is undefined'],
+    ['a number', 42, 'is 42'],
+    ['a string', 'truth-table', 'is "truth-table"'],
+    ['an entry whose kind is not a string', { kind: 7 }, 'kind=7'],
+  ])('records a failure for %s instead of throwing', (_label, entry, fragment) => {
+    const spec = withChecks(andLevel, [entry as LevelCheck]);
+    expect(() => runChecks(andCircuit(), registry, spec)).not.toThrow();
+    const outcome = runChecks(andCircuit(), registry, spec);
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures[0]?.reason).toBe('invalid');
+    expect(outcome.failures[0]?.detail).toContain(fragment);
+    expect(() => grade(andCircuit(), registry, spec)).not.toThrow();
+    expect(grade(andCircuit(), registry, spec).passed).toBe(false);
+  });
+
+  it('guards the element before the no-circuit failure, which reads its kind too', () => {
+    // The `'error' in created` push runs when the circuit cannot be bound (here
+    // a pin whose compiled width disagrees with the level's) and it sits
+    // outside the loop's `try`: it reads `check.kind` as well, so the element
+    // guard has to come before it, not just before the dispatch.
+    const spec = withChecks(
+      {
+        ...andLevel,
+        io: {
+          inputs: [
+            { id: 'a', width: 4 },
+            { id: 'b', width: 8 },
+          ],
+          outputs: AND_IO.outputs,
+        },
+      },
+      [null as unknown as LevelCheck],
+    );
+    expect(() => runChecks(andCircuit(), registry, spec)).not.toThrow();
+    const outcome = runChecks(andCircuit(), registry, spec);
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures[0]?.reason).toBe('invalid');
+    expect(outcome.failures[0]?.detail).toContain('is null');
   });
 });

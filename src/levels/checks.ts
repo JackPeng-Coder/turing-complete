@@ -4,10 +4,12 @@ import { Simulation, compile, type Netlist } from '../core/net';
 import type { Registry } from '../core/registry';
 import { assertWidth, formatPort, type PortValue } from '../core/signal';
 import { getCustomCheck } from './custom/index';
+import { FAILURE_REASONS } from './spec';
 import type {
   CheckFailure,
   CheckOutcome,
   ConstraintRule,
+  FailureReason,
   FuzzCheck,
   FuzzSample,
   FuzzVector,
@@ -512,32 +514,42 @@ function* fuzzVectors(seed: number, plan: FuzzRun): Generator<FuzzVector> {
 // custom
 // ---------------------------------------------------------------------------
 
-/** The reasons `CheckFailure` declares; a checker may not invent one. */
-const FAILURE_REASONS: readonly string[] = [
-  'mismatch',
-  'unstable',
-  'invalid',
-  'missing-io',
-  'missing-rows',
-  'missing-vectors',
-  'missing-check',
-];
-
-/** Why one adopted failure record cannot be shown as-is, or `undefined`. */
-function failureIssue(item: unknown): string | undefined {
+/**
+ * Why one adopted failure record cannot be shown as-is, or `undefined`.
+ *
+ * `spec` is what makes the pin names checkable: these three maps are rendered
+ * pin by pin, so a key that is not one of the level's pins would put a stray
+ * row of zeros beside the real ones, and a value that is not a finite number
+ * would render as whatever the panel's string conversion makes of it. Both are
+ * refused here, for the same reason `fuzz` refuses a value that does not fit its
+ * pin -- a checker must not be able to ship a silently wrong row.
+ */
+function failureIssue(item: unknown, spec: LevelSpec): string | undefined {
   if (!isRecord(item)) return `is ${describeValue(item)}, expected an object`;
   if (typeof item.check !== 'string') {
     return `has check=${describeValue(item.check)}, expected a check kind`;
   }
+  const pinIds = new Set<string>();
+  for (const pin of spec.io.inputs) pinIds.add(pin.id);
+  for (const pin of spec.io.outputs) pinIds.add(pin.id);
   for (const field of ['inputs', 'expected', 'actual'] as const) {
-    if (!isRecord(item[field])) {
-      return `has ${field}=${describeValue(item[field])}, expected an object of pin values`;
+    const map = item[field];
+    if (!isRecord(map)) {
+      return `has ${field}=${describeValue(map)}, expected an object of pin values`;
+    }
+    for (const [pin, value] of Object.entries(map)) {
+      if (!pinIds.has(pin)) {
+        return `has ${field} key "${pin}", which is not a pin of this level`;
+      }
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return `has ${field}."${pin}"=${describeValue(value)}, expected a finite number`;
+      }
     }
   }
   if (typeof item.tick !== 'number' || !Number.isFinite(item.tick)) {
     return `has tick=${describeValue(item.tick)}, expected a number`;
   }
-  if (item.reason !== undefined && !FAILURE_REASONS.includes(item.reason as string)) {
+  if (item.reason !== undefined && !FAILURE_REASONS.includes(item.reason as FailureReason)) {
     return `has reason=${describeValue(item.reason)}, which is not a known failure reason`;
   }
   return undefined;
@@ -550,9 +562,10 @@ function failureIssue(item: unknown): string | undefined {
  * The shape is checked here rather than trusted, because the records go straight
  * into the failure panel: a checker that returns `{ failures: 'none' }` or a
  * bare `null` must fail its check with a reason, not break the board on the next
- * keystroke.
+ * keystroke. Each record is checked against the level as well as for its own
+ * shape -- see `failureIssue`.
  */
-function outcomeIssue(outcome: unknown): string | undefined {
+function outcomeIssue(outcome: unknown, spec: LevelSpec): string | undefined {
   if (!isRecord(outcome)) {
     return `it returned ${describeValue(outcome)} instead of a CheckOutcome`;
   }
@@ -566,7 +579,7 @@ function outcomeIssue(outcome: unknown): string | undefined {
     return `"ticksUsed" is ${describeValue(outcome.ticksUsed)}, expected a non-negative integer`;
   }
   for (const [index, item] of outcome.failures.entries()) {
-    const issue = failureIssue(item);
+    const issue = failureIssue(item, spec);
     if (issue !== undefined) return `failure record ${index} ${issue}`;
   }
   return undefined;
@@ -576,7 +589,16 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
   const failures: CheckFailure[] = [];
   let ticksUsed = 0;
 
-  for (const check of spec.checks) {
+  for (const entry of spec.checks) {
+    // Element-level guard, before anything reads `check.kind`: level data
+    // reaches the kernel untyped, and an entry that is `null` used to throw a
+    // `TypeError` out of `runChecks` -- including from the `'error' in created`
+    // push just below, which reads `kind` and sits outside the `try`.
+    if (!isRecord(entry) || typeof entry.kind !== 'string') {
+      failures.push(unreadableCheckFailure(entry));
+      continue;
+    }
+    const check: LevelCheck = entry;
     // One compilation and one Simulation per check, reused for every row.
     // Compiling per row would re-run validateGraph and reallocate the signal
     // table hundreds of times for a single level.
@@ -812,8 +834,15 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
         }
 
         let outcome: unknown;
+        let issue: string | undefined;
         try {
           outcome = checker(io, spec);
+          // Read inside the same `try` as the call: an outcome whose `passed`,
+          // `failures` or `ticksUsed` accessor throws is a hostile return value,
+          // not kernel code, and the outer `catch` rethrows everything that is
+          // not a kernel error. Here it is a malformed outcome with an
+          // explanation, which is what it is.
+          issue = outcomeIssue(outcome, spec);
         } catch (e) {
           // A registered checker is code, and code has bugs. Every throw is
           // absorbed here -- `grade()` runs on every board edit, and Phase 0
@@ -835,7 +864,6 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
           continue;
         }
 
-        const issue = outcomeIssue(outcome);
         if (issue !== undefined) {
           failures.push(
             failure(
@@ -999,6 +1027,30 @@ function compare(
     if ((actual[key] ?? 0) !== want) return true;
   }
   return false;
+}
+
+/**
+ * The failure for a `spec.checks` element that is not a check at all.
+ *
+ * `failure()` cannot build this one: it reads `check.kind`, and the point of the
+ * record is that there is no readable kind. The record's `check` field is typed
+ * as the union of the kinds this kernel knows, so it states `'(none)'` here --
+ * the one place where level data is known to have named nothing the kernel can
+ * run.
+ */
+function unreadableCheckFailure(entry: unknown): CheckFailure {
+  const detail = isRecord(entry)
+    ? `check entry has kind=${describeValue(entry.kind)}, expected a string kind`
+    : `check entry is ${describeValue(entry)}, expected an object with a kind`;
+  return {
+    check: '(none)' as CheckFailure['check'],
+    inputs: {},
+    expected: {},
+    actual: {},
+    tick: 0,
+    reason: 'invalid',
+    detail,
+  };
 }
 
 /**

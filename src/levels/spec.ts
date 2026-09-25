@@ -146,6 +146,34 @@ export interface LevelSpec {
   readonly rewards?: { readonly components?: readonly string[] };
 }
 
+/**
+ * Every reason a check failure can carry, as a runtime array.
+ *
+ * This array is the single source of truth: `FailureReason` is derived from it,
+ * and the validation of a custom checker's failure records (`levels/checks.ts`)
+ * reads the array itself. Adding a reason to one and not the other is therefore
+ * impossible -- and it matters, because a reason the union declares but the
+ * array does not would make every checker that used it report "malformed".
+ */
+export const FAILURE_REASONS = [
+  'mismatch',
+  'unstable',
+  'invalid',
+  'missing-io',
+  'missing-rows',
+  /**
+   * A `fuzz` check that would exercise nothing: no usable `rounds`, no input
+   * pins to vary, or no expectation functions to compare with. The `fuzz`
+   * analogue of `missing-rows`.
+   */
+  'missing-vectors',
+  /** A `custom` check whose id is not in the registry. */
+  'missing-check',
+] as const;
+
+/** Why a check failure was recorded: one of `FAILURE_REASONS`. */
+export type FailureReason = (typeof FAILURE_REASONS)[number];
+
 export interface CheckFailure {
   readonly check: LevelCheck['kind'];
   readonly inputs: Readonly<Record<string, number>>;
@@ -166,20 +194,7 @@ export interface CheckFailure {
    * the numeric records above stay the machine-readable part.
    */
   readonly detail?: string;
-  readonly reason?:
-    | 'mismatch'
-    | 'unstable'
-    | 'invalid'
-    | 'missing-io'
-    | 'missing-rows'
-    /**
-     * A `fuzz` check that would exercise nothing: no usable `rounds`, no input
-     * pins to vary, or no expectation functions to compare with. The `fuzz`
-     * analogue of `missing-rows`.
-     */
-    | 'missing-vectors'
-    /** A `custom` check whose id is not in the registry. */
-    | 'missing-check';
+  readonly reason?: FailureReason;
 }
 
 export interface CheckOutcome {
