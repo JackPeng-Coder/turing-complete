@@ -129,7 +129,7 @@ test/
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
-    "jsdom": "28.0.1",
+    "jsdom": "28.1.0",
     "typescript": "5.9.3",
     "vite": "8.3.1",
     "vitest": "5.0.2"
@@ -138,6 +138,8 @@ test/
 ```
 
 > 说明：TypeScript 固定 `5.9.3` 而不是 registry 上的 `7.0.2`。TS 7 是重写的原生编译器，与 Vitest 5 + Vite 8 的组合在本项目中未经验证；阶段 0 不承担这个风险。等阶段 1 再评估升级。
+>
+> `jsdom` 固定 `28.1.0`：`28.0.1` 这个版本不存在（registry 返回 404），初稿写错了。Task 1 实测确认。
 
 - [ ] **Step 2: 写 `tsconfig.json`**
 
@@ -158,13 +160,14 @@ test/
     "noEmit": true,
     "types": ["vitest/globals"]
   },
-  "include": ["src", "test", "vite.config.ts"]
+  "include": ["src", "test", "vite.config.ts", "playwright.config.ts"]
 }
 ```
 
 - [ ] **Step 3: 写 `vite.config.ts`**
 
 ```ts
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 
 export default defineConfig({
@@ -175,13 +178,25 @@ export default defineConfig({
     // node is the default: the engine and level tests must not need a DOM.
     environment: 'node',
     include: ['test/**/*.test.ts'],
-    // The board-view tests build DOM-free geometry, but anything that touches
-    // `document` (palette, shell, truth table) needs a DOM. Opt those in by
-    // directory rather than making every test pay for jsdom.
-    environmentMatchGlobs: [['test/ui/**', 'jsdom']],
   },
 });
 ```
+
+> **三处必须照做的细节**（Task 1 实测得出，初稿写错了）：
+>
+> 1. `/// <reference types="vitest/config" />` 不能省。`tsconfig.json` 里的 `"types": ["vitest/globals"]` 关掉了自动 `@types` 引入，于是 Vite 的 `defineConfig` 不认识 `test` 键，`tsc --noEmit` 直接失败——而 `pnpm build` 就是 `tsc --noEmit && vite build`。
+> 2. **不要用 `environmentMatchGlobs`**：Vitest 5 已删除该选项（`node_modules/vitest` 里 0 处匹配），运行时静默忽略、`tsc` 直接报错。DOM 测试改用**文件首行 docblock**：`// @vitest-environment jsdom`（Task 11 的 `test/ui/panels.test.ts` 就是这么写的）。
+> 3. `pnpm-workspace.yaml` 需要提交，尽管它不是本任务代码的一部分。本机的 pnpm 强制供应链策略：**发布不足约 24 小时的包会被拒绝安装**，而我们固定的 `vite@8.3.1` / `vitest@5.0.2` / `@vitest/mocker@5.0.2` / `@vitest/spy@5.0.2` 全部年轻于此。删掉这个文件后 `pnpm install --frozen-lockfile` 会以 `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` 失败（exit 1）——这条是实测的，不是推测：
+>
+> ```yaml
+> minimumReleaseAgeExclude:
+>   - '@vitest/mocker@5.0.2'
+>   - '@vitest/spy@5.0.2'
+>   - vite@8.3.1
+>   - vitest@5.0.2
+> ```
+>
+> 四个都是 devDependency，没有豁免任何运行时依赖。等版本变旧后即可删除对应条目。
 
 - [ ] **Step 4: 写 `index.html` 与 `src/main.ts` 占位**
 
@@ -254,7 +269,7 @@ Expected: PASS — 1 passed
 - [ ] **Step 10: 提交**
 
 ```bash
-git add package.json pnpm-lock.yaml tsconfig.json vite.config.ts index.html src/main.ts src/levels/index.ts test/smoke/sanity.test.ts README.md
+git add package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json vite.config.ts index.html src/main.ts src/levels/index.ts test/smoke/sanity.test.ts README.md
 git commit -m "chore: scaffold vite + vitest project with sanity test"
 ```
 
@@ -5353,6 +5368,8 @@ html, body { margin: 0; height: 100%; background: #0d1117; color: #c9d1d9; }
 > 布局说明：`#app` 是纵向 flex 容器，顶栏是第一个子项（`flex: 0 0 auto`），`.screens` 吃掉剩余高度。画板是**正常流内的 flex 子项**，不用绝对定位、不用负 `z-index`——这样 `canvas.clientWidth/clientHeight` 与可见区域严格一致，指针坐标换算不需要任何修正，冒烟测试里测得的手感也才可信。
 
 - [ ] **Step 10: 写 `test/ui/panels.test.ts`（jsdom）**
+
+> 首行的 `// @vitest-environment jsdom` **不能删**。Vitest 5 移除了 `environmentMatchGlobs`，全局环境是 `node`，所以这个文件必须自己声明要 DOM；少了这一行会以 `document is not defined` 失败。反过来 `test/ui/view.test.ts` 是纯几何函数，不需要 jsdom，运行在 node 下即可。
 
 面板是 DOM 组件，值得有一个廉价的回归测试——否则「解锁的元件可以点、锁住的元件点不动」这条规则只靠冒烟测试兜底。
 

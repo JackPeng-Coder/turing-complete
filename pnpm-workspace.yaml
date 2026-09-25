@@ -1,3 +1,12 @@
+# This host's pnpm enforces a supply-chain policy: packages published within a
+# cutoff window (roughly the last day) are rejected during install. The four
+# versions below were pinned deliberately in package.json, are all younger than
+# that window, and are what the lockfile records.
+#
+# Without this exemption a clean `pnpm install --frozen-lockfile` fails with
+# ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION (verified by removing this file and
+# reinstalling). Every entry is a devDependency; no runtime dependency is
+# exempted. Remove an entry once its version ages past the cutoff.
 minimumReleaseAgeExclude:
   - '@vitest/mocker@5.0.2'
   - '@vitest/spy@5.0.2'
