@@ -20,3 +20,6 @@ test-results/
 # shipped: it quotes the original game's dialogue verbatim, and the project
 # claims (see README.md) to contain none of the original's text.
 图灵完备_Turing_Complete_游戏资料全集.md
+
+# Isolated worktrees for multi-phase work (superpowers:using-git-worktrees).
+.worktrees/
