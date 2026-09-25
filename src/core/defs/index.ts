@@ -1,5 +1,11 @@
 import type { ComponentDef } from '../registry';
-import { WIDE_DEF_IDS, WIDE_STORAGE_DEFS, WIDE_STORAGE_DEF_IDS, createWideDefs } from './wide';
+import {
+  FULL_ADDER,
+  WIDE_DEF_IDS,
+  WIDE_STORAGE_DEFS,
+  WIDE_STORAGE_DEF_IDS,
+  createWideDefs,
+} from './wide';
 
 // ---------------------------------------------------------------------------
 // GATE COST: the 1-bit NAND-equivalent basis, the same one `wide.ts` prices its
@@ -23,6 +29,11 @@ import { WIDE_DEF_IDS, WIDE_STORAGE_DEFS, WIDE_STORAGE_DEF_IDS, createWideDefs }
 //        |       | hand, and no such product is ~(abc).
 //   OR3  |   6   | NOT a, NOT b, NOT c, then a 3-input NAND (itself 3) = 6. The
 //        |       | cascade or(or(a, b), c) is also 3 + 3 = 6.
+//
+// The tenth 1-bit gate, `full_adder`, is the largest cell on this basis:
+// FULL_ADDER = 9, and `wide.ts` prices `add8` as eight of it (8 x 9 = 72). Its
+// construction is written out at the def below, and the count is that file's
+// exported `FULL_ADDER` constant rather than a second literal.
 //
 // These are documented constructions, not proven minima -- AND3 is the one with
 // a minimality argument, sketched above. `cost` and `gateCost` coincide only for
@@ -73,6 +84,64 @@ const gate = (
   };
 };
 
+/**
+ * `full_adder`: `sum = a XOR b XOR cin`, and `cout` is the majority of `a`, `b`
+ * and `cin` -- high when at least two of the three are high. This is the
+ * standard 1-bit full adder: the part level 20 hands out, the puzzle level 21
+ * builds by hand, and the cell level 22 cascades eight of into a byte adder
+ * (carry out of one stage into `cin` of the next).
+ *
+ * NOT BUILT WITH `gate()`. That helper produces exactly one output pin named
+ * `out` from a single-output table, and this part has two named outputs the
+ * level data addresses by name (`sum`, `cout`); the input count and the
+ * normalisation of a pin value to 0 or 1 are the same either way.
+ *
+ * THE CELL, IN 2-INPUT NANDs -- 9 of them:
+ *
+ *   x1 = NAND(a, b)        x2 = NAND(a, x1)      x3 = NAND(b, x1)
+ *   s1 = NAND(x2, x3)      = a XOR b
+ *   s2 = NAND(s1, cin)     s3 = NAND(s1, s2)     s4 = NAND(cin, s2)
+ *   sum = NAND(s3, s4)     = s1 XOR cin
+ *   cout = NAND(x1, s2)    = ab + cin(a XOR b)
+ *
+ * Two four-NAND XORs (x2/x3/s1 and s2/s3/s4/sum) make eight, and the carry is
+ * the ninth: `cout` reuses `x1` and `s2` -- the products already in hand --
+ * instead of rebuilding them, which is what makes it `NAND(x1, s2)` rather than
+ * a tenth gate. That reuse is the whole reason the count is the 9 that `add8` is
+ * eight of.
+ *
+ * `gateCost` is `FULL_ADDER` imported from `wide.ts`, not a second literal 9:
+ * the registered gate and the bit `add8` is built from are one construction, and
+ * two literals for one construction is how the gate metric drifts. The delay
+ * unit is 1 either way -- a 1-bit part is one node on the longest path, whatever
+ * it expands to.
+ */
+const fullAdder: ComponentDef = {
+  id: 'full_adder',
+  name: { zh: '全加器', en: 'Full Adder' },
+  category: 'logic1',
+  inputs: [
+    { id: 'a', width: 1 },
+    { id: 'b', width: 1 },
+    { id: 'cin', width: 1 },
+  ],
+  outputs: [
+    { id: 'sum', width: 1 },
+    { id: 'cout', width: 1 },
+  ],
+  cost: 1,
+  gateCost: FULL_ADDER,
+  sequential: false,
+  stateBytes: 0,
+  evaluate: (i, o) => {
+    const a = i[0] === 1 ? 1 : 0;
+    const b = i[1] === 1 ? 1 : 0;
+    const cin = i[2] === 1 ? 1 : 0;
+    o[0] = a ^ b ^ cin;
+    o[1] = a + b + cin >= 2 ? 1 : 0;
+  },
+};
+
 // Constant sources carry `category: 'io'`, not `'logic1'`: they have no inputs and
 // simply drive a level, so they do not belong with the gates. The registry test
 // pins this down by asserting that `byCategory('logic1')` does not contain
@@ -114,8 +183,18 @@ const PHASE0_DEF_IDS = [
 ] as const;
 
 /**
- * Every def id the game ships: phase 0's one-bit parts, then the wide family --
- * the operators, then the storage parts.
+ * One-bit gates added after phase 0, in registration order.
+ *
+ * `full_adder` is a `logic1` gate exactly like the parts above -- pin-for-pin
+ * one bit, priced on the same NAND basis -- but it is chapter 2's part (level
+ * 20's reward), not something phase 0 shipped, so it is not spelled inside
+ * `PHASE0_DEF_IDS`, whose name and order describe that set.
+ */
+const POST_PHASE0_DEF_IDS = ['full_adder'] as const;
+
+/**
+ * Every def id the game ships: phase 0's one-bit parts, the one-bit gate added
+ * since, then the wide family -- the operators, then the storage parts.
  *
  * The wide ids are not repeated here -- `wide.ts` owns them next to the defs
  * they name, and `test/core/defs-wide.test.ts` pins that each list agrees with
@@ -124,6 +203,7 @@ const PHASE0_DEF_IDS = [
  */
 export const DEF_IDS = [
   ...PHASE0_DEF_IDS,
+  ...POST_PHASE0_DEF_IDS,
   ...WIDE_DEF_IDS,
   ...WIDE_STORAGE_DEF_IDS,
 ] as const;
@@ -153,6 +233,9 @@ export const BASE_DEFS: readonly ComponentDef[] = [
   gate('and3', '三路与门', '3-Pin AND', 3, [0, 0, 0, 0, 0, 0, 0, 1], 2 * AND),
   // NOT a, NOT b, NOT c, then a 3-input NAND; the OR cascade also totals 6.
   gate('or3', '三路或门', '3-Pin OR', 3, [0, 1, 1, 1, 1, 1, 1, 1], 2 * OR),
+  // Two named outputs, so this one is written out rather than built by `gate()`;
+  // its 9-NAND cell and that count's construction are at the def.
+  fullAdder,
 
   // Level IO plumbing. Always available in the palette; never unlocked.
   {

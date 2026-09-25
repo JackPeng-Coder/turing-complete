@@ -3,6 +3,10 @@ import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS, DEF_IDS } from '../../src/core/defs/index';
 import { WIDE_DEF_IDS, WIDE_STORAGE_DEF_IDS } from '../../src/core/defs/wide';
 import { extractField, insertField, packBits, unpackBits } from '../../src/core/fields';
+import { CH2_BATCH2 } from '../../src/levels/content/ch2/batch2';
+import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
+import { LEVELS } from '../../src/levels/index';
+import type { LevelSpec } from '../../src/levels/spec';
 
 // `evaluate(inputs, outputs, state, ctx)`: `state` is the instance's private
 // storage, placed third. Only storage elements read it -- every combinational
@@ -95,15 +99,43 @@ describe('base defs', () => {
       xnor: 5,
       and3: 4,
       or3: 6,
+      // The 9-NAND full-adder cell `wide.ts` prices `add8` with (8 x 9 = 72),
+      // reused rather than restated: see the `FULL_ADDER` constant there.
+      full_adder: 9,
     };
     for (const [id, want] of Object.entries(NAND_EQUIVALENTS)) {
       expect(r.get(id).gateCost, id).toBe(want);
     }
-    // These nine ARE the `logic1` family, so a tenth gate added without a count
-    // cannot slip past the loop above.
+    // These ten ARE the `logic1` family, so an eleventh gate added without a
+    // count cannot slip past the loop above.
     expect(r.byCategory('logic1').map((d) => d.id).sort()).toEqual(
       Object.keys(NAND_EQUIVALENTS).sort(),
     );
+  });
+
+  it('registers full_adder as a 1-bit gate on the same 9-NAND cell as add8', () => {
+    // Level 20 rewards `full_adder` by name, so the id has to be spelled here
+    // exactly as the level data spells it.
+    expect([...DEF_IDS]).toContain('full_adder');
+    const def = r.get('full_adder');
+    // A 1-bit gate-level part, like `and3` / `or3` -- not an eight-bit operator.
+    expect(def.category).toBe('logic1');
+    // The DELAY unit, one per node: never the gate count.
+    expect(def.cost).toBe(1);
+    // The GATE metric: the standard 9-NAND cell (the construction is written out
+    // in `defs/index.ts`, and `FULL_ADDER` in `wide.ts` is the same number
+    // rather than a second literal). The identity below is the part that cannot
+    // be satisfied by editing one number: an 8-bit ripple adder is eight of
+    // these cells and nothing else.
+    expect(def.gateCost).toBe(9);
+    expect(r.get('add8').gateCost).toBe(8 * (def.gateCost ?? 0));
+    expect(def.sequential).toBe(false);
+    expect(def.stateBytes).toBe(0);
+    // Pin ids and widths are the contract the level data and the palette
+    // address, so they are pinned here as `id:width` pairs.
+    expect(def.inputs.map((p) => `${p.id}:${p.width}`)).toEqual(['a:1', 'b:1', 'cin:1']);
+    expect(def.outputs.map((p) => `${p.id}:${p.width}`)).toEqual(['sum:1', 'cout:1']);
+    expect(def.name).toEqual({ zh: '全加器', en: 'Full Adder' });
   });
 
   it('leaves gateCost to the `?? cost` fallback only where both metrics are zero', () => {
@@ -145,6 +177,32 @@ describe('base defs', () => {
     expect(o1[0]).toBe(1);
     or3.evaluate!([0, 0, 0], o1, undefined, { tick: 0 });
     expect(o1[0]).toBe(0);
+  });
+
+  it('evaluates the full adder over all eight input combinations', () => {
+    const def = r.get('full_adder');
+    // Written out rather than computed from the def, so the test states the
+    // contract instead of agreeing with the implementation. The index is the
+    // input vector with `a` as bit 0 (`a + 2b + 4cin`), the same convention the
+    // one-output truth tables above use, and each row is `[sum, cout]`: `sum` is
+    // the XOR of the three inputs, `cout` the majority. This is the cell level
+    // 22 cascades eight of into a byte adder.
+    const TABLE: readonly (readonly [number, number])[] = [
+      [0, 0], // 000
+      [1, 0], // a
+      [1, 0], // b
+      [0, 1], // a b
+      [1, 0], // cin
+      [0, 1], // a cin
+      [0, 1], // b cin
+      [1, 1], // a b cin
+    ];
+    for (let pattern = 0; pattern < 8; pattern += 1) {
+      const bits = [pattern & 1, (pattern >> 1) & 1, (pattern >> 2) & 1];
+      const out: (number | Uint8Array)[] = [0, 0];
+      def.evaluate!(bits, out, undefined, { tick: 0 });
+      expect([out[0], out[1]], `full_adder(${bits.join(',')})`).toEqual(TABLE[pattern]);
+    }
   });
 
   it('evaluates XOR and XNOR', () => {
@@ -350,5 +408,79 @@ describe('fields', () => {
     expect(extractField(packed, 24, 8)).toBe(0xff);
     expect(extractField(packed, 0, 24)).toBe(0);
     expect(insertField(0xffff_ffff, 0, 32, 0)).toBe(0);
+  });
+});
+
+/**
+ * The defect class this block guards: a level whose `rewards.components` names
+ * an id that no def declares.
+ *
+ * WHY IT SURVIVED EVERYTHING ELSE. `rewards.components` is `readonly string[]`
+ * (`levels/spec.ts`), not `readonly DefId[]`, so the compiler cannot see the
+ * mistake; and a reward is only read when the player FINISHES the level
+ * (`unlockedComponents`) or opens a palette that lists it (`paletteDefsFor`),
+ * so a reward naming nothing is invisible for the whole of authoring, review and
+ * every test that grades a level's reference solution. Level 20 was the live
+ * case: it rewards `full_adder`, and no def in `src/` declared that id -- the
+ * per-chapter tests spelled the reward as a string literal and agreed with
+ * themselves.
+ *
+ * WHAT IS WALKED. The game's own level set (`LEVELS`, chapter 1) plus the
+ * chapter-2 batches that are shipped data: `CH2_LEVELS` (the batches joined into
+ * the game so far) and `CH2_BATCH2`, which is written and reviewed but not
+ * joined yet. Naming the unjoined batch explicitly is the point -- level 20
+ * lives in it, and a walk that only covered `LEVELS` + `CH2_LEVELS` would have
+ * passed this test while the defect stood. When a batch is appended to
+ * `CH2_LEVELS`, it joins this walk with no edit here; the one line to delete
+ * then is the `CH2_BATCH2` import, which a batch join makes redundant.
+ */
+describe('shipped level rewards', () => {
+  const r = createRegistry(BASE_DEFS);
+
+  /** Every shipped level: the game's order first, then the unjoined batch. */
+  const SHIPPED: readonly LevelSpec[] = [...LEVELS, ...CH2_LEVELS, ...CH2_BATCH2];
+
+  it('names only registered defs in rewards.components', () => {
+    const named = new Set<string>();
+    const missing: string[] = [];
+    for (const level of SHIPPED) {
+      for (const def of level.rewards?.components ?? []) {
+        named.add(def);
+        if (!r.has(def)) missing.push(`${level.id} rewards ${def}`);
+      }
+    }
+    // Every offender at once, not just the first: a batch of new rewards is
+    // cheaper to fix from one list than from one failure per run.
+    expect(missing, 'rewards that name no def').toEqual([]);
+    // NON-VACUITY. An empty walk passes the assertion above no matter what the
+    // level data says, so the walk proves it reached the levels: `full_adder` is
+    // level 20's reward, and level 20 is in the batch that is not joined into
+    // `LEVELS`/`CH2_LEVELS` yet -- the exact hole this test exists to cover.
+    expect([...named]).toContain('full_adder');
+    expect(named.size).toBeGreaterThan(1);
+  });
+
+  it('names only registered defs in allowedComponents', () => {
+    // The palette half of the same defect, and just as silent: `ui/palette.ts`
+    // filters the ids it is handed through `registry.has`, so a level offering a
+    // part no def declares simply never shows it. Level 20 was the live case on
+    // both halves at once -- it rewarded `full_adder` AND listed it in its own
+    // palette, and neither reached the player.
+    //
+    // Stated here rather than in the rewards test because the two lists are
+    // different claims: a reward decides what the level UNLOCKS, a palette entry
+    // what it lets you BUILD with.
+    const offered = new Set<string>();
+    const missing: string[] = [];
+    for (const level of SHIPPED) {
+      for (const def of level.allowedComponents) {
+        offered.add(def);
+        if (!r.has(def)) missing.push(`${level.id} offers ${def}`);
+      }
+    }
+    expect(missing, 'palette ids that name no def').toEqual([]);
+    // The same non-vacuity anchor as above: `full_adder` is only reachable
+    // through the unjoined batch, and only level 20 lists it.
+    expect([...offered]).toContain('full_adder');
   });
 });

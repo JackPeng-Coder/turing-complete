@@ -127,7 +127,8 @@ function maskOf(w: number): number {
 // NOT), which is a useful sign that 54 is not an artifact of one drawing.
 //
 // The same basis prices the registered 1-bit gates in `defs/index.ts` -- NAND 1,
-// NOT 1, AND 2, OR 3, NOR 4, XOR 4, XNOR 5, AND3 4, OR3 6 -- and
+// NOT 1, AND 2, OR 3, NOR 4, XOR 4, XNOR 5, AND3 4, OR3 6, and FULL_ADDER 9 for
+// `full_adder` itself, which imports this constant.
 // `test/core/defs-wide.test.ts` cross-checks this file's per-bit cells against
 // those defs, so an `and8` bit and a built-in `and` can never be priced two
 // different ways again.
@@ -158,8 +159,13 @@ const MUX2 = 4;
  *   cout = NAND(x1, s2)        = a·b + cin·(a XOR b)
  *
  * Eight of these in a ripple chain are `add8`, `cin` and `cout` included.
+ *
+ * EXPORTED because the same one-bit part is registered as `full_adder` in
+ * `defs/index.ts` -- the id level 20 rewards and level 22's cascade is wired
+ * from. That def imports this constant instead of restating 9, so the registered
+ * gate and the bit `add8` is built out of cannot be priced two different ways.
  */
-const FULL_ADDER = 9;
+export const FULL_ADDER = 9;
 
 /** Bits a barrel shifter selects on: one 2:1-mux stage per amount bit. */
 function shiftStages(w: number): number {
