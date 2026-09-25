@@ -976,8 +976,10 @@ describe('the targets separate the constructions they measure', () => {
   it('level 24: the bit-serial incrementer is smaller and much deeper, and one star', () => {
     // `~a + 1` without the byte adder: eight NOTs, then a carry ripple of seven
     // ANDs and eight XORs. Measured rather than described, because the level's
-    // comment claims the target DENIES three stars to a 48-gate circuit -- which
-    // is true, and is the whole of what "delay 2" buys.
+    // comment claims the target DENIES three stars to a 54-gate circuit -- which
+    // is true, and is the whole of what "delay 2" buys. (The number here is the
+    // one the measurement below reads, and the one the level's comment states;
+    // this comment used to quote it as 48, which the level comment never said.)
     const graph = bitSerial(
       (bit) => `n${bit}`,
       'one',

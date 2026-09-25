@@ -12,9 +12,6 @@ import {
   createWideDefs,
 } from '../../src/core/defs/wide';
 import { extractField, insertField, packBits, unpackBits } from '../../src/core/fields';
-import { CH2_BATCH2 } from '../../src/levels/content/ch2/batch2';
-import { CH2_BATCH3 } from '../../src/levels/content/ch2/batch3';
-import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
 import { LEVELS } from '../../src/levels/index';
 import type { LevelSpec } from '../../src/levels/spec';
 
@@ -617,21 +614,21 @@ describe('the decoder family', () => {
  * per-chapter tests spelled the reward as a string literal and agreed with
  * themselves.
  *
- * WHAT IS WALKED. The game's own level set (`LEVELS`, chapter 1) plus the
- * chapter-2 batches that are shipped data: `CH2_LEVELS` (the batches joined into
- * the game so far) and the two written-but-unjoined batches `CH2_BATCH2` and
- * `CH2_BATCH3`. Naming the unjoined batches explicitly is the point -- level 20
- * lives in the second and levels 25 and 26 in the third, and a walk that only
- * covered `LEVELS` + `CH2_LEVELS` would have passed this test while the holes
- * stood. When a batch is appended to `CH2_LEVELS`, it joins this walk with no
- * edit here; the one line to delete then is that batch's import, which a batch
- * join makes redundant.
+ * WHAT IS WALKED. The game's own level set, `LEVELS` -- which is every shipped
+ * level, chapter 1 and chapter 2, in play order. `CH2_BATCH2` and `CH2_BATCH3`
+ * used to be named here as separate "written-but-unjoined" arrays because level
+ * 20 lives in the second (it rewards `full_adder`) and levels 25 and 26 in the
+ * third (they reward `decoder1` / `decoder3`), and a walk that only covered
+ * chapter 1 would have passed this test while those holes stood. They are joined
+ * now -- `LEVELS` reaches all four batches through `content/index.ts` -- so naming
+ * them again here would not widen the walk, it would only walk levels 18-27 two
+ * more times. The anchors below are what keeps the walk honest instead.
  */
 describe('shipped level rewards', () => {
   const r = createRegistry(BASE_DEFS);
 
-  /** Every shipped level: the game's order first, then the unjoined batches. */
-  const SHIPPED: readonly LevelSpec[] = [...LEVELS, ...CH2_LEVELS, ...CH2_BATCH2, ...CH2_BATCH3];
+  /** Every shipped level, in the game's own order. */
+  const SHIPPED: readonly LevelSpec[] = LEVELS;
 
   it('names only registered defs in rewards.components', () => {
     const named = new Set<string>();
@@ -646,10 +643,10 @@ describe('shipped level rewards', () => {
     // cheaper to fix from one list than from one failure per run.
     expect(missing, 'rewards that name no def').toEqual([]);
     // NON-VACUITY. An empty walk passes the assertion above no matter what the
-    // level data says, so the walk proves it reached the levels: `full_adder` is
-    // level 20's reward, in the batch after `CH2_LEVELS`, and `decoder1` /
-    // `decoder3` are levels 25 and 26's rewards, in the batch after that -- the
-    // exact holes this test exists to cover.
+    // level data says, so the walk proves it reached the levels the defect class
+    // lived in: `full_adder` is level 20's reward and `decoder1` / `decoder3` are
+    // levels 25 and 26's -- a hole in any of those batches fails here rather than
+    // passing silently.
     expect([...named]).toContain('full_adder');
     expect([...named]).toContain('decoder1');
     expect([...named]).toContain('decoder3');
@@ -675,9 +672,9 @@ describe('shipped level rewards', () => {
       }
     }
     expect(missing, 'palette ids that name no def').toEqual([]);
-    // The same non-vacuity anchors as above: `full_adder` is only reachable
-    // through the second unjoined batch, and `decoder1` / `decoder3` -- which
-    // levels 25 and 26 offer in their own palettes -- only through the third.
+    // The same non-vacuity anchors as above: `full_adder` and `decoder1` /
+    // `decoder3` -- which levels 25 and 26 offer in their own palettes -- are the
+    // ids that were unreachable while their batches were unjoined.
     expect([...offered]).toContain('full_adder');
     expect([...offered]).toContain('decoder1');
     expect([...offered]).toContain('decoder3');

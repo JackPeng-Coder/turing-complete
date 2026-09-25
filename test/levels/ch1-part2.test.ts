@@ -220,6 +220,19 @@ describe('reference solutions pass with three stars', () => {
   }
 });
 
+describe("three-star targets are the reference solutions' own metrics", () => {
+  // The chapter-1 counterpart of the assertion chapter 2 carries per batch: the
+  // reference must score its level's stated target EXACTLY, so a loosened target
+  // (which `stars === 3` alone cannot see) fails here instead of passing silently.
+  for (const [id, make] of Object.entries(solutions)) {
+    it(id, () => {
+      const level = byId.get(id) as LevelSpec;
+      const { metrics } = grade(make(), registry, level);
+      expect(level.threeStar, `measured metrics=${JSON.stringify(metrics)}`).toEqual(metrics);
+    });
+  }
+});
+
 describe('reference solutions are buildable from the palette they are graded against', () => {
   for (const [id, make] of Object.entries(solutions)) {
     it(id, () => {

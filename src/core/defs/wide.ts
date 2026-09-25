@@ -70,9 +70,15 @@ import type { PortValue } from '../signal';
  * Charging the NAND-equivalents to `cost` instead would give a wide part a
  * multi-unit delay and break "every component contributes exactly one unit of
  * delay"; collapsing them into one number is the bug this split exists to
- * prevent. Every def below states its `gateCost` explicitly -- none leans on
- * the `?? cost` fallback -- so the whole family's gate numbers are in this file
- * and one test can pin all 24.
+ * prevent. Every OPERATOR below states its `gateCost` explicitly -- none of the
+ * 24 leans on the `?? cost` fallback -- so the whole family's gate numbers are in
+ * this file and one test can pin all 24. The four STATEFUL defs are the deliberate
+ * exception: `delay8`, `reg8`, `counter8` and `ram8` leave `gateCost` absent, which
+ * reads as `cost`'s 0, because the gate metric prices what the player BUILT and
+ * storage is free on both metrics by ruling rather than by omission. The storage
+ * section note below carries the argument, and `grader.ts` states the same
+ * exception from the metric's side; `mux8`, the one combinational def in that
+ * section, states its count like the operators do.
  */
 
 /** The width every wide def is registered at in this phase (spec §3.3). */
@@ -102,9 +108,31 @@ export function clampWidth(width: number | undefined): number {
   return Math.min(MAX_WIDE_WIDTH, Math.max(1, Math.trunc(width)));
 }
 
-/** Low-`w`-bit mask. `1 << 32` is `1` in JS, so 32 is handled separately. */
+/**
+ * Low-`w`-bit mask, as a NON-NEGATIVE number.
+ *
+ * `2 ** w - 1`, not `(1 << w) - 1`: `<<` converts through int32, so at the top of
+ * the admitted range it produces a negative mask -- `1 << 31` is `-2 ** 31`, and
+ * `(1 << 31) - 1` is `-2147483649` rather than `0x7fff_ffff`. That negative number
+ * is not a mask at all: `x & -2147483649` is `x & 0x7fff_ffff` by luck, but the
+ * two operators that RETURN the mask instead of ANDing with it (`div8` by zero,
+ * `ashr8`'s sign fill) hand it straight to a port, where `assertWidth` rejects it
+ * and `runChecks` turns a correct circuit into an 'invalid' failure.
+ *
+ * `2 ** w - 1` is exact for every `w` up to 32 (doubles stay exact well past
+ * `2 ** 32`), so no width needs a special case.
+ *
+ * RECORDED LIMITATION, NOT FIXED HERE: correcting this mask is necessary but not
+ * sufficient for a 31-bit port to work end to end. `fitsWidth` (`core/signal.ts`)
+ * bounds a narrow value with `v < 1 << width`, and `1 << 31` is `-2 ** 31`, so
+ * `assertWidth(v, 31)` rejects EVERY value -- `assertWidth(0, 31)` throws today.
+ * Widths 1..30 and 32 are unaffected. The repair is one line in that guard
+ * (`v < 2 ** width`), but `signal.ts` is outside this task's file scope, so the
+ * defect is recorded here rather than edited: the two returns below are correct,
+ * and a caller at width 31 still cannot stage them.
+ */
 function maskOf(w: number): number {
-  return w >= 32 ? 0xffff_ffff : (1 << w) - 1;
+  return 2 ** w - 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -409,7 +437,11 @@ function multiplyOp(a: number, b: number, w: number): number {
  *
  * DECIDED, not undefined: division by zero returns all ones -- `0xff` at width
  * 8. Every numerator gets the same answer, so a level can rely on it, and a
- * divider built from this can never produce a value the port cannot carry.
+ * divider built from this can never produce a value the port cannot carry: the
+ * all-ones returned is `maskOf(w)`, which is exactly `w` bits and never negative
+ * (see `maskOf` -- this return and `ashr{w}`'s sign fill are the two places that
+ * hand a mask to a port instead of ANDing with one, so `maskOf`'s sign is the
+ * whole contract here).
  */
 function divideOp(a: number, b: number, w: number): number {
   const divisor = u(b, w);

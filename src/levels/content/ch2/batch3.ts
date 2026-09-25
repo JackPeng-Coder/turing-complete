@@ -584,11 +584,27 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
   /**
    * ch2-27-logic-engine -- Logic Engine / 逻辑引擎
    *
-   * SOURCED: the name in both languages, its position (27th), and the concept --
+   * SOURCED: the name in both languages, its position (27th), the concept --
    * 用或门和非门构建完整逻辑运算集, build the complete set of logical operations
-   * out of OR and NOT gates. That is every word the source gives this level: it
-   * ENUMERATES NO OPCODES, no widths and no pass condition, so the instruction
-   * set below is this replica's design and not the source's.
+   * out of OR and NOT gates -- and the source's ACHIEVEMENT note: 'Symmetric ALU
+   * … 仅用「8 位」系列元件通过「逻辑引擎」关卡', pass the Logic Engine level using
+   * only the 8-bit series of components. It ENUMERATES NO OPCODES, no widths and
+   * no pass condition, so the instruction set below is this replica's design and
+   * not the source's.
+   *
+   * HOW THAT ACHIEVEMENT IS RECORDED, AND WHAT IT IS NOT. As on levels 21, 22 and
+   * 38, the source's note is an achievement rather than a pass condition, and spec
+   * 5.4 puts achievements out of this phase's scope: nothing in this file grades a
+   * circuit on the 8-bit-family restriction, and no check here can see which
+   * components a solution used. It is recorded because it is a sourced fact about
+   * this level -- and because it is the one note in the source that CONSTRAINS a
+   * solution, which is worth knowing before a later phase briefs an achievement
+   * system from these comments. What the reference and the hint below do is a
+   * separate question from what the achievement requires: the reference is built
+   * from the 8-bit operators (`and8`, `or8`, `xor8`, `not8`, `add8`, `shift_l8`,
+   * `ashr8`) and its 56-mux select tree, and the hint steers the player to those
+   * same wide parts -- so neither is evidence about the achievement either way, and
+   * neither was chosen to satisfy it.
    *
    * AUTHORED, AND THE ONE THING THAT HAS TO BE AUTHORED HERE IS THE TABLE. `op`'s
    * low three bits select the operation -- 0=and, 1=or, 2=xor, 3=not a, 4=add,

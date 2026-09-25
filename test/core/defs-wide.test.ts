@@ -1084,6 +1084,58 @@ describe('the width generator', () => {
     expect(createWideDefs().find((d) => d.id === 'add16')).toBeUndefined();
   });
 
+  it('keeps the two port-returning operators unsigned at the top of the range', () => {
+    // `div{w}` by zero and `ashr{w}`'s sign fill are the only two operators that
+    // RETURN a mask instead of ANDing with one, so they are the only two that can
+    // put a raw mask on a port. `maskOf` used to be `(1 << w) - 1`, and `<<`
+    // converts through int32: at w = 31 that is `-2147483649`, not `0x7fff_ffff`,
+    // and the negative number reaches the port unmasked -- every other operator
+    // ANDs with the mask, which happens to give the right bits anyway. 31 is the
+    // width that breaks, and the range `clampWidth` and `createWideDefs` both
+    // document as admitted is 1..32, so the contract is asserted across the whole
+    // range and not just at the registered 8.
+    //
+    // These values are read from the defs' own `evaluate`, as the rest of this
+    // file does. That matters at 31 for a reason outside this module: `fitsWidth`
+    // (`core/signal.ts`) bounds a narrow value with `v < 1 << width`, and `1 << 31`
+    // is negative, so `assertWidth` rejects every 31-bit value -- `assertWidth(0,
+    // 31)` throws -- and staging these results is impossible until that separate
+    // one-line guard is fixed. `maskOf`'s sign is this module's half of the
+    // contract and the half this test owns; the limitation is recorded on `maskOf`.
+    for (let w = 1; w <= MAX_WIDE_WIDTH; w += 1) {
+      const allOnes = 2 ** w - 1;
+      const signBit = 2 ** (w - 1);
+
+      expect(outputsAt(w, `div${w}`, [5, 0]), `div${w} by zero`).toEqual([allOnes]);
+      // A negative operand shifted by at least its own width fills with the sign
+      // bit, which is every bit of the port.
+      expect(outputsAt(w, `ashr${w}`, [signBit, w]), `ashr${w} sign fill`).toEqual([allOnes]);
+      // A positive operand fills with zero instead -- the other half of the rule.
+      expect(outputsAt(w, `ashr${w}`, [0, w]), `ashr${w} zero fill`).toEqual([0]);
+    }
+
+    // Named separately from the loop so a regression reports the width the bug was
+    // found at rather than a loop counter.
+    expect(outputsAt(31, 'div31', [5, 0])).toEqual([0x7fff_ffff]);
+    expect(outputsAt(31, 'ashr31', [2 ** 30, 31])).toEqual([0x7fff_ffff]);
+    expect(outputsAt(MAX_WIDE_WIDTH, 'div32', [5, 0])).toEqual([0xffff_ffff]);
+  });
+
+  it('returns the all-ones of its own width, not of the module cap', () => {
+    // The value `div{w}` reports for a zero divisor is `maskOf(w)` at THAT width --
+    // `div1` is 1 and `div8` is 0xff, not the 32-bit all-ones. Pinning it here
+    // keeps a fix for the sign bug from over-correcting into one shared constant.
+    for (const w of [1, 2, 3, 4, 7, 8, 16, 31, 32]) {
+      expect(outputsAt(w, `div${w}`, [5, 0]), `div${w} by zero`).toEqual([2 ** w - 1]);
+      expect(outputsAt(w, `div${w}`, [5, 0])[0], `div${w} sign`).toBeGreaterThanOrEqual(0);
+    }
+
+    // The two values the bug produced. `maskOf(31)` was `(1 << 31) - 1`, i.e.
+    // `-2147483649`; the mask must instead be `0x7fff_ffff`.
+    expect(outputsAt(31, 'div31', [5, 0])[0]).toBe(2147483647);
+    expect(outputsAt(31, 'ashr31', [2 ** 30, 31])[0]).toBe(2147483647);
+  });
+
   it('is not re-counted by params.width, which widens every pin instead', () => {
     // This is WHY the pin count is a def parameter: the kernel resolves a pin's
     // width as `params.width ?? pin.width` for EVERY pin of the instance, so the

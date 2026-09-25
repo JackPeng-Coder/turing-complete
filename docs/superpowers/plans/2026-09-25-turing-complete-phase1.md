@@ -85,11 +85,19 @@ Ledger: `.superpowers/sdd/2026-09-25-turing-complete-phase1/progress.md`
 
 - 每一关用到的组件，必须在**该关之前**已经解锁（否则玩家卡死）。
 - 每个第 2 章组件必须**恰好**被一个关卡解锁，且解锁点不晚于它第一次被需要。
-- `mem1` 已由第 1 章第 8 关解锁（阶段 0 事实），第 2 章不重复解锁。
+- `mem1` **由第 1 章第 12 关《二进制速算》解锁**（该关的 `rewards.components`，
+  见 spec §3.3 关于 `mem1` 的说明）；它必须在第 2 章开始前已经在玩家手里，
+  而第 2 章（第 28 关的锁存器）只消费它，不重复解锁。第 1 章没有任何一关的
+  电路需要它，第 12 关自己的调色板也没有列出它。
 - `half_adder` 不在 spec §3.3 的第 2 章清单里，因此**不做成组件**：
   第 20 关的奖励是 `full_adder`。
-- `decoder2` 不在第 2 章清单里，因此 `decoder1` 与 `decoder2` 是
-  **同一个宽度参数化解码器**（`params.width`），不各自占一个解锁点。
+- `decoder2` 不在第 2 章清单里，因此**不为它单独设解锁点**。注意机制：
+  `decoder1` 与 `decoder2` 不是同一个 def 在不同 `params.width` 下的形态 ——
+  `params.width` 会**加宽实例的每一个引脚**（`net.ts` 的 `effectiveWidth`），
+  对解码器而言这只会得到一个引脚全错的组件。解码器族是**按位宽生成**的：
+  `createDecoderDef(width)` 生成 `decoder{width}`，`decoder1` 与 `decoder2`
+  是两次调用（`w` 位 `sel` → `2 ** w` 位 `out`），它们各自有两个引脚宽度不同的
+  引脚，这正是它不能由 `createWideDefs` 生成、也不能用实例参数计数的原因。
 
 ## Task 1: 内核宽位端口正确性
 
@@ -316,9 +324,14 @@ spec §5.2：`custom` 是逃生舱，但必须只依赖内核公开接口，且�
   关卡 `brief` 里对玩家说清楚。采用 `op` 的低 3 位选择运算：
   `0=and 1=or 2=xor 3=not a 4=add 5=sub 6=shift_l(a, b 低 3 位) 7=ashr(a, b 低 3 位)`，
   `out` 为 8 位结果（`add`/`sub` 丢弃高位进位）。`brief` 必须逐条列出这 8 个操作码。
-- 第 25 关解锁的解码器是**宽度参数化**的：`decoder1` 与 `decoder2` 是同一个
-  组件定义在不同 `params.width` 下的形态，不各占一个解锁点。
-  第 25 关的 `brief` 必须说明玩家可以用 `params.width` 得到 2 位解码器。
+- 第 25 关解锁的解码器是**按位宽生成**的：`decoder1` 与 `decoder2` 是
+  `createDecoderDef(1)` 与 `createDecoderDef(2)` 的产物，**不是**同一个 def 靠
+  `params.width` 变形得到的（`params.width` 会把一个实例的每一个引脚一起加宽，
+  见本计划「全章共用的解锁链规则」里的说明）。因此第 25 关的 `brief` 说明的是
+  「解码器按宽度分档，一档一颗元件」：本关要做的是 `decoder1`（`sel:1` → `out:2`），
+  而目录里的 2 位解码器是另一颗 `decoder2`（`sel:2` → `out:4`），没有任何关卡为它
+  命名，以后哪一关需要 4 路输出直接放进去即可 —— **不要**让玩家去找一个不存在的
+  实例宽度参数。
 - 第 24 关的 `threeStar` 与第 23 关一样由参考解实测。
 
 ## Task 11: 第 2 章关卡 28–38（存储与时序）

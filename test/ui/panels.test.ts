@@ -120,6 +120,42 @@ describe('truth table panel', () => {
     mountTruthTable(root, store);
     expect(root.textContent).toContain('1 ≠ 0');
   });
+
+  it('shows the reason and detail when a failure drove no vector at all', () => {
+    // The `unstable` reason (levels 28 and 30) is raised by `settle`, before any
+    // vector is driven, so all three maps are empty. Rendering those pins as 0
+    // would show the player a test vector that was never driven -- the row has to
+    // carry the reason and the detail instead.
+    const store = makeStore('ch1-04-and-gate');
+    store.set({
+      lastGrade: {
+        passed: false,
+        metrics: { gate: 0, delay: 0, tick: 0 },
+        score: 0,
+        stars: 0,
+        failures: [
+          {
+            check: 'fuzz',
+            inputs: {},
+            expected: {},
+            actual: {},
+            tick: 0,
+            reason: 'unstable',
+            round: 3,
+            detail: 'fuzz round 3 did not settle',
+          },
+        ],
+        issues: [],
+      },
+    });
+    const root = document.createElement('div');
+    mountTruthTable(root, store);
+    expect(root.textContent).toContain('unstable');
+    expect(root.textContent).toContain('fuzz round 3 did not settle');
+    // Nothing may be fabricated: no cell of the table reads as a bare `0`.
+    const cells = [...root.querySelectorAll('td')].map((td) => td.textContent);
+    expect(cells).not.toContain('0');
+  });
 });
 
 describe('shell bar', () => {

@@ -242,6 +242,22 @@ describe('reference solutions pass with three stars', () => {
   }
 });
 
+describe("three-star targets are the reference solutions' own metrics", () => {
+  // The target is measured, not guessed: this fails if a level states a number
+  // its own reference does not score exactly, in either direction. Chapter 2 has
+  // carried this assertion per batch since it was written; chapter 1 asserted
+  // only `stars === 3` above, under which a LOOSENED chapter-1 target is
+  // invisible -- the reference still scores three stars against a target it beats
+  // rather than meets. Comparing the two records makes that fail instead.
+  for (const [id, make] of Object.entries(solutions)) {
+    it(id, () => {
+      const level = byId.get(id) as LevelSpec;
+      const { metrics } = grade(make(), registry, level);
+      expect(level.threeStar, `measured metrics=${JSON.stringify(metrics)}`).toEqual(metrics);
+    });
+  }
+});
+
 describe('reference solutions are buildable from the palette they are graded against', () => {
   for (const [id, make] of Object.entries(solutions)) {
     it(id, () => {

@@ -109,9 +109,13 @@ import { truthTable, type LevelIo } from '../../tables';
  *    four-row truth table. Batch 1 recorded the same coincidence for levels 15
  *    and 16.
  *
- * NOT JOINED YET: `ch2/index.ts` assembles the chapter and still lists batch 1
- * alone, so this file is reachable only through its own test until the chapter
- * assembly task appends it.
+ * JOINED: this batch is the fourth and last slice of `CH2_LEVELS`
+ * (`ch2/index.ts`), which `content/index.ts` appends to chapter 1, so these
+ * eleven levels ship as levels 28-38 of the game's own `LEVELS`. All four
+ * batches are joined, which is what makes chapter 2 the 26 levels at indices
+ * 13-38; `test/levels/unlock-chain.test.ts` holds that to a number. Nothing
+ * imports a batch directly except that batch's own test, which grades it against
+ * its own file.
  */
 
 /**

@@ -61,6 +61,19 @@ export function mountTruthTable(root: HTMLElement, store: Store<AppState>): { re
     table.append(header);
 
     for (const failure of lastGrade.failures.slice(0, rowLimit)) {
+      // A failure that drove no vector has nothing to render pin by pin: an
+      // unstable loop is caught by `settle`, so `inputs`/`expected`/`actual` are
+      // all empty. Rendering that as a row of 0s would show the player a test
+      // vector that never existed -- so say what went wrong instead.
+      if (isEmpty(failure.inputs) && isEmpty(failure.expected)) {
+        const row = document.createElement('tr');
+        const c = cell('td', `${failure.reason ?? 'failure'}: ${failure.detail ?? 'no detail'}`);
+        c.colSpan = level.io.inputs.length + level.io.outputs.length;
+        c.style.color = THEME.error;
+        row.append(c);
+        table.append(row);
+        continue;
+      }
       const row = document.createElement('tr');
       for (const pin of level.io.inputs) row.append(cell('td', String(failure.inputs[pin.id] ?? 0)));
       for (const pin of level.io.outputs) {
@@ -77,6 +90,11 @@ export function mountTruthTable(root: HTMLElement, store: Store<AppState>): { re
   store.subscribe(render);
   render();
   return { render };
+}
+
+/** True when a failure carried no per-pin values at all. */
+function isEmpty(map: Readonly<Record<string, number>>): boolean {
+  return Object.keys(map).length === 0;
 }
 
 function cell(tag: 'td' | 'th', text: string): HTMLTableCellElement {
