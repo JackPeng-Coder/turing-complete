@@ -1,15 +1,18 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { createStore, type AppState, type Store } from '../../src/app/store';
-import { emptyProgress, applyGrade } from '../../src/app/progress';
+import { emptyProgress, applyGrade, type Progress } from '../../src/app/progress';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { addInstance, connect, emptyGraph } from '../../src/core/graph';
-import { getLevel } from '../../src/levels/index';
+import { getLevel, LEVELS } from '../../src/levels/index';
 import { grade } from '../../src/levels/grader';
 import { mountPalette } from '../../src/ui/palette';
 import { mountTruthTable } from '../../src/ui/truthTable';
 import { mountShell } from '../../src/ui/shell';
+import { mountMap } from '../../src/ui/map';
+import { NARRATIVE, narrativeFor } from '../../src/ui/narrative';
+import { THEME } from '../../src/ui/theme';
 import { levelIoInstanceId } from '../../src/ui/board/interact';
 
 const registry = createRegistry(BASE_DEFS);
@@ -204,5 +207,120 @@ describe('level io placement', () => {
     expect(result.failures).toEqual([]);
     expect(result.passed).toBe(true);
     expect(result.stars).toBe(3);
+  });
+});
+
+describe('narrative coverage', () => {
+  it('writes dedicated text for every chapter 1 level', () => {
+    for (const level of LEVELS.filter((l) => l.chapter === 1)) {
+      expect(NARRATIVE[level.id], `no narrative for ${level.id}`).toBeDefined();
+      const text = narrativeFor(level.id);
+      expect(text.before.zh.length).toBeGreaterThan(4);
+      expect(text.after.en.length).toBeGreaterThan(4);
+    }
+  });
+
+  it('falls back to generic text for a level with no narrative yet', () => {
+    const text = narrativeFor('ch9-not-written-yet');
+    expect(text.before.zh.length).toBeGreaterThan(0);
+    expect(text.before.zh).not.toBe(NARRATIVE['ch1-04-and-gate']!.before.zh);
+  });
+
+  /**
+   * Both locales are rendered by the same overlay; a missing `en` would ship a
+   * briefing that reads `undefined` to an English player, and the fallback path
+   * has to be complete for the same reason.
+   */
+  it('has both locales for every chapter 1 level, before and after', () => {
+    for (const level of LEVELS.filter((l) => l.chapter === 1)) {
+      const text = narrativeFor(level.id);
+      expect(text.before.en.length, `before.en for ${level.id}`).toBeGreaterThan(4);
+      expect(text.after.zh.length, `after.zh for ${level.id}`).toBeGreaterThan(4);
+    }
+    const fallback = narrativeFor('ch9-not-written-yet');
+    expect(fallback.before.en.length).toBeGreaterThan(0);
+    expect(fallback.after.zh.length).toBeGreaterThan(0);
+  });
+});
+
+describe('chapter map', () => {
+  function mapStore(levelId: string, progress: Progress = emptyProgress()): Store<AppState> {
+    const store = makeStore(levelId);
+    store.set({ progress });
+    return store;
+  }
+
+  /**
+   * jsdom parses the inline colour and reports it back normalised, so a
+   * comparison against `THEME.success` has to be made in the same units.
+   */
+  function rgbOf(hex: string): string {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  const passedLevel1: Progress = {
+    version: 1,
+    levels: {
+      'ch1-01-crude-awakening': {
+        passed: true,
+        best: { gate: 0, delay: 0, tick: 0 },
+        stars: 3,
+      },
+    },
+  };
+
+  it('shows one tile per level and disables the ones still locked', () => {
+    const root = document.createElement('div');
+    mountMap(root, mapStore('ch1-01-crude-awakening'), () => {});
+    const tiles = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
+    expect(tiles).toHaveLength(LEVELS.length);
+    expect(tiles[0]!.disabled).toBe(false);
+    expect(tiles[1]!.disabled).toBe(true);
+    expect(tiles[2]!.disabled).toBe(true);
+  });
+
+  it('marks the level that is open, and only that one', () => {
+    const root = document.createElement('div');
+    mountMap(root, mapStore('ch1-02-nand-gate', passedLevel1), () => {});
+    const tiles = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
+    expect(tiles.filter((t) => t.classList.contains('map-tile-current'))).toEqual([tiles[1]]);
+  });
+
+  it('shows the stars of a passed level and unlocks its successor', () => {
+    const root = document.createElement('div');
+    mountMap(root, mapStore('ch1-01-crude-awakening', passedLevel1), () => {});
+    const tiles = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
+    expect(tiles[0]!.textContent).toContain('★');
+    expect(tiles[0]!.style.color).toBe(rgbOf(THEME.success));
+    expect(tiles[1]!.disabled).toBe(false);
+    expect(tiles[2]!.disabled).toBe(true);
+    // a tile that is neither passed nor unlocked is dimmed, not tinted green
+    expect(tiles[2]!.style.color).toBe(rgbOf(THEME.textMuted));
+  });
+
+  it('reports the selected level id and ignores clicks on locked tiles', () => {
+    const root = document.createElement('div');
+    const picked: string[] = [];
+    mountMap(root, mapStore('ch1-01-crude-awakening', passedLevel1), (id) => picked.push(id));
+    const tiles = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
+    tiles[1]!.click();
+    tiles[2]!.click(); // still locked: a disabled button fires nothing
+    expect(picked).toEqual(['ch1-02-nand-gate']);
+  });
+
+  it('re-renders when progress changes', () => {
+    const store = mapStore('ch1-01-crude-awakening');
+    const root = document.createElement('div');
+    mountMap(root, store, () => {});
+    const before = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
+    expect(before[1]!.disabled).toBe(true);
+
+    store.set({ progress: passedLevel1 });
+    const after = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
+    expect(after).toHaveLength(LEVELS.length);
+    expect(after[1]!.disabled).toBe(false);
   });
 });

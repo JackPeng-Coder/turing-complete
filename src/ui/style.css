@@ -24,6 +24,11 @@ html, body { margin: 0; height: 100%; background: #0d1117; color: #c9d1d9; }
    a flex column (palette / board / truth table); the map screen scrolls. */
 .screens { flex: 1 1 auto; min-height: 0; display: flex; }
 .screen { flex: 1 1 auto; min-width: 0; min-height: 0; }
+/* `hidden` has to beat `.screen-board`'s own `display: flex`. An author rule
+   outranks the user-agent `[hidden] { display: none }` whatever its
+   specificity, so without this the board stays on screen next to the map --
+   it merely stops being the flex child that grows. */
+.screen[hidden] { display: none; }
 .screen-board { display: flex; flex-direction: column; }
 .screen-map { overflow: auto; }
 /* The board is an ordinary in-flow flex child, never an absolutely positioned
@@ -35,6 +40,8 @@ html, body { margin: 0; height: 100%; background: #0d1117; color: #c9d1d9; }
 .map-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
 .map-tile { padding: 12px; text-align: left; background: #161b22; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; color: #c9d1d9; }
 .map-tile:disabled { opacity: 0.4; cursor: not-allowed; }
+/* The level the board has open, so the player can see where they are. */
+.map-tile-current { border-color: #2fd4a7; }
 .briefing { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; background: rgba(13, 17, 23, 0.96); z-index: 10; padding: 40px; text-align: center; }
 .briefing p { max-width: 52ch; line-height: 1.7; font-size: 17px; color: #c9d1d9; }
 .briefing button { padding: 8px 24px; background: #1e2530; border: 1px solid #2fd4a7; color: #2fd4a7; border-radius: 4px; cursor: pointer; font-size: 15px; }
