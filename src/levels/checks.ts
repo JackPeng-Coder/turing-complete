@@ -3,10 +3,14 @@ import type { Graph } from '../core/graph';
 import { Simulation, compile, type Netlist } from '../core/net';
 import type { Registry } from '../core/registry';
 import { assertWidth, formatPort, type PortValue } from '../core/signal';
+import { getCustomCheck } from './custom/index';
 import type {
   CheckFailure,
   CheckOutcome,
   ConstraintRule,
+  FuzzCheck,
+  FuzzSample,
+  FuzzVector,
   LevelCheck,
   LevelSpec,
 } from './spec';
@@ -27,6 +31,25 @@ export interface LevelIo {
    */
   readonly mismatch?: string;
 }
+
+/**
+ * How many random vectors a `fuzz` check runs when it does not state `rounds`.
+ *
+ * 64 is enough to catch a wrong 8-bit operator almost immediately -- a circuit
+ * that disagrees on any single bit pattern disagrees on roughly half of the
+ * vectors -- while keeping a board edit cheap.
+ */
+export const DEFAULT_FUZZ_ROUNDS = 64;
+
+/**
+ * Hard ceiling on a `fuzz` check's `rounds`.
+ *
+ * `grade()` runs on every board edit, so a level that asks for 10^9 rounds must
+ * not be able to hang the editor: `rounds` is clamped here, and the levels that
+ * want exhaustive coverage use `truth-table`/`constraint` instead. (A `rounds`
+ * that is not a positive integer is not clamped but refused -- see `fuzzIssue`.)
+ */
+export const FUZZ_ROUNDS_CAP = 4096;
 
 /**
  * True when `value` is representable on a `width`-bit pin.
@@ -216,6 +239,339 @@ function evaluateRule(
   return count >= rule.count ? 1 : 0;
 }
 
+// ---------------------------------------------------------------------------
+// fuzz
+// ---------------------------------------------------------------------------
+
+/**
+ * True when `value` is a whole number that fits a `width`-bit pin.
+ *
+ * Shares `fitsPort` with `writeInput`, so "a value a fuzz function may expect"
+ * and "a value the signal table accepts" cannot drift apart.
+ */
+function fitsPin(value: unknown, width: number): value is number {
+  return typeof value === 'number' && fitsPort(value, width);
+}
+
+/** A safe, short description of an untrusted value, for a failure's `detail`. */
+function describeValue(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return `an array of ${value.length}`;
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'function') return 'a function';
+  if (typeof value === 'object' || typeof value === 'symbol') {
+    // An object's own `toString` is untrusted too: a throwing one must not
+    // escape the failure that is trying to describe it.
+    try {
+      return String(value);
+    } catch {
+      return `a ${typeof value}`;
+    }
+  }
+  return String(value);
+}
+
+/** `name: message` of a thrown `Error`, or a description of anything else. */
+function describeError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : describeValue(error);
+}
+
+/** Only the numeric entries of an authored vector, for a numeric failure record. */
+function numericOnly(vector: Readonly<Record<string, unknown>>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(vector)) {
+    if (typeof value === 'number') out[key] = value;
+  }
+  return out;
+}
+
+/** The sentence a failure carries when an authored value cannot fit its pin. */
+function unfitDetail(subject: string, id: string, value: unknown, width: number): string {
+  return `${subject} "${id}" is ${describeValue(value)}, which does not fit a ${width}-bit pin`;
+}
+
+/**
+ * The check's deterministic PRNG: xorshift32, seeded from the check data and
+ * from nothing else.
+ *
+ * Written here rather than taken from a library (the project has no runtime
+ * dependencies) and rather than `Math.random` (a level has to grade the same
+ * way on every board edit, and the same seed has to produce the same vectors in
+ * every run). xorshift32 has a single fixed point at 0, so an all-zero seed is
+ * remapped to the golden-ratio odd constant: a `seed: 0` level would otherwise
+ * drive one vector `rounds` times without ever saying so.
+ */
+function createFuzzRandom(seed: number): () => number {
+  let state = (seed >>> 0) || 0x9e37_79b9;
+  return () => {
+    state = (state ^ (state << 13)) >>> 0;
+    state = (state ^ (state >>> 17)) >>> 0;
+    state = (state ^ (state << 5)) >>> 0;
+    return state;
+  };
+}
+
+/** One validated input pin binding: the drawn sample in, the value to drive out. */
+interface FuzzInputPin {
+  readonly id: string;
+  readonly width: number;
+  readonly fn: (sample: FuzzSample) => number;
+}
+
+/** One validated output pin binding: the driven vector in, the expected value out. */
+interface FuzzOutputPin {
+  readonly id: string;
+  readonly width: number;
+  readonly fn: (inputs: FuzzVector) => number;
+}
+
+/**
+ * A fuzz check that can be run: the resolved round count and the level's pins
+ * bound to validated functions.
+ *
+ * `inputs` / `outputs` are in the level's pin order (never `Object.keys` order),
+ * which is what makes the vector sequence reproducible.
+ */
+interface FuzzRun {
+  readonly rounds: number;
+  readonly inputs: readonly FuzzInputPin[];
+  readonly outputs: readonly FuzzOutputPin[];
+}
+
+/** Why a fuzz check cannot run as written, in the shape a failure record needs. */
+interface FuzzIssue {
+  readonly reason: 'missing-vectors' | 'invalid';
+  readonly expected: Readonly<Record<string, number>>;
+  readonly actual: Readonly<Record<string, number>>;
+  readonly detail: string;
+}
+
+type FuzzPlan = ({ readonly kind: 'plan' } & FuzzRun) | ({ readonly kind: 'issue' } & FuzzIssue);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Validates a fuzz check against the level it belongs to.
+ *
+ * Vacuity is reported first, and deliberately: a check that would compare
+ * nothing is the defect this kind exists next to (`rounds: 0`, no input pins, no
+ * expectations -- the `missing-rows` lesson), so it is named as such even when
+ * the same check is also misspelled. Everything after that is a plain authoring
+ * error and comes back as `invalid`: a pin without a function, a function for a
+ * pin the level does not have, a non-integer seed.
+ */
+function planFuzz(check: FuzzCheck, spec: LevelSpec): FuzzPlan {
+  const rounds = check.rounds ?? DEFAULT_FUZZ_ROUNDS;
+  // A check that runs no rounds compares nothing -- the `missing-rows` lesson --
+  // so the round count is the first thing validated, before any pin is bound.
+  if (!Number.isInteger(rounds) || rounds <= 0) {
+    return {
+      kind: 'issue',
+      reason: 'missing-vectors',
+      expected: { rounds: 1 },
+      actual: { rounds },
+      detail: `fuzz check declares rounds=${describeValue(check.rounds)}; it must be a positive integer`,
+    };
+  }
+  if (spec.io.inputs.length === 0) {
+    return {
+      kind: 'issue',
+      reason: 'missing-vectors',
+      expected: { inputs: 1 },
+      actual: { inputs: 0 },
+      detail:
+        'fuzz check on a level with no input pins: every round would drive the same empty vector',
+    };
+  }
+  if (spec.io.outputs.length === 0) {
+    return {
+      kind: 'issue',
+      reason: 'missing-vectors',
+      expected: { outputs: 1 },
+      actual: { outputs: 0 },
+      detail: 'fuzz check on a level with no output pins: there is nothing to compare against',
+    };
+  }
+
+  // Level data is untrusted however it is typed: `inputs` and `outputs` may be
+  // absent, or hold something that is not a function at all.
+  const inputs: Record<string, unknown> = isRecord(check.inputs) ? check.inputs : {};
+  const outputs: Record<string, unknown> = isRecord(check.outputs) ? check.outputs : {};
+  if (Object.keys(inputs).length === 0) {
+    return {
+      kind: 'issue',
+      reason: 'missing-vectors',
+      expected: { inputs: 1 },
+      actual: { inputs: 0 },
+      detail: 'fuzz check declares no input functions: every round would drive the same vector',
+    };
+  }
+  if (Object.keys(outputs).length === 0) {
+    return {
+      kind: 'issue',
+      reason: 'missing-vectors',
+      expected: { outputs: 1 },
+      actual: { outputs: 0 },
+      detail: 'fuzz check declares no output expectations: every circuit would pass it',
+    };
+  }
+  if (!Number.isInteger(check.seed)) {
+    return {
+      kind: 'issue',
+      reason: 'invalid',
+      expected: { seed: 1 },
+      actual: { seed: check.seed },
+      detail: `fuzz check declares seed=${describeValue(check.seed)}, but it must be an integer`,
+    };
+  }
+
+  const boundInputs: FuzzInputPin[] = [];
+  const boundOutputs: FuzzOutputPin[] = [];
+  for (const pin of spec.io.inputs) {
+    const fn = inputs[pin.id];
+    if (typeof fn !== 'function') {
+      return {
+        kind: 'issue',
+        reason: 'invalid',
+        expected: { [pin.id]: 1 },
+        actual: { [pin.id]: 0 },
+        detail: `fuzz check declares no input function for pin "${pin.id}"`,
+      };
+    }
+    boundInputs.push({ id: pin.id, width: pin.width, fn: fn as FuzzInputPin['fn'] });
+  }
+  for (const pin of spec.io.outputs) {
+    const fn = outputs[pin.id];
+    if (typeof fn !== 'function') {
+      return {
+        kind: 'issue',
+        reason: 'invalid',
+        expected: { [pin.id]: 1 },
+        actual: { [pin.id]: 0 },
+        detail: `fuzz check declares no output expectation for pin "${pin.id}"`,
+      };
+    }
+    boundOutputs.push({ id: pin.id, width: pin.width, fn: fn as FuzzOutputPin['fn'] });
+  }
+  for (const key of Object.keys(inputs)) {
+    if (!spec.io.inputs.some((pin) => pin.id === key)) {
+      return {
+        kind: 'issue',
+        reason: 'invalid',
+        expected: { [key]: 0 },
+        actual: { [key]: 1 },
+        detail: `fuzz check declares an input function for "${key}", which is not an input pin`,
+      };
+    }
+  }
+  for (const key of Object.keys(outputs)) {
+    if (!spec.io.outputs.some((pin) => pin.id === key)) {
+      return {
+        kind: 'issue',
+        reason: 'invalid',
+        expected: { [key]: 0 },
+        actual: { [key]: 1 },
+        detail: `fuzz check declares an output expectation for "${key}", which is not an output pin`,
+      };
+    }
+  }
+  return {
+    kind: 'plan',
+    rounds: Math.min(rounds, FUZZ_ROUNDS_CAP),
+    inputs: boundInputs,
+    outputs: boundOutputs,
+  };
+}
+
+/**
+ * The vectors a validated fuzz check drives, one per round.
+ *
+ * A generator so the caller can stop at the first failing round without paying
+ * for the rest of the sequence -- a wrong circuit usually disagrees on round 0,
+ * and the cap allows thousands of rounds.
+ *
+ * Each pin's draw is already inside that pin's width, so the natural input
+ * function (`(sample) => sample.a`) always produces a value the pin can hold.
+ * A pin wider than 32 bits can only use 32 bits of the stream; nothing this
+ * phase builds is wider than eight.
+ */
+function* fuzzVectors(seed: number, plan: FuzzRun): Generator<FuzzVector> {
+  const random = createFuzzRandom(seed);
+  for (let round = 0; round < plan.rounds; round += 1) {
+    const sample: Record<string, number> = {};
+    for (const pin of plan.inputs) sample[pin.id] = random() % 2 ** pin.width;
+    const vector: Record<string, number> = {};
+    for (const pin of plan.inputs) vector[pin.id] = pin.fn(sample);
+    yield vector;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// custom
+// ---------------------------------------------------------------------------
+
+/** The reasons `CheckFailure` declares; a checker may not invent one. */
+const FAILURE_REASONS: readonly string[] = [
+  'mismatch',
+  'unstable',
+  'invalid',
+  'missing-io',
+  'missing-rows',
+  'missing-vectors',
+  'missing-check',
+];
+
+/** Why one adopted failure record cannot be shown as-is, or `undefined`. */
+function failureIssue(item: unknown): string | undefined {
+  if (!isRecord(item)) return `is ${describeValue(item)}, expected an object`;
+  if (typeof item.check !== 'string') {
+    return `has check=${describeValue(item.check)}, expected a check kind`;
+  }
+  for (const field of ['inputs', 'expected', 'actual'] as const) {
+    if (!isRecord(item[field])) {
+      return `has ${field}=${describeValue(item[field])}, expected an object of pin values`;
+    }
+  }
+  if (typeof item.tick !== 'number' || !Number.isFinite(item.tick)) {
+    return `has tick=${describeValue(item.tick)}, expected a number`;
+  }
+  if (item.reason !== undefined && !FAILURE_REASONS.includes(item.reason as string)) {
+    return `has reason=${describeValue(item.reason)}, which is not a known failure reason`;
+  }
+  return undefined;
+}
+
+/**
+ * Why a custom checker's return value cannot be adopted, or `undefined` when it
+ * can.
+ *
+ * The shape is checked here rather than trusted, because the records go straight
+ * into the failure panel: a checker that returns `{ failures: 'none' }` or a
+ * bare `null` must fail its check with a reason, not break the board on the next
+ * keystroke.
+ */
+function outcomeIssue(outcome: unknown): string | undefined {
+  if (!isRecord(outcome)) {
+    return `it returned ${describeValue(outcome)} instead of a CheckOutcome`;
+  }
+  if (typeof outcome.passed !== 'boolean') {
+    return `"passed" is ${describeValue(outcome.passed)}, expected a boolean`;
+  }
+  if (!Array.isArray(outcome.failures)) {
+    return `"failures" is ${describeValue(outcome.failures)}, expected an array`;
+  }
+  if (!Number.isInteger(outcome.ticksUsed) || (outcome.ticksUsed as number) < 0) {
+    return `"ticksUsed" is ${describeValue(outcome.ticksUsed)}, expected a non-negative integer`;
+  }
+  for (const [index, item] of outcome.failures.entries()) {
+    const issue = failureIssue(item);
+    if (issue !== undefined) return `failure record ${index} ${issue}`;
+  }
+  return undefined;
+}
+
 export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): CheckOutcome {
   const failures: CheckFailure[] = [];
   let ticksUsed = 0;
@@ -230,6 +586,10 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
       continue;
     }
     const io = created.io;
+    // The fuzz round in flight, so the `catch` below can still name the round
+    // when the kernel (not the authored data) is what failed. `null` for every
+    // other kind of check.
+    let activeRound: number | null = null;
 
     try {
       if (check.kind === 'truth-table') {
@@ -282,37 +642,329 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
         continue;
       }
 
-      // script: walk the steps in tick order, driving inputs along the way
-      io.reset();
-      ticksUsed = Math.max(ticksUsed, io.sim.tickCount);
-      const steps = [...check.steps].sort((a, b) => a.tick - b.tick);
-      for (const step of steps) {
-        for (const pin of spec.io.inputs) {
-          io.writeInput(pin.id, step.inputs?.[pin.id] ?? 0);
+      if (check.kind === 'fuzz') {
+        const plan = planFuzz(check, spec);
+        if (plan.kind === 'issue') {
+          failures.push(
+            failure(check, {}, plan.expected, plan.actual, 0, plan.reason, null, plan.detail),
+          );
+          continue;
         }
-        io.sim.settle();
-        while (io.sim.tickCount < step.tick) io.tick();
-        ticksUsed = Math.max(ticksUsed, io.sim.tickCount);
-        if (step.expect) {
-          const actual: Record<string, number> = {};
-          for (const pin of spec.io.outputs) actual[pin.id] = io.readOutput(pin.id);
-          if (compare(step.expect, actual)) {
+
+        const vectors = fuzzVectors(check.seed, plan);
+        for (let round = 0; ; round += 1) {
+          activeRound = round;
+          let step: IteratorResult<FuzzVector>;
+          try {
+            step = vectors.next();
+          } catch (e) {
+            // Authored code, not kernel code: a throwing input function is a
+            // level-data defect, and it must not escape into the board-edit
+            // path (see the `RangeError` note in the `catch` below).
             failures.push(
-              failure(check, step.inputs ?? {}, step.expect, actual, step.tick, 'mismatch'),
+              failure(
+                check,
+                {},
+                {},
+                {},
+                0,
+                'invalid',
+                round,
+                `fuzz input function threw in round ${round}: ${describeError(e)}`,
+              ),
+            );
+            break;
+          }
+          if (step.done) break;
+          const raw: Readonly<Record<string, unknown>> = step.value;
+          const unpinnable = plan.inputs.find((pin) => !fitsPin(raw[pin.id], pin.width));
+          if (unpinnable !== undefined) {
+            // Writing it would be refused by `writeInput` and leave the pin at
+            // zero, comparing the circuit against a vector it never saw. Say
+            // which pin and which value instead.
+            failures.push(
+              failure(
+                check,
+                numericOnly(raw),
+                {},
+                {},
+                0,
+                'invalid',
+                round,
+                unfitDetail(
+                  'the value of fuzz input pin',
+                  unpinnable.id,
+                  raw[unpinnable.id],
+                  unpinnable.width,
+                ),
+              ),
+            );
+            break;
+          }
+          const inputs: FuzzVector = step.value;
+
+          const expected: Record<string, number> = {};
+          let badExpectation: { id: string; width: number; value: unknown } | undefined;
+          try {
+            for (const pin of plan.outputs) {
+              const value: unknown = pin.fn(inputs);
+              if (!fitsPin(value, pin.width)) {
+                badExpectation = { id: pin.id, width: pin.width, value };
+                break;
+              }
+              expected[pin.id] = value;
+            }
+          } catch (e) {
+            failures.push(
+              failure(
+                check,
+                inputs,
+                {},
+                {},
+                0,
+                'invalid',
+                round,
+                `fuzz output function threw in round ${round}: ${describeError(e)}`,
+              ),
+            );
+            break;
+          }
+          if (badExpectation !== undefined) {
+            // Never masked to the pin width: masking `a + b` on an 8-bit pin
+            // would turn the authored mistake into a comparison that silently
+            // means something else. The expectation is reported unusable, with
+            // the pin and the value, instead.
+            failures.push(
+              failure(
+                check,
+                inputs,
+                typeof badExpectation.value === 'number'
+                  ? { [badExpectation.id]: badExpectation.value }
+                  : {},
+                {},
+                0,
+                'invalid',
+                round,
+                unfitDetail(
+                  'the fuzz expectation for pin',
+                  badExpectation.id,
+                  badExpectation.value,
+                  badExpectation.width,
+                ),
+              ),
+            );
+            break;
+          }
+
+          const attempt = runRow(io, spec, inputs, 0);
+          ticksUsed = Math.max(ticksUsed, attempt.ticksUsed);
+          if (compare(expected, attempt.outputs)) {
+            // The first failing round is enough: no later round can change the
+            // verdict, and a wrong circuit usually disagrees on round 0 while
+            // the cap allows thousands. The record still names the round, the
+            // vector, the expectation and what the circuit actually drove.
+            failures.push(
+              failure(
+                check,
+                inputs,
+                expected,
+                attempt.outputs,
+                0,
+                'mismatch',
+                round,
+                `round ${round} of ${plan.rounds} (seed ${check.seed})`,
+              ),
+            );
+            break;
+          }
+        }
+        continue;
+      }
+
+      if (check.kind === 'custom') {
+        if (typeof check.id !== 'string' || check.id === '') {
+          // Ruling: the kernel takes an id and looks it up in the registry. A
+          // function carried in level data is neither serialisable nor
+          // reviewable, so it is refused -- not called.
+          const detail =
+            typeof check.id === 'function'
+              ? 'custom check inlined a function in level data; name a registered id instead'
+              : `custom check id=${describeValue(check.id)}: expected a non-empty string`;
+          failures.push(failure(check, {}, {}, {}, 0, 'missing-check', null, detail));
+          continue;
+        }
+
+        const checker = getCustomCheck(check.id);
+        if (typeof checker !== 'function') {
+          failures.push(
+            failure(
+              check,
+              {},
+              { [check.id]: 1 },
+              { [check.id]: 0 },
+              0,
+              'missing-check',
+              null,
+              `no custom check is registered under id "${check.id}"`,
+            ),
+          );
+          continue;
+        }
+
+        let outcome: unknown;
+        try {
+          outcome = checker(io, spec);
+        } catch (e) {
+          // A registered checker is code, and code has bugs. Every throw is
+          // absorbed here -- `grade()` runs on every board edit, and Phase 0
+          // had a `RangeError` escape this loop and fire on each one. Unlike
+          // the outer `catch`, nothing is rethrown: a checker's crash is the
+          // level's failure, not the kernel's.
+          failures.push(
+            failure(
+              check,
+              {},
+              {},
+              {},
+              io.sim.tickCount,
+              e instanceof UnstableCircuitError ? 'unstable' : 'invalid',
+              null,
+              `custom check "${check.id}" threw ${describeError(e)}`,
+            ),
+          );
+          continue;
+        }
+
+        const issue = outcomeIssue(outcome);
+        if (issue !== undefined) {
+          failures.push(
+            failure(
+              check,
+              {},
+              {},
+              {},
+              io.sim.tickCount,
+              'invalid',
+              null,
+              `custom check "${check.id}" returned a malformed outcome: ${issue}`,
+            ),
+          );
+          continue;
+        }
+
+        const result = outcome as CheckOutcome;
+        // The checker owns its ticks (it is the only thing that knows how far it
+        // drove the circuit); they join the run's tick metric like every other
+        // check's.
+        ticksUsed = Math.max(ticksUsed, result.ticksUsed);
+        if (!result.passed || result.failures.length > 0) {
+          if (result.failures.length > 0) {
+            // Adopted verbatim: these records are the checker's own report. A
+            // loop rather than `push(...)`, because a checker may return more
+            // records than the argument limit a spread tolerates.
+            for (const record of result.failures) failures.push(record);
+            if (result.passed) {
+              // A contradiction fails safe: the records are kept, and a second
+              // record says why the check failed despite `passed: true`.
+              const count = result.failures.length;
+              const detail = `custom check "${check.id}" reported passed=true despite ${count} failure(s)`;
+              failures.push(failure(check, {}, {}, {}, io.sim.tickCount, 'invalid', null, detail));
+            }
+          } else {
+            // Failing without a record leaves the player nothing to look at,
+            // so the run states one on the checker's behalf.
+            failures.push(
+              failure(
+                check,
+                {},
+                {},
+                {},
+                io.sim.tickCount,
+                'invalid',
+                null,
+                `custom check "${check.id}" reported passed=false without a failure record`,
+              ),
             );
           }
         }
+        continue;
       }
+
+      if (check.kind === 'script') {
+        // script: walk the steps in tick order, driving inputs along the way
+        io.reset();
+        ticksUsed = Math.max(ticksUsed, io.sim.tickCount);
+        const steps = [...check.steps].sort((a, b) => a.tick - b.tick);
+        for (const step of steps) {
+          for (const pin of spec.io.inputs) {
+            io.writeInput(pin.id, step.inputs?.[pin.id] ?? 0);
+          }
+          io.sim.settle();
+          while (io.sim.tickCount < step.tick) io.tick();
+          ticksUsed = Math.max(ticksUsed, io.sim.tickCount);
+          if (step.expect) {
+            const actual: Record<string, number> = {};
+            for (const pin of spec.io.outputs) actual[pin.id] = io.readOutput(pin.id);
+            if (compare(step.expect, actual)) {
+              failures.push(
+                failure(check, step.inputs ?? {}, step.expect, actual, step.tick, 'mismatch'),
+              );
+            }
+          }
+        }
+        continue;
+      }
+
+      // Every kind `LevelCheck` declares is handled above; this is the guard for
+      // level data that names something else (a stale save, a typo, a check from
+      // a newer kernel). It fails loudly instead of falling through, which is
+      // exactly how a `fuzz` or `custom` check used to reach `check.steps` and
+      // throw a `TypeError` out of `runChecks` on every board edit.
+      const unknown = check as { readonly kind?: unknown };
+      failures.push(
+        failure(
+          check,
+          {},
+          {},
+          {},
+          0,
+          'invalid',
+          null,
+          `unknown check kind ${describeValue(unknown.kind)}; this kernel cannot run it`,
+        ),
+      );
     } catch (e) {
       if (e instanceof UnstableCircuitError) {
-        failures.push(failure(check, {}, {}, {}, io.sim.tickCount, 'unstable'));
+        failures.push(
+          failure(
+            check,
+            {},
+            {},
+            {},
+            io.sim.tickCount,
+            'unstable',
+            activeRound,
+            activeRound === null ? null : `fuzz round ${activeRound} did not settle`,
+          ),
+        );
       } else if (e instanceof CircuitValidationError || e instanceof RangeError) {
         // `RangeError` is the kernel's "this value does not fit this port"
         // signal (`assertWidth`), and level data is hand-authored: absorb it as
         // a failed check so nothing thrown from inside a check can escape
         // `runChecks` into the board-edit path. `'invalid'` already means "this
         // circuit/spec cannot be evaluated as declared".
-        failures.push(failure(check, {}, {}, {}, io.sim.tickCount, 'invalid'));
+        failures.push(
+          failure(
+            check,
+            {},
+            {},
+            {},
+            io.sim.tickCount,
+            'invalid',
+            activeRound,
+            activeRound === null ? null : `fuzz round ${activeRound}`,
+          ),
+        );
       } else {
         throw e;
       }
@@ -356,6 +1008,10 @@ function compare(
  * is optional, so the indexed type includes `undefined`, and
  * `exactOptionalPropertyTypes` rejects assigning a possibly-`undefined` value to
  * an optional property. Every failure this module builds names a reason anyway.
+ *
+ * `round` and `detail` are likewise "absent when there is nothing to say": only
+ * `fuzz` has rounds, and only the failures whose specifics do not fit a numeric
+ * record carry a sentence.
  */
 function failure(
   check: LevelCheck,
@@ -364,8 +1020,22 @@ function failure(
   actual: Readonly<Record<string, number>>,
   tick: number,
   reason: NonNullable<CheckFailure['reason']>,
+  round: number | null = null,
+  detail: string | null = null,
 ): CheckFailure {
-  return { check: check.kind, inputs, expected, actual, tick, reason };
+  // `round` and `detail` are only attached when they exist: `exactOptional
+  // PropertyTypes` rejects handing an explicit `undefined` to an optional
+  // property, and a caller here has nothing to say with a null either.
+  return {
+    check: check.kind,
+    inputs,
+    expected,
+    actual,
+    tick,
+    reason,
+    ...(round === null ? {} : { round }),
+    ...(detail === null ? {} : { detail }),
+  };
 }
 
 /**
