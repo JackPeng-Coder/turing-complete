@@ -28,8 +28,9 @@ import { truthTable, type LevelIo } from '../../tables';
  *    reference is the five-component circuit the achievement describes. The
  *    mapping is stated in that level's comment and measured in the test file.
  *  * level 22's is "延迟 ≤ 35". 35 is recorded in that level's comment as the
- *    source's reference value; `threeStar.delay` is this replica's own
- *    measurement of its reference solution (17), and the comment says so.
+ *    source's reference value; `threeStar` is this replica's own measurement of
+ *    its reference solution -- the eight-`full_adder` cascade, 72 gates and 8
+ *    delay -- and the comment says so.
  *
  * THE PALETTE RULE, spelled out once because the batches after this one inherit
  * it. Three things build a level's palette, and nothing else:
@@ -67,17 +68,22 @@ import { truthTable, type LevelIo } from '../../tables';
  * two levels are the two halves of the rule above: level 20, its own reward, where
  * tying `cin` low makes it a 9-gate one-star alternative to that level's 6; and
  * level 22, the cascade that consumes it, where eight instances measure 72 gates
- * and 8 delay against the hand-wired reference's 120 and 17. Level 21 is the one
- * level that withholds it, and its comment states the reason: there one instance
- * is the level's exact I/O and would score the 15-gate target that the source's
- * five-component achievement maps to.
+ * and 8 delay and are the circuit that level's `threeStar` is now measured from
+ * (it used to be the hand-wired chain's 120/17, which is the documented
+ * alternative there and scores one star). Level 21 is the one level that withholds
+ * it, and its comment states the reason: there one instance is the level's exact
+ * I/O and would score the 15-gate target that the source's five-component
+ * achievement maps to.
  *
  * WHAT THE TASK THAT REGISTERED THE DEF OWED, and where each answer landed: the
- * two decisions this note used to leave open are both taken. The part is offered
- * at levels 20 and 22; level 22's target was NOT re-measured from the cascade,
- * because `threeStar` is the reference solution's own measurement and the
- * reference there is the hand-wired chain its comment describes -- what the
- * drop-in scores is recorded in that comment and measured in the test file. A
+ * two decisions this note used to leave open are both taken, and the second one
+ * was taken twice. The part is offered at levels 20 and 22. Level 22's target WAS
+ * re-measured from the cascade in the end: `threeStar` is the reference solution's
+ * own measurement, the cascade is the reference now, and the hand-wired chain that
+ * used to hold that title is kept as the documented alternative -- correct at
+ * 120/17, and one star, because the target is the cascade's 72/8. The reason is
+ * the one this note recorded and did not act on at the time: a shipped target that
+ * a cheaper legal solution beats is not the target its own comment claims. A
  * later chapter that wants `full_adder` in its palettes makes a new decision;
  * nothing in this batch is waiting on one.
  *
@@ -470,24 +476,41 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
    *
    * AUTHORED: the `a:8 b:8 cin:1 -> out:8 cout:1` shape; the fuzz check (seed,
    * 256 rounds, and both expectation functions, computed from one sum so the two
-   * pins cannot disagree about the overflow); the measured three-star target; the
-   * two rewards; and the palette.
+   * pins cannot disagree about the overflow); the reference solution and the
+   * measured three-star target; the two rewards; and the palette.
    *
-   * THE TARGET'S DELAY IS MEASURED, NOT COPIED, AND THE SOURCE'S 35 IS NOT IT.
-   * The source's note is an achievement, so nothing here treats 35 as a pass
-   * condition or as a target: `threeStar` is this replica's own measurement of
-   * its reference solution -- eight hand-built full adders in a ripple chain.
-   * Its carry path costs three gates to reach the first carry (a XOR b, the AND
-   * with `cin`, the OR that combines the two carry terms) and two per bit after
-   * that (the AND with the incoming carry, then the OR), so the delay is
-   * 3 + 2 x 7 = 17; the sum path is a gate shorter at the top bit. 35 is recorded
-   * here as the source's reference value and for nothing else. The measured 17 is
-   * below it, which is agreement in spirit rather than on a shared scale: the
-   * source's "delay" is its own simulation metric on its own circuit, while this
+   * THE REFERENCE IS EIGHT `full_adder` INSTANCES IN A RIPPLE CHAIN, AND THE
+   * TARGET IS ITS OWN MEASUREMENT. One stage per bit, each stage's `cout` wired to
+   * the next stage's `cin`, the eight `sum` pins packed by a maker: 8 x 9 = 72 NAND
+   * equivalents on a carry path eight components deep -- the registered part's own
+   * basis (`FULL_ADDER` in `wide.ts`, the same 9 that prices `add8` as eight of
+   * it), measured as `gate: 72, delay: 8, tick: 0`. The splitters, the maker and
+   * the level pins are free on both metrics. The source's note is an achievement,
+   * so nothing here treats 35 as a pass condition or as a target: 35 is recorded
+   * as the source's reference value and for nothing else, and the measured 8 is
+   * below it -- agreement in spirit rather than on a shared scale, because the
+   * source's "delay" is its own simulation metric on its own circuit while this
    * replica charges one unit per component on the longest combinational path. If
    * the measurement had come out above 35, this paragraph would say so and
-   * `threeStar.delay` would still carry the measurement -- a target is not
-   * allowed to be bent towards a number taken from another metric.
+   * `threeStar.delay` would still carry the measurement -- a target is not allowed
+   * to be bent towards a number taken from another metric.
+   *
+   * THE HAND-WIRED CHAIN THIS LEVEL USED TO REFERENCE IS NOW THE DOCUMENTED
+   * ALTERNATIVE. The old reference was eight hand-built full adders -- the
+   * five-component construction level 21 teaches, 8 x (4 + 2 + 4 + 2 + 3) = 120
+   * NAND equivalents on a path 3 + 2 x 7 = 17 -- and `threeStar` used to be that
+   * 120/17. Registering `full_adder` (`523a7b9`) and offering it here made the
+   * shipped reference DOMINATED by a cheaper legal solution: eight instances of
+   * the part measure 72/8, strictly better on both scored metrics, so a 120/17
+   * target could not be what this comment claimed it was -- `threeStar` is the
+   * reference's measurement, and the reference was no longer the best circuit the
+   * level's own palette could build. The cascade is the reference now and
+   * `threeStar` is ITS measurement; the hand-wired chain stays in the reference
+   * fixture (`test/fixtures/ch2-references.ts`, `handWiredAdderReference`), is
+   * still graded, and now scores one star rather than three (120 > 72 and 17 > 8),
+   * which is a target separating two correct constructions rather than a
+   * formality. What the level teaches is unchanged: the eight-stage carry chain and
+   * the ninth bit, wired the same way in both spellings.
    *
    * WHY THE PALETTE WITHHOLDS ONE PART AND OFFERS ANOTHER, which is a design
    * decision rather than an oversight:
@@ -495,23 +518,19 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
    *  * `add8`, unlocked by level 17, has EXACTLY this level's I/O shape, and one
    *    instance measures 72 gates and 1 delay. It would answer the level in a
    *    single drop, make the cascade the level teaches pointless, and make the
-   *    source's own achievement value vacuous (any one-component circuit is
-   *    inside a delay of 35). Withheld, and it stays withheld.
-   *  * `full_adder`, level 20's reward, is OFFERED. An earlier ruling withheld it
-   *    here too; that ruling was amended, because one instance is a one-bit part
-   *    whose pins are one bit wide and it cannot answer an eight-bit adder. Eight
-   *    of them and the carry chain between them ARE the cascade this level asks
-   *    for, so the part is this level's own subject one scale up from the cell it
-   *    is at level 20. What it scores is measured in the test file rather than
-   *    promised here: eight instances are 8 x 9 = 72 NAND equivalents on a path 8
-   *    deep, against the hand-wired reference's 120 and 17 -- the drop-in is
-   *    CHEAPER than the reference and scores three stars as well. The target
-   *    therefore does not separate the two constructions, and this comment says so
-   *    rather than implying otherwise: `threeStar` is the reference solution's own
-   *    measurement, the reference is a correct ripple adder, and the drop-in is
-   *    another correct ripple adder. What the level teaches is the eight-stage
-   *    carry chain and the ninth bit, and both constructions have to be wired into
-   *    exactly that. The five-component lesson the drop-in WOULD void is level
+   *    source's own achievement value vacuous (any one-component circuit is inside
+   *    a delay of 35). Withheld, and it stays withheld -- but note what that costs
+   *    the target rather than hiding it: `add8` TIES the shipped reference's 72
+   *    gates and beats its delay (72 and 1, measured in the test file), so the only
+   *    circuit that still beats this reference is one this level's palette does not
+   *    offer. It is unavailable here rather than beaten, and this comment is where
+   *    that is on the record.
+   *  * `full_adder`, level 20's reward, is OFFERED, because here eight of them and
+   *    the carry chain between them ARE the cascade this level asks for. That is
+   *    the withholding rule applied the other way round rather than contradicted:
+   *    one instance is a one-bit part that cannot answer an eight-bit adder, so the
+   *    cascade is the reference this level's target is measured from, not an
+   *    alternative to it. The five-component lesson a drop-in WOULD void is level
    *    21's, and level 21 withholds the part for precisely that reason.
    *
    * Everything else on the player's wide shelf is offered even though no
@@ -566,14 +585,15 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
         outputs: { out: SUM_LOW_BYTE, cout: SUM_CARRY_OUT },
       },
     ],
-    // Measured: eight full adders of five gates each -- 8 x (4 + 2 + 4 + 2 + 3)
-    // = 120 NAND equivalents -- with the splitters, the maker and the level pins
-    // free, and a ripple carry path of 3 + 2 x 7 = 17. The source's achievement
-    // value (35) is recorded in the comment above; the target is the
-    // measurement, not that value. The cheaper correct answer this palette also
-    // offers -- eight instances of level 20's `full_adder`, measured at 72 and 8
-    // in the test file -- is what the paragraph above is about.
-    threeStar: { gate: 120, delay: 17, tick: 0 },
+    // Measured: the reference is eight `full_adder` instances in a ripple chain --
+    // 8 x 9 = 72 NAND equivalents, one component per bit on the carry path so the
+    // delay is 8 -- with the splitters, the maker and the level pins free. The
+    // source's achievement value (35) is recorded in the comment above; the target
+    // is the measurement, not that value. The hand-wired five-component chain this
+    // level used to reference measures 120 and 17 and is now the documented
+    // alternative: correct, inside the pass condition, and one star, because the
+    // target is 72/8.
+    threeStar: { gate: 72, delay: 8, tick: 0 },
     rewards: { components: ['switch', 'switch8'] },
   },
 ];

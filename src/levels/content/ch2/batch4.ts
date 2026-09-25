@@ -660,6 +660,19 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
    * AUTHORED: the `a:1 on:1 -> out:1` shape; the four rows; the measured target;
    * and the palette.
    *
+   * THE PART IS OLD NEWS BY THE TIME THIS LEVEL ARRIVES, and this comment is where
+   * that is recorded. The source teaches `switch` here -- its own level 32 is
+   * literally named Bit Switch -- but this replica slides the part from chapter 1
+   * into chapter 2 (spec 3.3) and the level data unlocks it, with `switch8`, at
+   * level 22, the 8-bit adder whose ripple carry chain needs the conditional pass;
+   * level 28's reference is built from two of them. So the player has held `switch`
+   * for ten levels when this level opens, and level 32 is a RE-TEACH rather than an
+   * introduction: what it verifies is that the player can put the behaviour on the
+   * pins (`on` high passes `a`, `on` low holds 0) rather than that they can meet a
+   * new part. Nothing else about the level changes for it -- the four rows, the
+   * 2/1 target and the palette are as they were, and
+   * `test/levels/unlock-chain.test.ts` pins the unlock at level 22.
+   *
    * THE SOURCE'S "LIKE AN AND GATE" IS MEASURED RATHER THAN ASSERTED, and that is
    * what makes it safe for this level to offer the part it is named after:
    * `and(a, on)` is 2 NAND equivalents on one delay unit, and the registered

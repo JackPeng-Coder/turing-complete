@@ -30,6 +30,7 @@ import {
   byteNotReference,
   byteOrReference,
   fullAdderReference,
+  handWiredAdderReference,
   rippleAdderReference,
 } from '../fixtures/ch2-references';
 
@@ -853,8 +854,8 @@ describe("level 21's five-component construction is the reference it names", () 
   });
 });
 
-describe("level 22's delay target is measured, and the source's 35 is not it", () => {
-  it("meets the source's reference value with the ripple chain's own measurement", () => {
+describe("level 22's target is the cascade's own measurement, and the source's 35 is not it", () => {
+  it("measures the shipped reference well inside the source's reference value", () => {
     // The source's note is the achievement "延迟 ≤ 35", which the level's data
     // comment records as a reference value and which nothing here treats as a
     // pass condition: `threeStar` is the reference solution's measured metrics.
@@ -863,57 +864,76 @@ describe("level 22's delay target is measured, and the source's 35 is not it", (
     // from the equality `threeStar === metrics` the block above asserts.
     const result = grade(rippleAdderReference(), registry, specOf('ch2-22-adding-bytes'));
     expect(result.metrics.delay).toBeLessThanOrEqual(35);
-    expect(result.metrics).toEqual({ gate: 120, delay: 17, tick: 0 });
+    expect(result.metrics).toEqual({ gate: 72, delay: 8, tick: 0 });
   });
 });
 
-describe("level 22 offers level 20's `full_adder`, and the drop-in is measured", () => {
-  /** Eight `full_adder` instances rippling into each other: the cascade, dropped in. */
-  function fullAdderCascade(): Graph {
-    const nodes: Node[] = [
-      { kind: 'input', name: 'a', width: 8 },
-      { kind: 'input', name: 'b', width: 8 },
-      { kind: 'input', name: 'cin' },
-      { kind: 'part', def: 'splitter', id: 'sa', from: ['a'] },
-      { kind: 'part', def: 'splitter', id: 'sb', from: ['b'] },
-    ];
-    let carry = 'cin';
-    const sums: string[] = [];
-    for (let bit = 0; bit < 8; bit += 1) {
-      nodes.push({
-        kind: 'part',
-        def: 'full_adder',
-        id: `fa${bit}`,
-        from: [`sa.b${bit}`, `sb.b${bit}`, carry],
-      });
-      sums.push(`fa${bit}.sum`);
-      carry = `fa${bit}.cout`;
-    }
-    nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: sums });
-    nodes.push({ kind: 'output', name: 'OUT_out', from: 'mk', width: 8 });
-    nodes.push({ kind: 'output', name: 'OUT_cout', from: carry, width: 1 });
-    return build(nodes);
-  }
-
-  it('scores 72 and 8 against the reference 120 and 17, and three stars either way', () => {
-    // The amended ruling offers the part here and withholds it at level 21,
-    // because one instance cannot answer an eight-bit adder while eight of them
-    // and the carry chain between them ARE the cascade this level asks for. The
-    // measurement is what the level's comment promises, taken rather than
-    // restated: 8 x 9 = 72 NAND equivalents on a path eight deep, CHEAPER than
-    // the hand-wired reference's 120 and 17, so the target does not separate the
-    // two constructions -- it is the reference's own measurement, and the
-    // drop-in is another correct ripple adder inside it.
+describe("level 22's reference is the `full_adder` cascade, and the hand-wired chain is the alternative", () => {
+  it('files eight instances of the part as the reference, measured at 72 and 8', () => {
+    // The reference IS the cascade level 20's reward makes possible: eight
+    // instances of the registered 9-NAND part, one per bit, with the carry chain
+    // between them. Counted here rather than described, because the whole point
+    // of the re-measurement is that this circuit is what `threeStar` came from,
+    // and the target is its own measurement rather than a number chosen for it.
     const level = specOf('ch2-22-adding-bytes');
     expect(level.allowedComponents).toContain('full_adder');
-    const dropped = grade(fullAdderCascade(), registry, level);
-    expect(dropped.failures, JSON.stringify(dropped.failures)).toEqual([]);
-    expect(dropped.metrics).toEqual({ gate: 72, delay: 8, tick: 0 });
-    expect(dropped.stars).toBe(3);
-
-    const built = grade(rippleAdderReference(), registry, level);
+    const reference = rippleAdderReference();
+    expect(reference.instances.filter((inst) => inst.def === 'full_adder')).toHaveLength(8);
+    const built = grade(reference, registry, level);
+    expect(built.failures, JSON.stringify(built.failures)).toEqual([]);
+    expect(built.metrics).toEqual({ gate: 72, delay: 8, tick: 0 });
+    expect(built.stars).toBe(3);
     expect(level.threeStar).toEqual(built.metrics);
-    expect(dropped.metrics.gate).toBeLessThan(built.metrics.gate);
+  });
+
+  it('grades the hand-wired chain it replaced at 120 and 17 -- correct, and one star', () => {
+    // The alternative the level used to file as its reference is still a correct
+    // eight-bit adder, so it still passes. It is no longer the reference and no
+    // longer three stars, which is the measurement behind the level comment's
+    // "documented alternative" paragraph: the target now separates the two
+    // constructions -- 120 > 72 and 17 > 8 -- instead of being a number the
+    // cheaper cascade already satisfied.
+    const level = specOf('ch2-22-adding-bytes');
+    const reference = grade(rippleAdderReference(), registry, level);
+    const alternative = grade(handWiredAdderReference(), registry, level);
+    expect(alternative.failures, JSON.stringify(alternative.failures)).toEqual([]);
+    expect(alternative.passed).toBe(true);
+    expect(alternative.metrics).toEqual({ gate: 120, delay: 17, tick: 0 });
+    expect(alternative.stars).toBe(1);
+    // The separation stated as stars and as both measured metrics, so it does not
+    // rest on the optional target's fields being readable: the reference is three
+    // stars, the chain it replaced is one, and the chain is bigger on both.
+    expect(reference.stars).toBe(3);
+    expect(alternative.metrics.gate).toBeGreaterThan(reference.metrics.gate);
+    expect(alternative.metrics.delay).toBeGreaterThan(reference.metrics.delay);
+  });
+
+  it('measures the one drop-in that would beat the reference, and shows the palette withholds it', () => {
+    // The level comment's claim about what makes the shipped reference the best
+    // circuit the level can actually build: `add8` (level 17's reward) has exactly
+    // this level's I/O -- `a:8 b:8 cin:1 -> out:8 cout:1` -- and one instance
+    // measures 72 gates and 1 delay, tying the target's gates and beating its
+    // delay. So it is not "worse": it is WITHHELD, and both halves are measured
+    // here rather than argued. The star count is the "answers the level in a
+    // single drop" half; the palette check is the "and is therefore not legal on
+    // this level" half.
+    const level = specOf('ch2-22-adding-bytes');
+    expect(level.allowedComponents).not.toContain('add8');
+    const dropped = grade(
+      build([
+        { kind: 'input', name: 'a', width: 8 },
+        { kind: 'input', name: 'b', width: 8 },
+        { kind: 'input', name: 'cin' },
+        { kind: 'part', def: 'add8', id: 'add', from: ['a', 'b', 'cin'] },
+        { kind: 'output', name: 'OUT_out', from: 'add', width: 8 },
+        { kind: 'output', name: 'OUT_cout', from: 'add.cout', width: 1 },
+      ]),
+      registry,
+      level,
+    );
+    expect(dropped.failures, JSON.stringify(dropped.failures)).toEqual([]);
+    expect(dropped.metrics).toEqual({ gate: 72, delay: 1, tick: 0 });
+    expect(dropped.stars).toBe(3);
   });
 });
 

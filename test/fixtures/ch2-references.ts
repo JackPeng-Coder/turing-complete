@@ -26,7 +26,11 @@ import { build, type Node } from './build';
  * the three-star targets were measured from. The plausible-wrong and
  * correct-but-expensive alternatives stay in the batch test files that assert
  * they fail or score one star, because those are that file's argument, not a
- * reference. The few alternatives a batch test borrows for its own counterexample
+ * reference. ONE alternative lives here instead, and its own note says why:
+ * `handWiredAdderReference` is level 22's FORMER reference -- it still passes the
+ * level and scores one star now -- so it is filed beside the cascade that replaced
+ * it, which is the one comparison a reader of that level has to be able to make.
+ * The few other alternatives a batch test borrows for its own counterexample
  * blocks are exported below for the same reason the references are.
  *
  * The per-batch maps exist so each batch test keeps grading exactly its own
@@ -217,14 +221,70 @@ export function fullAdderReference(): Graph {
 }
 
 /**
- * Level 22's reference: eight hand-built full adders in a ripple chain.
+ * Level 22's reference: EIGHT `full_adder` INSTANCES in a ripple chain.
  *
- * Every number in that level's `threeStar` comes from this circuit measured by
+ * This is the construction the level's own palette makes possible -- `full_adder`
+ * is level 20's reward and level 22 offers it -- and it is the circuit that
+ * level's `threeStar` is measured from: eight instances at the registered 9 NAND
+ * equivalents each are 72 gates, and the carry chain is one component per bit, so
+ * the delay is 8. The splitters, the maker and the level pins are free on both
+ * metrics.
+ *
+ * IT REPLACED THE HAND-WIRED CHAIN BELOW, which used to be the reference at
+ * 120/17. Once the part was registered (`523a7b9`) and offered here, the shipped
+ * target was dominated by a cheaper legal solution -- 8 x 9 = 72 on a path eight
+ * deep beats 120 on a path seventeen deep on both scored metrics -- so the target
+ * could no longer be what level 22's comment claimed it was. The old circuit is
+ * kept as `handWiredAdderReference` below and is still graded: it passes the
+ * level and scores one star now, which is the target separating the two
+ * constructions the way a target should.
+ *
+ * Every number in level 22's `threeStar` comes from this circuit measured by
  * `grade()`, and batch 2's `three-star targets are the reference solutions own
  * metrics` is what holds the data to it. Exported because that batch test
  * measures this circuit directly as well.
  */
 export function rippleAdderReference(): Graph {
+  const nodes: Node[] = [
+    { kind: 'input', name: 'a', width: 8 },
+    { kind: 'input', name: 'b', width: 8 },
+    { kind: 'input', name: 'cin' },
+    { kind: 'part', def: 'splitter', id: 'sa', from: ['a'] },
+    { kind: 'part', def: 'splitter', id: 'sb', from: ['b'] },
+  ];
+  let carry = 'cin';
+  const sums: string[] = [];
+  for (let bit = 0; bit < 8; bit += 1) {
+    nodes.push({
+      kind: 'part',
+      def: 'full_adder',
+      id: `fa${bit}`,
+      from: [`sa.b${bit}`, `sb.b${bit}`, carry],
+    });
+    // `full_adder`'s outputs are `sum` and `cout` rather than one `out`, so both
+    // edges of the chain spell their pin.
+    sums.push(`fa${bit}.sum`);
+    carry = `fa${bit}.cout`;
+  }
+  nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: sums });
+  nodes.push({ kind: 'output', name: 'OUT_out', from: 'mk', width: 8 });
+  nodes.push({ kind: 'output', name: 'OUT_cout', from: carry, width: 1 });
+  return build(nodes);
+}
+
+/**
+ * The alternative level 22 used to file as its reference: eight hand-built full
+ * adders in the same ripple chain.
+ *
+ * Each stage is the five-component construction level 21 teaches -- XOR, AND,
+ * XOR, AND, OR -- so the chain is 8 x (4 + 2 + 4 + 2 + 3) = 120 NAND equivalents
+ * on a carry path of 3 + 2 x 7 = 17. It is a correct eight-bit adder and it still
+ * passes the level; what changed is that it is no longer the reference and no
+ * longer three stars, because the shipped target is the cascade's own 72/8. That
+ * is the measurement behind level 22's "documented alternative" paragraph and the
+ * assertion in `test/levels/ch2-batch2.test.ts`.
+ */
+export function handWiredAdderReference(): Graph {
   const nodes: Node[] = [
     { kind: 'input', name: 'a', width: 8 },
     { kind: 'input', name: 'b', width: 8 },

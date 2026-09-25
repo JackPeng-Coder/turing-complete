@@ -101,7 +101,7 @@ interface ComponentDef {
 | 章节 | 解锁组件 |
 |---|---|
 | Ch1 基础逻辑 | `const_on` `const_off` `nand` `not` `and` `or` `nor` `xor` `xnor` `and3` `or3` `delay_line` |
-| Ch2 算术与存储 | `switch` `full_adder` `decoder1` `decoder2` `decoder3` `mem1` `reg8` `counter8` `mux8` `switch8` `splitter` `maker` `const8` `add8` `neg8` `and8` `or8` `not8` `nand8` `nor8` `xor8` `xnor8` `less_s` `less_u` `equal8` `shift_l8` `shift_r8` `ashr8` `rot_l8` `rot_r8` `mul8` `div8` `delay8` |
+| Ch2 算术与存储 | `switch` `full_adder` `decoder1` `decoder2` `decoder3` `mem1` `ram8` `reg8` `counter8` `mux8` `switch8` `splitter` `maker` `const8` `add8` `neg8` `and8` `or8` `not8` `nand8` `nor8` `xor8` `xnor8` `less_s` `less_u` `equal8` `shift_l8` `shift_r8` `ashr8` `rot_l8` `rot_r8` `mul8` `div8` `delay8` |
 | Ch3 CPU（OVERTURE） | `alu8` `regfile6` `instr_decoder` `pc8` `ram_prog` `halt` |
 | Ch4 编程 | 无新元件；解锁汇编 IDE 与调试器 |
 | Ch5 CPU2（LEG） | `ram256` `addr_reg` `ram_dual` `ram_fast` `ram_latency` |
@@ -113,7 +113,9 @@ interface ComponentDef {
 
 **关于宽位组件**：16/32/64 位组件不是 60 多个独立内核实现，而是**同一套算子的宽度参数化**（`add8` / `add16` / `add32` / `add64` 共享一份定义生成器）。Ch6 完成后解锁宽位版本。
 
-**关于 `switch`**：源资料把它列在第 1 章，但第 1 章 12 关没有任何一关需要条件通断。为了让「元件只在真正用到时才出现」这条教学原则成立，`switch` 顺延到第 2 章，与 `switch8` 一起在第 32 关《1 位开关》解锁。
+**关于 `switch`**：源资料把它列在第 1 章，但第 1 章 12 关没有任何一关需要条件通断。为了让「元件只在真正用到时才出现」这条教学原则成立，`switch` 顺延到第 2 章，与 `switch8` 一起在第 22 关《8 位加法器》解锁——那一关的逐位进位链需要条件通断（第 28 关的参考解也用到 `switch`），所以它在第 22 关第一次真正被需要，比源资料里教这个元件的第 32 关早了十关。
+
+**这是一处相对源资料的实打实的偏离，代价记在这里**：源资料自己的第 32 关名为《1 位开关》（Bit Switch），是它教这个元件的地方；在本复刻里 `switch` 在第 22 关就已经交到玩家手里，因此第 32 关从「首次登场」变成一次**再教**——它验证的是玩家能否把这个条件通断的行为搭出来（`and(a, on)` 与 `switch` 在计分上完全同价），而不是介绍一个陌生的元件。关卡数据即以此为准。
 
 **关卡 I/O 绑定约定**（实施计划中确定）：关卡不靠引脚同名绑定——引脚名由组件定义固定，改不了。`level_input` / `level_output` 是两个专用的 plumbing 元件（`hidden`，不进解锁体系、永远可用），实例 id 为 `IN_<引脚名>` 与 `OUT`（单输出）或 `OUT_<引脚名>`（多输出）。多比特引脚由实例 `params.width` 覆盖。
 
