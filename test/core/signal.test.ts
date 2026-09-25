@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertWidth,
   createPort,
   createSignalTable,
   formatPort,
@@ -118,6 +119,54 @@ describe('SignalTable', () => {
     expect(t.getPort(base, 8)).toBe(0b1111_0000); // and the values survived
     expect(slots[base]).toBe(0);
     expect(slots[base + 4]).toBe(1);
+  });
+});
+
+describe('assertWidth', () => {
+  it('accepts every value of a 31-bit port, zero included', () => {
+    // `fitsWidth` bounded this with `v < 1 << width`, and `<<` converts through
+    // int32: `1 << 31` is `-2147483648`, so the comparison read
+    // `v < -2147483648` -- false for EVERY non-negative v. `assertWidth(0, 31)`
+    // threw, which is the strongest form of the bug: a port whose values were all
+    // rejected, and `createWideDefs(31)` hands out defs that produce exactly these
+    // values, so `runChecks` turned a correct circuit into an 'invalid' failure.
+    expect(() => assertWidth(0, 31)).not.toThrow();
+    expect(() => assertWidth(1, 31)).not.toThrow();
+    expect(() => assertWidth(12345, 31)).not.toThrow();
+    expect(() => assertWidth(2 ** 31 - 1, 31)).not.toThrow();
+
+    // The bound still excludes the first value that is one bit too wide, and the
+    // sign check survived the change: `2 ** width` is positive, but only the
+    // `v >= 0` half keeps a negative number out.
+    expect(() => assertWidth(2 ** 31, 31)).toThrow(/does not fit a 31-bit port/);
+    expect(() => assertWidth(-1, 31)).toThrow(/does not fit a 31-bit port/);
+  });
+
+  it('bounds a 32-bit port at 0xffff_ffff, as its own arm did', () => {
+    // Width 32 never reached the `1 << width` expression, so these values are the
+    // ones the fix had to keep behaving exactly as before.
+    expect(() => assertWidth(0, 32)).not.toThrow();
+    expect(() => assertWidth(0xffff_ffff, 32)).not.toThrow();
+    expect(() => assertWidth(0x1_0000_0000, 32)).toThrow(/does not fit a 32-bit port/);
+  });
+
+  it('bounds 0, 1 and 2 ** width - 1 in and 2 ** width out at every width 1..32', () => {
+    // The sweep is the point. Widths 1-30 and 32 were all correct under
+    // `1 << width`; 31 alone was broken, so a test that picks one width -- the
+    // 8-bit port every other test in this file uses -- passes either way and
+    // would not have caught this. The message names the width so a failure says
+    // which arm regressed.
+    for (let width = 1; width <= 32; width += 1) {
+      expect(() => assertWidth(0, width), `0 at width ${width}`).not.toThrow();
+      expect(() => assertWidth(1, width), `1 at width ${width}`).not.toThrow();
+      expect(
+        () => assertWidth(2 ** width - 1, width),
+        `2 ** ${width} - 1 at width ${width}`,
+      ).not.toThrow();
+      expect(() => assertWidth(2 ** width, width), `2 ** ${width} at width ${width}`).toThrow(
+        new RegExp(`does not fit a ${width}-bit port`),
+      );
+    }
   });
 });
 

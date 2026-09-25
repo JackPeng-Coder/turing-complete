@@ -12,7 +12,7 @@ import {
 } from '../../src/core/defs/wide';
 import { Simulation, compile } from '../../src/core/net';
 import { createRegistry, type ComponentDef } from '../../src/core/registry';
-import type { PortValue } from '../../src/core/signal';
+import { createSignalTable, type PortValue } from '../../src/core/signal';
 import { build } from '../fixtures/build';
 
 const registry = createRegistry(BASE_DEFS);
@@ -1096,12 +1096,14 @@ describe('the width generator', () => {
     // range and not just at the registered 8.
     //
     // These values are read from the defs' own `evaluate`, as the rest of this
-    // file does. That matters at 31 for a reason outside this module: `fitsWidth`
-    // (`core/signal.ts`) bounds a narrow value with `v < 1 << width`, and `1 << 31`
-    // is negative, so `assertWidth` rejects every 31-bit value -- `assertWidth(0,
-    // 31)` throws -- and staging these results is impossible until that separate
-    // one-line guard is fixed. `maskOf`'s sign is this module's half of the
-    // contract and the half this test owns; the limitation is recorded on `maskOf`.
+    // file does: the mask's sign is this module's half of the contract, and the
+    // half this test owns. The other half -- whether the value can be put on a
+    // port at all -- was blocked outside this module: `fitsWidth`
+    // (`core/signal.ts`) bounded a narrow value with `v < 1 << width`, and
+    // `1 << 31` is `-2 ** 31`, so `assertWidth(v, 31)` rejected EVERY 31-bit
+    // value, `assertWidth(0, 31)` included, and staging these results was
+    // impossible. That guard is repaired, and the test right below drives the
+    // staging it used to refuse.
     for (let w = 1; w <= MAX_WIDE_WIDTH; w += 1) {
       const allOnes = 2 ** w - 1;
       const signBit = 2 ** (w - 1);
@@ -1119,6 +1121,28 @@ describe('the width generator', () => {
     expect(outputsAt(31, 'div31', [5, 0])).toEqual([0x7fff_ffff]);
     expect(outputsAt(31, 'ashr31', [2 ** 30, 31])).toEqual([0x7fff_ffff]);
     expect(outputsAt(MAX_WIDE_WIDTH, 'div32', [5, 0])).toEqual([0xffff_ffff]);
+  });
+
+  it('stages the 31-bit result the port guard used to reject', () => {
+    // The loop above is this module's half of the contract: `div31` returns
+    // 0x7fff_ffff. The other half is whether that value can reach a port at all,
+    // and until `fitsWidth` (`core/signal.ts`) stopped bounding a narrow value
+    // with `v < 1 << width` it could not -- `1 << 31` is `-2 ** 31`, so
+    // `assertWidth(v, 31)` rejected EVERY value, 0 included, and `runChecks`
+    // reported a correct 31-bit circuit as 'invalid'. This drives the def's own
+    // result through the kernel's table rather than reading it from `evaluate`,
+    // so it fails on the port guard and not on the mask.
+    const allOnes = outputsAt(31, 'div31', [5, 0])[0]!;
+    expect(allOnes).toBe(0x7fff_ffff);
+
+    const table = createSignalTable();
+    const base = table.alloc(31);
+    table.setPort(base, 31, allOnes);
+    expect(table.getPort(base, 31)).toEqual(new Uint8Array([0xff, 0xff, 0xff, 0x7f]));
+
+    // And the guard still refuses the value one bit too wide, so the admitted
+    // range is 0 .. 2 ** 31 - 1 rather than "anything".
+    expect(() => table.setPort(base, 31, 2 ** 31)).toThrow(/does not fit a 31-bit port/);
   });
 
   it('returns the all-ones of its own width, not of the module cap', () => {

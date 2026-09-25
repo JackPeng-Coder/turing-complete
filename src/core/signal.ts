@@ -12,10 +12,29 @@ export interface SignalTable {
   clear(): void;
 }
 
-/** True when every bit of `v` above `width` is 0, so `v` fits the port. */
+/**
+ * True when every bit of `v` above `width` is 0, so `v` fits the port.
+ *
+ * The narrow bound is `2 ** width`, NOT `1 << width`: `<<` converts both
+ * operands through int32, so `1 << 31` is `-2 ** 31` and the comparison read
+ * `v < -2147483648` -- false for every non-negative `v`, which made
+ * `assertWidth(v, 31)` reject every 31-bit value including 0 (widths 1..30 are
+ * exact either way, and 32 never reached this arm). `2 ** w` is exact for every
+ * width a double can hold, far past the 4096 `MAX_PARAM_WIDTH` admits, so no
+ * width needs a special case.
+ *
+ * The `width >= 32` arm is kept, and is NOT redundant: at 32 it accepts exactly
+ * the values the general form does, but widths ABOVE 32 are reachable
+ * (`graph.ts` admits `params.width` up to 4096 and `net.ts` resolves pins from
+ * it), and there it is the number writer's own limit -- `setPort`'s number
+ * branch is `(v >>> i) & 1`, which carries at most 32 bits -- so the guard stays
+ * pinned to what a `number` can actually stage instead of admitting a value the
+ * writer would silently truncate. A `Uint8Array` is the carrier above 32 bits,
+ * and `assertWidth` sizes it for the full width.
+ */
 function fitsWidth(v: number, width: number): boolean {
   if (width >= 32) return v <= 0xffff_ffff;
-  return v >= 0 && v < 1 << width;
+  return v >= 0 && v < 2 ** width;
 }
 
 export function assertWidth(v: PortValue, width: number): void {
