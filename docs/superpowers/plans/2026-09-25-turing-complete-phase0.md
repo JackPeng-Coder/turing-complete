@@ -631,7 +631,14 @@ git commit -m "feat(core): add bit-level signal table and ports"
 >
 > 因此约定是：**`evaluate` 对存储元件 = 把保持的值发布到输出**；`clockEdge` **只改 state，不写输出**。
 >
-> `state` 声明为**可选参数** `Uint8Array | undefined`，有两个好处：纯组合元件（所有门）忽略它即可，测试里现存的 `def.evaluate!([a, b], out, { tick: 0 })` 调用**一个都不用改**（TS 允许实参少于形参）；而存储元件在类型上被要求处理 `undefined`，不会假装自己拿到了状态。
+> `state` 是**必填的第三参数**，类型 `Uint8Array | undefined`。它必须是必填的：TypeScript 把第三个实参按位置核对到 `state` 的类型上，可选化并不会让 `{ tick: 0 }` 落到 `state` 槽位（实测 `state?: Uint8Array` 会让 `def.evaluate([a, b], out, { tick: 0 })` 报 TS2353）。因此**测试与调用点里凡是给组合元件传第三参的地方，都要显式写 `undefined`**，形如：
+>
+> ```ts
+> def.evaluate!([a, b], out, undefined, { tick: 0 });
+> def.evaluate!([1], out, state, { tick: 0 });   // 存储元件才传真的 state
+> ```
+>
+> 组合元件的**定义**不受影响，仍可写成 `evaluate: (i, o) => …`（TS 允许实参少于形参）。
 >
 > 另一条 Task 3 实测结论：`const_on` / `const_off` 的 `category` 是 `'io'`，不是 `'logic1'`——测试要求 `byCategory('logic1')` 不包含 `const_on`。初稿的代码块写成 `logic1`，与自己的测试矛盾。
 
@@ -712,7 +719,7 @@ describe('base defs', () => {
       [1, 1, 0],
     ] as const) {
       const out: (number | Uint8Array)[] = [0];
-      def.evaluate!([a, b], out, { tick: 0 });
+      def.evaluate!([a, b], out, undefined, { tick: 0 });
       expect(out[0], `nand(${a},${b})`).toBe(want);
     }
   });
@@ -721,13 +728,13 @@ describe('base defs', () => {
     const and3 = r.get('and3');
     const or3 = r.get('or3');
     const o1: (number | Uint8Array)[] = [0];
-    and3.evaluate!([1, 1, 1], o1, { tick: 0 });
+    and3.evaluate!([1, 1, 1], o1, undefined, { tick: 0 });
     expect(o1[0]).toBe(1);
-    and3.evaluate!([1, 0, 1], o1, { tick: 0 });
+    and3.evaluate!([1, 0, 1], o1, undefined, { tick: 0 });
     expect(o1[0]).toBe(0);
-    or3.evaluate!([0, 0, 1], o1, { tick: 0 });
+    or3.evaluate!([0, 0, 1], o1, undefined, { tick: 0 });
     expect(o1[0]).toBe(1);
-    or3.evaluate!([0, 0, 0], o1, { tick: 0 });
+    or3.evaluate!([0, 0, 0], o1, undefined, { tick: 0 });
     expect(o1[0]).toBe(0);
   });
 
@@ -741,10 +748,10 @@ describe('base defs', () => {
       [1, 1],
     ] as const) {
       const ox: (number | Uint8Array)[] = [0];
-      xor.evaluate!([a, b], ox, { tick: 0 });
+      xor.evaluate!([a, b], ox, undefined, { tick: 0 });
       expect(ox[0], `xor(${a},${b})`).toBe(a ^ b);
       const on: (number | Uint8Array)[] = [0];
-      xnor.evaluate!([a, b], on, { tick: 0 });
+      xnor.evaluate!([a, b], on, undefined, { tick: 0 });
       expect(on[0], `xnor(${a},${b})`).toBe(a ^ b ? 0 : 1);
     }
   });
@@ -752,32 +759,43 @@ describe('base defs', () => {
   it('propagates undefined inputs as zero', () => {
     const nand = r.get('nand');
     const out: (number | Uint8Array)[] = [0];
-    nand.evaluate!([0, undefined as unknown as number], out, { tick: 0 });
+    nand.evaluate!([0, undefined as unknown as number], out, undefined, { tick: 0 });
     expect(out[0]).toBe(1);
   });
 
-  it('delay_line samples its input on the clock edge, starting at 0', () => {
+  it('delay_line publishes its held value and ignores its input', () => {
     const def = r.get('delay_line');
     const state = new Uint8Array(def.stateBytes);
     const out: (number | Uint8Array)[] = [0];
     out[0] = 0;
     def.clockEdge!([1], out, state, { tick: 0 });
     expect(state[0]).toBe(1);
-    expect(out[0]).toBe(0); // output still holds the pre-edge value
-    def.evaluate!([1], out, { tick: 0 });
+    expect(out[0]).toBe(0); // clockEdge must not write the output
+    // Deliberately the OPPOSITE polarity of the held value: a delay line that
+    // mirrors its input fails right here.
+    def.evaluate!([0], out, state, { tick: 0 });
     expect(out[0]).toBe(1);
+    // The next edge samples the low input, so the following settle publishes 0.
+    def.clockEdge!([0], out, state, { tick: 1 });
+    def.evaluate!([1], out, state, { tick: 1 });
+    expect(out[0]).toBe(0);
   });
 
-  it('mem1 holds its value until write is asserted on a clock edge', () => {
+  it('mem1 publishes its latched bit and ignores both inputs', () => {
     const def = r.get('mem1');
     const state = new Uint8Array(def.stateBytes);
     const out: (number | Uint8Array)[] = [0];
     // inputs: [set, value]
     def.clockEdge!([0, 1], out, state, { tick: 0 });
-    expect(state[0]).toBe(0);
+    expect(state[0]).toBe(0); // set deasserted: nothing latched
     def.clockEdge!([1, 1], out, state, { tick: 1 });
     expect(state[0]).toBe(1);
-    def.evaluate!([0, 0], out, { tick: 1 });
+    // Inputs are all zero; the latched 1 must still be published.
+    def.evaluate!([0, 0], out, state, { tick: 1 });
+    expect(out[0]).toBe(1);
+    // A deasserted write must not disturb the held bit.
+    def.clockEdge!([0, 0], out, state, { tick: 2 });
+    def.evaluate!([1, 0], out, state, { tick: 2 });
     expect(out[0]).toBe(1);
   });
 });
@@ -1100,7 +1118,7 @@ export const BASE_DEFS: readonly ComponentDef[] = [
 
 > **存储元件的分工**（初稿在这里写错了，Task 3 实测纠正）：`evaluate` 负责**发布保持的值**，`clockEdge` 负责**采样新值到 state**。初稿把 `evaluate` 写成空操作、让内核在每次 settle 前统一发布 state——那样内核的 `#publishState()` 就与 `evaluate` 争夺写同一个输出槽，而且根本没法表达「输入变了但还没到时钟沿，输出必须不变」。现在内核只在 `reset()` 与 `tick()` 里发布，`settle()` 走通用的 `evaluate` 路径。
 >
-> `state` 是可选参数，所以门的 `evaluate` 可以继续写成 `(i, o) => …`，Task 3 的测试里那些 `def.evaluate!([a, b], out, { tick: 0 })` 调用一个都不用改。
+> 调用点记得显式传 `state`：组合元件传 `undefined`，存储元件传真 state。门的 `evaluate` **定义**仍可写成 `(i, o) => …`。
 
 - [ ] **Step 6: 运行测试，确认通过**
 
@@ -2144,7 +2162,7 @@ describe('Simulation', () => {
 - [ ] **Step 7: 运行测试，确认通过**
 
 Run: `pnpm test test/core/net.test.ts`
-Expected: PASS — 8 passed
+Expected: PASS — 9 passed（含那条钉死存储语义的 delay 保持测试）
 
 - [ ] **Step 8: 提交**
 
