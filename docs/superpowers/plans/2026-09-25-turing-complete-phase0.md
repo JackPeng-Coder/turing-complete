@@ -4782,64 +4782,23 @@ export function hitTest(graph: Graph, registry: Registry, world: Point): Hit {
 Run: `pnpm test test/ui/view.test.ts`
 Expected: PASS — 6 passed
 
-- [ ] **Step 6: 实现 `src/app/store.ts`**
+- [ ] **Step 6: 不要重写 `src/app/store.ts`——它已经存在，本任务只消费它**
+
+Task 10 已经提交了 `src/app/store.ts`，其中包含**泛型** `Store<S>` / `createStore<S>`，**以及** `AppState` 与 `DragState` 两个类型声明。Task 10 的修复轮把这两个类型提前放进去，就是为了避免本任务与 Task 10 争抢同一个文件。
+
+所以这一步**没有代码要写**，只需要确认：
 
 ```ts
-import type { Graph } from '../core/graph';
-import type { Registry } from '../core/registry';
-import type { GradeResult } from '../levels/grader';
-import type { LevelSpec } from '../levels/spec';
-import type { Progress } from './progress';
-import type { Camera } from '../ui/board/view';
-
-export type DragState =
-  | { kind: 'instance'; ids: string[]; offsetX: number; offsetY: number }
-  | { kind: 'wire'; fromInst: string; fromPort: string }
-  | { kind: 'pan'; lastX: number; lastY: number }
-  | { kind: 'marquee'; x0: number; y0: number; x1: number; y1: number };
-
-export interface AppState {
-  level: LevelSpec;
-  graph: Graph;
-  registry: Registry;
-  progress: Progress;
-  camera: Camera;
-  selected: string[];
-  dragging: DragState | null;
-  lastGrade: GradeResult | null;
-  status: { zh: string; en: string } | null;
-}
-
-export interface Store {
-  get(): AppState;
-  set(patch: Partial<AppState>): void;
-  update(fn: (state: AppState) => AppState): void;
-  subscribe(listener: (state: AppState) => void): () => void;
-}
-
-export function createStore(initial: AppState): Store {
-  let state = initial;
-  const listeners = new Set<(s: AppState) => void>();
-  const emit = (): void => {
-    for (const listener of listeners) listener(state);
-  };
-  return {
-    get: () => state,
-    set(patch) {
-      state = { ...state, ...patch };
-      emit();
-    },
-    update(fn) {
-      state = fn(state);
-      emit();
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-  };
-}
+// 本任务的每个模块都这样引入，不要重新声明、不要重新实现：
+import type { AppState, DragState, Store } from '../app/store';
 ```
+
+`Store<S>` 的关键保证（Task 10 有测试锁定，别改）：
+
+- `set(patch)` 浅合并顶层并**无条件通知**。嵌套值不会被深度复制——`core/graph.ts` 的 `addInstance`/`connect` 是**就地 push**，而 `removeInstance`/`disconnect` 是**整体替换数组**，所以「引用没变就不通知」的优化会吞掉就地编辑的渲染。多渲染一次是更便宜的错。
+- `subscribe` 返回幂等的取消订阅；通知时遍历快照并对每个 listener 复查成员资格，因此 listener 可以在通知过程中退订自己或别人。
+
+`Camera` 的三个字段 `x` / `y` / `zoom` 是跨任务契约（`src/ui/board/view.ts` 里已声明），本任务扩展 `view.ts` 时**不要改变它们的形状**——`AppState.camera` 依赖它。
 
 - [ ] **Step 7: 实现 `src/ui/board/render.ts`（Canvas 分层绘制）**
 
