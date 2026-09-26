@@ -735,6 +735,79 @@ disjoint; disjoint files are not disjoint *commits*.
 — Cost if wrong: the remaining work serializes, which costs wall-clock time in the verification and
 final-review phase. That is strictly cheaper than a lost commit.
 
+## Final review and the closing wave
+
+Final whole-branch review (31 commits, `405b497..901dda4`): **Ready to merge. 0 Critical, 0 Important,
+7 Minor.** Phase acceptance MET on evidence rather than test counts — the reviewer checked the 26
+chapter-2 level names and their one-line concepts directly against the source compendium, confirmed
+every level has a reference that grades to a pass with `threeStar` asserted **equal** to its own
+measured metrics, and confirmed the spec §12 criterion (latch/oscillator/counter) is tested as
+behaviour from both sides: the latch holds a byte across an input flip and reverts to a wire without
+storage; the oscillator's 16-tick period is measured out of the check data with an ungated twin
+failing at exactly tick 16 and a stuck source at tick 1; the counter walks 256 enabled edges, the
+wrap, reset-over-enable and a same-tick hold. It also confirmed the three latent kernel defects are
+closed with no remaining call path around them.
+
+The review **re-derived two of my numbers rather than trusting them** and found one wrong prediction of
+mine: it recomputed level 27's `668 = 497 + 171` gate arithmetic by hand (the mux is 3 NANDs because
+`~s` is shared per stage) and re-derived the 8-deep delay path, and it reproduced `maskOf(31)` in node
+to confirm a bug I had described from arithmetic alone.
+
+Ruling: the fix wave is applied as **one** dispatch, not one per finding, and is followed by exactly
+one scoped re-review. This is the skill's prescription for final-review findings and it is also what the
+evidence supports: seven of the nine items were comment-only, one was a user-visible UI defect, and one
+was a latent arithmetic bug in a generator no shipped part exercises. — Cost if wrong: a fix that
+belonged to a different owner is bundled with the rest; the re-review verdicts each fix individually.
+
+Ruling: `fitsWidth`'s width-32 fast path **keeps** its `0xffff_ffff` bound *and* gains the `v >= 0`
+half. I initially left the negative case alone as beyond the assigned bug, the implementer reported it
+as the only hole left in that guard, and the re-review verified the fast path is load-bearing: widths
+above 32 are reachable (`MAX_PARAM_WIDTH = 4096`) while `setPort`'s number writer is
+`(v >>> i) & 1`, i.e. ToUint32, so the bound is what prevents admitting a value the writer would
+truncate. The re-review corrected the implementer's stated reason for that (for `i >= 32` the writer
+re-reads bit `i - 32` rather than zero-filling) while confirming the conclusion. — Cost if wrong:
+`setPort(base, 32, -1)` is now rejected rather than silently reinterpreted as `0xffff_ffff`. No shipped
+path stages a negative, so nothing that worked stops working.
+
+Ruling: `src/core/fields.ts`'s dormant `insertField`/`extractField` width-31 pair stays **unfixed**.
+`insertField(value, offset, 31, field)` throws for every field including 0, because it compares the
+field against the negative mask arithmetically, while `extractField` is only accidentally right at 31
+and returns a signed result at 32. **Neither has any caller in `src/`** — only tests at widths
+2/6/8/24/32 — so the pair is unreachable in the shipped game and fixing it would be speculative work on
+a module no code path uses. Recorded in `wide.ts`'s own comment so it is not lost, and carried to
+Phase 5 where `fields.ts` is the natural tool for wide ports. — Cost if wrong: a latent trap for
+whoever first wires `fields.ts` up; the mitigation is that the trap is now named in the source.
+
+Ruling: the level layer's **missing pin-width cap** stays deferred rather than being added. A level can
+textually declare a wide pin and nothing rejects it, but no shipped level exceeds 8 bits, level data is
+compiled TypeScript (not a document, save or player action), and the input-pin masks are unreachable
+anyway because a ≥ 31-bit input pin means ≥ 2³¹ enumerated rows — the editor would hang long before any
+mask mattered. Only a hand-authored wide *output* pin would get a wrong mask (`-1` at 32 bits, `1` at
+33+). Adding a cap now would be a change to the level contract with no failing case behind it.
+— Cost if wrong: a future chapter that declares a wide output pin on a truth-table level gets a mask
+that reduces every value to bit 0 at width 33+; the failure would be loud (the level's own tests would
+fail) rather than silent corruption.
+
+Ruling: the two prose slips the fix wave itself introduced are **fixed, not merged**. `batch4.ts`'s new
+sentence claims "nothing imports a batch directly except that batch's own test", which is false — three
+batch tests import earlier batches and two phase-level tests import the chapter index — and the spec's
+new clause justifies level 28's `switch` by a delay comparison that does not hold, since the registered
+`and` is also one delay unit and the same 2 NANDs, so `switch` and `and` are metric-identical there. The
+re-review correctly called both prose-only and non-blocking; I am fixing them anyway because a wrong
+justification in the authority document is exactly what misled a task earlier in this phase (the
+`params.width` premise), and the cost of the fix is two sentences. — Cost if wrong: the corrected
+justification for `switch`'s presence in level 28's reference becomes a plainer statement of what the
+reference actually does.
+
+Ruling: the phase merges to `master` **locally**, and I do **not** push to `origin` without asking.
+Merging brings 33 commits and ~17.7k added lines onto the branch the user plays; that is what "execute
+Phase 1" asked for. Pushing publishes the same to a repository the previous session established is
+**public**, which is an irreversible, outward-facing side effect that norms say to confirm — and the
+user has never told me whether the repo's visibility was intended. — Cost if wrong: the work is on
+`master` locally and one `git push` from being shared, which is a cheap state to be corrected from in
+either direction.
+
+
 Task 12b: commit `5a113f0` — the four rulings shipped. `ram8` added to §3.3's chapter-2 row, and the
   implementer **verified the row against the data rather than trusting my paragraph**: it checked every
   registered def id, all 20 chapter-1+2 reward statements, and every chapter-2 `allowedComponents`, and
