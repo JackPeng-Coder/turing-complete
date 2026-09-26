@@ -1,0 +1,92 @@
+$ vitest run "test/core/registry.test.ts" "-t" "names only registered defs"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/core/registry.test.ts (30 tests | 2 failed | 28 skipped) 8ms
+   ↓ registry (4)
+     ↓ registers every base def and can look them up
+     ↓ throws on unknown component ids
+     ↓ rejects duplicate ids
+     ↓ filters by category
+   ↓ base defs (14)
+     ↓ marks exactly the storage elements as sequential
+     ↓ hides the level IO plumbing from the palette but keeps it registered
+     ↓ gives every def at least one output and no duplicate pin ids
+     ↓ marks sources as zero cost and gates as one
+     ↓ prices every 1-bit gate on the NAND-equivalent basis, explicitly
+     ↓ registers full_adder as a 1-bit gate on the same 9-NAND cell as add8
+     ↓ leaves gateCost to the `?? cost` fallback only where both metrics are zero
+     ↓ evaluates NAND
+     ↓ evaluates the 3-input gates
+     ↓ evaluates the full adder over all eight input combinations
+     ↓ evaluates XOR and XNOR
+     ↓ propagates undefined inputs as zero
+     ↓ delay_line holds its value: evaluate publishes state and ignores its input
+     ↓ mem1 publishes its latched bit and ignores its inputs
+   ↓ base defs: extra coverage (5)
+     ↓ declares 1-bit pins on every def outside the wide family
+     ↓ gives every def a publisher, and sizes storage honestly
+     ↓ matches an independently written truth table for every gate
+     ↓ drives the constants and mirrors level IO
+     ↓ keeps a stored bit through a no-write edge and samples a zero
+   ↓ fields (5)
+     ↓ packs bit arrays low-bit-first
+     ↓ unpacks to bit arrays
+     ↓ extracts and inserts fields
+     ↓ rejects out-of-range inserts
+     ↓ round-trips fields in the high bits without sign leakage
+   ❯ shipped level rewards (2)
+     × names only registered defs in rewards.components 6ms
+     × names only registered defs in allowedComponents 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/registry.test.ts > shipped level rewards > names only registered defs in rewards.components
+AssertionError: rewards that name no def: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "ch2-20-half-adder rewards full_adder",
++ ]
+
+ ❯ test/core/registry.test.ts:454:49
+    452|     // Every offender at once, not just the first: a batch of new rewa…
+    453|     // cheaper to fix from one list than from one failure per run.
+    454|     expect(missing, 'rewards that name no def').toEqual([]);
+       |                                                 ^
+    455|     // NON-VACUITY. An empty walk passes the assertion above no matter…
+    456|     // level data says, so the walk proves it reached the levels: `ful…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/core/registry.test.ts > shipped level rewards > names only registered defs in allowedComponents
+AssertionError: palette ids that name no def: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "ch2-20-half-adder offers full_adder",
++ ]
+
+ ❯ test/core/registry.test.ts:481:53
+    479|       }
+    480|     }
+    481|     expect(missing, 'palette ids that name no def').toEqual([]);
+       |                                                     ^
+    482|     // The same non-vacuity anchor as above: `full_adder` is only reac…
+    483|     // through the unjoined batch, and only level 20 lists it.
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 28 skipped (30)
+   Start at  02:52:18
+   Duration  356ms (transform 73%, import 20%, worker 4%, tests 4%)
+
+[ELIFECYCLE] Test failed. See above for more details.

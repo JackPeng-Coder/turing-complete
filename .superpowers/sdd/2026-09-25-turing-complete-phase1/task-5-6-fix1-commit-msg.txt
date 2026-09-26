@@ -1,0 +1,43 @@
+fix(levels): close the fuzz/custom review gaps
+
+Four fixes from the round-1 review, plus one doc sentence. Nothing the
+review ratified changes: an over-cap `rounds` still clamps, and a custom
+checker still owns its `ticksUsed`.
+
+* fuzz: test the "level has no output pins" vacuity shape. That guard has
+  been in `planFuzz` since e61d556; the test was not, and the report
+  claimed otherwise. The no-input-pins case now asserts its detail too, so
+  the two siblings are tested the same way.
+
+* custom: `failureIssue`/`outcomeIssue` take the level and validate every
+  adopted failure record against it -- each key of `inputs`, `expected` and
+  `actual` must name one of `spec.io`'s pins, and each value must be a
+  finite number. The three fields were only checked to be objects, so a
+  checker could emit an unknown pin id or a `NaN` and the panel would render
+  a row of zeros instead of failing the check. The `CustomChecker` doc now
+  describes what actually runs, rather than promising it.
+
+* spec: `FAILURE_REASONS` is the runtime source of truth for
+  `CheckFailure['reason']`, which is now `(typeof FAILURE_REASONS)[number]`,
+  and `checks.ts` imports the array instead of hand-copying the union. A
+  reason can no longer exist in one and not the other -- which would have
+  made every checker using it report "malformed".
+
+* runChecks: the two residual escape paths out of `grade()` are closed. An
+  element of `spec.checks` that is not an object with a string `kind` (a
+  `null` save, say) records an `invalid` failure at the top of the loop,
+  before anything reads `check.kind` -- including the `'error' in created`
+  push, which sits outside the loop's `try`. And `outcomeIssue` is now
+  called inside the checker's own `try`, so an outcome whose `passed` /
+  `failures` / `ticksUsed` accessor throws is a malformed outcome instead of
+  a `TypeError` the outer catch rethrows onto the next board edit.
+
+* custom: the `CustomChecker` doc states that the tick count a checker
+  returns feeds the star rating, and is therefore reviewed with the checker.
+
+Verified: 67 tests in test/levels/fuzz-custom.test.ts (20 new), 442 in the
+full suite across 17 files, `tsc --noEmit` clean, `vite build` clean. The
+new tests were RED first (11 failing before the fixes), and disabling the
+new element guard fails all six of its tests.
+
+Logs: .superpowers/sdd/2026-09-25-turing-complete-phase1/task-5-6-fix1-*.txt

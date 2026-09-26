@@ -1,0 +1,47 @@
+fix(progress): offer a level its own rewards, and unlock mem1 from ch1-12
+
+Two playability defects, and the whole-set check that would have caught both.
+
+`paletteDefsFor` now folds the level's OWN rewards into the unlocked set
+before filtering by `allowedComponents`. The parts a level hands out are
+the parts its puzzle was designed around, so withholding them until the
+player has solved it is backwards: level 13's parity puzzle cannot be built
+without the `splitter` it rewards, because every chapter-1 part has 1-bit
+pins and a wire from the 4-bit input copies bit 0 alone. The asymmetry is
+deliberate and documented at the function: the own reward is offered to
+BUILD with, while the palette stays bounded by the level's own list, so a
+part the level does not offer stays out even once unlocked. `unlockedComponents`
+is untouched -- a save must not gain parts from a level the player has not
+passed.
+
+This is a no-op for chapter 1, measured rather than assumed: no chapter-1
+level lists its own reward, and every chapter-1 reference draws only on
+parts an earlier level rewards. Dumping all 17 shipped palettes under the
+old rule and the new one leaves the twelve chapter-1 lines byte-identical;
+the four chapter-2 lines that change gain exactly their own listed rewards
+(13: splitter/maker/const8, 15: less_u, 16: equal8, 17: add8/mul8).
+
+`ch1-12-binary-racer` rewards `mem1`: chapter 1's last two levels rewarded
+nothing, and `mem1` was defined in `core/defs/index.ts` and rewarded by no
+level anywhere, so chapter 2's latch level had no latch part it could ever
+offer. The capstone is the natural first home for "hold a bit". Not added
+to `STARTER_COMPONENTS`, which would put it in level 1's palette. Rewards
+are not scored (`grade()` reads the checks and the `threeStar` metrics
+only), chapter 1's tests run unchanged and in the same numbers, and level
+12's own palette is unchanged because it does not list `mem1`.
+
+New `test/levels/level-buildability.test.ts` (40 tests) walks every shipped
+level -- `LEVELS`/`LEVEL_ORDER`, never a hardcoded list -- and calls
+`paletteDefsFor` instead of re-deriving it:
+
+* every part in the level's reference solution is in the palette the app
+  builds for a player who has passed every PRIOR level and not this one;
+* every name in `allowedComponents` is a starter or rewarded by a level at
+  or before it, and nothing outside that list reaches the palette.
+
+Written first: 3 failed / 37 passed, naming level 13's missing splitter and
+`mem1` as unlocked by no shipped level. Chapter 2 is not joined into
+`LEVEL_ORDER` yet, so the walk covers chapter 1 plus the shipped chapter-2
+batch (17 ids) and picks up every later batch as it joins `CH2_LEVELS` --
+which turns "level 28 has no latch part" into a failure the moment level 28
+lists it.

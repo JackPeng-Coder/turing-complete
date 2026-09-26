@@ -1,0 +1,15 @@
+$ vitest run "test/levels/level-buildability.test.ts" "test/app/progress.test.ts" "test/levels/ch2-batch1.test.ts" "test/levels/ch1-part1.test.ts" "test/levels/ch1-part2.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/app/progress.test.ts (18 tests) 10ms
+ ✓ test/levels/ch1-part1.test.ts (34 tests) 22ms
+ ✓ test/levels/ch1-part2.test.ts (29 tests) 21ms
+ ✓ test/levels/level-buildability.test.ts (40 tests) 40ms
+ ✓ test/levels/ch2-batch1.test.ts (58 tests) 60ms
+
+ Test Files  5 passed (5)
+      Tests  179 passed (179)
+   Start at  02:36:53
+   Duration  445ms (transform 59%, import 23%, tests 13%, worker 5%)
+

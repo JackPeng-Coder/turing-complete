@@ -1,0 +1,2804 @@
+# Review package: 523a7b9..0e0828a
+
+## Commits
+0e0828a fix(levels): correct level 25's decoder brief, and derive the wide-category set
+a5e618a feat(defs): register the decoder1/decoder2/decoder3 family
+59bc652 feat(levels): add chapter-2 levels 23-27, two's complement, decoders and the logic engine
+
+## Files changed
+ src/core/defs/index.ts           |   16 +-
+ src/core/defs/wide.ts            |  153 +++++
+ src/levels/content/ch2/batch3.ts |  636 ++++++++++++++++++
+ test/core/defs-wide.test.ts      |   57 +-
+ test/core/registry.test.ts       |  239 ++++++-
+ test/levels/ch2-batch3.test.ts   | 1374 ++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 2448 insertions(+), 27 deletions(-)
+
+## Diff
+diff --git a/src/core/defs/index.ts b/src/core/defs/index.ts
+index d29f627..9b3a7da 100644
+--- a/src/core/defs/index.ts
++++ b/src/core/defs/index.ts
+@@ -1,12 +1,14 @@
+ import type { ComponentDef } from '../registry';
+ import {
++  DECODER_DEFS,
++  DECODER_DEF_IDS,
+   FULL_ADDER,
+   WIDE_DEF_IDS,
+   WIDE_STORAGE_DEFS,
+   WIDE_STORAGE_DEF_IDS,
+   createWideDefs,
+ } from './wide';
+ 
+ // ---------------------------------------------------------------------------
+ // GATE COST: the 1-bit NAND-equivalent basis, the same one `wide.ts` prices its
+ // bit-sliced cells against.
+@@ -187,32 +189,34 @@ const PHASE0_DEF_IDS = [
+  *
+  * `full_adder` is a `logic1` gate exactly like the parts above -- pin-for-pin
+  * one bit, priced on the same NAND basis -- but it is chapter 2's part (level
+  * 20's reward), not something phase 0 shipped, so it is not spelled inside
+  * `PHASE0_DEF_IDS`, whose name and order describe that set.
+  */
+ const POST_PHASE0_DEF_IDS = ['full_adder'] as const;
+ 
+ /**
+  * Every def id the game ships: phase 0's one-bit parts, the one-bit gate added
+- * since, then the wide family -- the operators, then the storage parts.
++ * since, then the wide family -- the operators, the storage parts, and the
++ * decoders.
+  *
+  * The wide ids are not repeated here -- `wide.ts` owns them next to the defs
+  * they name, and `test/core/defs-wide.test.ts` pins that each list agrees with
+  * the defs it registers, so a wide def can never be registered under an id that
+  * level data cannot spell.
+  */
+ export const DEF_IDS = [
+   ...PHASE0_DEF_IDS,
+   ...POST_PHASE0_DEF_IDS,
+   ...WIDE_DEF_IDS,
+   ...WIDE_STORAGE_DEF_IDS,
++  ...DECODER_DEF_IDS,
+ ] as const;
+ 
+ export type DefId = (typeof DEF_IDS)[number];
+ 
+ export const BASE_DEFS: readonly ComponentDef[] = [
+   source('const_on', '高电平', 'Constant On', 1),
+   source('const_off', '低电平', 'Constant Off', 0),
+ 
+   // Truth tables are written out in full. The index is the input vector with
+   // input `a` as bit 0, so index 0b10 means a=0, b=1. Writing them out makes
+@@ -328,11 +332,21 @@ export const BASE_DEFS: readonly ComponentDef[] = [
+   // counter and a 256-byte RAM. Registered from a literal list rather than a
+   // width generator -- a 32-bit RAM would be 4 GiB of state per instance; see
+   // the section note in `wide.ts`.
+   //
+   // Every one of them publishes what it holds through its own `evaluate`, the
+   // same call the settle sweep makes, which is what lets the kernel publish an
+   // eight-bit register correctly (see `Simulation.#publishState`). They are free
+   // on BOTH metrics, like the two 1-bit memories above: an asserted clear beats
+   // an asserted load/en, and the counter wraps to 0 at 256.
+   ...WIDE_STORAGE_DEFS,
++
++  // The decoder family (task 10): `decoder1` (`sel:1 -> out:2`) and `decoder3`
++  // (`sel:3 -> out:8`) are what chapter-2 levels 25 and 26 reward and offer in
++  // their own palettes; `decoder2` is the same generator at width 2. Registered
++  // at the widths their ids name rather than at the family's default width,
++  // because a decoder's `out` pin is `2 ** w` bits -- the ids say which part they
++  // are, and `createDecoderDef(w)` builds one. Their paper trail is in `wide.ts`:
++  // the generator, the one-hot contract, and the minterm tree that prices them
++  // (1 / 10 / 27 NAND equivalents at w = 1 / 2 / 3).
++  ...DECODER_DEFS,
+ ];
+diff --git a/src/core/defs/wide.ts b/src/core/defs/wide.ts
+index b37133a..ad31492 100644
+--- a/src/core/defs/wide.ts
++++ b/src/core/defs/wide.ts
+@@ -5,20 +5,27 @@ import type { PortValue } from '../signal';
+  * The wide (8-bit) family: bitwise, arithmetic, shift, compare and the two bit
+  * packers -- all pure combinational, no state and no clock edge, and every one
+  * of them a *generator* result, so phase 5 can register the same operators at
+  * 16/32/64 bits without a second copy of the semantics.
+  *
+  * Task 4 added the STATEFUL half of the family at the bottom of this file
+  * (`mux8`, `delay8`, `reg8`, `counter8`, `ram8`), which is registered from a
+  * literal list rather than generated; the section note there says why, and what
+  * each def keeps in `state`.
+  *
++ * Task 10 added the DECODER family (`decoder1`, `decoder2`, `decoder3`) between
++ * the operators and the storage parts. It is generated per width like the
++ * operators are, but it is deliberately NOT a `createWideDefs` product: a
++ * decoder's two pins have different widths (`sel` is `w` bits, `out` is `2 ** w`)
++ * and that generator builds one width for every pin of every def it produces.
++ * The section note below the operators has the full reason.
++ *
+  * Three rules this module establishes, because nothing in the project had a
+  * width other than 1 before it:
+  *
+  *  * **Ids and pin names are the contract.** `and8.a`, `add8.cout`,
+  *    `splitter.b0`, `reg8.load` and the rest are addressed verbatim by the
+  *    chapter-2 level data, so they are written out literally in `createWideDefs`
+  *    (and in the storage list) rather than derived from a clever naming scheme.
+  *  * **Values are unsigned patterns, never negative numbers.** An 8-bit port
+  *    carries 0..255; two's complement exists only *inside* `less_s` and `ashr8`,
+  *    which convert to a signed value to read the sign and then return an
+@@ -805,20 +812,166 @@ export function createWideDefs(width: number = DEFAULT_WIDE_WIDTH): readonly Com
+     splitterDef(w),
+     makerDef(w),
+     // The one-bit conditional pass is width-independent and keeps its bare id,
+     // so `createWideDefs(8)` yields the pair `switch` / `switch8` the contract
+     // asks for.
+     switchDef('switch', { zh: '开关', en: 'Switch' }, 1),
+     switchDef(`switch${w}`, { zh: `${w} 位开关`, en: `${w}-Bit Switch` }, w),
+   ];
+ }
+ 
++// ---------------------------------------------------------------------------
++// THE DECODER FAMILY (task 10)
++//
++// `decoder1` and `decoder3` are the parts chapter-2 levels 25 and 26 reward AND
++// offer in their own palettes; `decoder2` is the same definition one width up --
++// the compendium's "2-Bit Decoder", which no level name introduces, so it is not a
++// second hand-written part but this generator at width 2, registered so a later
++// chapter can reach for it.
++//
++// WHY THIS IS NOT PART OF `createWideDefs`. That generator builds one width for
++// every pin of every def it produces, and a decoder's two pins deliberately
++// differ: `sel` is `w` bits and `out` is `2 ** w`. The id says which width it is
++// (`decoder3` = a 3-bit select, an 8-bit output), and the width is a parameter of
++// the DEF rather than of the instance for exactly the reason the module header
++// gives for `splitter` / `maker`: `params.width` widens EVERY pin of an instance
++// (`net.ts`, `effectiveWidth`), so no instance knob can make one pin three bits
++// and the other eight. A decoder built by `createWideDefs(8)` would have a `2 ** 8
++// = 256`-bit `out` pin -- a port this project has no carrier for -- which is why
++// the registered widths come from the literal list below and `createWideDefs`
++// never grows a decoder.
++//
++// ONE-HOT OUTPUT. The value published is `1 << sel`: bit `sel` high and every
++// other bit low. That is what a decoder is FOR -- turning an address into a
++// one-of-N select line -- and the level data states the same expectation at both
++// widths (`truthTable(io, { out: ({ sel }) => 1 << (sel ?? 0) })`). Publishing
++// `sel` instead would be a wire wearing a decoder's pins: it agrees with the
++// one-hot reading at sel 0 and 1 and disagrees everywhere above, which is the
++// "pass-through decoder" that level 26's test file measures as a failure. Do not
++// "simplify" this to the select value.
++//
++// COST. `cost` is 1 -- the delay unit every operator pays (spec §3.2), because the
++// part is one node however many minterms it expands to. `gateCost` is the minterm
++// tree's NAND count, derived at `decoderNand` below and stated explicitly on every
++// def, never inherited from `cost`.
++// ---------------------------------------------------------------------------
++
++/**
++ * Widest select field this generator will build: `out` is `2 ** w` bits, and
++ * `2 ** 5 = 32` is the widest value a `number` carries exactly (`MAX_WIDE_WIDTH`
++ * is the same ceiling applied to a data width).
++ *
++ * A width outside `1..DECODER_MAX_WIDTH` is REFUSED rather than clamped, which is
++ * the opposite of `clampWidth` and is deliberate: clamping a request for a 6-bit
++ * decoder would hand the caller a part with a different pin shape than the one it
++ * asked for, in silence, and no level name can reach such a width anyway.
++ */
++export const DECODER_MAX_WIDTH = 5;
++
++/**
++ * NANDs in a `w`-to-`2 ** w` decoder: **`w` inverters plus `2 ** (w + 1) - 4`
++ * AND gates**, on the same basis as every other count in this file (one 2-input
++ * NAND is the unit, so `NOT` = 1 and `AND` = 2).
++ *
++ * THE CONSTRUCTION is the shared minterm tree level 26 teaches -- do not rebuild
++ * the low decode once per output line:
++ *
++ *  * Invert every select bit: `w` NOTs, which hand the tree both literals of each
++ *    bit.
++ *  * Grow the minterms one literal at a time. Layer 2 ANDs each literal of bit 1
++ *    with each literal of bit 0: 4 ANDs, giving the four minterms of the low two
++ *    bits. Layer `j` does the same to the `2 ** (j - 1)` minterms already in hand
++ *    with bit `j - 1`'s two literals: `2 ** j` ANDs. The last layer IS the
++ *    `2 ** w` output lines, so no minterm is ever decoded twice and the tree has
++ *    depth `w`.
++ *  * ANDs total `sum(2 ** j for j in 2..w)` = `2 ** (w + 1) - 4`.
++ *
++ *   w | NOTs | ANDs | NANDs | the same number in the level data
++ *   --|------|------|-------|-------------------------------------------------
++ *   1 |  1   |  0   |   1   | level 25's reference: one `not`, `maker` free
++ *   2 |  2   |  4   |  10   | 2 NOTs + 4 two-literal ANDs
++ *   3 |  3   | 12   |  27   | level 26's reference: 3 NOTs + 4 ANDs + 8 ANDs
++ *
++ * Both level targets are this tree's own arithmetic, which is the check that
++ * these numbers describe the construction the levels were authored against
++ * rather than a drawing invented here. A documented construction, not a proven
++ * minimum: sharing the low decode is what makes it cheaper than `2 ** w` flat
++ * `w`-input ANDs (at w = 3, 35 NANDs instead of 27).
++ */
++function decoderNand(w: number): number {
++  return w * NOT + (2 ** (w + 1) - 4) * AND;
++}
++
++/**
++ * One decoder at `w` select bits: `sel: w` in, `out: 2 ** w` out, one-hot.
++ *
++ * The generator is the width mechanism, exactly as `createWideDefs(width)` is for
++ * the operators: `createDecoderDef(3)` is `decoder3` (`sel:3 -> out:8`), and the
++ * pins are rebuilt at that width rather than re-counted per instance (which the
++ * kernel cannot do -- see the section note).
++ *
++ * `sel` is read through `toUint`, so a poisoned, oversized or unwired select is
++ * masked into the select field before it can index anything; the published value
++ * is then `2 ** sel`, which is at most `2 ** (2 ** w - 1)` and fits the pin by
++ * construction. `2 ** sel` and not `1 << sel`: `<<` converts through int32, so at
++ * a 5-bit select bit 31 would come out negative -- the "negative reading" every
++ * def in this file is written to avoid.
++ */
++export function createDecoderDef(width: number): ComponentDef {
++  if (!Number.isInteger(width) || width < 1 || width > DECODER_MAX_WIDTH) {
++    throw new Error(`decoder width must be an integer in 1..${DECODER_MAX_WIDTH}, got ${width}`);
++  }
++  const w = width;
++  const lines = 2 ** w;
++  return combinational(
++    `decoder${w}`,
++    { zh: `${w} 位解码器`, en: `${w}-Bit Decoder` },
++    'wide',
++    [{ id: 'sel', width: w }],
++    [{ id: 'out', width: lines }],
++    // The delay unit, one per node; the gate metric is the tree below.
++    1,
++    decoderNand(w),
++    (i, o) => {
++      o[0] = u(2 ** toUint(i[0], w), lines);
++    },
++  );
++}
++
++/**
++ * The select widths this phase registers, in order.
++ *
++ * 1 and 3 are the widths the level names introduce; 2 is the compendium's 2-bit
++ * decoder, which no level name introduces and which therefore must not become a
++ * hand-written part of its own -- it is `createDecoderDef(2)`.
++ */
++export const DECODER_WIDTHS = [1, 2, 3] as const;
++
++/**
++ * Ids `DECODER_DEFS` registers, in order, as a literal tuple so `DEF_IDS` can
++ * spread it and `DefId` still narrows to the individual strings.
++ *
++ * The id is `decoder` + the SELECT width, which is the contract the level data
++ * spells (`ch2-25-1-bit-decoder` rewards `decoder1`, level 26 `decoder3`); the
++ * output width is `2 ** w` and is deliberately not part of the name.
++ */
++export const DECODER_DEF_IDS = ['decoder1', 'decoder2', 'decoder3'] as const;
++
++/**
++ * The decoder family, in `DECODER_DEF_IDS` order.
++ *
++ * Registered from this list rather than from a `createWideDefs` call for the
++ * reason in the section note: the output pin is `2 ** w` bits, so the widths are
++ * a decision this family owns.
++ */
++export const DECODER_DEFS: readonly ComponentDef[] = DECODER_WIDTHS.map((w) => createDecoderDef(w));
++
+ // ---------------------------------------------------------------------------
+ // THE STORAGE FAMILY (task 4)
+ //
+ // The stateful half of the eight-bit family: a multiplexer, a delay, a register,
+ // a counter and a byte-addressed memory. Ids and pin names are the contract the
+ // chapter-2 level data is written against, exactly as the operators above are,
+ // and every edge rule is DECIDED here rather than inherited -- each def says
+ // which one it follows.
+ //
+ // WHY THIS IS NOT WIDTH-GENERATED. `createWideDefs(width)` exists so phase 5 can
+diff --git a/src/levels/content/ch2/batch3.ts b/src/levels/content/ch2/batch3.ts
+new file mode 100644
+index 0000000..21e58a9
+--- /dev/null
++++ b/src/levels/content/ch2/batch3.ts
+@@ -0,0 +1,636 @@
++import type { FuzzVector, LevelSpec } from '../../spec';
++// `LevelIo` -- the pin shape -- is `tables.ts`'s; `checks.ts` exports an
++// unrelated runtime interface of the same name (the bound simulation), so the
++// two must not be confused.
++import { truthTable, type LevelIo } from '../../tables';
++
++/**
++ * Chapter 2, levels 23-27: two's complement, the decoders and the eight-bit
++ * logic engine -- the batch where a byte stops being eight wires and starts
++ * being a signed number, and where a level with an instruction set appears.
++ *
++ * WHAT THE SOURCE FIXES, AND WHAT IT DOES NOT. As in batches 1 and 2: the
++ * compendium gives each of these levels exactly three things -- its name
++ * (English and Chinese), its place in the chapter, and one line of teaching
++ * concept. It gives no ports, no widths, no pass conditions, no targets and no
++ * rewards. Everything else below is this replica's design, derived from the name
++ * and that one line -- so every level carries a data comment split into
++ * `SOURCED` and `AUTHORED`, and `test/levels/ch2-batch3.test.ts` fails if either
++ * marker is missing. No number in this file may be presented as the source's
++ * own.
++ *
++ * THREE THINGS THIS BATCH OWES A READER, and each says so in its own level
++ * comment rather than only here:
++ *
++ *  * LEVEL 23 CHANGES THE SOURCE LEVEL'S KIND. The source's level of this name
++ *    is a 限时小游戏 -- a timed mini-game, played against a clock, with no
++ *    circuit specification of any sort. This replica is a circuit game and
++ *    cannot host a typing game, so the level becomes a two's-complement
++ *    arithmetic circuit: the concept the mini-game taught (read a negative
++ *    number) is kept, the form is replaced. That is a deliberate change of kind,
++ *    not a translation, and it is recorded as such -- batch 1 did the same thing
++ *    to level 15 (`Binary Racer`, the other timed mini-game in the chapter).
++ *  * LEVEL 25'S DECODER COMES IN WIDTHS, ONE PART PER WIDTH -- and the kernel
++ *    has no per-instance knob that stands in for that. The family is generated
++ *    (`decoder1` / `decoder2` / `decoder3`, one `createDecoderDef(w)` each), so
++ *    the level's brief names the ids a player drops in rather than a width
++ *    parameter; that level's comment records the rejected mechanism and the
++ *    resolution, because an earlier revision of this batch shipped the wrong
++ *    story (`params.width = 2` giving the catalog's 2-bit decoder).
++ *  * LEVEL 27 HAS AN AUTHORED INSTRUCTION SET. The source says only "用或门和非门
++ *    构建完整逻辑运算集" -- build the complete set of logical operations -- and
++ *    enumerates no opcodes at all. The eight values in that level's comment, and
++ *    in its brief for the player, are therefore this plan's design, and the test
++ *    file measures all eight one at a time rather than trusting a random
++ *    sequence to cover them.
++ *
++ * THE PALETTE RULE, inherited from batch 2 and used once more here: a level
++ * offers the parts unlocked at or before it whose pins can attach to something
++ * on it, plus its own rewards, MINUS any part that is not its own reward and
++ * would answer the level by itself. Level 24 uses that subtraction on `neg8` --
++ * one component with exactly the level's I/O shape, whose documented cell IS the
++ * circuit the level teaches -- and says so in its own comment. `full_adder`
++ * (level 20's reward, now registered) stays out of every palette here for batch
++ * 2's reason, recorded in that file's module note: it is offered nowhere but its
++ * own level, so no target in this batch is measured from a part a level would
++ * rather have answered with. Nothing else here needed that subtraction -- and
++ * the one part a level in this batch both offers and is answered by is level
++ * 25's OWN reward, `decoder1`, now that the family is registered: that is batch
++ * 2's own-reward half of the rule rather than an exception to it (level 13's
++ * splitter and level 20's `full_adder` are the same case), and that level's
++ * comment states what the drop-in scores.
++ *
++ * THE DECODER REWARDS NAME DEFS THAT NOW EXIST. `decoder1` (level 25) and
++ * `decoder3` (level 26) were reward DATA when this batch was written -- a legal
++ * state rather than a hole, because a reward is an id, the unlock walk is over
++ * ids, and `ui/palette` drops an id `registry.has` refuses. The family has since
++ * been registered (`DECODER_DEF_IDS`: `decoder1` / `decoder2` / `decoder3`,
++ * generated per width in `src/core/defs/wide.ts`), and no number in this file
++ * moved when it landed: every reference in the test file is wired from gates, so
++ * the levels do not depend on the parts they hand out. `decoder2` is the 2-to-4
++ * form, the family member no level name introduces: it is registered and
++ * offered by no level's palette, and level 25's comment records why it is not in
++ * that level's.
++ *
++ * EVERY LEVEL HERE IS PURELY COMBINATIONAL, so `tick` is 0 on every three-star
++ * target, for the same reason batches 1 and 2 state it: no check in this batch
++ * ever ticks the clock, so the metric is genuinely 0 and its target can never be
++ * what denies a player three stars. The metrics that do the work here are `gate`
++ * and `delay`, and every target below is the reference solution's own measured
++ * score -- `three-star targets are the reference solutions own metrics` in the
++ * test file is what holds that to a number rather than a promise.
++ *
++ * NOT JOINED YET: `ch2/index.ts` assembles the chapter and still lists batch 1
++ * alone, so this file is reachable only through its own test until the chapter
++ * assembly task appends it.
++ */
++
++/**
++ * The one-bit shelf every level in this batch draws from: chapter 1's gates, its
++ * two constants and the delay line, in the order chapter 1 hands them out.
++ * `delay_line` is offered because chapter 1's palettes offered it; no check in
++ * this batch ticks the clock, so nothing below can use it.
++ */
++const GATES_1BIT = [
++  'nand',
++  'not',
++  'and',
++  'or',
++  'nor',
++  'xor',
++  'xnor',
++  'and3',
++  'or3',
++  'const_on',
++  'const_off',
++  'delay_line',
++] as const;
++
++/** The level's own plumbing: always in the palette, never unlocked (`defs/index.ts`). */
++const LEVEL_IO = ['level_input', 'level_output'] as const;
++
++/** What batch 1's level 13 unlocked: the two byte packers and the byte constant. */
++const BYTE_WIRING = ['splitter', 'maker', 'const8'] as const;
++
++/** The wide operators batch 1's levels 15-17 unlocked. */
++const WIDE_OPS = ['less_u', 'equal8', 'add8', 'mul8'] as const;
++
++/** The bit-sliced byte operators batch 2's levels 18 and 19 unlocked. */
++const BYTE_OPS = ['and8', 'or8', 'nand8', 'nor8', 'xor8', 'xnor8', 'not8'] as const;
++
++/** Level 22's reward: a conditional pass, one bit and one byte wide. */
++const SWITCHES = ['switch', 'switch8'] as const;
++
++/**
++ * The four pin shapes this batch uses, so a level's io is one named constant
++ * instead of two lines of literal in the middle of a spec.
++ */
++const IO_A8_OUT8: LevelIo = { inputs: [{ id: 'a', width: 8 }], outputs: [{ id: 'out', width: 8 }] };
++const IO_SEL1_OUT2: LevelIo = {
++  inputs: [{ id: 'sel', width: 1 }],
++  outputs: [{ id: 'out', width: 2 }],
++};
++const IO_SEL3_OUT8: LevelIo = {
++  inputs: [{ id: 'sel', width: 3 }],
++  outputs: [{ id: 'out', width: 8 }],
++};
++const IO_A8_B8_OP8_OUT8: LevelIo = {
++  inputs: [
++    { id: 'a', width: 8 },
++    { id: 'b', width: 8 },
++    { id: 'op', width: 8 },
++  ],
++  outputs: [{ id: 'out', width: 8 }],
++};
++
++/**
++ * A fuzz seed per level: the level's index in the high byte and the byte width
++ * in the low one, exactly as batch 2 seeds its three.
++ *
++ * Fixed literals, not drawn ones: the same seed produces the same vectors on
++ * every run and on every board edit, which is what makes a fuzz level's coverage
++ * a fact about the level rather than about the run. Three distinct values, so
++ * one level's sequence is never another's -- and level 27's coverage of all
++ * eight opcodes is measured in the test file against this literal.
++ */
++const SEED_23 = 0x2308;
++const SEED_24 = 0x2408;
++const SEED_27 = 0x2708;
++
++/**
++ * The signed value of an eight-bit two's-complement pattern.
++ *
++ * The whole of what levels 23 and 24 teach, written once: the top bit is the
++ * sign, so a pattern of 128 or more is that pattern minus 256. The bit never
++ * leaves this function -- both levels publish an eight-bit PATTERN again, which
++ * is the contract every port in the kernel has (a port carries 0..255 and
++ * `assertWidth` accepts nothing else).
++ */
++function signedByte(pattern: number): number {
++  const byte = pattern & 0xff;
++  return byte < 0x80 ? byte : byte - 0x100;
++}
++
++/**
++ * Level 23's expectation: how far the byte is from zero.
++ *
++ * `0x01 -> 1`, `0xff -> 1`, `0x80 -> 128`. The one pattern to note is `0x80`:
++ * the most negative byte is also the one whose magnitude needs the sign bit's
++ * own position, and it fits (128 is representable) -- which is why this level
++ * can publish a magnitude at all.
++ */
++const MAGNITUDE_OF_SIGNED_BYTE = (v: FuzzVector): number => Math.abs(signedByte(v.a ?? 0));
++
++/**
++ * Level 24's expectation: the low eight bits of `-a`.
++ *
++ * `0x80` negated is `0x80` again -- the one pattern two's complement cannot
++ * reflect -- and the mask is what states that as arithmetic rather than as a
++ * wrap-around the reader has to work out.
++ */
++const NEGATED_BYTE = (v: FuzzVector): number => (-signedByte(v.a ?? 0)) & 0xff;
++
++/**
++ * Level 27's opcode: the low three bits of `op`, and nothing else.
++ *
++ * The engine ignores the top five bits, which is a rule the fuzz check has to
++ * state because random bytes set them: the test file drives `op = (high << 3) |
++ * n` for every `high` against the level's own expectation.
++ */
++const ENGINE_OPCODE = (op: number): number => op & 7;
++
++/**
++ * `a` shifted arithmetically right by `amount` bits: the sign bit replicates.
++ *
++ * Written as the kernel's own `shiftRightArithmeticOp` defines it -- sign-extend,
++ * shift, mask back to a pattern -- because the reference the target is measured
++ * from is the `ashr8` part, and an expectation that disagreed with the part it
++ * grades would be a level that grades the wrong thing. `amount` is at most 7
++ * here (it is `b`'s low three bits), so the operator's "an amount of `w` or more
++ * fills with the sign" edge is out of reach and the plain shift is the whole
++ * function.
++ */
++function arithmeticRightByte(a: number, amount: number): number {
++  const signed = (a << 24) >> 24;
++  return (signed >> amount) & 0xff;
++}
++
++/**
++ * Level 27's expectation: the eight-opcode table, as a pure function.
++ *
++ * THE SPECIFICATION OF THE LEVEL, not a convenience: the source enumerates no
++ * opcodes, so this switch IS the authored instruction set (the level's brief
++ * lists the same eight values for the player, and the test file checks the two
++ * against each other opcode by opcode). `add` and `sub` keep the low eight bits
++ * and discard the carry out, exactly as `add8`/`add8(a, ~b, 1)` do; the shifts
++ * read `b`'s LOW THREE BITS, which is what makes `sub`'s second operand and a
++ * shift amount two different things in the same byte.
++ */
++const LOGIC_ENGINE_OUT = (v: FuzzVector): number => {
++  const a = (v.a ?? 0) & 0xff;
++  const b = (v.b ?? 0) & 0xff;
++  const amount = b & 7;
++  switch (ENGINE_OPCODE(v.op ?? 0)) {
++    case 0:
++      return a & b;
++    case 1:
++      return a | b;
++    case 2:
++      return a ^ b;
++    case 3:
++      return ~a & 0xff;
++    case 4:
++      return (a + b) & 0xff;
++    case 5:
++      return (a - b) & 0xff;
++    case 6:
++      // `b & 7` is at most 7, so the logical shifts' "amount of 8 or more" edge
++      // (`shift_l8`/`shift_r8` publish 0 there) is unreachable on this level.
++      return (a << amount) & 0xff;
++    default:
++      // `op & 7` is 0..7 (`noFallthroughCasesInSwitch` is satisfied by the
++      // returns above), so this is opcode 7 and there is no other case.
++      return arithmeticRightByte(a, amount);
++  }
++};
++
++export const CH2_BATCH3: readonly LevelSpec[] = [
++  /**
++   * ch2-23-negative-numbers -- Negative Numbers / 负数
++   *
++   * SOURCED: the name in both languages, its position (the 23rd level), and the
++   * concept -- two's-complement representation (二进制补码), i.e. reading a byte
++   * as a signed number. AND the form the source gives it: its level of this name
++   * is a 限时小游戏, a timed mini-game with NO circuit specification at all -- no
++   * ports, no gates, no pass condition.
++   *
++   * AUTHORED, AND THE FIRST THING IT RECORDS IS A CHANGE OF KIND. This replica
++   * cannot host a game played against a clock, so the level is rebuilt as a
++   * two's-complement arithmetic circuit: the concept the mini-game taught is
++   * kept and the form is replaced, which is a deliberate change of the level's
++   * kind rather than a translation of it. This is one of the three places in
++   * this phase where a level's kind changes, and -- like batch 1's level 15,
++   * the chapter's other timed mini-game -- it says so here rather than only in
++   * the module header.
++   *
++   * The rest is authored too: the `a:8 -> out:8` shape; the function itself
++   * (publish the MAGNITUDE of the byte read as two's complement -- a reading of
++   * the sign, which is what the level is for, and deliberately not the negation
++   * level 24 asks for); the fuzz check (the brief fixes its kind, its 256 rounds
++   * and its fixed-seed rule; the seed, the pin maps and the expectation function
++   * are written here); the measured three-star target; and the `div8` reward.
++   *
++   * THE REFERENCE THE TARGET IS MEASURED FROM is `add8(xor8(a, m), 0, m0)`,
++   * where `m` is the sign bit spread over the whole byte and `m0` is that same
++   * bit as the carry-in: `a XOR m` is `a` or `~a`, and adding `m` finishes the
++   * job because subtracting 255 and adding 1 are the same eight-bit operation.
++   * That is one `xor8` (32) and one `add8` (72) = 104 NAND equivalents on a path
++   * two gates deep, and the maker and splitter that spread the sign are wiring
++   * and cost nothing on either metric.
++   *
++   * WHAT THE TARGET SEPARATES, measured in the test file rather than asserted
++   * here: the textbook `(a XOR m) - m`, spelled with a byte NOT of the mask
++   * (112 gates, still two deep, one star), and the bit-serial spelling -- eight
++   * XORs spreading the sign, then a carry-only ripple with no adder in it --
++   * which is SMALLER (78 gates) and nine gates deep (one star). The level's own
++   * answer is the one that is both cheap and shallow, which is what three stars
++   * means here: the byte adder is two components where the ripple is fifteen, and
++   * it is more than four times shallower.
++   */
++  {
++    id: 'ch2-23-negative-numbers',
++    chapter: 2,
++    index: 23,
++    name: { zh: '负数', en: 'Negative Numbers' },
++    brief: {
++      zh: '八位输入 a 是一个二进制补码数：最高位是符号位，a 小于 128 时它就是这个数本身，否则它的值是 a−256（0xFF 就是 −1）。输出这个数到 0 的距离：0x01→1，0xFF→1，0x80→128。',
++      en: "Eight-bit input a is a two's-complement number: the top bit is the sign, so a below 128 is that number itself and anything else is a − 256 (0xFF is −1). Publish how far it is from zero: 0x01 gives 1, 0xFF gives 1, 0x80 gives 128.",
++    },
++    hint: {
++      zh: '符号位就是第 7 位。把它铺满整个字节当作掩码 m：a 异或 m 得到 a 或 ~a，再把符号位本身当作进位加进去——在 8 位里减 255 和加 1 是一回事。',
++      en: "The sign is bit 7. Spread it over the whole byte as a mask m: a XOR m is either a or ~a, and feeding the sign bit itself in as the carry finishes it, because subtracting 255 and adding 1 are the same thing in eight bits.",
++    },
++    allowedComponents: [
++      ...GATES_1BIT,
++      ...BYTE_WIRING,
++      ...WIDE_OPS,
++      ...BYTE_OPS,
++      'neg8',
++      ...SWITCHES,
++      'div8',
++      ...LEVEL_IO,
++    ],
++    io: IO_A8_OUT8,
++    checks: [
++      {
++        kind: 'fuzz',
++        seed: SEED_23,
++        rounds: 256,
++        inputs: { a: (sample) => sample.a ?? 0 },
++        outputs: { out: MAGNITUDE_OF_SIGNED_BYTE },
++      },
++    ],
++    // Measured: `xor8` (32) and `add8` (72) = 104 NAND equivalents, two gates
++    // deep -- see the paragraph above for what the two numbers separate.
++    threeStar: { gate: 104, delay: 2, tick: 0 },
++    rewards: { components: ['div8'] },
++  },
++
++  /**
++   * ch2-24-signed-negator -- Signed Negator / 相反数
++   *
++   * SOURCED: the name in both languages, its position (24th), and the concept --
++   * the two's-complement negation, "invert and add one".
++   *
++   * AUTHORED: the `a:8 -> out:8` shape; the fuzz check (seed, 256 rounds, and the
++   * expectation `-signedByte(a) & 0xff`, which is where the mask is load-bearing
++   * rather than decorative: Javascript's `-` on the byte 0 would be `-0` and on
++   * 0x80 would be `-128`, and the kernel refuses an expectation that does not fit
++   * its pin instead of reducing it); the measured three-star target; the three
++   * rewards; and the palette.
++   *
++   * WHY THE PALETTE WITHHOLDS `neg8`, which is batch 2's palette rule used
++   * exactly once more: `neg8` is not this level's own reward, it has precisely
++   * this level's I/O shape, and its documented cell IS the circuit this level
++   * teaches -- NOT the byte (8) plus the byte adder (72) = the same 80 NAND
++   * equivalents, on one unit of delay instead of two. Offered, it would tie the
++   * reference on gates and beat it on delay in a single drop, and the "invert and
++   * add one" lesson would be pointless. Batch 2's level 22 withheld `add8` for
++   * the same reason; level 23 offers `neg8` because there it does NOT answer the
++   * level (a magnitude is not a negation).
++   *
++   * THE TARGET IS THE LESSON'S OWN CIRCUIT: `add8(not8(a), 0, 1)` -- 8 + 72 = 80
++   * NAND equivalents, two gates deep. `nand8(a, a)` ties it exactly (one NAND per
++   * bit is one NOT per bit on the same basis). What the target separates is
++   * measured in the test file: the same function spelled with a byte XOR against
++   * `const8` (104 gates, one star), and the bit-serial incrementer -- eight NOTs
++   * and a carry-only ripple, 54 gates and nine gates deep -- which is smaller
++   * than this circuit and one star for being more than four times deeper.
++   */
++  {
++    id: 'ch2-24-signed-negator',
++    chapter: 2,
++    index: 24,
++    name: { zh: '相反数', en: 'Signed Negator' },
++    brief: {
++      zh: '八位输入 a。输出它的相反数：按补码的规则取反再加一，也就是 −a 的低八位。0x01 变成 0xFF；0x80 取负之后还是 0x80——−128 的相反数溢出回了它自己。',
++      en: "Eight-bit input a. Publish its opposite: invert and add one, the two's-complement rule, which is the low eight bits of −a. 0x01 becomes 0xFF, and 0x80 stays 0x80 -- negating −128 overflows back onto itself.",
++    },
++    hint: {
++      zh: '取反加一：先用 8 位非门把每一位翻过来，再用 8 位加法器加 1——另一个操作数接低电平，进位端接高电平。',
++      en: 'Invert and add one: flip every bit with an 8-bit NOT, then add 1 with the 8-bit adder -- the other operand tied low, the carry-in tied high.',
++    },
++    allowedComponents: [
++      ...GATES_1BIT,
++      ...BYTE_WIRING,
++      ...WIDE_OPS,
++      ...BYTE_OPS,
++      ...SWITCHES,
++      'div8',
++      'less_s',
++      'shift_l8',
++      'shift_r8',
++      ...LEVEL_IO,
++    ],
++    io: IO_A8_OUT8,
++    checks: [
++      {
++        kind: 'fuzz',
++        seed: SEED_24,
++        rounds: 256,
++        inputs: { a: (sample) => sample.a ?? 0 },
++        outputs: { out: NEGATED_BYTE },
++      },
++    ],
++    // Measured: `not8` (8) plus `add8` (72) = 80 NAND equivalents on a path two
++    // gates deep. See the comment above for the drop-in the palette withholds and
++    // for the alternatives the test file measures.
++    threeStar: { gate: 80, delay: 2, tick: 0 },
++    rewards: { components: ['less_s', 'shift_l8', 'shift_r8'] },
++  },
++
++  /**
++   * ch2-25-1-bit-decoder -- 1 Bit Decoder / 1 位解码器
++   *
++   * SOURCED: the name in both languages, its position (25th), and the concept --
++   * one-to-two decoding: one select bit, two one-hot outputs. ALSO SOURCED, from
++   * the catalog rather than from a level name: the compendium's component list
++   * for this chapter has `decoder1`, `decoder2` and `decoder3`, while no level
++   * name introduces the catalog's `2-Bit Decoder`. The 2-bit decoder is therefore
++   * the same generator one width up -- registered as `decoder2` -- rather than a
++   * second hand-written part, which is what this level's brief tells the player.
++   *
++   * AUTHORED: the `sel:1 -> out:2` shape; the two rows (built by `truthTable`,
++   * which refuses to leave a declared output pin uncompared); the measured
++   * three-star target (ONE NAND equivalent on a path one gate deep: bit 0 is a
++   * `not` of the select bit, bit 1 is the select bit, and the `maker` that packs
++   * the two bits into the level's 2-bit output is wiring); and the palette.
++   *
++   * THE WIDTH QUESTION, RESOLVED -- recorded because a reviewer will ask, and
++   * because an earlier revision of this file answered it wrongly. The registered
++   * family is generated PER WIDTH: `createDecoderDef(w)` builds one part with
++   * `sel: w` in and `out: 2 ** w` out, `DECODER_WIDTHS` registers w = 1, 2 and
++   * 3, and the ids that come out are `decoder1`, `decoder2` and `decoder3`. The
++   * brief says exactly that: the decoder comes in widths, one part each, and a
++   * player who wants a 4-output decoder drops in `decoder2`.
++   *
++   * WHY `params.width` IS NOT, AND CANNOT BE, THE MECHANISM -- kept here so
++   * nobody tries it again. `params.width` is the only per-instance knob the
++   * kernel has, and it resolves a pin as `inst.params.width ?? pin.width` for
++   * EVERY pin of the instance (`src/core/net.ts`, `effectiveWidth`): one width
++   * literal covers the whole part. A def declaring `sel: 1 / out: 2` compiled at
++   * `params.width = 2` therefore has BOTH pins two bits wide -- `sel: 2 /
++   * out: 2`, which is not the catalog's 2-bit decoder (`sel: 2 / out: 4`). A
++   * decoder's two pins MUST differ (the output count is `2 ** width`), so no
++   * instance knob can express one; the width has to be a parameter of the DEF,
++   * which is exactly how `createWideDefs(width)` builds the operators and
++   * `createDecoderDef(width)` builds this family. `params.width` moves a part's
++   * pins together; it can never move them apart.
++   *
++   * WHY `decoder2` IS NOT IN THIS LEVEL'S PALETTE, although the brief mentions
++   * it. Two reasons, either of which would be enough. (1) No level unlocks it: a
++   * palette part is one the chapter has already handed out, and `decoder2` is
++   * the family member no level name introduces -- level 25 rewards `decoder1` and
++   * level 26 `decoder3`, and `test/levels/ch2-batch3.test.ts` walks the unlock
++   * order and refuses a palette entry nothing has unlocked by then. (2) It would
++   * answer this level by itself: `decoder2`'s select pin is two bits and the
++   * level's `sel` is one, so the second select bit is simply unwired (an unwired
++   * pin reads 0) and `out`'s low two bits are `1 << sel` -- this level's whole
++   * two-row table, from a part the player never builds. The brief names it as the
++   * form available later, not as an answer here.
++   *
++   * `decoder1` IS OFFERED HERE, AND THAT IS THE OWN-REWARD RULE RATHER THAN A
++   * CONTRADICTION OF THE PARAGRAPH ABOVE. Batch 2's palette rule subtracts only
++   * parts that are NOT the level's own reward, and `paletteDefsFor` hands a level
++   * its own rewards before it is passed (level 13's `splitter` and level 20's
++   * `full_adder` are the same case) -- so a player CAN drop `decoder1` straight
++   * in and score the target exactly: measured, `gate: 1, delay: 1, tick: 0`,
++   * three stars, the same numbers the NOT-and-Maker reference scores, because a
++   * one-NAND tree and the one NOT it is built from are the same one gate. That is
++   * the price of the rule rather than an oversight, and it is why the reward stays
++   * listed: the level teaches the part it hands out, and the drop-in is what a
++   * player who already owns it uses to replay. `decoder2` is a different case --
++   * it is not this level's reward at all -- which is the whole of the distinction.
++   */
++  {
++    id: 'ch2-25-1-bit-decoder',
++    chapter: 2,
++    index: 25,
++    name: { zh: '1 位解码器', en: '1 Bit Decoder' },
++    brief: {
++      zh: '解码器把一个选择值变成一条为高的输出线，而且是按宽度分档的：一档一颗元件。这一关要做的是 decoder1，也就是 1 位选择、2 路输出的那一颗——sel 为 0 时第 0 位为高（out 读作 1），sel 为 1 时第 1 位为高（out 读作 2）。2 位选择、4 路输出的那一颗是 decoder2，也就是源资料目录里的「2 位解码器」：没有任何关卡为它命名，以后哪一关需要 4 路输出，直接把它放进去就行。',
++      en: 'A decoder turns a select value into one high output line, and it comes in widths: one part per width. This level asks for decoder1, the 1-to-2 form -- sel 0 lights bit 0 (out reads 1) and sel 1 lights bit 1 (out reads 2). The 2-to-4 form is decoder2: two select bits, four output lines, the catalog\'s 2-bit decoder, which no level name introduces and which a later circuit can drop in as it is.',
++    },
++    hint: {
++      zh: '两个输出位里，第 0 位就是 sel 取反，第 1 位就是 sel 本身；用位合并器把这两条线拼成 2 位，一个非门就够了。',
++      en: 'Of the two output bits, bit 0 is sel inverted and bit 1 is sel itself. Pack those two wires into two bits with a Maker: one NOT gate is the whole circuit.',
++    },
++    allowedComponents: [...GATES_1BIT, 'maker', 'decoder1', ...LEVEL_IO],
++    io: IO_SEL1_OUT2,
++    checks: [truthTable(IO_SEL1_OUT2, { out: ({ sel }) => 1 << (sel ?? 0) })],
++    // Measured: one `not` (1 NAND equivalent) on a path one gate deep, with the
++    // maker free -- the floor for any circuit that has to invert one bit.
++    threeStar: { gate: 1, delay: 1, tick: 0 },
++    rewards: { components: ['decoder1'] },
++  },
++
++  /**
++   * ch2-26-3-bit-decoder -- 3 Bit Decoder / 3 位解码器
++   *
++   * SOURCED: the name in both languages, its position (26th), and the concept --
++   * three-to-eight decoding, the same generator as level 25 one width up (see
++   * that level's note on the family: `decoder3` is `createDecoderDef(3)`, the
++   * same part definition as its `decoder1`).
++   *
++   * AUTHORED: the `sel:3 -> out:8` shape; the eight rows; the measured three-star
++   * target; and the palette. The palette offers `splitter` and `maker` because
++   * this level's pins are wide enough to attach to them -- the 3-bit select has
++   * to be split before any gate can read one of its bits, and the eight one-bit
++   * results have to be packed back into the level's 8-bit output. (Level 25 has
++   * one-bit pins and offers neither.)
++   *
++   * THE REFERENCE IS THE TWO-LEVEL TREE, and that is the level's lesson: decode
++   * the low two select bits into four minterms (two NOTs and four ANDs), then
++   * combine each minterm with the top select bit or its inverse (one more NOT and
++   * eight ANDs) -- 3 + 8 + 16 = 27 NAND equivalents on a path three gates deep.
++   * The obvious flat alternative, eight 3-input ANDs each taking all three
++   * literals, is 3 + 8 x 4 = 35 gates on a path two deep; it is correct, it is
++   * measured in the test file, and the gate target is what makes it one star. So
++   * the target says what the level teaches: share the low decode, do not rebuild
++   * it eight times.
++   */
++  {
++    id: 'ch2-26-3-bit-decoder',
++    chapter: 2,
++    index: 26,
++    name: { zh: '3 位解码器', en: '3 Bit Decoder' },
++    brief: {
++      zh: '三位选择输入 sel，八位输出 out。sel 的取值决定 out 的哪一位为高：sel=0 点亮第 0 位，sel=1 点亮第 1 位，……sel=7 点亮第 7 位；其余七位都是 0。',
++      en: 'Three select bits, eight output bits. The value of sel decides which bit of out goes high: sel 0 lights bit 0, sel 1 lights bit 1, and so on to sel 7 lighting bit 7. The other seven bits stay 0.',
++    },
++    hint: {
++      zh: '先把低两位解成 4 路（两级深度），再让每一路按最高位分成上下两半——8 路输出共用同一次低位解码，一共 27 个 NAND 等价门。八个人手一个三路与门直接展开要 35 个，门更多。',
++      en: 'Decode the low two bits into four lines first, then split each of those into two by the top bit: one shared low decode for all eight outputs, 27 NAND equivalents in all. Eight flat 3-input ANDs cost 35, which is more.',
++    },
++    allowedComponents: [...GATES_1BIT, 'splitter', 'maker', 'decoder3', ...LEVEL_IO],
++    io: IO_SEL3_OUT8,
++    checks: [truthTable(IO_SEL3_OUT8, { out: ({ sel }) => 1 << (sel ?? 0) })],
++    // Measured: the two-level tree -- 3 NOTs + 4 ANDs + 8 ANDs = 27 NAND
++    // equivalents -- on a path three gates deep. The flat 3-input-AND decode is
++    // 35 and 2, which is the one-star alternative the test file measures.
++    threeStar: { gate: 27, delay: 3, tick: 0 },
++    rewards: { components: ['decoder3'] },
++  },
++
++  /**
++   * ch2-27-logic-engine -- Logic Engine / 逻辑引擎
++   *
++   * SOURCED: the name in both languages, its position (27th), and the concept --
++   * 用或门和非门构建完整逻辑运算集, build the complete set of logical operations
++   * out of OR and NOT gates. That is every word the source gives this level: it
++   * ENUMERATES NO OPCODES, no widths and no pass condition, so the instruction
++   * set below is this replica's design and not the source's.
++   *
++   * AUTHORED, AND THE ONE THING THAT HAS TO BE AUTHORED HERE IS THE TABLE. `op`'s
++   * low three bits select the operation -- 0=and, 1=or, 2=xor, 3=not a, 4=add,
++   * 5=sub, 6=shift_l(a, b's low three bits), 7=ashr(a, b's low three bits) --
++   * with `out` the eight-bit result and `add`/`sub` discarding the carry beyond
++   * bit 8. The top five bits of `op` change nothing. The level's brief lists all
++   * eight values for the player (it is the only place they exist for a player),
++   * the expectation function in this file is the same table as a pure function,
++   * and the test file proves all eight are exercised: it measures which opcodes
++   * the level's own fixed seed drives, and then breaks the reference one opcode
++   * at a time to show that a circuit wrong on opcode k fails on a round of
++   * opcode k.
++   *
++   * Also authored: the `a:8 b:8 op:8 -> out:8` shape; the fuzz check (seed, 256
++   * rounds, the expectation); the measured three-star target; the three rewards;
++   * and the palette. Note that `rot_l8` and `rot_r8` are handed out here without
++   * an opcode that selects them -- the brief's table is the brief's, and the two
++   * rotate parts are the chapter's next arithmetic to learn rather than this
++   * level's answer.
++   *
++   * THE REFERENCE THE TARGET IS MEASURED FROM computes all eight results at once
++   * and selects between them per bit: `and8`, `or8`, `xor8`, `not8`, `add8`,
++   * `add8(a, ~b, 1)`, `shift_l8` and `ashr8` (497 NAND equivalents together, the
++   * shift amount being `b`'s low three bits for free -- a splitter and a maker
++   * are wiring), then a three-level tree of 2:1 muxes per output bit driven by
++   * op0, op1 and op2, which is 56 muxes x 3 NANDs plus the three inverters of
++   * the opcode bits = 171. The measured total is 668 equivalents, eight gates
++   * deep. The other obvious shape -- a one-hot decoder of the three opcode bits
++   * (27), eight conditional passes of the results (`switch8`, 8 x 16 = 128) and
++   * an OR tree to merge them (7 x 24 = 168) -- comes to 323 for its select logic
++   * alone, which is arithmetic on the defs' own documented counts rather than a
++   * measurement taken here; no target above is measured from a construction this
++   * level's palette would make second best.
++   */
++  {
++    id: 'ch2-27-logic-engine',
++    chapter: 2,
++    index: 27,
++    name: { zh: '逻辑引擎', en: 'Logic Engine' },
++    brief: {
++      zh: '一个八位逻辑引擎：a 和 b 是两个操作数，op 的低 3 位选择运算，结果放在 out 上。0=and（a 与 b）、1=or（a 或 b）、2=xor（a 异或 b）、3=not a（a 取反）、4=add（a+b，只保留低八位，进位丢弃）、5=sub（a−b，同样只保留低八位）、6=shift_l（a 左移 b 的低 3 位）、7=ashr（a 算术右移 b 的低 3 位，符号位跟着移）。op 的高 5 位不影响结果。',
++      en: "An eight-bit logic engine: a and b are the operands, op's low three bits select the operation, and the result goes on out. 0=and, 1=or, 2=xor, 3=not a, 4=add (a+b, keeping only the low eight bits and discarding the carry), 5=sub (a−b, likewise), 6=shift_l (a shifted left by b's low three bits) and 7=ashr (a shifted arithmetically right by b's low three bits, the sign bit following). The top five bits of op change nothing.",
++    },
++    hint: {
++      zh: '把 op 的低 3 位拆出来，先把 8 种运算的结果全部算好（宽位元件都是现成的），再按 op0→op1→op2 的顺序用二选一多路选择器逐层选出一个字节的每一位：每一位 7 个选择器、每个 3 个与非门。移位量取 b 的低 3 位，用位拆分器取 b0..b2 再合并回去就有了，不花门。',
++      en: "Split op's low three bits out, compute all eight results first (the wide parts are all there), then select one bit at a time with a tree of 2:1 multiplexers driven by op0, then op1, then op2 -- seven muxes per bit, three NANDs each. The shift amount is b's low three bits, which a Splitter and a Maker hand you for no gates at all.",
++    },
++    allowedComponents: [
++      ...GATES_1BIT,
++      ...BYTE_WIRING,
++      ...WIDE_OPS,
++      ...BYTE_OPS,
++      'neg8',
++      ...SWITCHES,
++      'div8',
++      'less_s',
++      'shift_l8',
++      'shift_r8',
++      'ashr8',
++      'rot_l8',
++      'rot_r8',
++      ...LEVEL_IO,
++    ],
++    io: IO_A8_B8_OP8_OUT8,
++    checks: [
++      {
++        kind: 'fuzz',
++        seed: SEED_27,
++        rounds: 256,
++        inputs: {
++          a: (sample) => sample.a ?? 0,
++          b: (sample) => sample.b ?? 0,
++          op: (sample) => sample.op ?? 0,
++        },
++        outputs: { out: LOGIC_ENGINE_OUT },
++      },
++    ],
++    // Measured: the eight results (16 + 24 + 32 + 8 + 72 + 8 + 72 + 125 + 140 =
++    // 497) plus the 56-mux tree and its three inverters (171) = 668 NAND
++    // equivalents, eight gates deep -- see the construction paragraph above.
++    threeStar: { gate: 668, delay: 8, tick: 0 },
++    rewards: { components: ['ashr8', 'rot_l8', 'rot_r8'] },
++  },
++];
+diff --git a/test/core/defs-wide.test.ts b/test/core/defs-wide.test.ts
+index c908a74..a31053c 100644
+--- a/test/core/defs-wide.test.ts
++++ b/test/core/defs-wide.test.ts
+@@ -1,13 +1,14 @@
+ import { describe, expect, it } from 'vitest';
+ import { BASE_DEFS, DEF_IDS } from '../../src/core/defs/index';
+ import {
++  DECODER_DEF_IDS,
+   DEFAULT_WIDE_WIDTH,
+   MAX_WIDE_WIDTH,
+   WIDE_DEF_IDS,
+   WIDE_STORAGE_DEFS,
+   WIDE_STORAGE_DEF_IDS,
+   clampWidth,
+   createWideDefs,
+ } from '../../src/core/defs/wide';
+ import { Simulation, compile } from '../../src/core/net';
+ import { createRegistry, type ComponentDef } from '../../src/core/registry';
+@@ -129,20 +130,57 @@ const STORAGE_CONTRACT: readonly (ContractRow & {
+     outputs: [['out', 8]],
+     sequential: true,
+     stateBytes: 256,
+     cost: 0,
+     gateCost: undefined,
+   },
+ ];
+ 
+ const STORAGE_IDS = STORAGE_CONTRACT.map((row) => row.id);
+ 
++/**
++ * Every id the wide module registers, read from the module's own exported id
++ * tuples -- the same three `defs/index.ts` builds `DEF_IDS` from -- instead of
++ * being typed out here.
++ *
++ * THIS REPLACES A HAND-MAINTAINED LIST THAT A GENERATED FAMILY BROKE. The
++ * category assertion below used to expect `[...WIDE_OP_IDS, ...STORAGE_IDS]`,
++ * where `WIDE_OP_IDS` is derived from the CONTRACT table above and `STORAGE_IDS`
++ * from the storage one: two lists a human keeps in step, checked against defs a
++ * generator produces. The decoder family landed as a third generated tuple in
++ * `wide.ts` (`DECODER_DEF_IDS`, registered from `DECODER_WIDTHS`) and the
++ * assertion failed on three ids the family's author had no reason to know were
++ * listed in a test file. Deriving the set from the tuples means the expectation
++ * moves with the module, and a fourth generated family needs its tuple added to
++ * this one expression rather than a list of ids re-typed by hand.
++ *
++ * IT IS STILL AN ASSERTION, AND NOT A TAUTOLOGY, because of where these ids come
++ * from: the module's REGISTRATION TUPLES, not the registered defs' own
++ * `category` fields and not `byCategory('wide')`. An expectation built from
++ * either of those would move with the bug -- a part filed under the wrong
++ * category would drop out of the expected set and out of `byCategory('wide')` at
++ * the same time, and the assertion would pass on exactly the mistake it exists
++ * to catch. Here a mis-filed part is still missing from `byCategory('wide')`
++ * while remaining in this set, so the assertion fails.
++ */
++const WIDE_MODULE_IDS = [...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS, ...DECODER_DEF_IDS] as const;
++
++/**
++ * `WIDE_MODULE_IDS` minus `const8`, the module's ONE deliberate exception: it is
++ * a constant source with no inputs, filed with `const_on` / `const_off` under
++ * `io` rather than with the gates. The exception is filtered out here and
++ * asserted directly below (`const8` is the only id in the module's tuples that
++ * is not `wide`), so it is stated rather than smuggled in by a list that happens
++ * not to name it.
++ */
++const WIDE_CATEGORY_IDS = WIDE_MODULE_IDS.filter((id) => id !== 'const8');
++
+ /** Runs a def the way `settle` does: inputs in, outputs staged, no state. */
+ function evalDef(def: ComponentDef, inputs: readonly PortValue[]): PortValue[] {
+   const outputs: PortValue[] = [];
+   def.evaluate!(inputs, outputs, undefined, { tick: 0 });
+   return outputs;
+ }
+ 
+ const toNumber = (v: PortValue | undefined): number => {
+   if (typeof v === 'number') return v;
+   return Array.from(v ?? []).reduce((acc, byte, i) => acc + byte * 2 ** (8 * i), 0);
+@@ -211,26 +249,33 @@ describe('wide defs: the brief\'s contract', () => {
+       expect(typeof def.evaluate, id).toBe('function');
+       expect(def.sequential, id).toBe(false);
+       expect(def.stateBytes, id).toBe(0);
+       expect(def.clockEdge, id).toBeUndefined();
+       expect(def.hidden, id).toBeUndefined();
+     }
+   });
+ 
+   it('categorizes every wide part as wide and const8 as a source', () => {
+     const r = createRegistry(BASE_DEFS);
+-    // The storage family is built at eight bits too, so it belongs to `wide`
+-    // alongside the operators: `memory1` is phase 0's ONE-BIT memory group
+-    // (`delay_line`, `mem1`) and there is no `memory8`.
+-    expect(r.byCategory('wide').map((d) => d.id).sort()).toEqual(
+-      [...WIDE_OP_IDS, ...STORAGE_IDS].sort(),
+-    );
++    // The expected set is the wide module's own registration tuples -- the
++    // operators, the storage family (built at eight bits too, so it belongs to
++    // `wide` alongside them: `memory1` is phase 0's ONE-BIT memory group,
++    // `delay_line` and `mem1`, and there is no `memory8`) and the decoders.
++    // See `WIDE_MODULE_IDS`: it is derived, because the hand-maintained version
++    // of this line could not know about a family it had never heard of.
++    expect(r.byCategory('wide').map((d) => d.id).sort()).toEqual([...WIDE_CATEGORY_IDS].sort());
++    // The same membership stated as the exception it is, so it can never quietly
++    // become two: exactly `const8` is registered under a category that is not
++    // `wide`. A decoder filed as `logic1`, or a byte operator filed as `io`,
++    // joins this list and fails -- including when the id is still in the set
++    // above, which is what keeps the derived expectation honest.
++    expect(WIDE_MODULE_IDS.filter((id) => r.get(id).category !== 'wide')).toEqual(['const8']);
+     // `const8` has no inputs and only drives a level, so it belongs with
+     // `const_on` / `const_off` rather than with the gates.
+     expect(r.get('const8').category).toBe('io');
+     expect(r.byCategory('io').map((d) => d.id)).toContain('const8');
+   });
+ 
+   it('keeps the DELAY cost at one unit per operator, nothing for a source or a wire', () => {
+     // `cost` is the delay unit `delayOf` charges per node, so a value above 1
+     // would give a wide part a multi-unit delay and contradict the phase-1 rule
+     // that every component contributes exactly one unit of delay (spec §3.2).
+diff --git a/test/core/registry.test.ts b/test/core/registry.test.ts
+index b152671..fc12de1 100644
+--- a/test/core/registry.test.ts
++++ b/test/core/registry.test.ts
+@@ -1,16 +1,26 @@
+ import { describe, expect, it } from 'vitest';
+ import { createRegistry } from '../../src/core/registry';
+ import { BASE_DEFS, DEF_IDS } from '../../src/core/defs/index';
+-import { WIDE_DEF_IDS, WIDE_STORAGE_DEF_IDS } from '../../src/core/defs/wide';
++import {
++  DECODER_DEFS,
++  DECODER_DEF_IDS,
++  DECODER_MAX_WIDTH,
++  DECODER_WIDTHS,
++  WIDE_DEF_IDS,
++  WIDE_STORAGE_DEF_IDS,
++  createDecoderDef,
++  createWideDefs,
++} from '../../src/core/defs/wide';
+ import { extractField, insertField, packBits, unpackBits } from '../../src/core/fields';
+ import { CH2_BATCH2 } from '../../src/levels/content/ch2/batch2';
++import { CH2_BATCH3 } from '../../src/levels/content/ch2/batch3';
+ import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
+ import { LEVELS } from '../../src/levels/index';
+ import type { LevelSpec } from '../../src/levels/spec';
+ 
+ // `evaluate(inputs, outputs, state, ctx)`: `state` is the instance's private
+ // storage, placed third. Only storage elements read it -- every combinational
+ // def ignores it, so its call sites pass `undefined` (the parameter cannot be
+ // omitted: `state: Uint8Array | undefined` is required, which is what forces a
+ // storage def to say out loud that it has no state to read).
+ 
+@@ -136,21 +146,25 @@ describe('base defs', () => {
+     expect(def.inputs.map((p) => `${p.id}:${p.width}`)).toEqual(['a:1', 'b:1', 'cin:1']);
+     expect(def.outputs.map((p) => `${p.id}:${p.width}`)).toEqual(['sum:1', 'cout:1']);
+     expect(def.name).toEqual({ zh: '全加器', en: 'Full Adder' });
+   });
+ 
+   it('leaves gateCost to the `?? cost` fallback only where both metrics are zero', () => {
+     // The fallback still has a job: a rail, level plumbing, a wire and the
+     // storage elements are zero gates AND zero delay, so a second explicit 0
+     // would only give the two zeroes a way to drift apart. Every part that is
+     // worth a gate states its own count instead.
+-    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS]);
++    //
++    // The decoder family joins the operators and the storage parts here because
++    // it is a wide part too: one DELAY unit, and a gate count it states itself
++    // (1 / 10 / 27), so the `?? cost` fallback would price a 3-bit decoder at 1.
++    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS, ...DECODER_DEF_IDS]);
+     for (const d of r.all()) {
+       if (wide.has(d.id) || d.category === 'logic1') continue;
+       expect(d.cost, `${d.id} leans on the fallback but is not free`).toBe(0);
+       expect(d.gateCost, d.id).toBeUndefined();
+     }
+   });
+ 
+   it('evaluates NAND', () => {
+     const def = r.get('nand');
+     for (const [a, b, want] of [
+@@ -275,26 +289,29 @@ describe('base defs', () => {
+ describe('base defs: extra coverage', () => {
+   const r = createRegistry(BASE_DEFS);
+   const evalTo = (id: string, inputs: number[]): number | Uint8Array | undefined => {
+     const out: (number | Uint8Array)[] = [0];
+     r.get(id).evaluate!(inputs, out, undefined, { tick: 0 });
+     return out[0];
+   };
+ 
+   it('declares 1-bit pins on every def outside the wide family', () => {
+     // Phase 0 shipped only 1-bit parts, and every def it shipped still is one.
+-    // The wide family -- task 3's operators and task 4's storage parts -- is
+-    // where a pin wider than one bit appears, and `defs-wide.test.ts` pins its
+-    // exact pin widths against each task brief's table, a stronger statement
+-    // than this loop makes; those defs are excluded here rather than weakening
+-    // this invariant to "some pins".
+-    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS]);
++    // The wide family -- task 3's operators, task 4's storage parts and task 10's
++    // decoders -- is where a pin wider than one bit appears, and
++    // `defs-wide.test.ts` pins the operators' and the storage family's exact pin
++    // widths against each task brief's table, a stronger statement than this loop
++    // makes; those defs are excluded here rather than weakening this invariant to
++    // "some pins". `decoder1` is the sharpest case: its `out` is 2 bits wide by
++    // contract (a 1-to-2 decoder's whole point), so it belongs to that exclusion
++    // and is pinned by the decoder tests above.
++    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS, ...DECODER_DEF_IDS]);
+     for (const d of r.all()) {
+       if (wide.has(d.id)) continue;
+       for (const p of [...d.inputs, ...d.outputs]) {
+         expect(p.width, `${d.id}.${p.id}`).toBe(1);
+       }
+     }
+     expect(r.byCategory('wide').length).toBeGreaterThan(0);
+   });
+ 
+   it('gives every def a publisher, and sizes storage honestly', () => {
+@@ -404,66 +421,245 @@ describe('fields', () => {
+ 
+   it('round-trips fields in the high bits without sign leakage', () => {
+     const packed = insertField(0, 24, 8, 0xff);
+     expect(packed).toBe(0xff00_0000);
+     expect(extractField(packed, 24, 8)).toBe(0xff);
+     expect(extractField(packed, 0, 24)).toBe(0);
+     expect(insertField(0xffff_ffff, 0, 32, 0)).toBe(0);
+   });
+ });
+ 
++/**
++ * The decoder family: `decoder1` and `decoder3` are the parts levels 25 and 26
++ * reward, and `decoder2` is the same generator at width 2.
++ *
++ * ONE-HOT, NOT A NUMBER. A decoder turns an address into a one-of-N select line:
++ * the value on `out` is `1 << sel` -- bit `sel` high and every other bit low --
++ * and NOT `sel` itself. Level 26's own check states the same expectation
++ * (`truthTable(IO_SEL3_OUT8, { out: ({ sel }) => 1 << (sel ?? 0) })`), and the
++ * tables below are written out rather than computed from the def, so the level
++ * and the part cannot agree by sharing one mistake. A decoder that published
++ * `sel` would be a wire: it would pass `sel = 0` and `sel = 1` on both widths and
++ * teach nothing.
++ *
++ * WHY THE IDS ARE PINNED HERE. `rewards.components` and `allowedComponents` are
++ * `readonly string[]`, so the compiler cannot see a reward that names no def --
++ * the defect class the walk at the bottom of this file covers. These tests are
++ * the other half: the parts those two levels hand out behave like decoders.
++ */
++describe('the decoder family', () => {
++  const r = createRegistry(BASE_DEFS);
++
++  /** Runs a def the way `settle` does: one input, one output slot, no state. */
++  const decode = (id: string, sel: number): number | Uint8Array | undefined => {
++    const out: (number | Uint8Array)[] = [0];
++    r.get(id).evaluate!([sel], out, undefined, { tick: 0 });
++    return out[0];
++  };
++
++  it('decodes one select bit into a two-line one-hot vector', () => {
++    // The index IS the select value: sel 0 lights bit 0 (out reads 1) and sel 1
++    // lights bit 1 (out reads 2). Written out, so the table states the contract
++    // instead of agreeing with the implementation.
++    const TABLE: readonly number[] = [0b01, 0b10];
++    for (let sel = 0; sel < TABLE.length; sel += 1) {
++      expect(decode('decoder1', sel), `decoder1(sel=${sel})`).toBe(TABLE[sel]);
++    }
++    // The pass-through a decoder is not: `sel = 1` reads 2, never 1.
++    expect(decode('decoder1', 1)).not.toBe(1);
++  });
++
++  it('decodes three select bits into eight one-hot lines', () => {
++    const TABLE: readonly number[] = [
++      0b0000_0001, // sel 0 -> bit 0
++      0b0000_0010, // sel 1 -> bit 1
++      0b0000_0100, // sel 2 -> bit 2
++      0b0000_1000, // sel 3 -> bit 3
++      0b0001_0000, // sel 4 -> bit 4
++      0b0010_0000, // sel 5 -> bit 5
++      0b0100_0000, // sel 6 -> bit 6
++      0b1000_0000, // sel 7 -> bit 7
++    ];
++    /** Set bits in a byte: a one-hot vector has exactly one, whatever it decodes. */
++    const ones = (value: number): number => {
++      let count = 0;
++      for (let bit = 0; bit < 8; bit += 1) count += (value >> bit) & 1;
++      return count;
++    };
++    for (let sel = 0; sel < TABLE.length; sel += 1) {
++      const got = decode('decoder3', sel);
++      expect(got, `decoder3(sel=${sel})`).toBe(TABLE[sel]);
++      // Every row is a one-hot vector -- eight outputs, exactly one high...
++      expect(ones(Number(got)), `decoder3(sel=${sel}) is not one-hot`).toBe(1);
++      // ...and from sel 2 up the high bit is not where the NUMBER `sel` would put
++      // it, which is the only place the two readings differ: a def that published
++      // `sel` (the "pass-through decoder" level 26's test file names) passes the
++      // first two rows and fails every row below.
++      if (sel >= 2) expect(got, `decoder3(sel=${sel}) published sel`).not.toBe(sel);
++    }
++  });
++
++  it('registers every width as a wide, combinational, one-delay-unit part', () => {
++    // The whole surface in one row per part: id, select width, output width and
++    // NAND equivalents. `out` is a WIDE pin carrying a one-hot vector, which is
++    // why these are `category: 'wide'`, and the three rows are the whole family
++    // this phase registers -- `defs/index.ts` spreads `DECODER_DEF_IDS` rather
++    // than assuming the operator generator's 8.
++    const ROWS: readonly (readonly [string, number, number, number])[] = [
++      ['decoder1', 1, 2, 1],
++      ['decoder2', 2, 4, 10],
++      ['decoder3', 3, 8, 27],
++    ];
++    for (const [id, selWidth, outWidth, gateCost] of ROWS) {
++      expect([...DEF_IDS], id).toContain(id);
++      expect(r.has(id), id).toBe(true);
++      const def = r.get(id);
++      expect(def.category, id).toBe('wide');
++      // The DELAY unit, one per node -- never the gate count.
++      expect(def.cost, id).toBe(1);
++      expect(def.sequential, id).toBe(false);
++      expect(def.stateBytes, id).toBe(0);
++      expect(def.clockEdge, id).toBeUndefined();
++      // Stated explicitly, not inherited from `cost`: the two fields exist
++      // because a 27-NAND decoder is still one node of delay.
++      expect(typeof def.gateCost, id).toBe('number');
++      expect(def.gateCost, id).toBe(gateCost);
++      expect(def.inputs.map((p) => `${p.id}:${p.width}`), id).toEqual([`sel:${selWidth}`]);
++      expect(def.outputs.map((p) => `${p.id}:${p.width}`), id).toEqual([`out:${outWidth}`]);
++      // A palette part, not plumbing: `ui/palette.ts` drops a hidden def even
++      // when the level lists it, which is the silence this family ends.
++      expect(def.hidden, id).toBeUndefined();
++    }
++    expect(r.get('decoder1').name).toEqual({ zh: '1 位解码器', en: '1-Bit Decoder' });
++    expect(r.get('decoder3').name).toEqual({ zh: '3 位解码器', en: '3-Bit Decoder' });
++  });
++
++  it('prices the shared minterm tree, which is the number level 26 was measured at', () => {
++    const gate = (id: string): number => r.get(id).gateCost ?? -1;
++    // THE DERIVATION, written out at `decoderNand` in `wide.ts`: `w` inverters,
++    // then one minterm layer of `2 ** j` AND gates per extra select bit, so the
++    // layers total `2 ** (w + 1) - 4` ANDs. On the file's basis (NOT 1, AND 2):
++    expect(gate('decoder1')).toBe(1 * 1 + 0 * 2);
++    expect(gate('decoder2')).toBe(2 * 1 + 4 * 2);
++    expect(gate('decoder3')).toBe(3 * 1 + 12 * 2);
++    // The recurrence that table implies, so a single edited number cannot pass
++    // while the construction it claims stops adding up: each extra select bit
++    // adds its own inverter and doubles the last minterm layer.
++    expect(gate('decoder2')).toBe(gate('decoder1') + 1 + 2 ** 2 * 2);
++    expect(gate('decoder3')).toBe(gate('decoder2') + 1 + 2 ** 3 * 2);
++    // THE CROSS-CHECK, and the reason these are the numbers rather than a
++    // drawing invented here: level 25's reference solution is one `not` with the
++    // `maker` free (1) and level 26's is the two-level tree (3 NOTs + 4 ANDs + 8
++    // ANDs = 27). Both level targets are this tree's own arithmetic.
++    expect(gate('decoder1')).toBe(1);
++    expect(gate('decoder3')).toBe(27);
++    // ...and neither is a single NAND, which is what `cost` alone would say.
++    expect(gate('decoder3')).toBeGreaterThan(r.get('decoder3').cost);
++  });
++
++  it('is generated per width, the only knob that can give its two pins different sizes', () => {
++    // `params.width` cannot do this job: the kernel resolves a pin's width as
++    // `inst.params.width ?? pin.width` for EVERY pin of the instance (`net.ts`,
++    // `effectiveWidth`), so an instance knob makes `sel` and `out` the same
++    // width and cannot express `sel:3 -> out:8` at all. The pin count is a
++    // parameter of the DEF, exactly as `createWideDefs(width)` builds the
++    // splitter's pin list, and `decoder2` is that generator at width 2 rather
++    // than a second hand-written part.
++    expect(DECODER_WIDTHS).toEqual([1, 2, 3]);
++    expect(DECODER_DEF_IDS).toEqual(['decoder1', 'decoder2', 'decoder3']);
++    // The literal tuple and the generator cannot drift apart.
++    expect(DECODER_WIDTHS.map((w) => `decoder${w}`)).toEqual([...DECODER_DEF_IDS]);
++    expect(DECODER_DEFS.map((d) => d.id)).toEqual([...DECODER_DEF_IDS]);
++    for (const def of DECODER_DEFS) expect([...DEF_IDS], def.id).toContain(def.id);
++
++    // Every width the generator builds -- the registered three and the two above
++    // them that no level names -- is the same one-hot decode, so the widths are
++    // one definition rather than three implementations.
++    for (let w = 1; w <= DECODER_MAX_WIDTH; w += 1) {
++      const def = createDecoderDef(w);
++      expect(def.id).toBe(`decoder${w}`);
++      expect(def.inputs.map((p) => `${p.id}:${p.width}`)).toEqual([`sel:${w}`]);
++      expect(def.outputs.map((p) => `${p.id}:${p.width}`)).toEqual([`out:${2 ** w}`]);
++      const out: (number | Uint8Array)[] = [0];
++      for (let sel = 0; sel < 2 ** w; sel += 1) {
++        def.evaluate!([sel], out, undefined, { tick: 0 });
++        expect(out[0], `decoder${w}(sel=${sel})`).toBe(2 ** sel);
++      }
++    }
++
++    // A decoder's `out` pin is `2 ** w` bits, so the OPERATOR generator -- which
++    // builds one width for every pin of every def it produces -- must never grow
++    // one: its decoder would be a 256-bit port under an id (`decoder8`) that no
++    // level data spells.
++    expect(createWideDefs(8).map((d) => d.id).filter((id) => id.startsWith('decoder'))).toEqual(
++      [],
++    );
++    // An out-of-range width is refused loudly rather than clamped into a part
++    // with a different pin shape: `clampWidth` would answer a request for 6 with
++    // 6, whose `out` pin is 64 bits -- wider than the `number` carrier the def
++    // publishes.
++    expect(() => createDecoderDef(0)).toThrow(/1\.\.5/);
++    expect(() => createDecoderDef(DECODER_MAX_WIDTH + 1)).toThrow(/1\.\.5/);
++    expect(() => createDecoderDef(1.5)).toThrow(/1\.\.5/);
++  });
++});
++
+ /**
+  * The defect class this block guards: a level whose `rewards.components` names
+  * an id that no def declares.
+  *
+  * WHY IT SURVIVED EVERYTHING ELSE. `rewards.components` is `readonly string[]`
+  * (`levels/spec.ts`), not `readonly DefId[]`, so the compiler cannot see the
+  * mistake; and a reward is only read when the player FINISHES the level
+  * (`unlockedComponents`) or opens a palette that lists it (`paletteDefsFor`),
+  * so a reward naming nothing is invisible for the whole of authoring, review and
+  * every test that grades a level's reference solution. Level 20 was the live
+  * case: it rewards `full_adder`, and no def in `src/` declared that id -- the
+  * per-chapter tests spelled the reward as a string literal and agreed with
+  * themselves.
+  *
+  * WHAT IS WALKED. The game's own level set (`LEVELS`, chapter 1) plus the
+  * chapter-2 batches that are shipped data: `CH2_LEVELS` (the batches joined into
+- * the game so far) and `CH2_BATCH2`, which is written and reviewed but not
+- * joined yet. Naming the unjoined batch explicitly is the point -- level 20
+- * lives in it, and a walk that only covered `LEVELS` + `CH2_LEVELS` would have
+- * passed this test while the defect stood. When a batch is appended to
+- * `CH2_LEVELS`, it joins this walk with no edit here; the one line to delete
+- * then is the `CH2_BATCH2` import, which a batch join makes redundant.
++ * the game so far) and the two written-but-unjoined batches `CH2_BATCH2` and
++ * `CH2_BATCH3`. Naming the unjoined batches explicitly is the point -- level 20
++ * lives in the second and levels 25 and 26 in the third, and a walk that only
++ * covered `LEVELS` + `CH2_LEVELS` would have passed this test while the holes
++ * stood. When a batch is appended to `CH2_LEVELS`, it joins this walk with no
++ * edit here; the one line to delete then is that batch's import, which a batch
++ * join makes redundant.
+  */
+ describe('shipped level rewards', () => {
+   const r = createRegistry(BASE_DEFS);
+ 
+-  /** Every shipped level: the game's order first, then the unjoined batch. */
+-  const SHIPPED: readonly LevelSpec[] = [...LEVELS, ...CH2_LEVELS, ...CH2_BATCH2];
++  /** Every shipped level: the game's order first, then the unjoined batches. */
++  const SHIPPED: readonly LevelSpec[] = [...LEVELS, ...CH2_LEVELS, ...CH2_BATCH2, ...CH2_BATCH3];
+ 
+   it('names only registered defs in rewards.components', () => {
+     const named = new Set<string>();
+     const missing: string[] = [];
+     for (const level of SHIPPED) {
+       for (const def of level.rewards?.components ?? []) {
+         named.add(def);
+         if (!r.has(def)) missing.push(`${level.id} rewards ${def}`);
+       }
+     }
+     // Every offender at once, not just the first: a batch of new rewards is
+     // cheaper to fix from one list than from one failure per run.
+     expect(missing, 'rewards that name no def').toEqual([]);
+     // NON-VACUITY. An empty walk passes the assertion above no matter what the
+     // level data says, so the walk proves it reached the levels: `full_adder` is
+-    // level 20's reward, and level 20 is in the batch that is not joined into
+-    // `LEVELS`/`CH2_LEVELS` yet -- the exact hole this test exists to cover.
++    // level 20's reward, in the batch after `CH2_LEVELS`, and `decoder1` /
++    // `decoder3` are levels 25 and 26's rewards, in the batch after that -- the
++    // exact holes this test exists to cover.
+     expect([...named]).toContain('full_adder');
++    expect([...named]).toContain('decoder1');
++    expect([...named]).toContain('decoder3');
+     expect(named.size).toBeGreaterThan(1);
+   });
+ 
+   it('names only registered defs in allowedComponents', () => {
+     // The palette half of the same defect, and just as silent: `ui/palette.ts`
+     // filters the ids it is handed through `registry.has`, so a level offering a
+     // part no def declares simply never shows it. Level 20 was the live case on
+     // both halves at once -- it rewarded `full_adder` AND listed it in its own
+     // palette, and neither reached the player.
+     //
+@@ -472,15 +668,18 @@ describe('shipped level rewards', () => {
+     // what it lets you BUILD with.
+     const offered = new Set<string>();
+     const missing: string[] = [];
+     for (const level of SHIPPED) {
+       for (const def of level.allowedComponents) {
+         offered.add(def);
+         if (!r.has(def)) missing.push(`${level.id} offers ${def}`);
+       }
+     }
+     expect(missing, 'palette ids that name no def').toEqual([]);
+-    // The same non-vacuity anchor as above: `full_adder` is only reachable
+-    // through the unjoined batch, and only level 20 lists it.
++    // The same non-vacuity anchors as above: `full_adder` is only reachable
++    // through the second unjoined batch, and `decoder1` / `decoder3` -- which
++    // levels 25 and 26 offer in their own palettes -- only through the third.
+     expect([...offered]).toContain('full_adder');
++    expect([...offered]).toContain('decoder1');
++    expect([...offered]).toContain('decoder3');
+   });
+ });
+diff --git a/test/levels/ch2-batch3.test.ts b/test/levels/ch2-batch3.test.ts
+new file mode 100644
+index 0000000..4c18d59
+--- /dev/null
++++ b/test/levels/ch2-batch3.test.ts
+@@ -0,0 +1,1374 @@
++// tsconfig lists only `vitest/globals` in `types`, so Node's ambient types are
++// deliberately not in this program. The import is real at runtime (vitest runs
++// this file in Node) and the assertion below is what proves it; the suppression
++// is one line rather than a project-wide `@types/node` dependency. It also fails
++// loudly if a later task ever does add Node types, at which point the directive
++// can simply go.
++// @ts-expect-error -- no Node ambient types in this project's tsconfig
++import { readFileSync } from 'node:fs';
++import { describe, expect, it } from 'vitest';
++import { STARTER_COMPONENTS } from '../../src/app/progress';
++import type { Graph } from '../../src/core/graph';
++import { DEFAULT_FUZZ_ROUNDS } from '../../src/levels/checks';
++import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
++import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
++import { CH2_BATCH1 } from '../../src/levels/content/ch2/batch1';
++import { CH2_BATCH2 } from '../../src/levels/content/ch2/batch2';
++import { CH2_BATCH3 } from '../../src/levels/content/ch2/batch3';
++import { grade } from '../../src/levels/grader';
++import type {
++  CheckFailure,
++  FuzzCheck,
++  FuzzVector,
++  LevelSpec,
++  TruthRow,
++} from '../../src/levels/spec';
++import { build, registry, type Node } from '../fixtures/build';
++
++/**
++ * Chapter 2's third batch: levels 23-27 -- two's complement, the decoders and
++ * the eight-bit logic engine.
++ *
++ * The source compendium fixes these levels' names, their order and a one-line
++ * concept each, and nothing else -- no ports, no widths, no pass conditions, no
++ * targets and no rewards. Every other number in the level data is this replica's
++ * design, which is why each level carries a data comment saying which is which;
++ * the marker block below checks that the comments exist and that the three
++ * notes this batch owes a reader are in them (level 23's change of KIND, level
++ * 25's per-width decoder family, and level 27's authored opcode table).
++ *
++ * TWO THINGS THIS FILE CARRIES THAT THE EARLIER BATCHES' DO NOT:
++ *
++ *  * a level whose SOURCE FORM IS NOT A CIRCUIT AT ALL -- level 23 is a timed
++ *    mini-game in the compendium, so the level data and its comment record the
++ *    conversion rather than pretending the source specified a puzzle;
++ *  * a level with an AUTHORED INSTRUCTION SET -- level 27's eight opcodes are
++ *    not enumerated anywhere in the source, so `the eight opcodes are all
++ *    exercised` below is not decoration: it measures which opcodes the level's
++ *    own fixed-seed sequence actually drives, proves the expectation function
++ *    defines all eight, and breaks the reference one opcode at a time to show
++ *    that a circuit wrong on opcode k fails on a round of opcode k.
++ *
++ * The `fuzz` levels (23, 24 and 27) follow batch 2's pattern for a wrong
++ * circuit: the failure record is checked against the level's own expectation
++ * functions and the round and vector in it are asserted to be the FIRST ones
++ * that actually disagree, so a check that failed "somewhere" could not pass for
++ * a check that compares something.
++ *
++ * The starter set is imported rather than restated (`STARTER_COMPONENTS` is the
++ * same constant `paletteDefsFor` filters with), exactly as the chapter-1 and
++ * batch-1/2 tests do it.
++ */
++
++/** The level with this index, or a loud failure -- indexing returns `undefined`. */
++function levelAt(index: number): LevelSpec {
++  const level = CH2_BATCH3.find((l) => l.index === index);
++  if (!level) throw new Error(`chapter 2 batch 3 has no level with index ${index}`);
++  return level;
++}
++
++function specOf(id: string): LevelSpec {
++  const level = CH2_BATCH3.find((l) => l.id === id);
++  if (!level) throw new Error(`chapter 2 batch 3 has no level ${id}`);
++  return level;
++}
++
++const L23 = levelAt(23);
++const L24 = levelAt(24);
++const L25 = levelAt(25);
++const L26 = levelAt(26);
++const L27 = levelAt(27);
++
++/** The batch's three fuzz levels, in order. */
++const FUZZ_LEVELS: readonly LevelSpec[] = [L23, L24, L27];
++
++/** `id:width` per pin, the shape the task brief fixes for each level. */
++function pinsOf(level: LevelSpec): { inputs: string[]; outputs: string[] } {
++  return {
++    inputs: level.io.inputs.map((pin) => `${pin.id}:${pin.width}`),
++    outputs: level.io.outputs.map((pin) => `${pin.id}:${pin.width}`),
++  };
++}
++
++/** The level's truth-table rows, refusing an absent or empty table. */
++function rowsOf(level: LevelSpec): readonly TruthRow[] {
++  const check = level.checks.find((entry) => entry.kind === 'truth-table');
++  if (check?.kind !== 'truth-table') throw new Error(`${level.id} has no truth-table check`);
++  if (!check.rows || check.rows.length === 0) {
++    throw new Error(`${level.id} has a truth table with no rows`);
++  }
++  return check.rows;
++}
++
++/** The level's fuzz check, refusing an absent one. */
++function fuzzOf(level: LevelSpec): FuzzCheck {
++  const check = level.checks.find((entry) => entry.kind === 'fuzz');
++  if (check?.kind !== 'fuzz') throw new Error(`${level.id} has no fuzz check`);
++  return check;
++}
++
++/** The row whose inputs include every named pin/value pair. */
++function rowFor(rows: readonly TruthRow[], inputs: Record<string, number>): TruthRow | undefined {
++  return rows.find((row) =>
++    Object.entries(inputs).every(([pin, value]) => row.inputs[pin] === value),
++  );
++}
++
++/** One expectation function of a level's fuzz check, refusing an absent one. */
++function expectation(level: LevelSpec, pin: string): (vector: FuzzVector) => number {
++  const fn = fuzzOf(level).outputs[pin];
++  if (typeof fn !== 'function') throw new Error(`${level.id} expects nothing for pin ${pin}`);
++  return fn;
++}
++
++/** The whole expected output map for one fuzz vector, from the level's own functions. */
++function expectedFor(level: LevelSpec, vector: FuzzVector): Record<string, number> {
++  const expected: Record<string, number> = {};
++  for (const pin of level.io.outputs) expected[pin.id] = expectation(level, pin.id)(vector);
++  return expected;
++}
++
++/** A fuzz vector, spelled as the record the kernel builds. */
++function vector(parts: Record<string, number>): FuzzVector {
++  return parts;
++}
++
++/**
++ * Why this level's checks would let a circuit pass unmeasured, in the words of
++ * the failure.
++ *
++ * The same five-branch invariant `ch1-part1.test.ts`, `ch1-part2.test.ts`,
++ * `ch2-batch1.test.ts` and `ch2-batch2.test.ts` carry -- batch 1's copy is
++ * itself tested against synthetic vacuous checks of every kind, and a fifth
++ * copy of that proof would be a fifth thing to keep in step. This copy keeps
++ * the part that matters here: `fuzz` reads `check.inputs` / `check.outputs` pin
++ * by pin, so a level that renamed a pin and left its expectation behind is
++ * reported instead of comparing nothing, and `truth-table` refuses a table with
++ * no rows or a row with no expected output.
++ */
++function vacuityProblems(level: LevelSpec): string[] {
++  const problems: string[] = [];
++  if (level.checks.length === 0) problems.push(`${level.id} has no checks`);
++
++  for (const check of level.checks) {
++    switch (check.kind) {
++      case 'truth-table':
++        if (!check.rows || check.rows.length === 0) {
++          problems.push(`${level.id} has a truth table with no rows`);
++        } else if (check.rows.some((row) => Object.keys(row.outputs).length === 0)) {
++          problems.push(`${level.id} has a truth-table row with no expected output`);
++        }
++        break;
++      case 'script':
++        if (check.steps.length === 0) {
++          problems.push(`${level.id} has an empty script`);
++        } else if (check.steps.every((step) => step.expect === undefined)) {
++          problems.push(`${level.id} has a script that expects nothing`);
++        }
++        break;
++      case 'constraint':
++        if (check.rule.inputs.length === 0) {
++          problems.push(`${level.id} has a constraint with no inputs`);
++        } else if (check.rule.kind === 'at-least' && check.rule.count < 1) {
++          problems.push(`${level.id} has an at-least constraint every vector satisfies`);
++        }
++        break;
++      case 'fuzz': {
++        // `rounds` is optional by contract -- omitting it means
++        // `DEFAULT_FUZZ_ROUNDS`, read from the checker's own constant so the two
++        // cannot drift -- and an explicit bad one is `missing-vectors`.
++        const rounds = check.rounds ?? DEFAULT_FUZZ_ROUNDS;
++        if (!Number.isInteger(rounds) || rounds <= 0) {
++          problems.push(`${level.id} has a fuzz check with rounds=${String(check.rounds)}`);
++        }
++        if (level.io.inputs.length === 0 || level.io.outputs.length === 0) {
++          problems.push(`${level.id} has a fuzz check on a level with no pins to vary`);
++        }
++        for (const pin of level.io.inputs) {
++          if (typeof check.inputs[pin.id] !== 'function') {
++            problems.push(`${level.id} has a fuzz check with no input function for pin ${pin.id}`);
++          }
++        }
++        for (const pin of level.io.outputs) {
++          if (typeof check.outputs[pin.id] !== 'function') {
++            problems.push(`${level.id} has a fuzz check with no expectation for pin ${pin.id}`);
++          }
++        }
++        break;
++      }
++      case 'custom':
++        if (typeof check.id !== 'string' || check.id === '') {
++          problems.push(`${level.id} has a custom check with no id to look up`);
++        }
++        break;
++      default:
++        problems.push(
++          `${level.id} has a check of unknown kind ${String((check as { kind?: unknown }).kind)}`,
++        );
++    }
++  }
++
++  return problems;
++}
++
++describe('chapter 2, levels 23-27', () => {
++  it('exposes five chapter-2 levels with the briefed indices', () => {
++    expect(CH2_BATCH3.map((level) => level.index)).toEqual([23, 24, 25, 26, 27]);
++    expect(CH2_BATCH3.map((level) => level.chapter)).toEqual([2, 2, 2, 2, 2]);
++  });
++
++  it('uses the ch2-<index>-<slug> id convention', () => {
++    expect(CH2_BATCH3.map((level) => level.id)).toEqual([
++      'ch2-23-negative-numbers',
++      'ch2-24-signed-negator',
++      'ch2-25-1-bit-decoder',
++      'ch2-26-3-bit-decoder',
++      'ch2-27-logic-engine',
++    ]);
++  });
++
++  it('shapes every level exactly as the brief fixes it', () => {
++    expect(pinsOf(L23)).toEqual({ inputs: ['a:8'], outputs: ['out:8'] });
++    expect(pinsOf(L24)).toEqual({ inputs: ['a:8'], outputs: ['out:8'] });
++    expect(pinsOf(L25)).toEqual({ inputs: ['sel:1'], outputs: ['out:2'] });
++    expect(pinsOf(L26)).toEqual({ inputs: ['sel:3'], outputs: ['out:8'] });
++    expect(pinsOf(L27)).toEqual({ inputs: ['a:8', 'b:8', 'op:8'], outputs: ['out:8'] });
++  });
++
++  it('names each level in both languages', () => {
++    expect(CH2_BATCH3.map((level) => level.name.en)).toEqual([
++      'Negative Numbers',
++      'Signed Negator',
++      '1 Bit Decoder',
++      '3 Bit Decoder',
++      'Logic Engine',
++    ]);
++    expect(CH2_BATCH3.map((level) => level.name.zh)).toEqual([
++      '负数',
++      '相反数',
++      '1 位解码器',
++      '3 位解码器',
++      '逻辑引擎',
++    ]);
++    for (const level of CH2_BATCH3) {
++      expect(level.brief.zh.length, `${level.id} has an empty zh brief`).toBeGreaterThan(0);
++      expect(level.brief.en.length, `${level.id} has an empty en brief`).toBeGreaterThan(0);
++      expect(level.hint.zh.length, `${level.id} has an empty zh hint`).toBeGreaterThan(0);
++      expect(level.hint.en.length, `${level.id} has an empty en hint`).toBeGreaterThan(0);
++    }
++  });
++
++  it('gates every part behind a component unlocked at or before it', () => {
++    // "At or before": a level may offer the parts its own rewards hand out (level
++    // 25 offers the `decoder1` it teaches), so the walk adds a level's rewards
++    // before testing its own palette. Everything before this batch is walked
++    // first, because these palettes are built on it -- `neg8` arrives at level
++    // 21, `switch8` at 22, and the splitter and maker this batch wires bytes
++    // with arrive at 13.
++    const unlocked = new Set<string>(STARTER_COMPONENTS);
++    for (const level of [...CH1_PART1, ...CH1_PART2, ...CH2_BATCH1, ...CH2_BATCH2, ...CH2_BATCH3]) {
++      for (const def of level.rewards?.components ?? []) unlocked.add(def);
++      for (const def of level.allowedComponents) {
++        expect(unlocked.has(def), `${level.id} offers locked component ${def}`).toBe(true);
++      }
++    }
++  });
++
++  it('offers nothing from a later level', () => {
++    // The same rule from the other side: what this batch offers is chapter 1's
++    // rewards, batches 1-2's, its own, and the starter set -- never the parts
++    // the batches after it hand out (the storage family: the byte mux, delay,
++    // register, counter and RAM).
++    const owned = new Set<string>(STARTER_COMPONENTS);
++    for (const level of [...CH1_PART1, ...CH1_PART2, ...CH2_BATCH1, ...CH2_BATCH2, ...CH2_BATCH3]) {
++      for (const def of level.rewards?.components ?? []) owned.add(def);
++      for (const def of level.allowedComponents) {
++        expect(owned.has(def), `${level.id} offers ${def}, which no level unlocks by then`).toBe(
++          true,
++        );
++      }
++    }
++    for (const later of ['mux8', 'delay8', 'reg8', 'counter8', 'ram8']) {
++      expect(owned.has(later), `${later} is unlocked inside this batch`).toBe(false);
++    }
++  });
++
++  it('gives every level a check with something to compare', () => {
++    for (const level of CH2_BATCH3) {
++      expect(level.checks.length, `${level.id} has no checks`).toBeGreaterThan(0);
++      expect(vacuityProblems(level), `${level.id} has a vacuous check`).toEqual([]);
++    }
++  });
++
++  it('builds the decoder tables instead of leaving rows out', () => {
++    // An empty `rows` array is a hard `missing-rows` failure, not "enumerate
++    // everything" -- so both decoder levels build their rows with the kernel's
++    // own `truthTable`, and each table is exhaustive over its select pin: two
++    // rows for one select bit, eight for three.
++    expect(rowsOf(L25).length).toBe(2);
++    expect(rowsOf(L26).length).toBe(8);
++    for (const level of [L25, L26]) {
++      const rows = rowsOf(level);
++      const seen = new Set(rows.map((row) => JSON.stringify(row.inputs)));
++      expect(seen.size, `${level.id} repeats or skips input combinations`).toBe(rows.length);
++    }
++  });
++
++  it('states the one-bit decoder as a two-line one-hot table', () => {
++    const rows = rowsOf(L25);
++    expect(rowFor(rows, { sel: 0 })?.outputs).toEqual({ out: 1 });
++    expect(rowFor(rows, { sel: 1 })?.outputs).toEqual({ out: 2 });
++  });
++
++  it('states the three-bit decoder as an eight-line one-hot table', () => {
++    const rows = rowsOf(L26);
++    for (let sel = 0; sel < 8; sel += 1) {
++      expect(rowFor(rows, { sel })?.outputs, `sel=${sel}`).toEqual({ out: 1 << sel });
++    }
++  });
++
++  it('states the three fuzz levels with a fixed seed and 256 rounds', () => {
++    // The brief fixes the checker kind, the seed discipline (a literal, never a
++    // drawn one, never 0 -- the xorshift fixed point) and the round count; the
++    // expectation functions are this batch's.
++    for (const level of FUZZ_LEVELS) {
++      const check = fuzzOf(level);
++      expect(Number.isInteger(check.seed), `${level.id} has a non-integer seed`).toBe(true);
++      expect(check.seed, `${level.id} fuzzes from seed 0`).not.toBe(0);
++      expect(check.rounds, `${level.id} does not fuzz 256 rounds`).toBe(256);
++    }
++    // Distinct seeds, so one level's vector sequence is never another's.
++    expect(new Set(FUZZ_LEVELS.map((l) => fuzzOf(l).seed)).size).toBe(FUZZ_LEVELS.length);
++  });
++
++  it('names every pin of a fuzz level and nothing else in its pin maps', () => {
++    // A missing or unknown name is an `invalid` failure at grading time, and
++    // `rounds: 0` is `missing-vectors` -- these are the two authoring mistakes
++    // the pin maps can carry, so they are asserted directly as well as through
++    // the kernel.
++    for (const level of FUZZ_LEVELS) {
++      const check = fuzzOf(level);
++      const inputs = level.io.inputs.map((pin) => pin.id).sort();
++      const outputs = level.io.outputs.map((pin) => pin.id).sort();
++      expect(Object.keys(check.inputs).sort(), `${level.id} input map`).toEqual(inputs);
++      expect(Object.keys(check.outputs).sort(), `${level.id} output map`).toEqual(outputs);
++    }
++  });
++
++  it('expects the two two\'s-complement levels the brief names', () => {
++    // The expectation functions are the level's specification: a pure function
++    // that computes something else is a level that grades the wrong thing, and
++    // it would still be "not vacuous". These are the defining values, taken from
++    // both sides of the sign bit.
++    const abs = expectation(L23, 'out');
++    expect(abs(vector({ a: 0x00 }))).toBe(0x00);
++    expect(abs(vector({ a: 0x01 }))).toBe(0x01);
++    expect(abs(vector({ a: 0x7f }))).toBe(0x7f);
++    // The sign bit is the reading, not the bit itself: 0x80 is the most negative
++    // byte and 0xff is minus one.
++    expect(abs(vector({ a: 0x80 }))).toBe(0x80);
++    expect(abs(vector({ a: 0xff }))).toBe(0x01);
++    expect(abs(vector({ a: 0xfe }))).toBe(0x02);
++
++    const negate = expectation(L24, 'out');
++    expect(negate(vector({ a: 0x00 }))).toBe(0x00);
++    expect(negate(vector({ a: 0x01 }))).toBe(0xff);
++    expect(negate(vector({ a: 0x02 }))).toBe(0xfe);
++    expect(negate(vector({ a: 0x7f }))).toBe(0x81);
++    // The one pattern that is its own negation: 0x80 is -128, and -(-128) does
++    // not fit a signed byte -- the low eight bits are 0x80.
++    expect(negate(vector({ a: 0x80 }))).toBe(0x80);
++    expect(negate(vector({ a: 0xff }))).toBe(0x01);
++  });
++
++  it('expects the eight opcodes the logic engine states, in the brief', () => {
++    // The opcode table is this replica's design (the source says only "build the
++    // complete set of logical operations"), so the level's own expectation
++    // function IS the specification of what each opcode computes -- and the
++    // BRIEF has to state all eight to the player. One hand-picked vector per
++    // opcode, plus the three ways an eight-bit op can surprise a reader: the
++    // discarded carry, the shift amount read from b's LOW THREE BITS, and the
++    // arithmetic shift's sign fill.
++    const out = expectation(L27, 'out');
++    expect(out(vector({ a: 0xf0, b: 0x3c, op: 0 }))).toBe(0x30); // and
++    expect(out(vector({ a: 0xf0, b: 0x3c, op: 1 }))).toBe(0xfc); // or
++    expect(out(vector({ a: 0xf0, b: 0x3c, op: 2 }))).toBe(0xcc); // xor
++    expect(out(vector({ a: 0xf0, b: 0x3c, op: 3 }))).toBe(0x0f); // not a
++    expect(out(vector({ a: 0xf0, b: 0x3c, op: 4 }))).toBe(0x2c); // add: 0x12c -> 0x2c
++    expect(out(vector({ a: 0x3c, b: 0xf0, op: 5 }))).toBe(0x4c); // sub: -0xb4 -> 0x4c
++    expect(out(vector({ a: 0x81, b: 0x03, op: 6 }))).toBe(0x08); // shift_l by 3
++    expect(out(vector({ a: 0x81, b: 0x03, op: 7 }))).toBe(0xf0); // ashr by 3: sign fills
++    // b's low three bits are the amount, so 0x0b is a shift by 3 and not by 11.
++    expect(out(vector({ a: 0x81, b: 0x0b, op: 6 }))).toBe(0x08);
++    expect(out(vector({ a: 0x81, b: 0x0b, op: 7 }))).toBe(0xf0);
++    // 0xff shifted arithmetically right by 7 is -1, not 1.
++    expect(out(vector({ a: 0xff, b: 0x07, op: 7 }))).toBe(0xff);
++    expect(out(vector({ a: 0xff, b: 0x07, op: 6 }))).toBe(0x80);
++    // The top five bits of op change nothing: op is masked to its low three.
++    for (let high = 0; high < 32; high += 1) {
++      expect(out(vector({ a: 0x81, b: 0x03, op: (high << 3) | 7 }))).toBe(0xf0);
++      expect(out(vector({ a: 0x81, b: 0x03, op: (high << 3) | 6 }))).toBe(0x08);
++    }
++  });
++
++  it('lists every opcode in the brief, in both languages', () => {
++    // The brief is the only place a player learns the instruction set, so all
++    // eight numbered mnemonics have to be in it -- in both languages, as
++    // identifiers with localized prose around them. The paired form (`0=and`)
++    // rather than the bare mnemonic, because `or` alone is a substring of half
++    // the English language and would prove nothing.
++    const opcodes = ['0=and', '1=or', '2=xor', '3=not a', '4=add', '5=sub', '6=shift_l', '7=ashr'];
++    for (const opcode of opcodes) {
++      expect(L27.brief.en, `the en brief omits ${opcode}`).toContain(opcode);
++      expect(L27.brief.zh, `the zh brief omits ${opcode}`).toContain(opcode);
++    }
++  });
++
++  it('tells the player the decoder comes in widths, and names the parts', () => {
++    // The family is GENERATED PER WIDTH -- `createDecoderDef(w)` in `wide.ts`,
++    // registered as `decoder1` / `decoder2` / `decoder3` -- and the instance
++    // width knob cannot stand in for that: `params.width` resolves as
++    // `inst.params.width ?? pin.width` for EVERY pin of an instance
++    // (`net.ts`, `effectiveWidth`), while a decoder's pins must differ (`sel` is
++    // `w` bits, `out` is `2 ** w`). So the brief has to do what the engine does:
++    // name the parts. `decoder1` is the 1-to-2 form this level asks for, and
++    // `decoder2` is the 2-to-4 form a later circuit drops in.
++    for (const brief of [L25.brief.en, L25.brief.zh]) {
++      expect(brief).toContain('decoder1');
++      expect(brief).toContain('decoder2');
++    }
++    // Each form is stated as the width it decodes, in both languages, and the
++    // catalog's own name for the wider one is kept -- it is the name the source
++    // gives the part no level introduces.
++    expect(L25.brief.en).toContain('1-to-2');
++    expect(L25.brief.en).toContain('2-to-4');
++    expect(L25.brief.en).toContain('2-bit decoder');
++    expect(L25.brief.zh).toContain('2 路输出');
++    expect(L25.brief.zh).toContain('4 路输出');
++    expect(L25.brief.zh).toContain('2 位解码器');
++    // And the mechanism the engine cannot honour is GONE from the brief, not
++    // merely joined by the right one: a level that offered `params.width = 2` as
++    // a way to a 4-output decoder would be teaching a knob this kernel does not
++    // have. This is the assertion that fails if the old wording comes back.
++    expect(L25.brief.en).not.toContain('params.width');
++    expect(L25.brief.zh).not.toContain('params.width');
++  });
++
++  it('hands out the parts the brief assigns to each level', () => {
++    expect(L23.rewards?.components).toEqual(['div8']);
++    expect(L24.rewards?.components).toEqual(['less_s', 'shift_l8', 'shift_r8']);
++    expect(L25.rewards?.components).toEqual(['decoder1']);
++    expect(L26.rewards?.components).toEqual(['decoder3']);
++    expect(L27.rewards?.components).toEqual(['ashr8', 'rot_l8', 'rot_r8']);
++  });
++
++  it('offers each level the parts its own lesson needs', () => {
++    // Not a restatement of the palettes but of the claims their comments make.
++    for (const def of ['splitter', 'maker', 'add8', 'xor8']) {
++      expect(L23.allowedComponents, `level 23 cannot use ${def}`).toContain(def);
++    }
++    for (const def of ['not8', 'add8']) {
++      expect(L24.allowedComponents, `level 24 cannot use ${def}`).toContain(def);
++    }
++    expect(L25.allowedComponents).toContain('maker');
++    expect(L26.allowedComponents).toContain('maker');
++    for (const def of ['shift_l8', 'ashr8', 'and8', 'or8', 'nand', 'not']) {
++      expect(L27.allowedComponents, `level 27 cannot use ${def}`).toContain(def);
++    }
++    // Level 24 withholds the one drop-in that answers it: `neg8` is not this
++    // level's own reward and has exactly this level's I/O shape, so offering it
++    // would let one component tie the level's two-component lesson on gates and
++    // beat it on delay. Batch 2's level 22 states the rule; this is its second
++    // use, and level 23 (where `neg8` does NOT answer the level) offers it.
++    expect(L24.allowedComponents).not.toContain('neg8');
++    expect(L23.allowedComponents).toContain('neg8');
++  });
++});
++
++describe('every level carries its sourced-vs-authored data comment', () => {
++  /**
++   * The compendium fixes a name, an order and a one-line concept per level --
++   * and for level 23 it fixes neither a circuit nor a pass condition, because
++   * its source form is a timed mini-game. So every port, width, check, target
++   * and reward in this file is this replica's design. The data comment on each
++   * level has to say which is which, and a reviewer checks the wording by
++   * reading; this checks that the marker block exists at all, so a later batch
++   * cannot quietly drop it, plus the three specific notes this batch owes.
++   */
++  const source = readFileSync(
++    new URL('../../src/levels/content/ch2/batch3.ts', import.meta.url),
++    'utf8',
++  );
++
++  /** Data comment -> level id, for every doc comment followed by a level literal. */
++  const comments = new Map<string, string>();
++  for (const match of source.matchAll(/\/\*\*([\s\S]*?)\*\/\s*\{\s*id: '([^']+)'/g)) {
++    const [, body, id] = match;
++    if (body !== undefined && id !== undefined) comments.set(id, body);
++  }
++
++  for (const level of CH2_BATCH3) {
++    it(level.id, () => {
++      const comment = comments.get(level.id) ?? '';
++      expect(comment.length, `${level.id} has no data comment`).toBeGreaterThan(0);
++      expect(comment, `${level.id} does not record what is sourced`).toContain('SOURCED');
++      expect(comment, `${level.id} does not record what is authored`).toContain('AUTHORED');
++    });
++  }
++
++  it("records that level 23 changes the source level's kind", () => {
++    // The source's level of this name is a timed mini-game with no circuit spec
++    // at all, so this level's KIND changes: a mini-game becomes a two's-
++    // complement arithmetic circuit. The comment has to say so, quote the
++    // source's own label for what it was, and say that it is a conversion rather
++    // than the source's puzzle.
++    const l23 = comments.get('ch2-23-negative-numbers') ?? '';
++    expect(l23).toContain('限时小游戏');
++    expect(l23).toContain('补码');
++    expect(l23).toContain('kind');
++  });
++
++  it('records the per-width decoder family and why a width parameter cannot do it', () => {
++    // The family is generated per width, and the kernel's rule for a width
++    // override is one line in `net.ts` -- so the comment has to name
++    // `params.width` and record that ONE override covers EVERY pin of the
++    // instance, which is what makes the rejected mechanism impossible rather
++    // than merely unfashionable. It also has to name the resolution: the
++    // registered family, and `decoder2` as the catalog's 2-Bit Decoder.
++    const l25 = comments.get('ch2-25-1-bit-decoder') ?? '';
++    expect(l25).toContain('params.width');
++    expect(l25).toContain('decoder2');
++    expect(l25).toContain('2-Bit Decoder');
++  });
++
++  it("records that level 27's opcode table is this replica's own", () => {
++    // The source gives this level one line -- build the complete set of logical
++    // operations -- and enumerates no opcodes, so the table is authored. The
++    // comment has to say that, and has to list the eight values, because the
++    // brief teaches the player from them.
++    const l27 = comments.get('ch2-27-logic-engine') ?? '';
++    expect(l27).toContain('用或门和非门构建完整逻辑运算集');
++    for (const opcode of ['and', 'or', 'xor', 'add', 'sub', 'shift_l', 'ashr']) {
++      expect(l27, `the comment omits ${opcode}`).toContain(opcode);
++    }
++  });
++});
++
++// ---------------------------------------------------------------------------
++// Reference solutions
++// ---------------------------------------------------------------------------
++
++/** The eight `stem<bit>` ids a byte-wide maker is fed, low bit first. */
++function bits(stem: string): string[] {
++  return Array.from({ length: 8 }, (_, bit) => `${stem}${bit}`);
++}
++
++/**
++ * Level 23's reference: the magnitude of a two's-complement byte.
++ *
++ * `abs(a) = (a XOR m) + m`, where `m` is the sign bit spread over all eight
++ * positions: for a non-negative `a` the mask is 0 and this is `a + 0`; for a
++ * negative one it is `(255 - a) + 1`, which is `-a` modulo 256. The `+ m` is the
++ * whole trick -- subtracting 255 and adding 1 are the same eight-bit operation,
++ * so the sign bit itself is the carry-in.
++ *
++ * Measured: one `xor8` (32) and one `add8` (72) = 104 NAND equivalents, two
++ * gates deep; the splitter and the maker that spread the sign are wiring and
++ * cost nothing on either metric.
++ */
++function absReference(): Graph {
++  const sign = 'sa.b7';
++  return build([
++    { kind: 'input', name: 'a', width: 8 },
++    { kind: 'part', def: 'splitter', id: 'sa', from: ['a'] },
++    {
++      kind: 'part',
++      def: 'maker',
++      id: 'mask',
++      from: Array.from({ length: 8 }, () => sign),
++    },
++    { kind: 'part', def: 'xor8', id: 'flip', from: ['a', 'mask'] },
++    { kind: 'part', def: 'const_off', id: 'z', from: [] },
++    { kind: 'part', def: 'add8', id: 'plus', from: ['flip', 'z', sign] },
++    { kind: 'output', from: 'plus', width: 8 },
++  ]);
++}
++
++/**
++ * Level 24's reference: the level's own lesson, invert and add one.
++ *
++ * `~a + 1` with the byte NOT and the byte adder -- 8 + 72 = 80 NAND
++ * equivalents, two gates deep. This is the construction the level's teaching
++ * line names, and (per its data comment) the palette withholds `neg8`, whose
++ * documented cell IS this circuit (8 NOTs + 8 full adders) and which would
++ * therefore tie it on gates and beat it on delay.
++ */
++function negateReference(): Graph {
++  return build([
++    { kind: 'input', name: 'a', width: 8 },
++    { kind: 'part', def: 'not8', id: 'flip', from: ['a'] },
++    { kind: 'part', def: 'const_off', id: 'z', from: [] },
++    { kind: 'part', def: 'const_on', id: 'one', from: [] },
++    { kind: 'part', def: 'add8', id: 'plus', from: ['flip', 'z', 'one'] },
++    { kind: 'output', from: 'plus', width: 8 },
++  ]);
++}
++
++/**
++ * Level 25's reference: bit 0 is `NOT sel`, bit 1 is `sel`.
++ *
++ * One NAND equivalent, one gate deep: the Maker that packs the two bits into the
++ * level's 2-bit output is wiring.
++ */
++function oneBitDecoderReference(): Graph {
++  return build([
++    { kind: 'input', name: 'sel' },
++    { kind: 'part', def: 'not', id: 'n', from: ['sel'] },
++    { kind: 'part', def: 'const_off', id: 'z', from: [] },
++    { kind: 'part', def: 'maker', id: 'mk', from: ['n', 'sel', 'z'] },
++    { kind: 'output', from: 'mk', width: 2 },
++  ]);
++}
++
++/**
++ * Level 26's reference: the two-level tree.
++ *
++ * The low two select bits are decoded into four minterms (`b2` is not needed
++ * yet), and each of those is then combined with `b2` or its inverse -- three
++ * NOTs, four ANDs, eight ANDs = 27 NAND equivalents, three gates deep. The flat
++ * alternative, eight 3-input ANDs each taking all three literals, is 35 gates
++ * on a path two deep, and the level's target is what separates them (it is
++ * measured in `the decode targets separate the constructions they measure`).
++ */
++function threeBitDecoderReference(): Graph {
++  const s0 = 'sp.b0';
++  const s1 = 'sp.b1';
++  const s2 = 'sp.b2';
++  const nodes: Node[] = [
++    { kind: 'input', name: 'sel', width: 3 },
++    { kind: 'part', def: 'splitter', id: 'sp', from: ['sel'] },
++    { kind: 'part', def: 'not', id: 'n0', from: [s0] },
++    { kind: 'part', def: 'not', id: 'n1', from: [s1] },
++    { kind: 'part', def: 'not', id: 'n2', from: [s2] },
++    // The four minterms of the low pair, in one-hot order.
++    { kind: 'part', def: 'and', id: 'lo0', from: ['n0', 'n1'] },
++    { kind: 'part', def: 'and', id: 'lo1', from: [s0, 'n1'] },
++    { kind: 'part', def: 'and', id: 'lo2', from: ['n0', s1] },
++    { kind: 'part', def: 'and', id: 'lo3', from: [s0, s1] },
++  ];
++  for (let out = 0; out < 8; out += 1) {
++    nodes.push({
++      kind: 'part',
++      def: 'and',
++      id: `o${out}`,
++      from: [`lo${out % 4}`, out < 4 ? 'n2' : s2],
++    });
++  }
++  nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: bits('o') });
++  nodes.push({ kind: 'output', from: 'mk', width: 8 });
++  return build(nodes);
++}
++
++/** How one reference-shaped logic engine differs from the level's spec. */
++interface EngineOptions {
++  /** Where the shift amount comes from: the spec's low three bits, or the whole byte. */
++  readonly amount?: 'low3' | 'byte';
++  /** What opcode 7 computes: the spec's arithmetic shift, or the logical one. */
++  readonly op7?: 'ashr' | 'logical';
++  /** Wire opcode `k`'s output to the next opcode's result instead of its own. */
++  readonly breakOp?: number;
++}
++
++/** One 2:1 mux in gates: `NAND(NAND(a, ~s), NAND(b, s))`, with `~s` shared. */
++function muxNodes(id: string, a: string, b: string, s: string, ns: string): Node[] {
++  return [
++    { kind: 'part', def: 'nand', id: `${id}a`, from: [a, ns] },
++    { kind: 'part', def: 'nand', id: `${id}b`, from: [b, s] },
++    { kind: 'part', def: 'nand', id: `${id}o`, from: [`${id}a`, `${id}b`] },
++  ];
++}
++
++/**
++ * Level 27's reference: all eight results, then a 2:1-mux tree per bit.
++ *
++ * Eight results are computed in parallel from the level's own inputs -- `and8`,
++ * `or8`, `xor8`, `not8`, `add8`, `add8(a, ~b, 1)`, `shift_l8` and `ashr8` -- and
++ * each output bit is selected by a three-level tree of 2:1 muxes driven by
++ * `op0`, `op1`, `op2` in that order. Fifty-six muxes at three NANDs each plus
++ * the three inverters of the op bits is 171 gate equivalents on top of the 497
++ * the eight results cost.
++ *
++ * The shift amount is `b`'s low three bits and costs no gate: a splitter hands
++ * out `b0..b2` and a maker packs them back with zeroes above.
++ *
++ * The three options are what the counterexample blocks vary -- the level's own
++ * reference takes all three defaults.
++ */
++function logicEngine(options: EngineOptions = {}): Graph {
++  const amountId = 'amt';
++  const amountRef = options.amount === 'byte' ? 'b' : amountId;
++  const nodes: Node[] = [
++    { kind: 'input', name: 'a', width: 8 },
++    { kind: 'input', name: 'b', width: 8 },
++    { kind: 'input', name: 'op', width: 8 },
++    { kind: 'part', def: 'splitter', id: 'sa', from: ['a'] },
++    { kind: 'part', def: 'splitter', id: 'sb', from: ['b'] },
++    { kind: 'part', def: 'splitter', id: 'sop', from: ['op'] },
++    { kind: 'part', def: 'const_off', id: 'z', from: [] },
++    { kind: 'part', def: 'const_on', id: 'one', from: [] },
++    // The three opcode bits and their inverses, shared by all 56 muxes.
++    { kind: 'part', def: 'not', id: 'nop0', from: ['sop.b0'] },
++    { kind: 'part', def: 'not', id: 'nop1', from: ['sop.b1'] },
++    { kind: 'part', def: 'not', id: 'nop2', from: ['sop.b2'] },
++    // The eight results, in opcode order.
++    { kind: 'part', def: 'and8', id: 'r0', from: ['a', 'b'] },
++    { kind: 'part', def: 'or8', id: 'r1', from: ['a', 'b'] },
++    { kind: 'part', def: 'xor8', id: 'r2', from: ['a', 'b'] },
++    { kind: 'part', def: 'not8', id: 'r3', from: ['a'] },
++    { kind: 'part', def: 'add8', id: 'r4', from: ['a', 'b', 'z'] },
++    { kind: 'part', def: 'not8', id: 'nbb', from: ['b'] },
++    { kind: 'part', def: 'add8', id: 'r5', from: ['a', 'nbb', 'one'] },
++    // `b & 7` as wiring: the low three bits, zeroes above.
++    { kind: 'part', def: 'maker', id: amountId, from: ['sb.b0', 'sb.b1', 'sb.b2', 'z'] },
++    { kind: 'part', def: 'shift_l8', id: 'r6', from: ['a', amountRef] },
++    {
++      kind: 'part',
++      def: options.op7 === 'logical' ? 'shift_r8' : 'ashr8',
++      id: 'r7',
++      from: ['a', amountRef],
++    },
++  ];
++
++  // One splitter per result, so every bit of every result can be selected.
++  const results = Array.from({ length: 8 }, (_, op) => `r${op}`);
++  if (options.breakOp !== undefined) {
++    // A wiring change, not a new part: opcode k's mux input becomes opcode
++    // (k + 1)'s result, which is what makes this a circuit wrong on exactly one
++    // opcode. The result it no longer uses stays in the graph (and in the gate
++    // count) with its output unread.
++    results[options.breakOp] = `r${(options.breakOp + 1) % 8}`;
++  }
++  for (let op = 0; op < 8; op += 1) {
++    nodes.push({ kind: 'part', def: 'splitter', id: `s${op}`, from: [results[op]!] });
++  }
++
++  const selects = [
++    { s: 'sop.b0', ns: 'nop0' },
++    { s: 'sop.b1', ns: 'nop1' },
++    { s: 'sop.b2', ns: 'nop2' },
++  ];
++  const outBits: string[] = [];
++  for (let bit = 0; bit < 8; bit += 1) {
++    // Level 1 pairs opcodes that differ in op0, level 2 pairs those groups by
++    // op1, and level 3 -- one mux -- decides by op2.
++    let level = Array.from({ length: 8 }, (_, op) => `s${op}.b${bit}`);
++    for (const [stage, { s, ns }] of selects.entries()) {
++      const next: string[] = [];
++      for (let pair = 0; pair < level.length / 2; pair += 1) {
++        const id = `mux${bit}_${stage}_${pair}`;
++        nodes.push(...muxNodes(id, level[pair * 2]!, level[pair * 2 + 1]!, s, ns));
++        next.push(`${id}o`);
++      }
++      level = next;
++    }
++    outBits.push(level[0]!);
++  }
++  nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: outBits });
++  nodes.push({ kind: 'output', from: 'mk', width: 8 });
++  return build(nodes);
++}
++
++const solutions: Record<string, () => Graph> = {
++  'ch2-23-negative-numbers': absReference,
++  'ch2-24-signed-negator': negateReference,
++  'ch2-25-1-bit-decoder': oneBitDecoderReference,
++  'ch2-26-3-bit-decoder': threeBitDecoderReference,
++  'ch2-27-logic-engine': () => logicEngine(),
++};
++
++describe('reference solutions pass with three stars', () => {
++  for (const [id, make] of Object.entries(solutions)) {
++    it(id, () => {
++      const result = grade(make(), registry, specOf(id));
++      expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
++      expect(result.passed).toBe(true);
++      expect(result.stars, `metrics=${JSON.stringify(result.metrics)}`).toBe(3);
++    });
++  }
++});
++
++describe('three-star targets are the reference solutions own metrics', () => {
++  // The target is measured, not guessed: this fails if a level states a number
++  // its own reference does not score exactly, in either direction.
++  for (const [id, make] of Object.entries(solutions)) {
++    it(id, () => {
++      const level = specOf(id);
++      const { metrics } = grade(make(), registry, level);
++      expect(level.threeStar, `measured metrics=${JSON.stringify(metrics)}`).toEqual(metrics);
++    });
++  }
++});
++
++describe('reference solutions are buildable from the palette they are graded against', () => {
++  for (const [id, make] of Object.entries(solutions)) {
++    it(id, () => {
++      const offered = new Set(specOf(id).allowedComponents);
++      for (const inst of make().instances) {
++        expect(offered.has(inst.def), `${id} uses ${inst.def}, which its palette omits`).toBe(true);
++      }
++    });
++  }
++});
++
++// ---------------------------------------------------------------------------
++// Counterexamples
++// ---------------------------------------------------------------------------
++
++/** Always negate: the sign is read but the magnitude is never recovered. */
++function alwaysNegate(): Graph {
++  return build([
++    { kind: 'input', name: 'a', width: 8 },
++    { kind: 'part', def: 'neg8', id: 'neg', from: ['a'] },
++    { kind: 'output', from: 'neg', width: 8 },
++  ]);
++}
++
++/** Invert without the plus one: every byte is one short of its negation. */
++function invertOnly(): Graph {
++  return build([
++    { kind: 'input', name: 'a', width: 8 },
++    { kind: 'part', def: 'not8', id: 'flip', from: ['a'] },
++    { kind: 'output', from: 'flip', width: 8 },
++  ]);
++}
++
++/** The two decode bits the wrong way round: an anti-decoder. */
++function swappedDecoderBits(): Graph {
++  return build([
++    { kind: 'input', name: 'sel' },
++    { kind: 'part', def: 'not', id: 'n', from: ['sel'] },
++    { kind: 'part', def: 'const_off', id: 'z', from: [] },
++    { kind: 'part', def: 'maker', id: 'mk', from: ['sel', 'n', 'z'] },
++    { kind: 'output', from: 'mk', width: 2 },
++  ]);
++}
++
++/** The select value passed straight through: a binary value is not one-hot. */
++function decoderPassThrough(): Graph {
++  return build([
++    { kind: 'input', name: 'sel', width: 3 },
++    { kind: 'output', from: 'sel', width: 8 },
++  ]);
++}
++
++/** Circuits a player would plausibly build and that must be rejected. */
++const wrong: Record<string, () => Graph> = {
++  'ch2-23-negative-numbers': alwaysNegate,
++  'ch2-24-signed-negator': invertOnly,
++  'ch2-25-1-bit-decoder': swappedDecoderBits,
++  'ch2-26-3-bit-decoder': decoderPassThrough,
++  // The engine with a logical right shift where the spec asks for an arithmetic
++  // one: correct on every opcode but the seventh.
++  'ch2-27-logic-engine': () => logicEngine({ op7: 'logical' }),
++};
++
++describe('plausible wrong circuits fail', () => {
++  for (const [id, make] of Object.entries(wrong)) {
++    it(id, () => {
++      const result = grade(make(), registry, specOf(id));
++      expect(result.passed).toBe(false);
++      // A graded-but-wrong circuit, not a refused graph: a malformed circuit
++      // also fails, with no failure records at all.
++      expect(result.failures.length, JSON.stringify(result.issues)).toBeGreaterThan(0);
++      expect(result.stars).toBe(0);
++    });
++  }
++
++  it('fails the anti-decoder on the row the swap changes', () => {
++    const result = grade(wrong['ch2-25-1-bit-decoder']!(), registry, specOf('ch2-25-1-bit-decoder'));
++    expect(result.failures[0]?.inputs).toEqual({ sel: 0 });
++    expect(result.failures[0]?.expected).toEqual({ out: 1 });
++    expect(result.failures[0]?.actual).toEqual({ out: 2 });
++  });
++
++  it('fails the pass-through decoder on the first row that is not its own one-hot code', () => {
++    // The rows are enumerated with `sel` as the whole input, so the first
++    // combination is `sel = 0`: its one-hot form is 1 and the pass-through
++    // drives 0. A decoder that published its input as a binary value would be
++    // right on no row at all except the trivial one.
++    const result = grade(wrong['ch2-26-3-bit-decoder']!(), registry, specOf('ch2-26-3-bit-decoder'));
++    expect(result.failures[0]?.inputs).toEqual({ sel: 0 });
++    expect(result.failures[0]?.expected).toEqual({ out: 1 });
++    expect(result.failures[0]?.actual).toEqual({ out: 0 });
++  });
++});
++
++describe('an empty circuit fails every level instead of throwing', () => {
++  for (const level of CH2_BATCH3) {
++    it(level.id, () => {
++      const result = grade(build([]), registry, level);
++      expect(result.passed).toBe(false);
++      expect(result.stars).toBe(0);
++    });
++  }
++});
++
++// ---------------------------------------------------------------------------
++// The fuzz levels: the round, the vector, and what the circuit actually drove
++// ---------------------------------------------------------------------------
++
++/**
++ * Grades `make()` against `level` with its first output function wrapped to
++ * record every vector the kernel drives, in round order.
++ *
++ * `runChecks` stops at the first disagreeing round, so a failing circuit leaves
++ * exactly `firstBad + 1` vectors in `seen` -- the last one being the vector the
++ * failure record has to name. That is what makes "the check failed" a statement
++ * about a specific round rather than about `fuzz` in general.
++ */
++function captureRound(
++  level: LevelSpec,
++  make: () => Graph,
++): { failures: readonly CheckFailure[]; seen: FuzzVector[] } {
++  const check = fuzzOf(level);
++  const first = level.io.outputs[0]!;
++  const seen: FuzzVector[] = [];
++  const capture: LevelSpec = {
++    ...level,
++    checks: [
++      {
++        ...check,
++        outputs: {
++          ...check.outputs,
++          [first.id]: (v: FuzzVector) => {
++            seen.push(v);
++            return expectation(level, first.id)(v);
++          },
++        },
++      },
++    ],
++  };
++  const result = grade(make(), registry, capture);
++  return { failures: result.failures, seen };
++}
++
++describe('the fuzz levels name the round and the vector that failed', () => {
++  /**
++   * What each wrong circuit actually drives, as a pure function of the vector.
++   *
++   * A fuzz check that reported "failed" without the round and the vector would
++   * be indistinguishable from one that compares nothing -- on an 8-bit level
++   * there is no readable table to point at instead. So each counterexample is
++   * replayed here against the level's OWN expectation functions, and the first
++   * round that disagrees is what the failure record has to name.
++   */
++  const behaviour: Record<string, (v: FuzzVector) => Record<string, number>> = {
++    // Always negate: `-a` for every byte, sign or no sign.
++    'ch2-23-negative-numbers': (v) => ({ out: (0x100 - (v.a ?? 0)) & 0xff }),
++    // Invert only: `~a`, which is `-a - 1`.
++    'ch2-24-signed-negator': (v) => ({ out: ~(v.a ?? 0) & 0xff }),
++    // The engine with the logical right shift in opcode 7's slot.
++    'ch2-27-logic-engine': (v) => ({ out: engineValue(v, { op7: 'logical' }) }),
++  };
++
++  for (const [id, actual] of Object.entries(behaviour)) {
++    it(`${id}: the first disagreeing round, with its vector`, () => {
++      const level = specOf(id);
++      const { failures, seen } = captureRound(level, wrong[id]!);
++      expect(failures).toHaveLength(1);
++      const failure = failures[0]!;
++
++      const firstBad = seen.findIndex((v) => {
++        const want = expectedFor(level, v);
++        const got = actual(v);
++        return level.io.outputs.some((pin) => want[pin.id] !== got[pin.id]);
++      });
++      expect(firstBad, `${id}: the wrong circuit never disagreed`).toBeGreaterThanOrEqual(0);
++
++      expect(failure.reason).toBe('mismatch');
++      expect(failure.round).toBe(firstBad);
++      expect(failure.inputs).toEqual(seen[firstBad]);
++      expect(failure.expected).toEqual(expectedFor(level, seen[firstBad]!));
++      expect(failure.actual).toEqual(actual(seen[firstBad]!));
++      expect(failure.detail).toContain(`round ${firstBad}`);
++      // The wrapper recorded one vector per round the kernel ran, so the record
++      // is the last one it saw: the round in the failure is where the kernel
++      // stopped, not a number it worked out afterwards.
++      expect(seen).toHaveLength(firstBad + 1);
++    });
++  }
++});
++
++describe('the fuzz levels drive varying, reproducible vectors', () => {
++  it('draws 256 different vectors on every run, from the level data alone', () => {
++    // The round count and the seed are the whole of a fuzz level's coverage, so
++    // both are measured rather than restated: a correct circuit fills the record
++    // with every vector the level will ever drive, and a sequence that did not
++    // vary would make "the first disagreeing round" a statement about one
++    // repeated vector.
++    for (const level of FUZZ_LEVELS) {
++      const once = captureRound(level, solutions[level.id]!).seen;
++      const twice = captureRound(level, solutions[level.id]!).seen;
++      expect(once, `${level.id} reference`).toHaveLength(256);
++      expect(twice).toEqual(once);
++      // 256 draws from an 8-bit space repeat a little; from the 24-bit space
++      // level 27 drives they hardly ever do. 100 is a floor only a degenerate
++      // sequence -- the xorshift fixed point, or a constant -- can miss.
++      expect(new Set(once.map((v) => JSON.stringify(v))).size).toBeGreaterThan(100);
++    }
++  });
++});
++
++// ---------------------------------------------------------------------------
++// Level 27's eight opcodes, one at a time
++// ---------------------------------------------------------------------------
++
++/**
++ * What the engine computes for one vector, as the level's spec states it.
++ *
++ * The TARGET of this modelling, never its source: the level's own expectation
++ * function is what grades, and `expects the eight opcodes...` above compares the
++ * two on hand-picked vectors. What this copy is for is predicting what a BROKEN
++ * engine drives, which the level data cannot answer.
++ */
++function engineValue(
++  v: FuzzVector,
++  options: { readonly amount?: 'low3' | 'byte'; readonly op7?: 'ashr' | 'logical' } = {},
++): number {
++  const a = (v.a ?? 0) & 0xff;
++  const b = (v.b ?? 0) & 0xff;
++  const op = (v.op ?? 0) & 7;
++  const amount = options.amount === 'byte' ? b : b & 7;
++  switch (op) {
++    case 0:
++      return a & b;
++    case 1:
++      return a | b;
++    case 2:
++      return a ^ b;
++    case 3:
++      return ~a & 0xff;
++    case 4:
++      return (a + b) & 0xff;
++    case 5:
++      return (a - b) & 0xff;
++    case 6:
++      // The logical shifts give 0 for an amount of eight or more.
++      return amount >= 8 ? 0 : (a << amount) & 0xff;
++    case 7:
++      if (options.op7 === 'logical') return amount >= 8 ? 0 : (a >>> amount) & 0xff;
++      return arithmeticRight(a, amount);
++    default:
++      return 0;
++  }
++}
++
++/** `a` shifted arithmetically right: the sign fills, and an amount of 8+ is all sign. */
++function arithmeticRight(a: number, amount: number): number {
++  const signed = (a << 24) >> 24;
++  if (amount >= 8) return signed < 0 ? 0xff : 0x00;
++  return (signed >> amount) & 0xff;
++}
++
++describe("level 27's eight opcodes are all exercised", () => {
++  it('drives every opcode at least once in the level\'s own 256-round sequence', () => {
++    // The proof this block exists for. A fuzz check that happened to draw only
++    // opcodes 0-3 would leave half the instruction set ungraded while still
++    // "passing a correct circuit", so coverage is measured against the level's
++    // own fixed seed rather than asserted. The seed is a literal in the level
++    // data, so this is a fact about the level and not about the run.
++    const seen = captureRound(L27, solutions['ch2-27-logic-engine']!).seen;
++    expect(seen).toHaveLength(256);
++    const counts = new Map<number, number>();
++    for (const v of seen) {
++      const op = (v.op ?? 0) & 7;
++      counts.set(op, (counts.get(op) ?? 0) + 1);
++    }
++    expect([...counts.keys()].sort((x, y) => x - y)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
++    // Not a bare "at least once" that one lucky draw could satisfy: every opcode
++    // is drawn many times over, and the counts are printed by a failure here.
++    for (const op of [0, 1, 2, 3, 4, 5, 6, 7]) {
++      expect(counts.get(op) ?? 0, `opcode ${op} appears ${counts.get(op) ?? 0} times`).toBeGreaterThan(
++        3,
++      );
++    }
++  });
++
++  it('grades every opcode against a circuit broken on exactly that opcode', () => {
++    // Coverage is necessary but not sufficient: an opcode that appears in the
++    // sequence and is never COMPARED would still be ungraded. Each of the eight
++    // variants wires one opcode's mux input to its neighbour's result, so it is
++    // wrong on exactly one opcode and right on the other seven -- and the round
++    // it fails on has to be a round of that opcode.
++    for (let op = 0; op < 8; op += 1) {
++      const { failures, seen } = captureRound(L27, () => logicEngine({ breakOp: op }));
++      expect(failures, `opcode ${op} was never graded`).toHaveLength(1);
++      const failure = failures[0]!;
++      const round = failure.round ?? -1;
++      const failing = seen[round];
++      expect(failing, `opcode ${op}: no vector recorded for round ${round}`).toBeDefined();
++      expect(
++        (failing!.op ?? 0) & 7,
++        `opcode ${op} failed on a round of opcode ${(failing!.op ?? 0) & 7}`,
++      ).toBe(op);
++      // And the disagreement is the one this variant introduces, not an
++      // expectation the level got wrong: `results[op]` was wired to
++      // `results[(op + 1) % 8]`, so the circuit drove the neighbouring opcode's
++      // value while the level expected this one's.
++      const expected = engineValue(failing!);
++      const neighbour = engineValue({ ...failing!, op: (op + 1) % 8 });
++      expect(failure.expected).toEqual({ out: expected });
++      expect(failure.actual).toEqual({ out: neighbour });
++      // Sanity: the two opcodes really do differ on this vector, so this is a
++      // round the break could be seen in at all.
++      expect(neighbour, `opcodes ${op} and ${(op + 1) % 8} agree on this vector`).not.toBe(
++        expected,
++      );
++    }
++  });
++
++  it('grades the shift amount as the low three bits of b', () => {
++    // The other authored rule in the opcode table: `shift_l`/`ashr` read b's low
++    // three bits, so the engine that feeds a whole byte to the barrel shifter is
++    // wrong on exactly the shift opcodes -- and on a round whose b is eight or
++    // more, which is what makes the round it fails on a meaningful one.
++    const { failures, seen } = captureRound(L27, () => logicEngine({ amount: 'byte' }));
++    expect(failures).toHaveLength(1);
++    const failing = seen[failures[0]!.round ?? -1]!;
++    expect([6, 7]).toContain((failing.op ?? 0) & 7);
++    expect((failing.b ?? 0) & 0xf8, 'the failing vector shifts by less than eight').not.toBe(0);
++  });
++
++  it('separates the eight opcodes on vectors a player would try by hand', () => {
++    // The same eight cases the level's own expectation function is checked on,
++    // stated here as arithmetic rather than as level data: this is the table the
++    // brief teaches, and the counterexample above is only meaningful against it.
++    expect(engineValue(vector({ a: 0xf0, b: 0x3c, op: 0 }))).toBe(0x30);
++    expect(engineValue(vector({ a: 0xf0, b: 0x3c, op: 1 }))).toBe(0xfc);
++    expect(engineValue(vector({ a: 0xf0, b: 0x3c, op: 2 }))).toBe(0xcc);
++    expect(engineValue(vector({ a: 0xf0, b: 0x3c, op: 3 }))).toBe(0x0f);
++    expect(engineValue(vector({ a: 0xf0, b: 0x3c, op: 4 }))).toBe(0x2c);
++    expect(engineValue(vector({ a: 0x3c, b: 0xf0, op: 5 }))).toBe(0x4c);
++    expect(engineValue(vector({ a: 0x81, b: 0x03, op: 6 }))).toBe(0x08);
++    expect(engineValue(vector({ a: 0x81, b: 0x03, op: 7 }))).toBe(0xf0);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// What the targets separate
++// ---------------------------------------------------------------------------
++
++describe('the targets separate the constructions they measure', () => {
++  /**
++   * The bit-serial spelling of both two's-complement functions: one flip per
++   * bit, then a carry ripple with no adder in it at all.
++   *
++   * `flipOf(bit)` names the already-built node holding that bit's flipped value
++   * and `cin` the carry the ripple starts from, so the same eight-gate skeleton
++   * serves level 24 (`~a + 1`, carry-in high) and level 23 (`(a XOR m) + m`,
++   * carry-in the sign bit). It is the construction a player reaches for after
++   * building the half adder: smaller than a byte adder, and one AND deep per bit.
++   */
++  function bitSerial(
++    flipOf: (bit: number) => string,
++    cin: string,
++    flipNodes: readonly Node[],
++  ): Graph {
++    const nodes: Node[] = [
++      { kind: 'input', name: 'a', width: 8 },
++      { kind: 'part', def: 'splitter', id: 'sa', from: ['a'] },
++      ...flipNodes,
++    ];
++    let carry = cin;
++    for (let bit = 0; bit < 8; bit += 1) {
++      nodes.push({ kind: 'part', def: 'xor', id: `s${bit}`, from: [flipOf(bit), carry] });
++      if (bit < 7) {
++        nodes.push({ kind: 'part', def: 'and', id: `c${bit + 1}`, from: [flipOf(bit), carry] });
++        carry = `c${bit + 1}`;
++      }
++    }
++    nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: bits('s') });
++    nodes.push({ kind: 'output', from: 'mk', width: 8 });
++    return build(nodes);
++  }
++
++  it('level 24: the bit-serial incrementer is smaller and much deeper, and one star', () => {
++    // `~a + 1` without the byte adder: eight NOTs, then a carry ripple of seven
++    // ANDs and eight XORs. Measured rather than described, because the level's
++    // comment claims the target DENIES three stars to a 48-gate circuit -- which
++    // is true, and is the whole of what "delay 2" buys.
++    const graph = bitSerial(
++      (bit) => `n${bit}`,
++      'one',
++      [
++        { kind: 'part', def: 'const_on', id: 'one', from: [] },
++        ...Array.from({ length: 8 }, (_, bit): Node => ({
++          kind: 'part',
++          def: 'not',
++          id: `n${bit}`,
++          from: [`sa.b${bit}`],
++        })),
++      ],
++    );
++    const level = specOf('ch2-24-signed-negator');
++    const result = grade(graph, registry, level);
++    expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
++    expect(result.metrics).toEqual({ gate: 54, delay: 9, tick: 0 });
++    expect(result.stars, 'the reference is two gates deep and this is nine').toBe(1);
++  });
++
++  it('level 23: the bit-serial magnitude is smaller and much deeper, and one star', () => {
++    // The same skeleton with the sign bit as the carry-in: eight XORs spread the
++    // sign over the byte, then the ripple adds it. 78 gates against the
++    // reference's 104, nine gates deep against its two.
++    const graph = bitSerial(
++      (bit) => `x${bit}`,
++      'sa.b7',
++      Array.from({ length: 8 }, (_, bit): Node => ({
++        kind: 'part',
++        def: 'xor',
++        id: `x${bit}`,
++        from: [`sa.b${bit}`, 'sa.b7'],
++      })),
++    );
++    const level = specOf('ch2-23-negative-numbers');
++    const result = grade(graph, registry, level);
++    expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
++    expect(result.metrics).toEqual({ gate: 78, delay: 9, tick: 0 });
++    expect(result.stars, 'the reference is two gates deep and this is nine').toBe(1);
++  });
++
++  it('level 26: the flat eight-AND3 decode is correct and one star', () => {
++    // The level's data comment names this alternative, so it is measured rather
++    // than described: eight 3-input ANDs, one per output, each taking all three
++    // literals directly. It is the same function on a path one gate shallower
++    // (35 gates, 2 delay) and it costs more gates than the tree, which is what
++    // the target says a decoder should not do.
++    const nodes: Node[] = [
++      { kind: 'input', name: 'sel', width: 3 },
++      { kind: 'part', def: 'splitter', id: 'sp', from: ['sel'] },
++      { kind: 'part', def: 'not', id: 'n0', from: ['sp.b0'] },
++      { kind: 'part', def: 'not', id: 'n1', from: ['sp.b1'] },
++      { kind: 'part', def: 'not', id: 'n2', from: ['sp.b2'] },
++    ];
++    for (let out = 0; out < 8; out += 1) {
++      nodes.push({
++        kind: 'part',
++        def: 'and3',
++        id: `o${out}`,
++        from: [out & 1 ? 'sp.b0' : 'n0', out & 2 ? 'sp.b1' : 'n1', out & 4 ? 'sp.b2' : 'n2'],
++      });
++    }
++    nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: bits('o') });
++    nodes.push({ kind: 'output', from: 'mk', width: 8 });
++
++    const level = specOf('ch2-26-3-bit-decoder');
++    const result = grade(build(nodes), registry, level);
++    expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
++    expect(result.metrics).toEqual({ gate: 35, delay: 2, tick: 0 });
++    expect(result.stars, 'the tree is cheaper in gates, so the flat decode is one star').toBe(1);
++  });
++
++  it('level 23: the textbook (a XOR m) - m is correct and one star', () => {
++    // The level's data comment names this form too: `(a XOR m) - m`, spelled as
++    // "NOT the mask, add it, carry-in high" instead of the level's "add the
++    // mask's own low bit as the carry-in". For a non-negative byte the mask is 0
++    // and the borrowed 255 is cancelled by the carry-in; for a negative one the
++    // NOT mask is 0 and the carry-in is the +1. Same function, 112 gates against
++    // the reference's 104, so it is one star -- which is the difference the extra
++    // `not8` makes.
++    const graph = build([
++      { kind: 'input', name: 'a', width: 8 },
++      { kind: 'part', def: 'splitter', id: 'sa', from: ['a'] },
++      {
++        kind: 'part',
++        def: 'maker',
++        id: 'mask',
++        from: Array.from({ length: 8 }, () => 'sa.b7'),
++      },
++      { kind: 'part', def: 'xor8', id: 'flip', from: ['a', 'mask'] },
++      { kind: 'part', def: 'not8', id: 'nmask', from: ['mask'] },
++      { kind: 'part', def: 'const_on', id: 'one', from: [] },
++      { kind: 'part', def: 'add8', id: 'plus', from: ['flip', 'nmask', 'one'] },
++      { kind: 'output', from: 'plus', width: 8 },
++    ]);
++    const level = specOf('ch2-23-negative-numbers');
++    const result = grade(graph, registry, level);
++    expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
++    expect(result.metrics).toEqual({ gate: 112, delay: 2, tick: 0 });
++    expect(result.stars).toBe(1);
++  });
++
++  it('level 24: inverting with a byte XOR is correct and one star', () => {
++    // The same one's complement, spelled `xor8(a, 0xff)` -- the `const8` the
++    // palette offers is all ones, so this is the other way a player might invert
++    // a byte. 32 gates where the `not8` costs 8, for the same function and the
++    // same delay: one star.
++    const graph = build([
++      { kind: 'input', name: 'a', width: 8 },
++      { kind: 'part', def: 'const8', id: 'ones', from: [] },
++      { kind: 'part', def: 'xor8', id: 'flip', from: ['a', 'ones'] },
++      { kind: 'part', def: 'const_off', id: 'z', from: [] },
++      { kind: 'part', def: 'const_on', id: 'one', from: [] },
++      { kind: 'part', def: 'add8', id: 'plus', from: ['flip', 'z', 'one'] },
++      { kind: 'output', from: 'plus', width: 8 },
++    ]);
++    const level = specOf('ch2-24-signed-negator');
++    const result = grade(graph, registry, level);
++    expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
++    expect(result.metrics).toEqual({ gate: 104, delay: 2, tick: 0 });
++    expect(result.stars).toBe(1);
++  });
++});
++
++describe('the decoder rewards are generated per width, and no reference drops one in', () => {
++  it('wires both decoder levels from gates, not from a decoder drop-in', () => {
++    // `decoder1` and `decoder3` are the ids levels 25 and 26 hand out, and the
++    // family they belong to is registered now (`DECODER_DEF_IDS`, one part per
++    // width, generated in `src/core/defs/wide.ts`). What this asserts is what
++    // the data comments describe, and it is a fact about this batch rather than
++    // about the registry: neither decoder level's reference solution depends on
++    // the drop-in -- both are wired from gates -- so no target here was measured
++    // from a part a player would have to own before the level that hands it out.
++    for (const id of ['decoder1', 'decoder2', 'decoder3']) {
++      for (const [levelId, make] of Object.entries(solutions)) {
++        const uses = make().instances.filter((inst) => inst.def === id);
++        expect(uses, `${levelId} instantiates ${id}`).toEqual([]);
++      }
++    }
++    // And they stay out of the palettes that have no pins for them.
++    for (const level of [L23, L24, L27]) {
++      expect(level.allowedComponents, `${level.id} offers a decoder`).not.toContain('decoder1');
++      expect(level.allowedComponents).not.toContain('decoder3');
++    }
++    // Level 25 names `decoder2` to the player and deliberately does not offer
++    // it: no level unlocks it, and wired to this level's one-bit select it would
++    // answer the level's own two-row table by itself (the level's data comment
++    // records both reasons). Pinned here so the decision has to be made again
++    // rather than drifted out of.
++    expect(L25.brief.en).toContain('decoder2');
++    expect(L25.allowedComponents).not.toContain('decoder2');
++  });
++
++  it("lets level 25's own reward score the target, which is the own-reward rule", () => {
++    // The level's comment states this measurement, so it is taken here rather
++    // than described. `decoder1` is the level's OWN reward and `paletteDefsFor`
++    // offers a level its own rewards before it is passed (batch 2's rule, the
++    // same case as level 13's `splitter` and level 20's `full_adder`), so a
++    // player can drop the part in and score exactly what the NOT-and-Maker
++    // reference scores: one NAND equivalent, one unit of delay, three stars.
++    // That is why the reward is listed and `decoder2` -- not this level's reward
++    // at all -- is not; the distinction is the rule's, not an inconsistency.
++    expect(L25.rewards?.components).toContain('decoder1');
++    expect(L25.allowedComponents).toContain('decoder1');
++    const graph = build([
++      { kind: 'input', name: 'sel' },
++      { kind: 'part', def: 'decoder1', id: 'dec', from: ['sel'] },
++      { kind: 'output', from: 'dec', width: 2 },
++    ]);
++    const result = grade(graph, registry, L25);
++    expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
++    expect(result.metrics).toEqual(L25.threeStar);
++    expect(result.stars).toBe(3);
++  });
++});

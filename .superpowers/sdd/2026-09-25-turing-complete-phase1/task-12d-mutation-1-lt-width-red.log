@@ -1,0 +1,168 @@
+$ vitest run "test/core/signal.test.ts" "test/core/defs-wide.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/core/signal.test.ts (19 tests | 2 failed) 19ms
+   ✓ SignalTable (11)
+     ✓ allocates sequential slot ranges 1ms
+     ✓ defaults every slot to 0 0ms
+     ✓ writes and reads single bits 0ms
+     ✓ stores an 8-bit port as 8 separate slots, low bit first 0ms
+     ✓ accepts a Uint8Array for wide ports 1ms
+     ✓ reads back every bit of a wide port whose width is not a multiple of 8 0ms
+     ✓ rejects a value that does not fit the port width 1ms
+     ✓ clear() zeroes every allocated slot and keeps size 0ms
+     ✓ keeps earlier values while allocating more slots 0ms
+     ✓ refuses to over-allocate instead of silently corrupting indices 1ms
+     ✓ never swaps its backing slots, so earlier bases stay valid 0ms
+   ❯ assertWidth (3)
+     × accepts every value of a 31-bit port, zero included 4ms
+     ✓ bounds a 32-bit port at 0xffff_ffff, as its own arm did 0ms
+     × bounds 0, 1 and 2 ** width - 1 in and 2 ** width out at every width 1..32 6ms
+   ✓ Port (2)
+     ✓ reads through to the table so writes are visible 0ms
+     ✓ throws when written a value wider than the port 0ms
+   ✓ formatPort (2)
+     ✓ pads binary to the port width 0ms
+     ✓ formats decimal and hex 0ms
+   ✓ valuesEqual (1)
+     ✓ compares numbers and byte arrays 0ms
+ ❯ test/core/defs-wide.test.ts (63 tests | 1 failed) 61ms
+   ✓ wide defs: the brief's contract (11)
+     ✓ declares every id with the exact pin ids and widths the brief gives 3ms
+     ✓ is reachable through the registry the way the game reaches it 2ms
+     ✓ keeps every wide def pure combinational 2ms
+     ✓ categorizes every wide part as wide and const8 as a source 0ms
+     ✓ keeps the DELAY cost at one unit per operator, nothing for a source or a wire 0ms
+     ✓ states a NAND-equivalent gateCost for every def, explicitly 1ms
+     ✓ gives every operator more than one NAND equivalent, and no part less than its delay 1ms
+     ✓ composes each count out of the others, so the constructions are checkable 0ms
+     ✓ prices each bit-sliced cell on the same NAND basis as the registered 1-bit gate 0ms
+     ✓ scales every count with the width the generator is asked for 1ms
+     ✓ registers the whole family without a duplicate id 0ms
+   ✓ wide storage defs: the brief's contract and the decided edge rules (8)
+     ✓ declares every storage def with the ids, pins, state and costs the brief gives 1ms
+     ✓ is registered, and every id is one level data can spell 0ms
+     ✓ mux8 selects a or b on sel, combinationally 0ms
+     ✓ delay8 publishes the byte it holds and never its inputs 0ms
+     ✓ reg8 samples d on the edge when load is high, and reset beats load 0ms
+     ✓ counter8 counts on the edge when en is high, wraps to 0, and reset beats en 0ms
+     ✓ ram8 writes the addressed byte on the edge and selects it on the fly 0ms
+     ✓ ram8 keeps all 256 of its bytes, and keeps them per instance 3ms
+   ✓ wide bitwise operators (6)
+     ✓ matches a reference truth table on the boundary vectors 1ms
+     ✓ treats the 8-bit patterns as unsigned, never as negative numbers 0ms
+     ✓ evaluates NOT and its double negation 0ms
+     ✓ is its own inverse under XOR 1ms
+     ✓ relates nand8/nor8/xnor8 to their negations 0ms
+     ✓ reads an unwired input as zero 0ms
+   ✓ add8 (2)
+     ✓ adds with carry-in on the boundary vectors 0ms
+     ✓ reports bit 8 as the carry out and wraps the low eight bits 3ms
+   ✓ neg8 (2)
+     ✓ negates the boundary vectors by two's complement 0ms
+     ✓ equals (256 - a) & 0xff for every byte, and inverts itself 4ms
+   ✓ comparators (3)
+     ✓ compares unsigned patterns 0ms
+     ✓ compares signed patterns across the sign boundary 1ms
+     ✓ reports equality for every pair, and its result is a single bit 1ms
+   ✓ shifts (4)
+     ✓ shifts left, dropping bits above bit 7 0ms
+     ✓ shifts right logically, filling with zeros 0ms
+     ✓ shifts right arithmetically, replicating the sign bit 1ms
+     ✓ gives 0 for an amount of 8 or more, and matches the reference below that 3ms
+   ✓ rotates (3)
+     ✓ rotates around the byte 0ms
+     ✓ treats an amount of 8 or more as amount % 8 4ms
+     ✓ is the inverse of the other direction 1ms
+   ✓ mul8 and div8 (5)
+     ✓ multiplies, keeping the low eight bits 0ms
+     ✓ equals (a * b) & 0xff on a grid 1ms
+     ✓ divides with truncation toward zero 0ms
+     ✓ returns 0xff for division by zero, as decided, and never throws 0ms
+     ✓ divides by a non-zero divisor exactly as floor does 1ms
+   ✓ const8, switch and switch8 (3)
+     ✓ drives a constant with no inputs 0ms
+     ✓ passes a through when on is 1 and forces zero when on is 0 0ms
+     ✓ cascades: switching an already-switched value stays off 0ms
+   ✓ splitter and maker (3)
+     ✓ splits a byte into eight one-bit pins, least significant first 0ms
+     ✓ makes a byte out of eight one-bit pins 0ms
+     ✓ round-trips maker(splitter(x)) === x for every byte 2ms
+   ❯ the width generator (10)
+     ✓ defaults to eight bits 0ms
+     ✓ builds the whole family at a non-default width 1ms
+     ✓ parameterises the suffixed operators too 0ms
+     ✓ clamps a requested width into the range it documents 0ms
+     ✓ clamps before it allocates, so an absurd width cannot ask for gigabytes 0ms
+     ✓ rejects nothing silently: an unknown id is simply absent 0ms
+     ✓ keeps the two port-returning operators unsigned at the top of the range 2ms
+     × stages the 31-bit result the port guard used to reject 5ms
+     ✓ returns the all-ones of its own width, not of the module cap 1ms
+     ✓ is not re-counted by params.width, which widens every pin instead 2ms
+   ✓ wide defs through the kernel (3)
+     ✓ adds two level inputs and carries out of bit 8 1ms
+     ✓ carries every byte through splitter -> maker at the pin level 6ms
+     ✓ drives an 8-bit operator from 1-bit level inputs 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/defs-wide.test.ts > the width generator > stages the 31-bit result the port guard used to reject
+RangeError: value 2147483647 does not fit a 31-bit port width
+ ❯ assertWidth src/core/signal.ts:46:13
+     44|     }
+     45|     if (!fitsWidth(v, width)) {
+     46|       throw new RangeError(`value ${v} does not fit a ${width}-bit por…
+       |             ^
+     47|     }
+     48|     return;
+ ❯ Object.setPort src/core/signal.ts:94:7
+ ❯ test/core/defs-wide.test.ts:1140:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  test/core/signal.test.ts > assertWidth > accepts every value of a 31-bit port, zero included
+AssertionError: expected [Function] to not throw an error but 'RangeError: value 0 does not fit a 31…' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"RangeError: value 0 does not fit a 31-bit port width"
+
+ ❯ test/core/signal.test.ts:133:42
+    131|     // rejected, and `createWideDefs(31)` hands out defs that produce …
+    132|     // values, so `runChecks` turned a correct circuit into an 'invali…
+    133|     expect(() => assertWidth(0, 31)).not.toThrow();
+       |                                          ^
+    134|     expect(() => assertWidth(1, 31)).not.toThrow();
+    135|     expect(() => assertWidth(12345, 31)).not.toThrow();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  test/core/signal.test.ts > assertWidth > bounds 0, 1 and 2 ** width - 1 in and 2 ** width out at every width 1..32
+AssertionError: 0 at width 31: expected [Function] to not throw an error but 'RangeError: value 0 does not fit a 31…' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"RangeError: value 0 does not fit a 31-bit port width"
+
+ ❯ test/core/signal.test.ts:160:70
+    158|     // which arm regressed.
+    159|     for (let width = 1; width <= 32; width += 1) {
+    160|       expect(() => assertWidth(0, width), `0 at width ${width}`).not.t…
+       |                                                                      ^
+    161|       expect(() => assertWidth(1, width), `1 at width ${width}`).not.t…
+    162|       expect(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed | 79 passed (82)
+   Start at  07:50:29
+   Duration  385ms (transform 59%, tests 22%, import 12%, worker 7%)
+
+[ELIFECYCLE] Test failed. See above for more details.

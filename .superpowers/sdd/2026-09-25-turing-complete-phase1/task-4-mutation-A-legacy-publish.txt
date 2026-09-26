@@ -1,0 +1,13 @@
+$ vitest run "test/core/defs-wide.test.ts" "test/core/net.test.ts" "test/core/registry.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/registry.test.ts (26 tests) 16ms
+ ✓ test/core/defs-wide.test.ts (60 tests) 64ms
+ ✓ test/core/net.test.ts (52 tests) 219ms
+
+ Test Files  3 passed (3)
+      Tests  138 passed (138)
+   Start at  01:21:07
+   Duration  540ms (transform 48%, tests 36%, import 12%, worker 4%)
+

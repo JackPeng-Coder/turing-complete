@@ -1,0 +1,37 @@
+fix(core): count NAND equivalents in the gate metric, not the delay cost
+
+`delayOf` charges `def.cost` per node (net.ts:616) and `gateCost()` summed the
+same field, so the wide family's `cost: 1` made an `add8` worth ONE gate. The
+gate metric (§5.4) expands wide parts into NAND equivalents; the delay metric
+(§3.2) counts a wide component as one unit. They cannot share a field.
+
+- src/core/registry.ts: `cost` is documented as the per-node DELAY unit and
+  `gateCost?: number` is added as the NAND-equivalent GATE count. Absent means
+  "same as `cost`", which is exactly right for the 1-bit phase-0 family (a
+  NAND-based gate is one NAND equivalent) and is what keeps every existing
+  score byte-identical.
+- src/levels/grader.ts: `gateCost()` sums `def.gateCost ?? def.cost`.
+- src/core/defs/wide.ts: every one of the 24 defs states its NAND equivalents,
+  each with the construction behind the number -- the 1-bit basis (NOT 1,
+  NAND 1, AND 2, OR 3, NOR 4, XOR 4, XNOR 5, MUX2 4, FULL_ADDER 9, all with
+  their all-NAND cells written out) and the composition per operator: bitwise
+  `w` x cell, `add8` 8 full adders (72), `neg8` NOT8 + add8 (80), `equal8`
+  XNOR8 into an AND tree (54), `less_u` subtract-and-read-the-borrow (81),
+  `less_s` sign fix on top (89), shifts/rotates as `log2(w)`-stage barrels
+  (96) with the `amount >= w` corner logic for the shifts (125) and the sign
+  fill for `ashr8` (140), `mul8` 8 partial products + 8 adds (704), `div8`
+  restoring division + the divide-by-zero rule (950), `switch` 2 and `switch8`
+  16, and 0 for `const8` (a rail) and `splitter`/`maker` (wires).
+  `cost` stays 1 for every operator, so the delay metric is untouched.
+- src/core/defs/index.ts: why the phase-0 defs state no `gateCost` (their two
+  numbers are equal) and that the wide defs do.
+- Tests: the per-def NAND table as literals plus the compositional identities
+  that make it checkable, the width scaling, the `?? cost` fallback, the
+  asymmetry guard (one `and8` circuit: `delay === 1`, `gate === 16`), and a
+  phase-0 regression that freezes all twelve chapter-1 reference metrics,
+  scores and three-star targets. The chapter-1 numbers were captured from the
+  pre-change tree; they are asserted as literals because a move there is a
+  finding, not a re-baseline.
+- Also recorded (ratified, not solved): the project has no way to instantiate
+  `splitter`/`maker` at a non-8 pin count, since per-instance counts would need
+  a def-level hook in `net.ts`.

@@ -1,0 +1,131 @@
+MUTATION 2 (RED on purpose): ch1-11's recalibrated target is put back to gate 2, which its own reference solution (gate 4) fails. COMMAND: node pnpm.mjs test test/levels/grader.test.ts test/levels/ch1-part1.test.ts test/levels/ch1-part2.test.ts
+$ vitest run "test/levels/grader.test.ts" "test/levels/ch1-part1.test.ts" "test/levels/ch1-part2.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/levels/ch1-part1.test.ts (34 tests) 17ms
+ ❯ test/levels/grader.test.ts (40 tests | 1 failed) 25ms
+   ✓ gateCost (4)
+     ✓ counts gates and ignores sources and level connectors 2ms
+     ✓ is zero for an empty circuit 0ms
+     ✓ reads gateCost when a def states it and cost when it does not 0ms
+     ✓ separates the gate metric from the delay metric on a wide part 1ms
+   ✓ scoreOf (1)
+     ✓ weights delay and ticks above gate count 0ms
+   ✓ starsOf (5)
+     ✓ is 0 when the level is not passed 0ms
+     ✓ is 1 when passed but targets are missed 0ms
+     ✓ is 3 when every target is met 0ms
+     ✓ is 3 when every target is beaten 0ms
+     ✓ is 1 when the level declares no targets 0ms
+   ✓ grade (4)
+     ✓ reports passed + metrics + 3 stars for the reference solution 4ms
+     ✓ never throws on an empty circuit and reports 0 stars 0ms
+     ✓ never throws on an unstable circuit and marks it as a failure 2ms
+     ✓ reports graph issues alongside the grade 1ms
+   ✓ phase-0 regression: the chapter-1 reference scores are frozen (13)
+     ✓ covers all twelve chapter-1 levels, with the same ids 0ms
+     ✓ ch1-01-crude-awakening grades to its frozen metrics and score 0ms
+     ✓ ch1-02-nand-gate grades to its frozen metrics and score 1ms
+     ✓ ch1-03-not-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-04-and-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-05-or-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-06-nor-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-07-always-on grades to its frozen metrics and score 0ms
+     ✓ ch1-08-second-tick grades to its frozen metrics and score 1ms
+     ✓ ch1-09-xor-gate grades to its frozen metrics and score 1ms
+     ✓ ch1-10-bigger-or-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-11-bigger-and-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-12-binary-racer grades to its frozen metrics and score 0ms
+   ❯ every shipped level: its reference solution meets its own three-star bounds (13)
+     ✓ has a reference circuit for every shipped level 0ms
+     ✓ ch1-01-crude-awakening meets every bound its level declares 0ms
+     ✓ ch1-02-nand-gate meets every bound its level declares 0ms
+     ✓ ch1-03-not-gate meets every bound its level declares 0ms
+     ✓ ch1-04-and-gate meets every bound its level declares 0ms
+     ✓ ch1-05-or-gate meets every bound its level declares 0ms
+     ✓ ch1-06-nor-gate meets every bound its level declares 0ms
+     ✓ ch1-07-always-on meets every bound its level declares 0ms
+     ✓ ch1-08-second-tick meets every bound its level declares 0ms
+     ✓ ch1-09-xor-gate meets every bound its level declares 0ms
+     ✓ ch1-10-bigger-or-gate meets every bound its level declares 0ms
+     × ch1-11-bigger-and-gate meets every bound its level declares 4ms
+     ✓ ch1-12-binary-racer meets every bound its level declares 1ms
+ ❯ test/levels/ch1-part2.test.ts (29 tests | 1 failed) 21ms
+   ✓ chapter 1 levels 7-12 (3)
+     ✓ exposes six levels in order 1ms
+     ✓ gates every part behind a component unlocked earlier 1ms
+     ✓ gives every level a check with something to compare 1ms
+   ❯ reference solutions pass with three stars (6)
+     ✓ ch1-07-always-on 2ms
+     ✓ ch1-08-second-tick 1ms
+     ✓ ch1-09-xor-gate 1ms
+     ✓ ch1-10-bigger-or-gate 1ms
+     × ch1-11-bigger-and-gate 6ms
+     ✓ ch1-12-binary-racer 1ms
+   ✓ reference solutions are buildable from the palette they are graded against (6)
+     ✓ ch1-07-always-on 0ms
+     ✓ ch1-08-second-tick 0ms
+     ✓ ch1-09-xor-gate 0ms
+     ✓ ch1-10-bigger-or-gate 0ms
+     ✓ ch1-11-bigger-and-gate 0ms
+     ✓ ch1-12-binary-racer 0ms
+   ✓ plausible wrong circuits fail (5)
+     ✓ ch1-12-binary-racer 1ms
+     ✓ ch1-08-second-tick 0ms
+     ✓ ch1-09-xor-gate 0ms
+     ✓ ch1-10-bigger-or-gate 0ms
+     ✓ ch1-11-bigger-and-gate 0ms
+   ✓ an empty circuit fails every level instead of throwing (6)
+     ✓ ch1-07-always-on 0ms
+     ✓ ch1-08-second-tick 0ms
+     ✓ ch1-09-xor-gate 0ms
+     ✓ ch1-10-bigger-or-gate 0ms
+     ✓ ch1-11-bigger-and-gate 0ms
+     ✓ ch1-12-binary-racer 0ms
+   ✓ the chapter 1 registry (3)
+     ✓ orders the whole chapter by level id 0ms
+     ✓ resolves a level from either half of the chapter 0ms
+     ✓ lists chapter 1 as all twelve levels 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/ch1-part2.test.ts > reference solutions pass with three stars > ch1-11-bigger-and-gate
+AssertionError: metrics={"gate":4,"delay":2,"tick":0}: expected 1 to be 3 // Object.is equality
+
+- Expected
++ Received
+
+- 3
++ 1
+
+ ❯ test/levels/ch1-part2.test.ts:162:73
+    160|       expect(result.failures, JSON.stringify(result.failures)).toEqual…
+    161|       expect(result.passed).toBe(true);
+    162|       expect(result.stars, `metrics=${JSON.stringify(result.metrics)}`…
+       |                                                                         ^
+    163|     });
+    164|   }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/levels/grader.test.ts > every shipped level: its reference solution meets its own three-star bounds > ch1-11-bigger-and-gate meets every bound its level declares
+AssertionError: ch1-11-bigger-and-gate gate: reference 4 > target 2: expected 4 to be less than or equal to 2
+ ❯ test/levels/grader.test.ts:419:79
+    417|       const { gate, delay, tick } = result.metrics;
+    418|       if (target.gate !== undefined) {
+    419|         expect(gate, `${id} gate: reference ${gate} > target ${target.…
+       |                                                                               ^
+    420|           target.gate,
+    421|         );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  2 failed | 101 passed (103)
+   Start at  01:00:59
+   Duration  356ms (transform 56%, import 28%, tests 11%, worker 5%)
+
+[ELIFECYCLE] Test failed. See above for more details.
+EXIT=1

@@ -1,0 +1,24 @@
+### pnpm smoke (playwright test)
+$ playwright test
+[WebServer] (node:18248) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] $ tsc --noEmit && vite build
+[WebServer] (node:24760) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:20164) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] $ vite preview "--port" "4173" "--strictPort"
+[WebServer] (node:1756) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 5 tests using 1 worker
+
+(node:4156) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 test\smoke\ui.spec.ts:84:1 › level 1 is playable end to end and shows its epilogue (586ms)
+  ok 2 test\smoke\ui.spec.ts:107:1 › progress survives a reload and unlocks the next level (684ms)
+  ok 3 test\smoke\ui.spec.ts:139:1 › chapter 2 is reachable: level 13 opens once chapter 1 is passed (291ms)
+  ok 4 test\smoke\ui.spec.ts:173:1 › a chapter-2 level opens and grades end to end (1.2s)
+  ok 5 test\smoke\ui.spec.ts:212:1 › the last chapter-2 level opens: level 38 is reachable (269ms)
+
+  5 passed (8.2s)

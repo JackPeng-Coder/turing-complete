@@ -1,0 +1,82 @@
+$ vitest run "test/core/net.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/core/net.test.ts (38 tests | 2 failed) 150ms
+   ❯ compile (10)
+     ✓ allocates one slot per bit of every pin 2ms
+     ✓ records the origin instance of every expanded instance 1ms
+     ✓ rejects invalid graphs 1ms
+     ✓ sizes the signal table for the circuit instead of the 65,536 default 114ms
+     ✓ rejects a malformed params.width (0) as a validation issue 0ms
+     ✓ rejects a malformed params.width (-1) as a validation issue 0ms
+     ✓ rejects a malformed params.width (1.5) as a validation issue 0ms
+     ✓ rejects a malformed params.width (NaN) as a validation issue 0ms
+     × rejects a malformed params.width (4097) as a validation issue 5ms
+     × rejects a malformed params.width (9007199254740991) as a validation issue 2ms
+   ✓ Simulation (11)
+     ✓ evaluates a NAND for every input combination 1ms
+     ✓ propagates through a chain of gates in one settle 0ms
+     ✓ treats an unwired input as zero 0ms
+     ✓ throws UnstableCircuitError for a combinational feedback loop 13ms
+     ✓ settles a delay_line held loop and publishes state on the edge 1ms
+     ✓ a delay line holds its sampled value when its input changes 0ms
+     ✓ keeps an externally driven output (level_input) through a settle 0ms
+     ✓ binds level I/O by pin name: drives a level_input, reads a level_output pin 0ms
+     ✓ settles a feedback loop that a storage element breaks 0ms
+     ✓ settles a wide pin whose read-back form differs from the written form 0ms
+     ✓ reset clears state and the tick counter 0ms
+   ✓ wide ports (6)
+     ✓ shows only the driving bit when a 1-bit output feeds an 8-bit input beside a live signal 0ms
+     ✓ takes only the low bit when an 8-bit output drives a 1-bit input 0ms
+     ✓ transfers every bit when an 8-bit output drives an 8-bit input 0ms
+     ✓ hands back a read region that belongs to one pin and is fresh after settle 0ms
+     ✓ zero-extends a narrower driver into a 12-bit input 0ms
+     ✓ materialises a region only for a pin whose driver is narrower 0ms
+   ✓ per-instance pin widths (7)
+     ✓ resolves a pin width from the instance over the def 0ms
+     ✓ leaves every width at the def default when the instance sets no params 0ms
+     ✓ reports an unknown pin by name and direction 0ms
+     ✓ gathers a params-wide pin per bit when its driver is narrower 0ms
+     ✓ gives a params-wide pin a coherent 8-bit region when its driver is narrower 0ms
+     ✓ reads a params-wide pin straight from an equally wide driver 0ms
+     ✓ reserves table capacity for params-derived widths and their read regions 0ms
+   ✓ delayOf (4)
+     ✓ sums gate costs along the longest path and counts sources as free 0ms
+     ✓ breaks the path at a storage element instead of counting through it 0ms
+     ✓ walks a diamond ladder in linear time instead of enumerating every path 2ms
+     ✓ terminates on a combinational loop and does not count it as depth 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/net.test.ts > compile > rejects a malformed params.width (4097) as a validation issue
+AssertionError: expected undefined to be an instance of CircuitValidationError
+ ❯ test/core/net.test.ts:82:22
+     80|         caught = error;
+     81|       }
+     82|       expect(caught).toBeInstanceOf(CircuitValidationError);
+       |                      ^
+     83|       expect((caught as CircuitValidationError).issues.map((issue) => …
+     84|         'invalid-params',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/core/net.test.ts > compile > rejects a malformed params.width (9007199254740991) as a validation issue
+AssertionError: expected RangeError: Invalid typed array length: 1… to be an instance of CircuitValidationError
+ ❯ test/core/net.test.ts:82:22
+     80|         caught = error;
+     81|       }
+     82|       expect(caught).toBeInstanceOf(CircuitValidationError);
+       |                      ^
+     83|       expect((caught as CircuitValidationError).issues.map((issue) => …
+     84|         'invalid-params',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 36 passed (38)
+   Start at  00:36:38
+   Duration  413ms (tests 55%, transform 32%, import 9%, worker 3%)
+
+[ELIFECYCLE] Test failed. See above for more details.

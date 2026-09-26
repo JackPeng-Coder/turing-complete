@@ -1,0 +1,930 @@
+# Review package: 2a2cece..c4fb3ab
+
+## Commits
+c4fb3ab fix(core): read wide input pins per bit and give inputBase a coherent region
+f17c979 docs(phase1): give each content task its own level table
+
+## Files changed
+ .../plans/2026-09-25-turing-complete-phase1.md     | 154 +++++++++++-----
+ src/core/net.ts                                    | 183 ++++++++++++++++---
+ test/core/net.test.ts                              | 203 ++++++++++++++++++++-
+ 3 files changed, 463 insertions(+), 77 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/plans/2026-09-25-turing-complete-phase1.md b/docs/superpowers/plans/2026-09-25-turing-complete-phase1.md
+index 5759661..81301dc 100644
+--- a/docs/superpowers/plans/2026-09-25-turing-complete-phase1.md
++++ b/docs/superpowers/plans/2026-09-25-turing-complete-phase1.md
+@@ -63,50 +63,32 @@ Ledger: `.superpowers/sdd/2026-09-25-turing-complete-phase1/progress.md`
+ ## 第 2 章设计总表
+ 
+ **关卡名与顺序来自源资料**（7 章 82 关结构，第 2 章 = 第 13–38 关）。
+ 源资料**只给一行核心概念，没有真值表、没有端口、没有宽度、没有通关条件**。
+ 因此下表的 `io`、检查器、`threeStar`、`rewards` **全部是本复刻版的设计**：
+ 它们按源资料给出的名字与教学顺序推导，并在关卡数据注释里逐关标注出处。
+ 两关源资料标为「限时小游戏」（15 二进制速算、23 负数）在本作中改建为
+ 同一概念的电路关；第 34 关「总线」按 spec §3.1「不做总线协议（多驱动仲裁）」
+ 改建为「同一时刻只有一个驱动器有效」的选择器关。三处改建都记录在账本里。
+ 
+-| # | 关卡（源资料名） | 本复刻版 io | 检查器 | 解锁 |
+-|---|---|---|---|---|
+-| 13 | ODD Number of Signals 奇数个信号 | `a:4` → `out:1` | truth-table 16 行 | `splitter` `maker` `const8` |
+-| 14 | Double Trouble 成对的麻烦 | `a,b,c,d:1` → `out:1` | constraint at-least 2 | `and3`(已有) `or3`(已有) |
+-| 15 | Binary Racer 二进制速算 | `a:4` → `out:3` | truth-table 16 行 | `less_u` |
+-| 16 | Counting Signals 信号计数 | `a,b,c,d:1` → `out:3` | truth-table 16 行 | `equal8` |
+-| 17 | Double the Number 加倍 | `a:8` → `d:8` | truth-table 256 行（生成） | `add8` `mul8` |
+-| 18 | Byte OR 8 位或 | `a:8 b:8` → `out:8` | fuzz 256 轮 | `and8` `or8` `nand8` `nor8` |
+-| 19 | Byte NOT 8 位非 | `a:8` → `out:8` | fuzz 256 轮 | `xor8` `xnor8` `not8` |
+-| 20 | Half Adder 半加器 | `a,b:1` → `sum,carry:1` | truth-table 4 行 | `full_adder` |
+-| 21 | Full Adder 全加器 | `a,b,cin:1` → `sum,cout:1` | truth-table 8 行 | `neg8` |
+-| 22 | Adding Bytes 8 位加法器 | `a:8 b:8 cin:1` → `out:8 cout:1` | fuzz 256 轮 | `switch` `switch8` |
+-| 23 | Negative Numbers 负数 | `a:8` → `out:8` | fuzz 256 轮 | `div8` |
+-| 24 | Signed Negator 相反数 | `a:8` → `out:8` | fuzz 256 轮 | `less_s` `shift_l8` `shift_r8` |
+-| 25 | 1 Bit Decoder 1 位解码器 | `sel:1` → `out:2` | truth-table 2 行 | `decoder1`(= decoder2) |
+-| 26 | 3 Bit Decoder 3 位解码器 | `sel:3` → `out:8` | truth-table 8 行 | `decoder3` |
+-| 27 | Logic Engine 逻辑引擎 | `a:8 b:8 op:8` → `out:8` | fuzz 256 轮 | `ashr8` `rot_l8` `rot_r8` |
+-| 28 | Circular Dependency 循环依赖 | `set,value:1` → `out:1` | script + 稳定性 | `ram8` |
+-| 29 | Delayed Lines 延迟线 | `a:8` → `out:8` | script 逐拍 | `reg8` `delay8` |
+-| 30 | Odd Ticks 奇变偶不变 | `enable:1` → `out:1` | script 逐拍 + 周期 | （无） |
+-| 31 | Bit Inverter 1 位取反器 | `a,inv:1` → `out:1` | truth-table 4 行 | （无） |
+-| 32 | Bit Switch 1 位开关 | `a,on:1` → `out:1` | truth-table 4 行 | （无） |
+-| 33 | Input Selector 数据选择器 | `a:8 b:8 sel:1` → `out:8` | fuzz 256 轮 | `mux8` |
+-| 34 | The bus 总线 | `a:8 b:8 sel:1` → `out:8` | truth-table + 唯一驱动断言 | （无） |
+-| 35 | Saving Gracefully 优雅存储 | `d,load:1` → `out:1` | script 逐拍 | （无） |
+-| 36 | Saving Bytes 存储一字节 | `d:8 load:1` → `out:8` | script 逐拍 | `counter8` |
+-| 37 | Little Box 小盒子 | `d:8 load,sel:1` → `out:8` | script 逐拍 | （无） |
+-| 38 | Counter 计数器 | `en,reset:1` → `out:8` | script 逐拍 + 回绕 | （无） |
+-
+-**解锁链的两条机器化规则**（Task 7 必须测试它们）：
++26 关的逐关定义在 **Task 8–11 各自的小节里**，每关四个批次只拥有自己那几关，
++这样每个实施者的 brief 都是自足的（brief 提取器按 `## Task N:` 切分，
++提取不到本节之外的内容）。总览：
++
++| 批次 | 关卡 | 主题 | 检查器 |
++|---|---|---|---|
++| Task 8 | 13–17 | 标量逻辑与计数 | truth-table / constraint |
++| Task 9 | 18–22 | 8 位逻辑与加法 | fuzz 起步 |
++| Task 10 | 23–27 | 补码、解码器与逻辑引擎 | fuzz |
++| Task 11 | 28–38 | 存储与时序 | script |
++
++**全章共用的解锁链规则**（Task 7 必须把它们变成机器检查）：
+ 
+ - 每一关用到的组件，必须在**该关之前**已经解锁（否则玩家卡死）。
+ - 每个第 2 章组件必须**恰好**被一个关卡解锁，且解锁点不晚于它第一次被需要。
+ - `mem1` 已由第 1 章第 8 关解锁（阶段 0 事实），第 2 章不重复解锁。
+ - `half_adder` 不在 spec §3.3 的第 2 章清单里，因此**不做成组件**：
+   第 20 关的奖励是 `full_adder`。
+ - `decoder2` 不在第 2 章清单里，因此 `decoder1` 与 `decoder2` 是
+   **同一个宽度参数化解码器**（`params.width`），不各自占一个解锁点。
+ 
+ ## Task 1: 内核宽位端口正确性
+@@ -262,54 +244,128 @@ spec §5.2：`custom` 是逃生舱，但必须只依赖内核公开接口，且
+   3. 组件在其首次**被需要**的关卡之前或同关解锁。
+      只豁免 spec 的 starter 集合 `['level_input','level_output','const_on','const_off']`
+      与第 1 章已解锁的组件。
+ - 章节地图显示 2 章。
+ - 第 2 章关卡文件按批次拆分（`ch2/batch1.ts` 等），`content/index.ts` 汇总。
+ 
+ ## Task 8: 第 2 章关卡 13–17（标量逻辑与计数）
+ 
+ **Files:** `src/levels/content/ch2/batch1.ts`, `test/levels/ch2-batch1.test.ts`
+ 
+-按总表实现第 13–17 关（`id` 用 `ch2-13-odd-number-of-signals` 形式）。
+-每关必须提供完整的 `LevelSpec` 字段（含原创 `brief` 与 `hint`）、
+-至少一个检查器、由参考解**实测**得出的 `threeStar`、以及 `rewards`。
+-第 15、16 关的输出是 3 位计数，用 `generateRows` 生成真值表行，
+-**不得**留空 `rows`。
++逐关定义（`id` 形如 `ch2-13-odd-number-of-signals`）：
++
++| # | 关卡名（源资料） | io | 检查器 | 解锁 | 教学点 |
++|---|---|---|---|---|---|
++| 13 | ODD Number of Signals 奇数个信号 | `a:4` → `out:1` | truth-table 16 行 | `splitter` `maker` `const8` | 异或链判奇偶；宽端口拆成位 |
++| 14 | Double Trouble 成对的麻烦 | `a,b,c,d:1` → `out:1` | constraint `at-least` 2 | — | 至少 2 个为高 |
++| 15 | Binary Racer 二进制速算 | `a:4` → `out:3` | truth-table 16 行 | `less_u` | 4 位量化成 3 位计数 |
++| 16 | Counting Signals 信号计数 | `a,b,c,d:1` → `out:3` | truth-table 16 行 | `equal8` | 4 个 1 位信号相加（半加器思想） |
++| 17 | Double the Number 加倍 | `a:8` → `out:8` | truth-table 256 行（生成） | `add8` `mul8` | 左移一位即加倍 |
++
++每关必须提供完整 `LevelSpec`：`id` `chapter: 2` `index` `name`(中英)
++`brief`(原创) `hint`(原创) `allowedComponents` `io` `checks` `threeStar` `rewards`。
++
++要求：
++
++- 第 15、16 关输出是 3 位计数，用 `generateRows` 生成真值表行，
++  **不得**留空 `rows`（空 `rows` 是硬失败 `missing-rows`）。
++- 第 13 关的 4 位输入是**有意的**：源资料没说宽度，4 位既够教学又让
++  16 行真值表可穷举。这一选择在关卡数据注释里标为「本复刻版设计」。
++- 第 15 关源资料是「限时二进制转换小游戏」，本作改建为 4 位 → 3 位计数电路。
++  这一改建必须写进关卡 `brief` 的数据注释。
++- `threeStar` 三项都必须由参考解**实测**得出，且参考解本身就满足。
++- 每关一条参考解测试 + 一条**必须真的失败**的反例测试。
+ 
+ ## Task 9: 第 2 章关卡 18–22（8 位逻辑与加法）
+ 
+ **Files:** `src/levels/content/ch2/batch2.ts`, `test/levels/ch2-batch2.test.ts`
+ 
+-第 18–22 关。**`fuzz` 从本批开始使用**（第 18、19、22 关）。
+-第 22 关的 `threeStar.delay` 必须由参考解实测得出；
+-源资料给出的「延迟 ≤ 35」是**成就**而非通关条件，作为
+-`threeStar.delay` 的**参考值**记录在关卡注释里，实测值以参考解为准。
++| # | 关卡名（源资料） | io | 检查器 | 解锁 | 教学点 |
++|---|---|---|---|---|---|
++| 18 | Byte OR 8 位或 | `a:8` `b:8` → `out:8` | fuzz 256 轮 | `and8` `or8` `nand8` `nor8` | 8 位按位或 |
++| 19 | Byte NOT 8 位非 | `a:8` → `out:8` | fuzz 256 轮 | `xor8` `xnor8` `not8` | 8 位按位非 |
++| 20 | Half Adder 半加器 | `a:1` `b:1` → `sum:1` `carry:1` | truth-table 4 行 | `full_adder` | 和与进位 |
++| 21 | Full Adder 全加器 | `a:1` `b:1` `cin:1` → `sum:1` `cout:1` | truth-table 8 行 | `neg8` | 带进位的 1 位加法器 |
++| 22 | Adding Bytes 8 位加法器 | `a:8` `b:8` `cin:1` → `out:8` `cout:1` | fuzz 256 轮 | `switch` `switch8` | 级联全加器 |
++
++要求：
++
++- **`fuzz` 从本批开始使用**（第 18、19、22 关），必须用 `seed` + `rounds: 256`，
++  期望函数是纯函数。
++- 第 20 关的 id 是 `ch2-20-half-adder`，但**不**产出 `half_adder` 组件
++  （spec §3.3 的第 2 章清单里没有它）；奖励是 `full_adder`，玩家下一关就要用。
++- 第 22 关的 `threeStar.delay` 必须**由参考解实测**得出。源资料给的
++  「延迟 ≤ 35」是**成就**而非通关条件：把它作为注释里的参考值记下来，
++  但 `threeStar` 用实测值。若实测值大于 35，照实写实测值。
++- 第 21 关源资料的成就是「仅用 5 个蓝色元件」；本作没有「蓝色元件」体系
++  （那是自定义组件，阶段 3 才有），因此改为 `threeStar.gate` 实测门槛，
++  并在数据注释里说明这一映射。
+ 
+ ## Task 10: 第 2 章关卡 23–27（补码、解码器与逻辑引擎）
+ 
+ **Files:** `src/levels/content/ch2/batch3.ts`, `test/levels/ch2-batch3.test.ts`
+ 
+-第 23–27 关。第 27 关的 `op:8` 语义必须在关卡 `brief` 里对玩家**说清楚**
+-（8 位操作码 → 8 位结果），因为源资料只给了「完整逻辑运算集」这句话，
+-没有枚举成员。第 25 关的 `decoder1` 奖励必须带 `params.width` 的用法说明
+-（玩家在后续关卡里用它得到 2 位解码器）。
++| # | 关卡名（源资料） | io | 检查器 | 解锁 | 教学点 |
++|---|---|---|---|---|---|
++| 23 | Negative Numbers 负数 | `a:8` → `out:8` | fuzz 256 轮 | `div8` | 二进制补码表示 |
++| 24 | Signed Negator 相反数 | `a:8` → `out:8` | fuzz 256 轮 | `less_s` `shift_l8` `shift_r8` | 取反 + 1 |
++| 25 | 1 Bit Decoder 1 位解码器 | `sel:1` → `out:2` | truth-table 2 行 | `decoder1` | 1-to-2 解码 |
++| 26 | 3 Bit Decoder 3 位解码器 | `sel:3` → `out:8` | truth-table 8 行 | `decoder3` | 3-to-8 解码 |
++| 27 | Logic Engine 逻辑引擎 | `a:8` `b:8` `op:8` → `out:8` | fuzz 256 轮 | `ashr8` `rot_l8` `rot_r8` | 8 位算术逻辑单元 |
++
++要求：
++
++- 第 23 关源资料是「限时小游戏」，本作改建为补码运算电路；
++  这一改建写进关卡数据注释。
++- 第 27 关的 `op` 语义**源资料没有枚举**，因此必须由本计划钉死并在
++  关卡 `brief` 里对玩家说清楚。采用 `op` 的低 3 位选择运算：
++  `0=and 1=or 2=xor 3=not a 4=add 5=sub 6=shift_l(a, b 低 3 位) 7=ashr(a, b 低 3 位)`，
++  `out` 为 8 位结果（`add`/`sub` 丢弃高位进位）。`brief` 必须逐条列出这 8 个操作码。
++- 第 25 关解锁的解码器是**宽度参数化**的：`decoder1` 与 `decoder2` 是同一个
++  组件定义在不同 `params.width` 下的形态，不各占一个解锁点。
++  第 25 关的 `brief` 必须说明玩家可以用 `params.width` 得到 2 位解码器。
++- 第 24 关的 `threeStar` 与第 23 关一样由参考解实测。
+ 
+ ## Task 11: 第 2 章关卡 28–38（存储与时序）
+ 
+ **Files:** `src/levels/content/ch2/batch4.ts`, `test/levels/ch2-batch4.test.ts`
+ 
+-第 28–38 关。第 28、29、30、35、36、37、38 关用 `script` 检查器逐拍断言，
+-其余用真值表或 fuzz。第 30 关（振荡器）必须断言**周期性**，
+-不能只断言「某一拍为高」。第 34 关按 spec §3.1 改建为选择器关，
+-`brief` 必须明确说明本作不实现多驱动仲裁，并记录这一改建。
+-第 37 关的 `ram8` 容量与「装满」的定义必须由关卡数据定义清楚，
+-不得含糊（源资料只给了「刚好装满存储空间的电路设计」一句）。
++| # | 关卡名（源资料） | io | 检查器 | 解锁 | 教学点 |
++|---|---|---|---|---|---|
++| 28 | Circular Dependency 循环依赖 | `set:1` `value:1` → `out:1` | script + 稳定性 | `ram8` | 反馈回路构成锁存器 |
++| 29 | Delayed Lines 延迟线 | `a:8` → `out:8` | script 逐拍 | `reg8` `delay8` | 延迟一拍 |
++| 30 | Odd Ticks 奇变偶不变 | `enable:1` → `out:1` | script + 周期断言 | — | 振荡器即时钟源 |
++| 31 | Bit Inverter 1 位取反器 | `a:1` `inv:1` → `out:1` | truth-table 4 行 | — | XOR 做条件取反 |
++| 32 | Bit Switch 1 位开关 | `a:1` `on:1` → `out:1` | truth-table 4 行 | — | 条件通断 |
++| 33 | Input Selector 数据选择器 | `a:8` `b:8` `sel:1` → `out:8` | fuzz 256 轮 | `mux8` | 2-to-1 MUX |
++| 34 | The bus 总线 | `a:8` `b:8` `sel:1` → `out:8` | truth-table 4 行 | — | 唯一驱动有效 |
++| 35 | Saving Gracefully 优雅存储 | `d:1` `load:1` → `out:1` | script 逐拍 | — | 条件写入锁存器 |
++| 36 | Saving Bytes 存储一字节 | `d:8` `load:1` → `out:8` | script 逐拍 | `counter8` | 8 位寄存器 |
++| 37 | Little Box 小盒子 | `d:8` `addr:8` `load:1` → `out:8` | script 逐拍 | — | 256 字节全装满 |
++| 38 | Counter 计数器 | `en:1` `reset:1` → `out:8` | script + 回绕 | — | 自增寄存器 |
++
++要求：
++
++- 第 28 关的「稳定性」指：`settle()` **不得**抛 `UnstableCircuitError`。
++  这是本关的核心断言 —— 玩家必须用存储元件切断组合环。必须有反例：
++  纯组合的 `not` 环必须抛错。
++- 第 30 关必须断言**周期性**（连续多拍的高低翻转规律），
++  不能只断言「某一拍为高」。`enable=0` 时输出必须保持，不得继续振荡。
++- 第 34 关按 spec §3.1「不做总线协议（多驱动仲裁）」改建为选择器关：
++  `out` 恰好等于被选中的那一路。这一改建（以及「本引擎禁止多驱动」这条理由）
++  必须写进关卡数据注释与 `brief`。
++- 第 37 关源资料只有「刚好装满存储空间的电路设计」一句：
++  本作定义为「用 `ram8` 的 256 字节全部可寻址且可读回」，
++  即 `addr` 0–255 每一格写入后都能读回原值。这一定义必须写进 `brief`。
++- 第 38 关源资料的成就是「≤ 65 个门」，映射为 `threeStar.gate` 实测门槛，
++  并在数据注释里说明。
++
+ 
+ ## Task 12: 阶段 1 收尾验证
+ 
+ **Files:** `README.md`, `docs/superpowers/plans/2026-09-25-turing-complete-phase0.md`
+ 
+ - 全量回归：`pnpm test`、`pnpm build`、`pnpm smoke`。
+ - 更新 README 的进度表述（第 1 章 12 关 → 第 1–2 章 38 关）。
+ - 修正阶段 0 计划里那张**已知过时**的第 1 章汇总表：要么从代码块重新生成，
+   要么删掉 —— 一张与代码不符的表比没有表更糟。
+ - 浏览器里从第 1 关连到第 38 关的冒烟确认，并截图存档。
+diff --git a/src/core/net.ts b/src/core/net.ts
+index fd546c6..6424afb 100644
+--- a/src/core/net.ts
++++ b/src/core/net.ts
+@@ -4,49 +4,64 @@ import { assertWidth, createSignalTable, type PortValue, type SignalTable } from
+ import type { ComponentDef, Registry } from './registry';
+ 
+ /** Iteration cap for the settle loop. A combinational loop exhausts it. */
+ export const SETTLE_LIMIT = 512;
+ 
+ /** Smallest table `compile` will ask for; tiny circuits still get a real buffer. */
+ const MIN_CAPACITY = 64;
+ 
+ /**
+  * A flattened, evaluated circuit: one slot per bit of every pin, plus the
+- * mapping from pins to slots.
++ * mapping from pins to slots, plus a read region for the pins that need one.
+  *
+  * The netlist is a value object owned by `Simulation` (the two are tied together
+  * by a private `WeakMap`); callers address slots, never names, so a hot loop
+  * resolves `"i3.a"` once instead of per evaluation.
+  */
+ export interface Netlist {
+   /**
+    * Expanded instances. Phase 0 does not expand custom components, so this is
+    * `graph.instances.length` and `expandedCount` repeats it for the plan's
+    * original spelling.
+    */
+   readonly instanceCount: number;
+   readonly expandedCount: number;
+-  /** Bits allocated (one slot per bit of every pin). */
++  /** Bits allocated: one slot per bit of every pin, plus every read region. */
+   readonly slotCount: number;
+   /**
+    * `drive[slot]` is the slot `slot` reads its value from: the identity for
+-   * every slot except a wired input pin, which reads the output pin driving it.
+-   * Resolving wires up front keeps the settle loop branch-free.
++   * every slot except a wired input pin bit, which reads the output pin bit
++   * driving it. Resolving wires up front keeps the settle loop branch-free.
++   *
++   * It covers the pin slots only. A bit no wire claimed keeps its own slot --
++   * an input pin's slots are never written by the kernel, so such a bit reads
++   * 0 -- and a materialised read region is not addressed through `drive`.
+    */
+   readonly drive: Int32Array;
+   /** Expanded instance key -> origin instance id in the document. */
+   readonly refs: Map<string, string>;
+   /**
+-   * Slot the kernel reads (and a driver writes) for the input pin
+-   * `"<instId>.<pinId>"`: its driver slot. For an unwired pin that is the pin's
+-   * own slot, which is always zero unless the caller writes it -- so an unwired
+-   * input reads 0 and a level can still drive it directly.
++   * Slot base of a **contiguous** read region for the input pin
++   * `"<instId>.<pinId>"`, so `read(inputBase(key), pin.width)` is coherent.
++   *
++   * Usually that is the driver's own base: an unwired pin reads its own slots
++   * (which is why a level can still drive one directly), and a driver as wide as
++   * the pin is one contiguous run of slots. A driver *narrower* than the pin is
++   * neither, so `compile` materialises a region of the pin's own width and this
++   * returns that instead. Returning the driver's base in that case would make
++   * the caller read the slots that physically follow the driver -- other pins'
++   * signals, silently.
++   *
++   * A region is republished from the settled table at the end of every `settle`,
++   * so a caller reads it after settling without asking for anything extra. It is
++   * a read alias only: writing into a region does not drive the pin. To drive a
++   * level input, write the `level_input` output slot (`outputBase`), as before.
+    */
+   inputBase(key: string): number;
+   /** Slot of the output pin `"<instId>.<pinId>"`. */
+   outputBase(key: string): number;
+   /** Expanded instance ids, in evaluation order. */
+   instanceIds(): readonly string[];
+   /** Def ids of the expanded instances, in evaluation order. */
+   instanceDefs(): readonly string[];
+   /** `"<instId>.<pinId>"` keys of every output pin. */
+   outputKeys(): readonly string[];
+@@ -62,77 +77,113 @@ interface CompiledInstance {
+   readonly outputs: readonly number[];
+   /** Index of each output pin in the netlist-wide output pin list. */
+   readonly outPin: readonly number[];
+ }
+ 
+ interface OutputPin {
+   readonly base: number;
+   readonly width: number;
+ }
+ 
++/** A contiguous slot range that `inputBase` can hand to a range-reading caller. */
++interface ReadRegion {
++  /** Base of the region: what `inputBase` reports for the pin. */
++  readonly base: number;
++  readonly width: number;
++  /** Slot base of the input pin whose bits the region mirrors. */
++  readonly src: number;
++}
++
+ interface NetInternals {
+   readonly table: SignalTable;
+   readonly instances: readonly CompiledInstance[];
+   readonly outputPins: readonly OutputPin[];
++  readonly readRegions: readonly ReadRegion[];
+ }
+ 
+ /** Ties a netlist to the storage `compile` built for it, without a public field. */
+ const INTERNALS = new WeakMap<Netlist, NetInternals>();
+ 
++/**
++ * The single driver base every bit of `[base, base + width)` reads from, or -1
++ * when those bits do not form one contiguous run.
++ *
++ * The identity answer (`base` itself) counts as a run on purpose: an unwired pin
++ * reads its own slots, which is what lets a caller write an unwired input
++ * directly. A run starting anywhere else is a driver covering the whole pin, so
++ * reading `width` slots from there is exactly the pin's value. A narrower driver
++ * leaves its tail pointing at the pin's own slots (see the identity default in
++ * `compile`), which no single base can describe -- that pin needs a region.
++ */
++function contiguousRun(drive: Int32Array, base: number, width: number): number {
++  const first = drive[base]!;
++  for (let bit = 1; bit < width; bit += 1) {
++    if (drive[base + bit] !== first + bit) return -1;
++  }
++  return first;
++}
++
+ /**
+  * Capacity for `graph`, derived from the circuit instead of the table default.
+  *
+  * `createSignalTable`'s 65,536-slot default cannot hold the spec's
+  * 20,000-instance budget: 20,000 two-input gates occupy 60,000 slots and a
+  * single three-input gate overruns it. The estimate is exact plus a quarter of
+- * headroom, so the requirement is not a knife edge; `alloc` still throws a named
+- * `RangeError` rather than growing the buffer if it were ever wrong.
++ * headroom, plus the most a read region could ever need (one per driven input
++ * pin wider than 1 bit, which is the only kind that can require one), so the
++ * requirement is not a knife edge; `alloc` still throws a named `RangeError`
++ * rather than growing the buffer if it were ever wrong.
+  */
+ function capacityFor(graph: Graph, registry: Registry): number {
++  const driven = new Set<string>();
++  for (const wire of graph.wires) driven.add(`${wire.to.inst}.${wire.to.port}`);
+   let slots = 0;
++  let regions = 0;
+   for (const inst of graph.instances) {
+     // `validateGraph` has already rejected unknown def ids, so `get` cannot throw.
+     const def = registry.get(inst.def);
+-    for (const pin of def.inputs) slots += pin.width;
++    for (const pin of def.inputs) {
++      slots += pin.width;
++      if (pin.width > 1 && driven.has(`${inst.id}.${pin.id}`)) regions += pin.width;
++    }
+     for (const pin of def.outputs) slots += pin.width;
+   }
+-  return Math.max(MIN_CAPACITY, Math.ceil(slots * 1.25) + 16);
++  return Math.max(MIN_CAPACITY, Math.ceil(slots * 1.25) + regions + 16);
+ }
+ 
+ /**
+  * Flattens a document into a netlist.
+  *
+  * Error-severity issues are fatal (the circuit is meaningless); warnings are
+  * accepted, because an unwired input legally reads 0 and only the simulator can
+  * tell whether a feedback loop settles.
++ *
++ * Pin widths are taken from the def as written; a later task resolves
++ * per-instance width overrides, and every width-dependent step below (allocation,
++ * `drive`, the regions, the reads) goes through these same values.
+  */
+ export function compile(graph: Graph, registry: Registry): Netlist {
+   const errors: GraphIssue[] = validateGraph(graph, registry).filter(
+     (i) => i.severity === 'error',
+   );
+   if (errors.length > 0) throw new CircuitValidationError(errors);
+ 
+   const table = createSignalTable(capacityFor(graph, registry));
+   const instances: CompiledInstance[] = [];
+   const refs = new Map<string, string>();
+   const byId = new Map<string, CompiledInstance>();
+-  const inputBases = new Map<string, number>();
+   const outputBases = new Map<string, number>();
+   const outputPins: OutputPin[] = [];
+ 
+   for (const inst of graph.instances) {
+     const def = registry.get(inst.def);
+-    const inputs = def.inputs.map((pin) => {
+-      const base = table.alloc(pin.width);
+-      inputBases.set(`${inst.id}.${pin.id}`, base);
+-      return base;
+-    });
++    const inputs = def.inputs.map((pin) => table.alloc(pin.width));
+     const outPin: number[] = [];
+     const outputs = def.outputs.map((pin) => {
+       const base = table.alloc(pin.width);
+       outputBases.set(`${inst.id}.${pin.id}`, base);
+       outPin.push(outputPins.length);
+       outputPins.push({ base, width: pin.width });
+       return base;
+     });
+     const compiled: CompiledInstance = {
+       key: inst.id,
+@@ -141,59 +192,87 @@ export function compile(graph: Graph, registry: Registry): Netlist {
+       inputs,
+       outputs,
+       outPin,
+     };
+     refs.set(inst.id, inst.id);
+     byId.set(inst.id, compiled);
+     instances.push(compiled);
+   }
+ 
+   // Start from the identity so an unwired input reads its own (zero) slot, then
+-  // point every wired input at the output pin that drives it. Giving each
++  // point every wired input bit at the output pin bit that drives it. Giving each
+   // unwired pin its own slot rather than sharing one zero slot is what lets a
+-  // caller write an unwired input directly -- and it keeps `slotCount` equal to
+-  // the pin bits the circuit actually has.
++  // caller write an unwired input directly -- and it is also what makes the bits
++  // a narrow driver does not cover read 0: they keep pointing at their own slots,
++  // which the kernel never writes.
+   const drive = new Int32Array(table.size);
+   for (let slot = 0; slot < drive.length; slot += 1) drive[slot] = slot;
+   for (const wire of graph.wires) {
+     const from = byId.get(wire.from.inst);
+     const to = byId.get(wire.to.inst);
+     if (!from || !to) continue; // unknown endpoints are a fatal issue, already thrown
+     const fromPin = from.def.outputs.findIndex((p) => p.id === wire.from.port);
+     const toPin = to.def.inputs.findIndex((p) => p.id === wire.to.port);
+     if (fromPin < 0 || toPin < 0) continue; // unknown ports are fatal too
+     const fromBase = from.outputs[fromPin]!;
+     const toBase = to.inputs[toPin]!;
+     const width = Math.min(from.def.outputs[fromPin]!.width, to.def.inputs[toPin]!.width);
+     for (let bit = 0; bit < width; bit += 1) drive[toBase + bit] = fromBase + bit;
+   }
+ 
++  // `drive` answers "which single slot drives this bit", which is all a per-bit
++  // read needs. A caller reads a *range* instead (`read(inputBase(key), width)`),
++  // and there the driver is the wrong answer whenever it is narrower than the
++  // pin: the read would run off the end of the driver into the slots that
++  // physically follow it -- other pins' live signals -- rather than the pin's own
++  // zero bits. So for every input pin whose bits are not already one contiguous
++  // run of slots, materialise a region of that pin's width and report that. The
++  // common cases (an unwired pin, a driver as wide as the pin) alias their slots
++  // directly and allocate nothing.
++  const readRegions: ReadRegion[] = [];
++  const readBases = new Map<string, number>();
++  for (const inst of instances) {
++    for (let p = 0; p < inst.inputs.length; p += 1) {
++      const base = inst.inputs[p]!;
++      const width = inst.def.inputs[p]!.width;
++      const key = `${inst.key}.${inst.def.inputs[p]!.id}`;
++      const run = contiguousRun(drive, base, width);
++      if (run >= 0) {
++        readBases.set(key, run);
++        continue;
++      }
++      const regionBase = table.alloc(width);
++      readRegions.push({ base: regionBase, width, src: base });
++      readBases.set(key, regionBase);
++    }
++  }
++
+   const instanceIds = instances.map((i) => i.key);
+   const instanceDefs = instances.map((i) => i.def.id);
+   const baseOf = (map: Map<string, number>, kind: string, key: string): number => {
+     const base = map.get(key);
+     if (base === undefined) throw new Error(`no such ${kind} pin: ${key}`);
+     return base;
+   };
+   const net: Netlist = {
+     instanceCount: instances.length,
+     expandedCount: instances.length,
+     slotCount: table.size,
+     drive,
+     refs,
+-    inputBase: (key) => drive[baseOf(inputBases, 'input', key)]!,
++    inputBase: (key) => baseOf(readBases, 'input', key),
+     outputBase: (key) => baseOf(outputBases, 'output', key),
+     instanceIds: () => instanceIds,
+     instanceDefs: () => instanceDefs,
+     outputKeys: () => [...outputBases.keys()],
+   };
+-  INTERNALS.set(net, { table, instances, outputPins });
++  INTERNALS.set(net, { table, instances, outputPins, readRegions });
+   return net;
+ }
+ 
+ export interface SettleReport {
+   readonly iterations: number;
+   readonly stable: boolean;
+ }
+ 
+ /**
+  * Runs a compiled circuit, one clock edge at a time.
+@@ -203,35 +282,37 @@ export interface SettleReport {
+  * `tick` applies one edge and settles again.
+  */
+ export class Simulation {
+   readonly net: Netlist;
+   /** The catalog this netlist was compiled against, for callers that need defs. */
+   readonly registry: Registry;
+   readonly #table: SignalTable;
+   readonly #drive: Int32Array;
+   readonly #instances: readonly CompiledInstance[];
+   readonly #outputPins: readonly OutputPin[];
++  readonly #readRegions: readonly ReadRegion[];
+   /** Private state of every instance, indexed like `#instances`. */
+   readonly #state: Uint8Array[];
+   /** Output values staged by the current settle sweep, indexed like `#outputPins`. */
+   readonly #staged: Array<PortValue | undefined>;
+   #tickCount = 0;
+ 
+   constructor(net: Netlist, registry: Registry) {
+     const internals = INTERNALS.get(net);
+     if (!internals) throw new Error('netlist was not produced by compile()');
+     this.net = net;
+     this.registry = registry;
+     this.#table = internals.table;
+     this.#drive = net.drive;
+     this.#instances = internals.instances;
+     this.#outputPins = internals.outputPins;
++    this.#readRegions = internals.readRegions;
+     this.#state = internals.instances.map((i) => new Uint8Array(i.def.stateBytes));
+     this.#staged = new Array<PortValue | undefined>(internals.outputPins.length).fill(undefined);
+   }
+ 
+   get tickCount(): number {
+     return this.#tickCount;
+   }
+ 
+   /** Clears every signal and every storage element, then settles from scratch. */
+   reset(): void {
+@@ -255,31 +336,72 @@ export class Simulation {
+     for (let i = 0; i < this.#instances.length; i += 1) {
+       const inst = this.#instances[i]!;
+       if (!inst.def.sequential) continue;
+       const state = this.#state[i]!;
+       for (let p = 0; p < inst.outputs.length; p += 1) {
+         this.#table.setBit(inst.outputs[p]!, state[p] === 1 ? 1 : 0);
+       }
+     }
+   }
+ 
+-  /** Reads each input pin through its pre-resolved driver slot. */
++  /**
++   * Assembles a pin's value one bit at a time, following `drive` per bit.
++   *
++   * Deliberately NOT `getPort(drive[base], width)`: that reads `width`
++   * *consecutive* slots from wherever the driver happens to sit, so a driver
++   * narrower than the pin pulls in the slots allocated after it -- other pins'
++   * signals. Here a bit with no driver of its own falls back (through `drive`)
++   * to the pin's own slot, which the kernel never writes, and so reads 0.
++   *
++   * The number/bytes split mirrors `SignalTable.getPort`, so a def sees the same
++   * value form at every width.
++   */
++  #gather(base: number, width: number): PortValue {
++    const slots = this.#table.slots;
++    if (width <= 8) {
++      let out = 0;
++      for (let bit = 0; bit < width; bit += 1) {
++        if (slots[this.#drive[base + bit]!] === 1) out |= 1 << bit;
++      }
++      return out;
++    }
++    const bytes = new Uint8Array(Math.ceil(width / 8));
++    for (let bit = 0; bit < width; bit += 1) {
++      if (slots[this.#drive[base + bit]!] === 1) bytes[bit >> 3]! |= 1 << (bit & 7);
++    }
++    return bytes;
++  }
++
++  /** Reads each input pin bit by bit through its pre-resolved driver slots. */
+   #readInputs(inst: CompiledInstance, scratch: PortValue[]): void {
+     for (let p = 0; p < inst.inputs.length; p += 1) {
+-      const base = inst.inputs[p]!;
+-      scratch[p] = this.#table.getPort(this.#drive[base]!, inst.def.inputs[p]!.width);
++      scratch[p] = this.#gather(inst.inputs[p]!, inst.def.inputs[p]!.width);
+     }
+     // Keep the scratch exactly as long as this instance's pin list, so a shorter
+     // instance never sees values left behind by a longer one.
+     scratch.length = inst.inputs.length;
+   }
+ 
++  /**
++   * Republishes every materialised read region from the values just settled.
++   *
++   * `inputBase` hands out a slot range and the caller then reads it whenever it
++   * likes, with nothing to tell it a fresh gather is needed -- so a region has to
++   * be current by the time `settle` returns. One pass over the regions (not over
++   * the instances) keeps this off the sweep's critical path.
++   */
++  #refreshReadRegions(): void {
++    for (const region of this.#readRegions) {
++      this.#table.setPort(region.base, region.width, this.#gather(region.src, region.width));
++    }
++  }
++
+   /**
+    * True when the table already holds `value` at this pin.
+    *
+    * Compared bit by bit rather than as `PortValue`s on purpose: `valuesEqual`
+    * cannot equate a number with the byte-array form of the same value (a 12-bit
+    * pin reads back as `Uint8Array`), so a value-form comparison would report a
+    * change on every sweep and misdiagnose a healthy circuit as unstable.
+    * `assertWidth` still runs, so a malformed staged value throws loudly instead
+    * of being silently truncated to the bits the comparison looks at.
+    */
+@@ -306,20 +428,24 @@ export class Simulation {
+    * leaves that pin alone, so `level_input` -- driven from outside through its
+    * output slot -- survives the sweep.
+    *
+    * The sweep is parallel (Jacobi): all instances are evaluated against the
+    * values committed by the previous sweep, staged, and committed together.
+    * Two properties follow, and the game needs both. The outcome cannot depend on
+    * the order instances happen to sit in the document, and a genuine oscillator
+    * cannot fake a fixed point -- with in-place (Gauss-Seidel) evaluation a ring
+    * of two inverters "converges" to a self-consistent-looking 1/0 pair, which
+    * would be reported as stable.
++   *
++   * On success the materialised read regions are refreshed last, so a caller that
++   * reads through `inputBase` right after `settle` sees the settled values
++   * without having to ask for anything extra.
+    */
+   settle(): SettleReport {
+     const inputs: PortValue[] = [];
+     const outputs: PortValue[] = [];
+     // Start from a clean stage: a def that produced nothing for a pin (`level_input`)
+     // must not inherit a value staged by an earlier, failed sweep.
+     this.#staged.fill(undefined);
+     for (let iteration = 0; iteration < SETTLE_LIMIT; iteration += 1) {
+       for (let i = 0; i < this.#instances.length; i += 1) {
+         const inst = this.#instances[i]!;
+@@ -340,21 +466,24 @@ export class Simulation {
+       let changed = false;
+       for (let k = 0; k < this.#outputPins.length; k += 1) {
+         const value = this.#staged[k];
+         if (value === undefined) continue;
+         this.#staged[k] = undefined;
+         const pin = this.#outputPins[k]!;
+         if (this.#holds(pin.base, pin.width, value)) continue;
+         this.#table.setPort(pin.base, pin.width, value);
+         changed = true;
+       }
+-      if (!changed) return { iterations: iteration + 1, stable: true };
++      if (!changed) {
++        this.#refreshReadRegions();
++        return { iterations: iteration + 1, stable: true };
++      }
+     }
+     throw new UnstableCircuitError(
+       SETTLE_LIMIT,
+       this.#instances.map((i) => i.origin),
+     );
+   }
+ 
+   /**
+    * Applies one clock edge: every storage element samples, then the circuit
+    * settles.
+diff --git a/test/core/net.test.ts b/test/core/net.test.ts
+index 64d2187..3d619b7 100644
+--- a/test/core/net.test.ts
++++ b/test/core/net.test.ts
+@@ -1,15 +1,15 @@
+ import { describe, expect, it } from 'vitest';
+ import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
+ import { BASE_DEFS } from '../../src/core/defs/index';
+ import { createRegistry } from '../../src/core/registry';
+-import type { ComponentDef } from '../../src/core/registry';
++import type { ComponentDef, Registry } from '../../src/core/registry';
+ import { UnstableCircuitError } from '../../src/core/errors';
+ import type { PortValue } from '../../src/core/signal';
+ import { SETTLE_LIMIT, Simulation, compile, delayOf } from '../../src/core/net';
+ 
+ const registry = createRegistry(BASE_DEFS);
+ 
+ const toNumber = (v: PortValue): number =>
+   typeof v === 'number' ? v : Array.from(v).reduce((acc, byte, i) => acc + byte * 2 ** (8 * i), 0);
+ 
+ /** A NAND whose pins are addressed by name as `"<instId>.<pinId>"`. */
+@@ -272,20 +272,221 @@ describe('Simulation', () => {
+     const net = compile(g, registry);
+     const sim = new Simulation(net, registry);
+     sim.tick();
+     expect(sim.tickCount).toBe(1);
+     sim.reset();
+     expect(sim.tickCount).toBe(0);
+     expect(sim.read(net.outputBase(`${delay.id}.out`), 1)).toBe(0);
+   });
+ });
+ 
++/**
++ * A source the test drives directly through its output slot: `level_input` at an
++ * arbitrary width. `evaluate` writes nothing on purpose, so whatever the test
++ * wrote into the slot survives the settle sweep -- which is how these tests put
++ * a live, toggling signal in the slots next to a pin under test.
++ */
++function feedDef(width: number): ComponentDef {
++  return {
++    id: `feed${width}`,
++    name: { zh: '测试源', en: 'Test Feed' },
++    category: 'wide',
++    inputs: [],
++    outputs: [{ id: 'out', width }],
++    cost: 0,
++    sequential: false,
++    stateBytes: 0,
++    evaluate: () => {},
++  };
++}
++
++/** Copies its one input pin to its one output pin, bit for bit, at any width. */
++function passDef(width: number): ComponentDef {
++  return {
++    id: `pass${width}`,
++    name: { zh: '直通', en: 'Pass' },
++    category: 'wide',
++    inputs: [{ id: 'in', width }],
++    outputs: [{ id: 'out', width }],
++    cost: 1,
++    sequential: false,
++    stateBytes: 0,
++    evaluate: (i, o) => {
++      o[0] = typeof i[0] === 'number' ? i[0] : toNumber(i[0] ?? 0);
++    },
++  };
++}
++
++interface WideFixture {
++  readonly graph: Graph;
++  readonly registry: Registry;
++}
++
++/**
++ * `bit.out -> wide.in`, i.e. a 1-bit output driving an 8-bit input, with a
++ * directly driven 8-bit feed sitting in the slots right after the driver.
++ *
++ * Slot order is what makes this a reproduction rather than an arbitrary shape.
++ * Instances are allocated in document order and, within an instance, inputs
++ * before outputs, so this document gives:
++ *
++ *   `bit.in` 0, `bit.out` 1, `feed.out` 2..9, `wide.in` 10..17, `wide.out` 18..25
++ *
++ * `bit.out` therefore sits directly against the seven live bits of `feed.out`,
++ * which is exactly the layout the old read (`getPort(drive[wide.in], 8)`, eight
++ * consecutive slots from the driver) turned into silent corruption.
++ */
++function narrowDriverFixture(): WideFixture {
++  const registry = createRegistry([...BASE_DEFS, feedDef(8), passDef(1), passDef(8)]);
++  const g = emptyGraph();
++  const bit = addInstance(g, 'pass1', 0, 0, 'bit');
++  const feed = addInstance(g, 'feed8', 0, 40, 'feed');
++  const wide = addInstance(g, 'pass8', 0, 80, 'wide');
++  connect(g, { inst: bit.id, port: 'out' }, { inst: wide.id, port: 'in' });
++  return { graph: g, registry };
++}
++
++describe('wide ports', () => {
++  it('shows only the driving bit when a 1-bit output feeds an 8-bit input beside a live signal', () => {
++    // The reproduction of the silent corruption. `wide.in` is driven by one bit
++    // and is 8 bits wide, so its read must be `bit` in position 0 and zeros
++    // above -- not the seven slots that happen to follow the driver in the
++    // table, which here hold `feed`'s live bits.
++    const { graph, registry: reg } = narrowDriverFixture();
++    const net = compile(graph, reg);
++    const sim = new Simulation(net, reg);
++    const feed = net.outputBase('feed.out');
++    const bitIn = net.inputBase('bit.in');
++    const observed = net.outputBase('wide.out');
++
++    // The reproduction depends on that adjacency; assert it rather than trust
++    // the allocation order documented above.
++    expect(feed).toBe(net.outputBase('bit.out') + 1);
++
++    for (const [feedValue, bit] of [
++      [0xff, 1],
++      [0xff, 0],
++      [0x00, 1],
++      [0x00, 0],
++    ] as const) {
++      sim.reset();
++      sim.write(feed, 8, feedValue); // the neighbouring pin toggles 0xff <-> 0x00
++      sim.write(bitIn, 1, bit);
++      sim.settle();
++      expect(toNumber(sim.read(observed, 8)), `feed=${feedValue} bit=${bit}`).toBe(bit);
++    }
++  });
++
++  it('takes only the low bit when an 8-bit output drives a 1-bit input', () => {
++    const reg = createRegistry([...BASE_DEFS, feedDef(8), passDef(1)]);
++    const g = emptyGraph();
++    const feed = addInstance(g, 'feed8', 0, 0, 'feed');
++    const one = addInstance(g, 'pass1', 0, 40, 'one');
++    connect(g, { inst: feed.id, port: 'out' }, { inst: one.id, port: 'in' });
++    const net = compile(g, reg);
++    const sim = new Simulation(net, reg);
++    const feedBase = net.outputBase('feed.out');
++
++    expect(net.inputBase('one.in')).toBe(feedBase);
++    for (const value of [0x00, 0x01, 0x42, 0xab, 0xfe, 0xff]) {
++      sim.write(feedBase, 8, value);
++      sim.settle();
++      expect(toNumber(sim.read(net.outputBase('one.out'), 1)), `value=${value}`).toBe(value & 1);
++      expect(toNumber(sim.read(net.inputBase('one.in'), 1)), `value=${value}`).toBe(value & 1);
++    }
++  });
++
++  it('transfers every bit when an 8-bit output drives an 8-bit input', () => {
++    const reg = createRegistry([...BASE_DEFS, feedDef(8), passDef(8)]);
++    const g = emptyGraph();
++    const feed = addInstance(g, 'feed8', 0, 0, 'feed');
++    const wide = addInstance(g, 'pass8', 0, 40, 'wide');
++    connect(g, { inst: feed.id, port: 'out' }, { inst: wide.id, port: 'in' });
++    const net = compile(g, reg);
++    const sim = new Simulation(net, reg);
++    const feedBase = net.outputBase('feed.out');
++
++    // Equal widths are a contiguous run of the driver's own slots, so the pin
++    // reads them directly.
++    expect(net.inputBase('wide.in')).toBe(feedBase);
++    for (const value of [0x00, 0x01, 0x55, 0x80, 0xab, 0xff]) {
++      sim.write(feedBase, 8, value);
++      sim.settle();
++      expect(toNumber(sim.read(net.outputBase('wide.out'), 8)), `value=${value}`).toBe(value);
++      expect(toNumber(sim.read(net.inputBase('wide.in'), 8)), `value=${value}`).toBe(value);
++    }
++  });
++
++  it('hands back a read region that belongs to one pin and is fresh after settle', () => {
++    const { graph, registry: reg } = narrowDriverFixture();
++    const net = compile(graph, reg);
++    const sim = new Simulation(net, reg);
++    const feed = net.outputBase('feed.out');
++    const bitIn = net.inputBase('bit.in');
++    const base = net.inputBase('wide.in');
++
++    // Not the driver's base: `read(driverBase, 8)` would sweep up the seven live
++    // slots that follow it, which is the corruption this task removes.
++    expect(base).not.toBe(net.outputBase('bit.out'));
++
++    sim.write(feed, 8, 0xff);
++    sim.write(bitIn, 1, 1);
++    sim.settle();
++    expect(toNumber(sim.read(base, 8))).toBe(1); // bit 0 only, no extra call needed
++
++    sim.write(feed, 8, 0x00); // the neighbour changes; the pin does not
++    sim.settle();
++    expect(toNumber(sim.read(base, 8))).toBe(1);
++
++    sim.write(bitIn, 1, 0);
++    sim.settle();
++    expect(toNumber(sim.read(base, 8))).toBe(0); // refreshed by that settle
++    // Coherent with what the pin's own consumer sees, bit for bit.
++    expect(toNumber(sim.read(base, 8))).toBe(toNumber(sim.read(net.outputBase('wide.out'), 8)));
++  });
++
++  it('zero-extends a narrower driver into a 12-bit input', () => {
++    // Widths above 8 read back as bytes, so this covers the other branch of the
++    // gather (and of the region refresh): bits 8..11 have no driver and are 0.
++    const reg = createRegistry([...BASE_DEFS, feedDef(8), passDef(12)]);
++    const g = emptyGraph();
++    const feed = addInstance(g, 'feed8', 0, 0, 'feed');
++    const wide = addInstance(g, 'pass12', 0, 40, 'wide');
++    connect(g, { inst: feed.id, port: 'out' }, { inst: wide.id, port: 'in' });
++    const net = compile(g, reg);
++    const sim = new Simulation(net, reg);
++    const feedBase = net.outputBase('feed.out');
++
++    for (const value of [0x00, 0x01, 0xab, 0xff]) {
++      sim.write(feedBase, 8, value);
++      sim.settle();
++      expect(toNumber(sim.read(net.outputBase('wide.out'), 12)), `value=${value}`).toBe(value);
++      expect(toNumber(sim.read(net.inputBase('wide.in'), 12)), `value=${value}`).toBe(value);
++    }
++  });
++
++  it('materialises a region only for a pin whose driver is narrower', () => {
++    // Equal widths: out(8) + in(8) + out(8) pin bits and no region.
++    const same = createRegistry([...BASE_DEFS, feedDef(8), passDef(8)]);
++    const sameGraph = emptyGraph();
++    const src = addInstance(sameGraph, 'feed8', 0, 0, 'feed');
++    const dst = addInstance(sameGraph, 'pass8', 0, 40, 'wide');
++    connect(sameGraph, { inst: src.id, port: 'out' }, { inst: dst.id, port: 'in' });
++    expect(compile(sameGraph, same).slotCount).toBe(24);
++
++    // Narrower driver: the same circuit plus one 8-bit region for the wide input
++    // (2 + 8 + 16 pin bits, + 8 region bits).
++    const { graph, registry: reg } = narrowDriverFixture();
++    expect(compile(graph, reg).slotCount).toBe(34);
++  });
++});
++
+ describe('delayOf', () => {
+   it('sums gate costs along the longest path and counts sources as free', () => {
+     const g = emptyGraph();
+     const inA = addInstance(g, 'level_input', 0, 0);
+     const nand = addInstance(g, 'nand', 60, 0);
+     const not = addInstance(g, 'not', 120, 0);
+     const out = addInstance(g, 'level_output', 180, 0);
+     connect(g, { inst: inA.id, port: 'out' }, { inst: nand.id, port: 'a' });
+     connect(g, { inst: nand.id, port: 'out' }, { inst: not.id, port: 'a' });
+     connect(g, { inst: not.id, port: 'out' }, { inst: out.id, port: 'in' });

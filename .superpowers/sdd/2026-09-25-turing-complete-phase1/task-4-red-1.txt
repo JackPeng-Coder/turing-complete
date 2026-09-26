@@ -1,0 +1,512 @@
+$ vitest run "test/core/defs-wide.test.ts" "test/core/net.test.ts" "test/core/registry.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/core/registry.test.ts (26 tests | 1 failed) 22ms
+   ✓ registry (4)
+     ✓ registers every base def and can look them up 2ms
+     ✓ throws on unknown component ids 1ms
+     ✓ rejects duplicate ids 0ms
+     ✓ filters by category 1ms
+   ❯ base defs (12)
+     × marks exactly the storage elements as sequential 6ms
+     ✓ hides the level IO plumbing from the palette but keeps it registered 1ms
+     ✓ gives every def at least one output and no duplicate pin ids 2ms
+     ✓ marks sources as zero cost and gates as one 0ms
+     ✓ prices every 1-bit gate on the NAND-equivalent basis, explicitly 0ms
+     ✓ leaves gateCost to the `?? cost` fallback only where both metrics are zero 0ms
+     ✓ evaluates NAND 0ms
+     ✓ evaluates the 3-input gates 0ms
+     ✓ evaluates XOR and XNOR 0ms
+     ✓ propagates undefined inputs as zero 1ms
+     ✓ delay_line holds its value: evaluate publishes state and ignores its input 0ms
+     ✓ mem1 publishes its latched bit and ignores its inputs 0ms
+   ✓ base defs: extra coverage (5)
+     ✓ declares 1-bit pins on every def outside the wide family 1ms
+     ✓ gives every def a publisher, and sizes storage honestly 2ms
+     ✓ matches an independently written truth table for every gate 1ms
+     ✓ drives the constants and mirrors level IO 0ms
+     ✓ keeps a stored bit through a no-write edge and samples a zero 0ms
+   ✓ fields (5)
+     ✓ packs bit arrays low-bit-first 0ms
+     ✓ unpacks to bit arrays 0ms
+     ✓ extracts and inserts fields 0ms
+     ✓ rejects out-of-range inserts 0ms
+     ✓ round-trips fields in the high bits without sign leakage 0ms
+ ❯ test/core/defs-wide.test.ts (60 tests | 9 failed) 68ms
+   ❯ wide defs: the brief's contract (11)
+     ✓ declares every id with the exact pin ids and widths the brief gives 3ms
+     ✓ is reachable through the registry the way the game reaches it 2ms
+     ✓ keeps every wide def pure combinational 3ms
+     × categorizes every wide part as wide and const8 as a source 8ms
+     ✓ keeps the DELAY cost at one unit per operator, nothing for a source or a wire 1ms
+     ✓ states a NAND-equivalent gateCost for every def, explicitly 1ms
+     ✓ gives every operator more than one NAND equivalent, and no part less than its delay 1ms
+     ✓ composes each count out of the others, so the constructions are checkable 0ms
+     ✓ prices each bit-sliced cell on the same NAND basis as the registered 1-bit gate 0ms
+     ✓ scales every count with the width the generator is asked for 1ms
+     ✓ registers the whole family without a duplicate id 0ms
+   ❯ wide storage defs: the brief's contract and the decided edge rules (8)
+     × declares every storage def with the ids, pins, state and costs the brief gives 1ms
+     × is registered, and every id is one level data can spell 1ms
+     × mux8 selects a or b on sel, combinationally 0ms
+     × delay8 publishes the byte it holds and never its inputs 0ms
+     × reg8 samples d on the edge when load is high, and reset beats load 0ms
+     × counter8 counts on the edge when en is high, wraps to 0, and reset beats en 0ms
+     × ram8 writes the addressed byte on the edge and selects it on the fly 0ms
+     × ram8 keeps all 256 of its bytes, and keeps them per instance 0ms
+   ✓ wide bitwise operators (6)
+     ✓ matches a reference truth table on the boundary vectors 1ms
+     ✓ treats the 8-bit patterns as unsigned, never as negative numbers 0ms
+     ✓ evaluates NOT and its double negation 0ms
+     ✓ is its own inverse under XOR 2ms
+     ✓ relates nand8/nor8/xnor8 to their negations 0ms
+     ✓ reads an unwired input as zero 0ms
+   ✓ add8 (2)
+     ✓ adds with carry-in on the boundary vectors 0ms
+     ✓ reports bit 8 as the carry out and wraps the low eight bits 3ms
+   ✓ neg8 (2)
+     ✓ negates the boundary vectors by two's complement 0ms
+     ✓ equals (256 - a) & 0xff for every byte, and inverts itself 5ms
+   ✓ comparators (3)
+     ✓ compares unsigned patterns 0ms
+     ✓ compares signed patterns across the sign boundary 1ms
+     ✓ reports equality for every pair, and its result is a single bit 1ms
+   ✓ shifts (4)
+     ✓ shifts left, dropping bits above bit 7 0ms
+     ✓ shifts right logically, filling with zeros 0ms
+     ✓ shifts right arithmetically, replicating the sign bit 1ms
+     ✓ gives 0 for an amount of 8 or more, and matches the reference below that 5ms
+   ✓ rotates (3)
+     ✓ rotates around the byte 0ms
+     ✓ treats an amount of 8 or more as amount % 8 4ms
+     ✓ is the inverse of the other direction 1ms
+   ✓ mul8 and div8 (5)
+     ✓ multiplies, keeping the low eight bits 0ms
+     ✓ equals (a * b) & 0xff on a grid 1ms
+     ✓ divides with truncation toward zero 0ms
+     ✓ returns 0xff for division by zero, as decided, and never throws 0ms
+     ✓ divides by a non-zero divisor exactly as floor does 1ms
+   ✓ const8, switch and switch8 (3)
+     ✓ drives a constant with no inputs 0ms
+     ✓ passes a through when on is 1 and forces zero when on is 0 0ms
+     ✓ cascades: switching an already-switched value stays off 0ms
+   ✓ splitter and maker (3)
+     ✓ splits a byte into eight one-bit pins, least significant first 0ms
+     ✓ makes a byte out of eight one-bit pins 0ms
+     ✓ round-trips maker(splitter(x)) === x for every byte 3ms
+   ✓ the width generator (7)
+     ✓ defaults to eight bits 0ms
+     ✓ builds the whole family at a non-default width 1ms
+     ✓ parameterises the suffixed operators too 1ms
+     ✓ clamps a requested width into the range it documents 0ms
+     ✓ clamps before it allocates, so an absurd width cannot ask for gigabytes 0ms
+     ✓ rejects nothing silently: an unknown id is simply absent 0ms
+     ✓ is not re-counted by params.width, which widens every pin instead 2ms
+   ✓ wide defs through the kernel (3)
+     ✓ adds two level inputs and carries out of bit 8 1ms
+     ✓ carries every byte through splitter -> maker at the pin level 5ms
+     ✓ drives an 8-bit operator from 1-bit level inputs 0ms
+ ❯ test/core/net.test.ts (52 tests | 11 failed) 245ms
+   ✓ compile (10)
+     ✓ allocates one slot per bit of every pin 2ms
+     ✓ records the origin instance of every expanded instance 1ms
+     ✓ rejects invalid graphs 1ms
+     ✓ sizes the signal table for the circuit instead of the 65,536 default 130ms
+     ✓ rejects a malformed params.width (0) as a validation issue 1ms
+     ✓ rejects a malformed params.width (-1) as a validation issue 0ms
+     ✓ rejects a malformed params.width (1.5) as a validation issue 0ms
+     ✓ rejects a malformed params.width (NaN) as a validation issue 0ms
+     ✓ rejects a malformed params.width (4097) as a validation issue 0ms
+     ✓ rejects a malformed params.width (9007199254740991) as a validation issue 0ms
+   ✓ Simulation (11)
+     ✓ evaluates a NAND for every input combination 14ms
+     ✓ propagates through a chain of gates in one settle 1ms
+     ✓ treats an unwired input as zero 0ms
+     ✓ throws UnstableCircuitError for a combinational feedback loop 2ms
+     ✓ settles a delay_line held loop and publishes state on the edge 0ms
+     ✓ a delay line holds its sampled value when its input changes 0ms
+     ✓ keeps an externally driven output (level_input) through a settle 0ms
+     ✓ binds level I/O by pin name: drives a level_input, reads a level_output pin 0ms
+     ✓ settles a feedback loop that a storage element breaks 0ms
+     ✓ settles a wide pin whose read-back form differs from the written form 0ms
+     ✓ reset clears state and the tick counter 0ms
+   ❯ wide storage (14)
+     × publishes every bit of a wide register, not just the low one 4ms
+     × holds its byte between the input flip and the next clock edge (latch) 1ms
+     × clears on reset, and reset beats load on the same edge 0ms
+     × delays a byte by exactly one tick 0ms
+     × counts one step per tick, holds when en is low, and wraps to 0 at 256 0ms
+     ✓ settles a 1-bit inverting ring that a delay_line breaks, and toggles once per tick 0ms
+     × settles an 8-bit inverting ring that a delay8 breaks, and toggles the whole byte 1ms
+     ✓ throws UnstableCircuitError for the same rings with the storage element gone 2ms
+     × stores and reads back a byte at any address, 0 and 255 included 1ms
+     × is combinational on its read path and edge-triggered on its write path 0ms
+     × gives every instance its own 256 bytes 0ms
+     × reserves table capacity for a bank of 8-bit storage parts and their read regions 68ms
+     ✓ publishes a 1-bit storage def across a pin an instance widened 1ms
+     × refuses a storage def that could never publish what it holds 3ms
+   ✓ wide ports (6)
+     ✓ shows only the driving bit when a 1-bit output feeds an 8-bit input beside a live signal 1ms
+     ✓ takes only the low bit when an 8-bit output drives a 1-bit input 0ms
+     ✓ transfers every bit when an 8-bit output drives an 8-bit input 0ms
+     ✓ hands back a read region that belongs to one pin and is fresh after settle 0ms
+     ✓ zero-extends a narrower driver into a 12-bit input 0ms
+     ✓ materialises a region only for a pin whose driver is narrower 0ms
+   ✓ per-instance pin widths (7)
+     ✓ resolves a pin width from the instance over the def 0ms
+     ✓ leaves every width at the def default when the instance sets no params 0ms
+     ✓ reports an unknown pin by name and direction 0ms
+     ✓ gathers a params-wide pin per bit when its driver is narrower 0ms
+     ✓ gives a params-wide pin a coherent 8-bit region when its driver is narrower 0ms
+     ✓ reads a params-wide pin straight from an equally wide driver 0ms
+     ✓ reserves table capacity for params-derived widths and their read regions 1ms
+   ✓ delayOf (4)
+     ✓ sums gate costs along the longest path and counts sources as free 0ms
+     ✓ breaks the path at a storage element instead of counting through it 0ms
+     ✓ walks a diamond ladder in linear time instead of enumerating every path 3ms
+     ✓ terminates on a combinational loop and does not count it as depth 0ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 21 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide defs: the brief's contract > categorizes every wide part as wide and const8 as a source
+AssertionError: expected [ 'add8', 'and8', 'ashr8', …(20) ] to deeply equal [ 'add8', 'and8', 'ashr8', …(25) ]
+
+- Expected
++ Received
+
+@@ -1,25 +1,20 @@
+  [
+    "add8",
+    "and8",
+    "ashr8",
+-   "counter8",
+-   "delay8",
+    "div8",
+    "equal8",
+    "less_s",
+    "less_u",
+    "maker",
+    "mul8",
+-   "mux8",
+    "nand8",
+    "neg8",
+    "nor8",
+    "not8",
+    "or8",
+-   "ram8",
+-   "reg8",
+    "rot_l8",
+    "rot_r8",
+    "shift_l8",
+    "shift_r8",
+    "splitter",
+
+ ❯ test/core/defs-wide.test.ts:217:58
+    215|     // alongside the operators: `memory1` is phase 0's ONE-BIT memory …
+    216|     // (`delay_line`, `mem1`) and there is no `memory8`.
+    217|     expect(r.byCategory('wide').map((d) => d.id).sort()).toEqual(
+       |                                                          ^
+    218|       [...WIDE_OP_IDS, ...STORAGE_IDS].sort(),
+    219|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/21]⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide storage defs: the brief's contract and the decided edge rules > declares every storage def with the ids, pins, state and costs the brief gives
+Error: unknown component: mux8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ test/core/defs-wide.test.ts:434:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/21]⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide storage defs: the brief's contract and the decided edge rules > is registered, and every id is one level data can spell
+AssertionError: mux8: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ test/core/defs-wide.test.ts:454:29
+    452|   it('is registered, and every id is one level data can spell', () => {
+    453|     for (const id of STORAGE_IDS) {
+    454|       expect(r.has(id), id).toBe(true);
+       |                             ^
+    455|       expect(r.get(id).id, id).toBe(id);
+    456|       // Level data and the palette address defs by id, and `DefId` is…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/21]⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide storage defs: the brief's contract and the decided edge rules > mux8 selects a or b on sel, combinationally
+Error: unknown component: mux8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ test/core/defs-wide.test.ts:467:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/21]⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide storage defs: the brief's contract and the decided edge rules > delay8 publishes the byte it holds and never its inputs
+Error: unknown component: delay8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ test/core/defs-wide.test.ts:481:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/21]⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide storage defs: the brief's contract and the decided edge rules > reg8 samples d on the edge when load is high, and reset beats load
+Error: unknown component: reg8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ test/core/defs-wide.test.ts:497:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/21]⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide storage defs: the brief's contract and the decided edge rules > counter8 counts on the edge when en is high, wraps to 0, and reset beats en
+Error: unknown component: counter8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ test/core/defs-wide.test.ts:519:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/21]⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide storage defs: the brief's contract and the decided edge rules > ram8 writes the addressed byte on the edge and selects it on the fly
+Error: unknown component: ram8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ test/core/defs-wide.test.ts:544:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/21]⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide storage defs: the brief's contract and the decided edge rules > ram8 keeps all 256 of its bytes, and keeps them per instance
+Error: unknown component: ram8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ test/core/defs-wide.test.ts:565:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/21]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > publishes every bit of a wide register, not just the low one
+Error: unknown component: reg8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ storageFixture test/core/net.test.ts:352:12
+ ❯ test/core/net.test.ts:386:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/21]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > holds its byte between the input flip and the next clock edge (latch)
+Error: unknown component: reg8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ storageFixture test/core/net.test.ts:352:12
+ ❯ test/core/net.test.ts:403:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/21]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > clears on reset, and reset beats load on the same edge
+Error: unknown component: reg8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ storageFixture test/core/net.test.ts:352:12
+ ❯ test/core/net.test.ts:435:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/21]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > delays a byte by exactly one tick
+Error: unknown component: delay8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ storageFixture test/core/net.test.ts:352:12
+ ❯ test/core/net.test.ts:463:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/21]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > counts one step per tick, holds when en is low, and wraps to 0 at 256
+Error: unknown component: counter8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ storageFixture test/core/net.test.ts:352:12
+ ❯ test/core/net.test.ts:484:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/21]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > settles an 8-bit inverting ring that a delay8 breaks, and toggles the whole byte
+CircuitValidationError: circuit is invalid: unknown-def
+ ❯ compile src/core/net.ts:213:32
+    211|     (i) => i.severity === 'error',
+    212|   );
+    213|   if (errors.length > 0) throw new CircuitValidationError(errors);
+       |                                ^
+    214|
+    215|   const table = createSignalTable(capacityFor(graph, registry));
+ ❯ test/core/net.test.ts:561:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/21]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > stores and reads back a byte at any address, 0 and 255 included
+Error: unknown component: ram8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ storageFixture test/core/net.test.ts:352:12
+ ❯ test/core/net.test.ts:604:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/21]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > is combinational on its read path and edge-triggered on its write path
+Error: unknown component: ram8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ storageFixture test/core/net.test.ts:352:12
+ ❯ test/core/net.test.ts:640:37
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/21]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > gives every instance its own 256 bytes
+Error: unknown component: ram8
+ ❯ Object.get src/core/registry.ts:116:23
+    114|     get(id: string): ComponentDef {
+    115|       const def = map.get(id);
+    116|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    117|       return def;
+    118|     },
+ ❯ test/core/net.test.ts:680:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/21]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > reserves table capacity for a bank of 8-bit storage parts and their read regions
+CircuitValidationError: circuit is invalid: unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def, unknown-def
+ ❯ compile src/core/net.ts:213:32
+    211|     (i) => i.severity === 'error',
+    212|   );
+    213|   if (errors.length > 0) throw new CircuitValidationError(errors);
+       |                                ^
+    214|
+    215|   const table = createSignalTable(capacityFor(graph, registry));
+ ❯ test/core/net.test.ts:721:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/21]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > refuses a storage def that could never publish what it holds
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ test/core/net.test.ts:776:40
+    774|     const g = emptyGraph();
+    775|     addInstance(g, 'mute_store', 0, 0);
+    776|     expect(() => compile(g, withMute)).toThrow(/mute_store/);
+       |                                        ^
+    777|   });
+    778| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/21]⎯
+
+ FAIL  test/core/registry.test.ts > base defs > marks exactly the storage elements as sequential
+AssertionError: expected [ 'delay_line', 'mem1' ] to deeply equal [ 'counter8', 'delay8', …(4) ]
+
+- Expected
++ Received
+
+  [
+-   "counter8",
+-   "delay8",
+    "delay_line",
+    "mem1",
+-   "ram8",
+-   "reg8",
+  ]
+
+ ❯ test/core/registry.test.ts:48:31
+     46|     // Phase 0's two one-bit memories plus task 4's eight-bit half; `m…
+     47|     // combinational and is deliberately absent.
+     48|     expect(sequential.sort()).toEqual([
+       |                               ^
+     49|       'counter8',
+     50|       'delay8',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/21]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  21 failed | 117 passed (138)
+   Start at  01:18:47
+   Duration  573ms (tests 43%, transform 42%, import 12%, worker 3%)
+
+[ELIFECYCLE] Test failed. See above for more details.

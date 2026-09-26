@@ -1,0 +1,79 @@
+$ vitest run "test/levels/unlock-chain.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/levels/unlock-chain.test.ts (38 tests | 1 failed) 17ms
+   ✓ every chapter-2 level offers only parts it has already earned (26)
+     ✓ ch2-13-odd-number-of-signals 1ms
+     ✓ ch2-14-double-trouble 0ms
+     ✓ ch2-15-binary-racer 0ms
+     ✓ ch2-16-counting-signals 0ms
+     ✓ ch2-17-double-the-number 0ms
+     ✓ ch2-18-byte-or 0ms
+     ✓ ch2-19-byte-not 0ms
+     ✓ ch2-20-half-adder 0ms
+     ✓ ch2-21-full-adder 0ms
+     ✓ ch2-22-adding-bytes 0ms
+     ✓ ch2-23-negative-numbers 0ms
+     ✓ ch2-24-signed-negator 0ms
+     ✓ ch2-25-1-bit-decoder 0ms
+     ✓ ch2-26-3-bit-decoder 0ms
+     ✓ ch2-27-logic-engine 0ms
+     ✓ ch2-28-circular-dependency 0ms
+     ✓ ch2-29-delayed-lines 0ms
+     ✓ ch2-30-odd-ticks 0ms
+     ✓ ch2-31-bit-inverter 0ms
+     ✓ ch2-32-bit-switch 0ms
+     ✓ ch2-33-input-selector 0ms
+     ✓ ch2-34-the-bus 0ms
+     ✓ ch2-35-saving-gracefully 0ms
+     ✓ ch2-36-saving-bytes 0ms
+     ✓ ch2-37-little-box 0ms
+     ✓ ch2-38-counter 0ms
+   ❯ spec §3.3's rows and the level data agree (3)
+     ✓ reads a row for every chapter the table lists 0ms
+     × names every part a chapter-2 level hands out 5ms
+     ✓ agrees with the chapter-1 row in both directions, mem1 included 0ms
+   ✓ every part in spec §3.3's chapter-2 list is unlocked by exactly one level (6)
+     ✓ walks the spec row itself, with no repeats and nothing dropped 0ms
+     ✓ hands out every listed part at exactly one chapter-2 level, bar the ruling 0ms
+     ✓ hands ram8 out at level 28, ahead of the level that builds from it 0ms
+     ✓ unlocks switch and switch8 at level 22, ten levels before the source teaches them 0ms
+     ✓ unlocks mem1 at chapter 1 level 12, the row the spec puts it in 1ms
+     ✓ registers decoder2 and records that no level unlocks it -- the second ruling 0ms
+   ✓ every component is unlocked at or before the first level that lists it (1)
+     ✓ holds for every component any shipped level offers 0ms
+   ✓ chapter 2 is exactly 26 levels, at indices 13-38 (2)
+     ✓ has 26 levels, one per index from 13 to 38 0ms
+     ✓ is the chapter join point, in the same order, with nothing in front of it 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/unlock-chain.test.ts > spec §3.3's rows and the level data agree > names every part a chapter-2 level hands out
+AssertionError: chapter-2 rewards spec §3.3's chapter-2 row does not name: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "ram8 (rewarded by ch2-28-circular-dependency)",
++ ]
+
+ ❯ test/levels/unlock-chain.test.ts:207:82
+    205|     // file's, and a stub or empty parse must not pass this test.
+    206|     expect(rewarded.size).toBeGreaterThanOrEqual(25);
+    207|     expect(unnamed, "chapter-2 rewards spec §3.3's chapter-2 row does …
+       |                                                                                  ^
+    208|   });
+    209|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 37 passed (38)
+   Start at  04:02:01
+   Duration  384ms (transform 70%, import 20%, tests 7%, worker 4%)
+
+[ELIFECYCLE] Test failed. See above for more details.

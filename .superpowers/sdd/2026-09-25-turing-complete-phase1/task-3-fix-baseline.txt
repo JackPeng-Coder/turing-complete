@@ -1,0 +1,31 @@
+COMMAND: node pnpm.mjs test test/levels/zz-baseline-capture.test.ts   (PRE-FIX tree, commit a57908a)
+$ vitest run "test/levels/zz-baseline-capture.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+stdout | test/levels/zz-baseline-capture.test.ts > BASELINE CAPTURE (temporary) > prints every chapter-1 reference solution metric
+
+===BASELINE-BEGIN===
+ch1-01-crude-awakening passed=true stars=3 score=0 gate=0 delay=0 tick=0 threeStar={"gate":0,"delay":0,"tick":0}
+ch1-02-nand-gate passed=true stars=3 score=5 gate=1 delay=1 tick=0 threeStar={"gate":1,"delay":1,"tick":0}
+ch1-03-not-gate passed=true stars=3 score=5 gate=1 delay=1 tick=0 threeStar={"gate":1,"delay":1,"tick":0}
+ch1-04-and-gate passed=true stars=3 score=10 gate=2 delay=2 tick=0 threeStar={"gate":2,"delay":2,"tick":0}
+ch1-05-or-gate passed=true stars=3 score=11 gate=3 delay=2 tick=0 threeStar={"gate":3,"delay":2,"tick":0}
+ch1-06-nor-gate passed=true stars=3 score=10 gate=2 delay=2 tick=0 threeStar={"gate":2,"delay":2,"tick":0}
+ch1-07-always-on passed=true stars=3 score=0 gate=0 delay=0 tick=0 threeStar={"gate":0,"delay":0,"tick":0}
+ch1-08-second-tick passed=true stars=3 score=24 gate=0 delay=0 tick=3 threeStar={"gate":0,"delay":0,"tick":3}
+ch1-09-xor-gate passed=true stars=3 score=16 gate=4 delay=3 tick=0 threeStar={"gate":4,"delay":3,"tick":0}
+ch1-10-bigger-or-gate passed=true stars=3 score=10 gate=2 delay=2 tick=0 threeStar={"gate":2,"delay":2,"tick":0}
+ch1-11-bigger-and-gate passed=true stars=3 score=10 gate=2 delay=2 tick=0 threeStar={"gate":2,"delay":2,"tick":0}
+ch1-12-binary-racer passed=true stars=3 score=0 gate=0 delay=0 tick=0 threeStar={"gate":0,"delay":0,"tick":0}
+===BASELINE-END===
+
+
+ ✓ test/levels/zz-baseline-capture.test.ts (1 test) 8ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  00:43:34
+   Duration  280ms (transform 67%, import 21%, worker 6%, tests 5%)
+
+EXIT=0

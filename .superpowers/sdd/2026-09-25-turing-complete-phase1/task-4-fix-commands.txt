@@ -1,0 +1,81 @@
+FIX ROUND 1 (task 4) — command index
+Worktree: D:\Documents\turing-complete\.worktrees\phase1  (branch phase1)
+Commit under test: 740e670 (task 4) -> 171fd6c (this round, fix round 1)
+Logs live beside this file: D:\Documents\turing-complete\.superpowers\sdd\2026-09-25-turing-complete-phase1\
+
+`pnpm` is not on PATH in this session; every command below was run as
+  & "C:\Users\ME\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe" `
+    "C:\Users\ME\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs" <args>
+so "<NODE> <PNPM>" stands for that pair. Each log starts with its exact command line and, where
+the command was run to completion, ends with EXIT=<code>.
+
+# | command                                          | exit | log
+--|--------------------------------------------------|------|-------------------------------------------
+ 1 | <NODE> <PNPM> test test/core/defs-wide.test.ts test/core/net.test.ts
+   |   test/core/registry.test.ts
+   | 0 | task-4-fix-green-focused.txt
+   |   | GREEN on the amended tree: 3 files, 141 passed (registry 26, defs-wide 60, net 55).
+   |   | net went 53 -> 55: the two `pre-seeds ...` tests added for Fix 2. The other two files
+   |   | are unchanged at 60 / 26.
+ 2 | <NODE> <PNPM> test
+   | 0 | task-4-fix-green-full.txt
+   |   | Full suite: 16 files, 375 passed (373 before this round). The file ends with a second,
+   |   | identical full run made AFTER the four mutation runs were reverted, so the log shows the
+   |   | committed tree is green both before and after the mutation experiments.
+ 3 | <NODE> <PNPM> exec tsc --noEmit
+   | 0 | task-4-fix-tsc.txt
+   |   | 0 diagnostics. The log holds only the command and "# exit code: 0": tsc prints nothing on
+   |   | success.
+ 4 | <NODE> <PNPM> build
+   | 0 | task-4-fix-build.txt
+   |   | tsc --noEmit && vite build: 32 modules, dist/assets/index-DGTrH-9z.js 52.36 kB.
+ 5 | git add src/core/defs/wide.ts src/core/net.ts src/core/registry.ts
+   |   test/core/net.test.ts test/core/registry.test.ts; git commit -F task-4-fix-commit-msg.txt
+   | 0 | (this round's commit: 171fd6c, 5 files, +211/-16)
+   |   | `.superpowers/.../progress.md` (the controller's ledger) was left modified and NOT
+   |   | committed, as instructed.
+ --- MUTATION RE-RUNS, on the final tree (Fix 1) -------------------------------------------------
+   |   | Each: apply the mutation, run the focused command of row 1, run the two candidate tests
+   |   | for the 52-vs-53 count difference alone, then `git checkout --` the mutated file.
+ 6 | MUTATION A: `#publishState` reverted to the pre-task body (`state[p]` -> pin `p`, one bit per
+   |   pin). Focused run + the two candidates run alone.
+   | 1 | task-4-fix-mutation-A-legacy-publish.txt
+   |   | 2 failed | 139 passed (141). The two failures are ONLY the new tests: "pre-seeds the held
+   |   | byte ... after a tick" (expected 165, got 0) and "pre-seeds a storage output whose zeroed
+   |   | state publishes a 1 ... reset()" (expected 1, got 0). The old log for this same mutation
+   |   | was 138 passed, exit 0 -- that is what Fix 2 closed. Both count-difference candidates
+   |   | pass alone under A (EXIT=0 each).
+ 7 | MUTATION B: `publishByte` mirrors its first input (`o[0] = toUint(_i[0], W)`) instead of
+   |   publishing `state[0]` -- the phase-0 wire failure mode, affecting delay8/reg8/counter8.
+   | 1 | task-4-fix-mutation-B-mirroring-publish.txt
+   |   | 9 failed | 132 passed (141): 3 in defs-wide (delay8/reg8/counter8 publish) and 6 in
+   |   | net. The old log had 8 failures; the ninth is the new "pre-seeds the held byte ...
+   |   | after a tick" test, which under B fails at its EARLIER "no edge yet" assertion (a
+   |   | mirroring delay publishes its input on every settle), not at the pre-seed assertion.
+   |   | Both count-difference candidates pass alone under B (EXIT=0 each).
+ 8 | MUTATION C: `ram8.evaluate` publishes `d` (`o[0] = toUint(i[0], W)`) instead of the byte
+   |   `addr` selects -- the one input read the GC5 carve-out does NOT sanction.
+   | 1 | task-4-fix-mutation-C-ram8-mirrors-d.txt
+   |   | 4 failed | 137 passed (141): 2 in defs-wide (ram8 select-on-the-fly, 256 bytes) and 2 in
+   |   | net (read-back at any address, combinational read / edge-triggered write). Identical to
+   |   | the old log's 4. Both candidates pass alone under C (EXIT=0 each).
+ 9 | MUTATION D (extra, not one of the three): `#publishState` deleted at BOTH call sites.
+   | 1 | task-4-fix-mutation-D-pass-deleted.txt
+   |   | 2 failed | 139 passed (141) -- exactly the two new tests, nothing else. This is the
+   |   | "delete the pass" option the controller offered, measured: the pass is now pinned by a
+   |   | red test and is no longer removable unnoticed.
+10 | <NODE> <PNPM> test   (after all four mutations were reverted)
+   | 0 | task-4-fix-green-full.txt (second section of that file)
+   |   | 375 passed again, `git status` shows only the controller's progress.md modified.
+
+Count reconciliation (Fix 1), settled with evidence rather than assertion: the single test that
+differs between the old "138 / net 52" logs and the final tree is
+`test/core/net.test.ts > wide storage > publishes a multi-byte storage def through the same path`
+(the 12-bit `reg12` holder with two state bytes). Proof is the old logs themselves: the four
+pre-commit logs covering the 52-test tree (task-4-red-1, task-4-red-2, task-4-mutation-B,
+task-4-mutation-C) are verbose -- 129..157 per-test lines each -- and "multi-byte" occurs ZERO
+times in all four, while "publishes a 1-bit storage def across a pin an instance widened" occurs
+exactly once in each. So the review's other candidate was already in the 52-test tree, and the
+extra test is the 12-bit one. It is indifferent to A, B and C (proved by running it alone under
+each mutation, in rows 6-8), which is why its absence changed none of the three verdicts -- but the
+count mismatch in the old report is now explained and named instead of left standing.

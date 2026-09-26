@@ -1,0 +1,17 @@
+ch1-01-crude-awakening: const_on,const_off,level_input,level_output
+ch1-02-nand-gate: nand,level_input,level_output
+ch1-03-not-gate: nand,level_input,level_output
+ch1-04-and-gate: nand,not,level_input,level_output
+ch1-05-or-gate: nand,not,and,level_input,level_output
+ch1-06-nor-gate: nand,not,and,or,level_input,level_output
+ch1-07-always-on: const_on,level_input,level_output
+ch1-08-second-tick: const_on,delay_line,level_input,level_output
+ch1-09-xor-gate: nand,not,and,or,const_on,delay_line,and3,level_input,level_output
+ch1-10-bigger-or-gate: nand,not,and,or,const_on,delay_line,and3,xor,level_input,level_output
+ch1-11-bigger-and-gate: nand,not,and,or,const_on,delay_line,and3,xor,or3,level_input,level_output
+ch1-12-binary-racer: nand,not,and,or,const_on,delay_line,and3,xor,or3,xnor,level_input,level_output
+ch2-13-odd-number-of-signals: nand,not,and,or,nor,xor,xnor,and3,or3,const_on,const_off,delay_line,splitter,maker,const8,level_input,level_output
+ch2-14-double-trouble: nand,not,and,or,nor,xor,xnor,and3,or3,const_on,const_off,delay_line,level_input,level_output
+ch2-15-binary-racer: nand,not,and,or,nor,xor,xnor,and3,or3,const_on,const_off,delay_line,splitter,maker,const8,less_u,level_input,level_output
+ch2-16-counting-signals: nand,not,and,or,nor,xor,xnor,and3,or3,const_on,const_off,delay_line,splitter,maker,const8,less_u,equal8,level_input,level_output
+ch2-17-double-the-number: nand,not,and,or,nor,xor,xnor,and3,or3,const_on,const_off,delay_line,splitter,maker,const8,less_u,equal8,add8,mul8,level_input,level_output

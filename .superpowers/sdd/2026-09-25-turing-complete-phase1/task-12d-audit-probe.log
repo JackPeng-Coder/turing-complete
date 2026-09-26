@@ -1,0 +1,32 @@
+=== fields.ts:16,29 -- `width >= 32 ? 0xffff_ffff : (1 << width) - 1` ===
+width 30: mask literal = 1073741823  (as int32 1073741823, unsigned 1073741823)
+  extractField(2**30-1, 0, 30) = 1073741823
+  insertField(0, 0, 30, 0) = 0
+  insertField(0, 0, 30, 1) = 1
+  insertField(0, 0, 30, 536870912) = 536870912
+  insertField(0, 0, 30, 1073741823) = 1073741823
+width 31: mask literal = -2147483649  (as int32 2147483647, unsigned 2147483647)
+  extractField(2**31-1, 0, 31) = 2147483647
+  insertField(0, 0, 31, 0) = threw RangeError: field 0 out of range for width 31
+  insertField(0, 0, 31, 1) = threw RangeError: field 1 out of range for width 31
+  insertField(0, 0, 31, 1073741824) = threw RangeError: field 1073741824 out of range for width 31
+  insertField(0, 0, 31, 2147483647) = threw RangeError: field 2147483647 out of range for width 31
+width 32: mask literal = 4294967295  (as int32 -1, unsigned 4294967295)
+  extractField(2**32-1, 0, 32) = -1
+  insertField(0, 0, 32, 0) = 0
+  insertField(0, 0, 32, 1) = 1
+  insertField(0, 0, 32, 2147483648) = 2147483648
+  insertField(0, 0, 32, 4294967295) = 4294967295
+
+=== signal.ts -- the number writer carries 32 bits (`(v >>> i) & 1`) ===
+(2**32 >>> 32) & 1 = 0  <- bit 32 of ANY number is 0
+setPort(base, 33, 2**32) number branch writes 0 set bits
+  so it would stage 0, not 4294967296
+
+=== signal.ts:20 (the fix) and the `width >= 32` arm, through the table ===
+setPort(31, 2**31 - 1) accepted; getPort = 255,255,255,127
+setPort(31, 2**31) threw: value 2147483648 does not fit a 31-bit port width
+setPort(32, -1) accepted today (the arm omits the sign check); getPort = 255,255,255,255
+width 32: 4294967295 accepted; 4294967296 threw (value 4294967296 does not fit a 32-bit port width)
+width 33: 4294967295 accepted; 4294967296 threw (value 4294967296 does not fit a 33-bit port width)
+width 64: 4294967295 accepted; 4294967296 threw (value 4294967296 does not fit a 64-bit port width)

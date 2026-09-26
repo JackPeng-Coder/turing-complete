@@ -1,0 +1,3 @@
+$ pnpm exec tsc --noEmit
+tsc printed no diagnostics (no errors, no warnings).
+exit code: 0

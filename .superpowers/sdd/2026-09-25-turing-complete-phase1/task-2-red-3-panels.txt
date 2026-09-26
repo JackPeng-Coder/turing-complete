@@ -1,0 +1,144 @@
+$ vitest run "test/ui/panels.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/ui/panels.test.ts (22 tests | 7 failed) 46ms
+   ✓ palette panel (3)
+     ✓ offers nothing but the starter components while nothing is unlocked 7ms
+     ✓ offers a part once its unlocking level is passed 2ms
+     ✓ reports the picked part id, not its label 1ms
+   ✓ truth table panel (2)
+     ✓ reports a pass with the three metrics 8ms
+     ✓ lists failing rows with expected and actual values 3ms
+   ✓ shell bar (2)
+     ✓ shows the level name and score once graded 2ms
+     ✓ offers a way back to the chapter map 3ms
+   ❯ level io placement (7)
+     × names the single level output OUT 2ms
+     × hands out one level input per declared pin, then stops naming them 1ms
+     × names the four outputs of the binary racer in pin order 0ms
+     × leaves ordinary gates to the graph id allocator 0ms
+     × makes level 1 pass with two palette placements and one wire 0ms
+     × carries each level pin width into the placement 0ms
+     × writes that width into params when the part is dropped on the board 5ms
+   ✓ narrative coverage (3)
+     ✓ writes dedicated text for every chapter 1 level 1ms
+     ✓ falls back to generic text for a level with no narrative yet 0ms
+     ✓ has both locales for every chapter 1 level, before and after 0ms
+   ✓ chapter map (5)
+     ✓ shows one tile per level and disables the ones still locked 3ms
+     ✓ marks the level that is open, and only that one 2ms
+     ✓ shows the stars of a passed level and unlocks its successor 1ms
+     ✓ reports the selected level id and ignores clicks on locked tiles 1ms
+     ✓ re-renders when progress changes 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/ui/panels.test.ts > level io placement > names the single level output OUT
+TypeError: levelIoPlacement is not a function
+ ❯ test/ui/panels.test.ts:168:12
+    166|   it('names the single level output OUT', () => {
+    167|     const level = getLevel('ch1-01-crude-awakening');
+    168|     expect(levelIoPlacement(level, emptyGraph(level.id), 'level_output…
+       |            ^
+    169|   });
+    170|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  test/ui/panels.test.ts > level io placement > hands out one level input per declared pin, then stops naming them
+TypeError: levelIoPlacement is not a function
+ ❯ test/ui/panels.test.ts:174:12
+    172|     const level = getLevel('ch1-02-nand-gate');
+    173|     const g = emptyGraph(level.id);
+    174|     expect(levelIoPlacement(level, g, 'level_input')?.id).toBe('IN_a');
+       |            ^
+    175|     addInstance(g, 'level_input', 0, 0, 'IN_a');
+    176|     expect(levelIoPlacement(level, g, 'level_input')?.id).toBe('IN_b');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  test/ui/panels.test.ts > level io placement > names the four outputs of the binary racer in pin order
+TypeError: levelIoPlacement is not a function
+ ❯ test/ui/panels.test.ts:187:18
+    185|     const ids: string[] = [];
+    186|     for (let i = 0; i < 4; i += 1) {
+    187|       const id = levelIoPlacement(level, g, 'level_output')?.id;
+       |                  ^
+    188|       expect(id).toBeDefined();
+    189|       ids.push(id!);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  test/ui/panels.test.ts > level io placement > leaves ordinary gates to the graph id allocator
+TypeError: levelIoPlacement is not a function
+ ❯ test/ui/panels.test.ts:197:12
+    195|   it('leaves ordinary gates to the graph id allocator', () => {
+    196|     const level = getLevel('ch1-04-and-gate');
+    197|     expect(levelIoPlacement(level, emptyGraph(level.id), 'nand')).toBe…
+       |            ^
+    198|   });
+    199|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  test/ui/panels.test.ts > level io placement > makes level 1 pass with two palette placements and one wire
+TypeError: levelIoPlacement is not a function
+ ❯ test/ui/panels.test.ts:204:57
+    202|     const g = emptyGraph(level.id);
+    203|     const source = addInstance(g, 'const_on', 0, 0);
+    204|     const sink = addInstance(g, 'level_output', 128, 0, levelIoPlaceme…
+       |                                                         ^
+    205|     connect(g, { inst: source.id, port: 'out' }, { inst: sink.id, port…
+    206|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  test/ui/panels.test.ts > level io placement > carries each level pin width into the placement
+TypeError: levelIoPlacement is not a function
+ ❯ test/ui/panels.test.ts:231:12
+    229|   it('carries each level pin width into the placement', () => {
+    230|     const level = wideLevel();
+    231|     expect(levelIoPlacement(level, emptyGraph(level.id), 'level_input'…
+       |            ^
+    232|       id: 'IN_a',
+    233|       width: 8,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  test/ui/panels.test.ts > level io placement > writes that width into params when the part is dropped on the board
+AssertionError: expected [ [ 'IN_a', undefined ], …(1) ] to deeply equal [ [ 'IN_a', 8 ], [ 'OUT', 8 ] ]
+
+- Expected
++ Received
+
+  [
+    [
+      "IN_a",
+-     8,
++     undefined,
+    ],
+    [
+      "OUT",
+-     8,
++     undefined,
+    ],
+  ]
+
+ ❯ test/ui/panels.test.ts:270:85
+    268|     }
+    269|
+    270|     expect(store.get().graph.instances.map((inst) => [inst.id, inst.pa…
+       |                                                                                     ^
+    271|       ['IN_a', 8],
+    272|       ['OUT', 8],
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 15 passed (22)
+   Start at  00:23:06
+   Duration  1.19s (environment 74%, transform 17%, tests 4%, import 4%, worker 1%)
+
+[ELIFECYCLE] Test failed. See above for more details.

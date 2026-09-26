@@ -1,0 +1,765 @@
+$ vitest run "test/levels/ch2-batch4.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/levels/ch2-batch4.test.ts (125 tests | 5 failed) 179ms
+   ✓ chapter 2, levels 28-38 (20)
+     ✓ exposes eleven chapter-2 levels with the briefed indices 2ms
+     ✓ uses the ch2-<index>-<slug> id convention 0ms
+     ✓ shapes every level exactly as the brief fixes it 1ms
+     ✓ uses the checker kind the brief fixes for each level 0ms
+     ✓ names each level in both languages 1ms
+     ✓ gates every part behind a component unlocked at or before it 5ms
+     ✓ offers nothing from a later level 4ms
+     ✓ gives every level a check with something to compare 1ms
+     ✓ hands out the parts the brief assigns to each level 0ms
+     ✓ holds its own rewards back where an eight-bit part cannot attach 1ms
+     ✓ offers the parts its own lesson needs 1ms
+     ✓ states the two four-row truth tables the brief fixes 0ms
+     ✓ states level 31 as a conditional inversion 0ms
+     ✓ states level 32 as a conditional pass 0ms
+     ✓ states level 34 as a four-row table over whole bytes 0ms
+     ✓ states the selector as a fixed seed and 256 rounds 0ms
+     ✓ tells the player level 34 is a selector because the engine forbids a bus 0ms
+     ✓ tells the player level 37 means all 256 bytes, and says how 0ms
+     ✓ gives level 38 a script that walks a whole byte and wraps 3ms
+     ✓ withholds the one drop-in that would answer level 38 in a single part 0ms
+   ✓ the script levels hold a value across edges, not just within one (5)
+     ✓ ch2-28-circular-dependency re-reads at a tick it has already reached 0ms
+     ✓ ch2-29-delayed-lines re-reads at a tick it has already reached 0ms
+     ✓ ch2-35-saving-gracefully re-reads at a tick it has already reached 0ms
+     ✓ ch2-36-saving-bytes re-reads at a tick it has already reached 0ms
+     ✓ gives each of those levels a run of consecutive ticks, not one sampled tick 0ms
+   ✓ level 30's periodicity is asserted across many ticks (4)
+     ✓ walks sixteen consecutive enabled ticks that alternate on every one 0ms
+     ✓ freezes the output on the four ticks once enable drops 0ms
+     ✓ resumes the beat from the held value when enable comes back 0ms
+     ✓ keeps level 30's second script held low for its whole run 0ms
+   ✓ level 37's check covers the whole address range (2)
+     ✓ writes 256 distinct bytes into the 256 addresses, one edge each 6ms
+     ✓ reads every address back with load low and a different byte on d 8ms
+   ❯ every level carries its sourced-vs-authored data comment (16)
+     ✓ ch2-28-circular-dependency 0ms
+     ✓ ch2-29-delayed-lines 0ms
+     ✓ ch2-30-odd-ticks 0ms
+     ✓ ch2-31-bit-inverter 0ms
+     ✓ ch2-32-bit-switch 0ms
+     ✓ ch2-33-input-selector 0ms
+     ✓ ch2-34-the-bus 0ms
+     ✓ ch2-35-saving-gracefully 0ms
+     ✓ ch2-36-saving-bytes 0ms
+     ✓ ch2-37-little-box 0ms
+     ✓ ch2-38-counter 0ms
+     × records that level 30 asserts periodicity, and why one tick would not 8ms
+     × records that level 34 changes the source level's kind, and why 4ms
+     ✓ records level 37's definition of 装满, because the source has none 0ms
+     ✓ records level 38's achievement without turning it into a pass condition 0ms
+     × records the script tick semantics that decide how these levels are authored 2ms
+   ✓ reference solutions pass with three stars (11)
+     ✓ ch2-28-circular-dependency 4ms
+     ✓ ch2-29-delayed-lines 1ms
+     ✓ ch2-30-odd-ticks 1ms
+     ✓ ch2-31-bit-inverter 0ms
+     ✓ ch2-32-bit-switch 0ms
+     ✓ ch2-33-input-selector 3ms
+     ✓ ch2-34-the-bus 0ms
+     ✓ ch2-35-saving-gracefully 0ms
+     ✓ ch2-36-saving-bytes 0ms
+     ✓ ch2-37-little-box 5ms
+     ✓ ch2-38-counter 13ms
+   ✓ three-star targets are the reference solutions own metrics (11)
+     ✓ ch2-28-circular-dependency 0ms
+     ✓ ch2-29-delayed-lines 0ms
+     ✓ ch2-30-odd-ticks 0ms
+     ✓ ch2-31-bit-inverter 0ms
+     ✓ ch2-32-bit-switch 0ms
+     ✓ ch2-33-input-selector 1ms
+     ✓ ch2-34-the-bus 0ms
+     ✓ ch2-35-saving-gracefully 0ms
+     ✓ ch2-36-saving-bytes 0ms
+     ✓ ch2-37-little-box 3ms
+     ✓ ch2-38-counter 8ms
+   ✓ reference solutions are buildable from the palette they are graded against (11)
+     ✓ ch2-28-circular-dependency 0ms
+     ✓ ch2-29-delayed-lines 0ms
+     ✓ ch2-30-odd-ticks 0ms
+     ✓ ch2-31-bit-inverter 0ms
+     ✓ ch2-32-bit-switch 0ms
+     ✓ ch2-33-input-selector 0ms
+     ✓ ch2-34-the-bus 0ms
+     ✓ ch2-35-saving-gracefully 0ms
+     ✓ ch2-36-saving-bytes 0ms
+     ✓ ch2-37-little-box 0ms
+     ✓ ch2-38-counter 0ms
+   ✓ level 28 asserts both sides of the loop (5)
+     ✓ settles its reference, which really does contain a feedback loop 2ms
+     ✓ throws UnstableCircuitError on a cross-coupled NOR latch with no storage in it 4ms
+     ✓ throws UnstableCircuitError on a NOT feeding itself 1ms
+     ✓ throws UnstableCircuitError on two NOTs in a ring 1ms
+     ✓ accepts the packaged latch the palette withholds, and says it is cheaper 0ms
+   ✓ level 33's 256 rounds exercise both select values (3)
+     ✓ draws both sel values many times over, in the same sequence every run 5ms
+     ✓ grades the expectation function the brief states, on hand-picked vectors 0ms
+     ✓ names the round and the vector the unselected line fails on 0ms
+   ✓ plausible wrong circuits fail (18)
+     ✓ ch2-28-circular-dependency 1ms
+     ✓ ch2-29-delayed-lines 0ms
+     ✓ ch2-30-odd-ticks 0ms
+     ✓ ch2-31-bit-inverter 0ms
+     ✓ ch2-32-bit-switch 0ms
+     ✓ ch2-33-input-selector 0ms
+     ✓ ch2-34-the-bus 0ms
+     ✓ ch2-35-saving-gracefully 0ms
+     ✓ ch2-36-saving-bytes 0ms
+     ✓ ch2-37-little-box 4ms
+     ✓ ch2-38-counter 10ms
+     ✓ fails the ring on `unstable` and names no tick, because nothing settled 1ms
+     ✓ fails the free-running oscillator on the first held tick, not on one beat 0ms
+     ✓ fails the clock that never ticks on the very first beat 0ms
+     ✓ fails the wrong delay on the tick it is one edge short at 0ms
+     ✓ fails the register that ignores the address on the first read-back 2ms
+     ✓ fails the counter with no reset on the first edge the level resets on 9ms
+     ✓ fails the always-loading latch on the first edge load is low on 0ms
+   ✓ an empty circuit fails every level instead of throwing (11)
+     ✓ ch2-28-circular-dependency 1ms
+     ✓ ch2-29-delayed-lines 0ms
+     ✓ ch2-30-odd-ticks 0ms
+     ✓ ch2-31-bit-inverter 0ms
+     ✓ ch2-32-bit-switch 0ms
+     ✓ ch2-33-input-selector 0ms
+     ✓ ch2-34-the-bus 0ms
+     ✓ ch2-35-saving-gracefully 0ms
+     ✓ ch2-36-saving-bytes 0ms
+     ✓ ch2-37-little-box 1ms
+     ✓ ch2-38-counter 0ms
+   ✓ the storage levels tie the constructions they measure (5)
+     ✓ level 29 accepts the register and the eight delay lines at the same price 1ms
+     ✓ level 36 accepts eight 1-bit memories for the byte register 1ms
+     ✓ level 35 accepts the hand-built loop, for one star 0ms
+     ✓ level 32 accepts the Switch part it is named after, at the AND price 0ms
+     ✓ level 38 measures the packaged counter the palette withholds 1ms
+   ❯ the targets separate the constructions they were measured against (3)
+     × level 31: XNOR is correct and costs one NAND equivalent more than one star 3ms
+     × level 33 and 34: the gate-built selector is one gate over and two units deeper 21ms
+     ✓ level 38: the byte adder counts too, for 72 gates and one unit of delay 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/ch2-batch4.test.ts > every level carries its sourced-vs-authored data comment > records that level 30 asserts periodicity, and why one tick would not
+AssertionError: expected '\n   * ch2-30-odd-ticks -- Odd Ticks …' to contain '周期'
+
+- Expected
++ Received
+
+- 周期
++
++    * ch2-30-odd-ticks -- Odd Ticks / 奇变偶不变
++    *
++    * SOURCED: the name in both languages, its position (30th), and the concept,
++    * which is the whole of what the source says: '构建振荡电路（时钟信号发生器）' --
++    * build an oscillating circuit, a clock-signal generator. It gives NO period,
++    * NO duty cycle and NO rule for what a disabled clock does.
++    *
++    * AUTHORED, and everything computable here is authored because of that: the
++    * `enable:1 -> out:1` shape; the period (two ticks: high for one, low for the
++    * next); the rule that `enable` low HOLDS the output rather than clearing it
++    * (nothing in the source gates the clock at all, and "hold" is what makes a
++    * clock source stoppable and restartable without losing its phase); the
++    * sixteen-tick alternating run, the four held ticks and the four resumed ones
++    * the first script states, and the eight held-low ticks the second one states;
++    * the measured target; and the palette.
++    *
++    * PERIODICITY IS THE ASSERTION, AND ONE TICK WOULD PROVE NOTHING. A single
++    * "tick 1 is high" would be satisfied by a wire to the rail; what the check
++    * states is a regular alternation across sixteen consecutive ticks -- eight
++    * whole periods, every consecutive pair differing -- followed by four ticks
++    * that must all read the value the last enabled tick left, and four more that
++    * resume the beat from it. The test file measures that shape out of the check
++    * data and grades three circuits against it: the reference passes, a clock that
++    * never ticks fails at tick 1, and an UNGATED oscillator -- one that flips
++    * whatever `enable` says -- satisfies all sixteen beats and fails at tick 16,
++    * the first held tick, with `expected 1, actual 0`.
++    *
++    * `out XOR enable` IS BOTH HALVES IN ONE GATE: XOR with 1 inverts (the beat)
++    * and XOR with 0 keeps (the hold), and the enable is the gate. The reference is
++    * that XOR plus a 1-Bit Memory whose `set` is tied high so it samples every
++    * edge -- 4 NAND equivalents on a path one delay unit deep, measured. `mem1` is
++    * offered here although level 28 withholds it: the level's answer is the XOR
++    * and the storage together, so neither part answers it alone.
++    
+
+ ❯ test/levels/ch2-batch4.test.ts:802:17
+    800|     const l30 = comments.get('ch2-30-odd-ticks') ?? '';
+    801|     expect(l30).toContain('构建振荡电路（时钟信号发生器）');
+    802|     expect(l30).toContain('周期');
+       |                 ^
+    803|     expect(l30).toContain('periodicity');
+    804|     // The source gives no period, no duty cycle and no gating rule; t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  test/levels/ch2-batch4.test.ts > every level carries its sourced-vs-authored data comment > records that level 34 changes the source level's kind, and why
+AssertionError: expected '\n   * ch2-34-the-bus -- The bus / 总线…' to contain '多驱动仲裁'
+
+- Expected
++ Received
+
+- 多驱动仲裁
++
++    * ch2-34-the-bus -- The bus / 总线
++    *
++    * SOURCED: the name in both languages, its position (34th), and the source's
++    * concept, which is one line and nothing else: '共享数据传输线路的概念' -- the
++    * idea of a data line that several sources share. No ports, no widths, no
++    * arbitration rule, no pass condition, no target and no reward.
++    *
++    * AUTHORED, AND THE FIRST THING IT RECORDS IS A CHANGE OF KIND. The source's
++    * concept is not computable as written in this engine, and not because this
++    * replica skipped it: spec 3.1 forbids a bus protocol -- '不做总线协议（多驱动
++    * 仲裁）' -- `validateGraph` reports a second wire on one input pin as a
++    * `multiple-drivers` ERROR, and nothing in the kernel resolves which of several
++    * drivers owns a line. A literal shared/tri-state bus is therefore
++    * unimplementable BY DESIGN. The level is reframed as the bus's other half:
++    * exactly one driver is active at a time, so `out` equals the line `sel`
++    * selects. In other words this level teaches driver selection, and its brief
++    * tells the player the same thing in both languages rather than pretending the
++    * source's line is a circuit spec. This is one of the three places in this
++    * phase where a level's kind knowingly changes, and it is recorded as such.
++    *
++    * AUTHORED (the rest): the `a:8 b:8 sel:1 -> out:8` shape; the four-row table
++    * and its vectors; the measured target; and the palette.
++    *
++    * THE TABLE IS FOUR ROWS BY THE BRIEF'S DECISION, not for want of a generator:
++    * this level states the RULE at a scale a reader can check by eye, and the
++    * byte-wide coverage is level 33's fuzz check. Both `sel` values appear on the
++    * same pair of operands (so the table separates "the selected line" from
++    * "always the first" and "always the second"), and the two operand pairs are
++    * asymmetric byte patterns, so a circuit that shuffled bits within the byte
++    * would fail one of the four.
++    *
++    * THE FUNCTION IS LEVEL 33'S, WHICH IS THE BRIEF'S OWN TABLE RATHER THAN A
++    * SLIP: one shape, one behaviour, two frames -- 33 is the byte selector graded
++    * by 256 random vectors, 34 is the shared line graded by a four-row truth
++    * table. (Batch 1 recorded the same coincidence for levels 15 and 16.) The
++    * reference is `mux8`, unlocked by level 33 and offered here, and it measures
++    * exactly the metrics level 33's target states, because it is the same circuit.
++    
+
+ ❯ test/levels/ch2-batch4.test.ts:816:17
+    814|     const l34 = comments.get('ch2-34-the-bus') ?? '';
+    815|     expect(l34).toContain('共享数据传输线路的概念');
+    816|     expect(l34).toContain('多驱动仲裁');
+       |                 ^
+    817|     expect(l34).toContain('3.1');
+    818|     expect(l34).toContain('kind');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  test/levels/ch2-batch4.test.ts > every level carries its sourced-vs-authored data comment > records the script tick semantics that decide how these levels are authored
+AssertionError: expected 'import type { LevelSpec, ScriptStep, …' to contain 'same tick'
+
+- Expected
++ Received
+
+- same tick
++ import type { LevelSpec, ScriptStep, TruthRow } from '../../spec';
++ // `LevelIo` -- the pin shape -- is `tables.ts`'s; `checks.ts` exports an
++ // unrelated runtime interface of the same name (the bound simulation), so the
++ // two must not be confused.
++ import { truthTable, type LevelIo } from '../../tables';
++
++ /**
++  * Chapter 2, levels 28-38: the storage and timing half of the chapter -- the
++  * latch, the delay, the clock source, the selector, the register, the RAM and
++  * the counter. It is the first chapter-2 batch the `script` checker carries.
++  *
++  * WHAT THE SOURCE FIXES, AND WHAT IT DOES NOT. As in batches 1-3: the
++  * compendium gives each of these levels exactly three things -- its name (English
++  * and Chinese), its place in the chapter, and one line of teaching concept. It
++  * gives no ports, no widths, no pass conditions, no targets and no rewards.
++  * Everything else below is this replica's design, derived from the name and that
++  * one line -- so every level carries a data comment split into `SOURCED` and
++  * `AUTHORED`, and `test/levels/ch2-batch4.test.ts` fails if either marker is
++  * missing. No number in this file may be presented as the source's own.
++  *
++  * THE `script` CHECKER'S TICK SEMANTICS ARE LOAD-BEARING, and they are not the
++  * obvious reading -- every script below is written to them. `runChecks` walks a
++  * check's steps in tick order, and for each step it writes the step's inputs and
++  * calls `settle()` BEFORE it advances the clock to that step's tick
++  * (`levels/checks.ts`, the script branch: `while (io.sim.tickCount < step.tick)
++  * io.tick()`). Two consequences:
++  *
++  *  * `tick` is an ABSOLUTE target, and the edges a step runs are the difference
++  *    from the previous step's tick. A step at tick 0 runs NO edge at all, so its
++  *    `expect` reads the post-`reset` state -- which is why every walk below
++  *    starts with a tick-0 step and starts writing one tick in.
++  *  * a step's inputs drive the edges that REACH that step's tick, so an `expect`
++  *    at tick T reads the value the edge into T just sampled. A delay line
++  *    therefore reads exactly like a wire while the input changes at every step,
++  *    and the only way a script can show that a value is HELD is a second step at
++  *    the SAME tick: no edge runs, the inputs change, and the OLD value must
++  *    still be on the output. Levels 28, 29, 35, 36 and 38 each carry such a
++  *    pair, and the test file measures that they do -- a wire, a two-tick delay
++  *    and a register that ignores its load enable all fail on exactly those
++  *    steps.
++  *
++  * DIVIDING THE WORK WITH THE KERNEL, since a level is pure data (Global
++  * Constraint 7) and cannot ask for either of these itself:
++  *
++  *  * STABILITY IS AN OUTCOME OF `settle()`, NOT A CHECK KIND. A combinational
++  *    loop exhausts `SETTLE_LIMIT` and raises `UnstableCircuitError`, which
++  *    `runChecks` turns into an `unstable` failure; a loop broken by a storage
++  *    element settles. Level 28 is the level about that, and it says so in its
++  *    brief, because there is no `stable` check to author.
++  *  * PERIODICITY IS A PROPERTY OF AN EXPECTATION SEQUENCE, not of one tick.
++  *    Level 30's check asserts sixteen alternating ticks and four held ones; a
++  *    check that asserted a single tick would pass a circuit that was simply
++  *    stuck high.
++  *
++  * THREE THINGS THIS BATCH OWES A READER, and each says so in its own level
++  * comment rather than only here:
++  *
++  *  * LEVEL 30 HAS NO COMPUTABLE SPEC IN THE SOURCE AT ALL -- "构建振荡电路
++  *    （时钟信号发生器）" gives no period, no duty cycle and no gating rule -- so
++  *    the period, the hold-when-disabled rule and the sixteen-tick run are this
++  *    replica's design, and the check's assertion of them is the level.
++  *  * LEVEL 34 CHANGES THE SOURCE LEVEL'S KIND. The source says only "共享数据
++  *    传输线路的概念" and spec 3.1 forbids a bus protocol ("不做总线协议（多驱动
++  *    仲裁）"), so a literal shared/tri-state bus is unimplementable by design in
++  *    this engine; the level teaches driver selection instead, and both its
++  *    comment and its brief say so plainly.
++  *  * LEVEL 37 HAS AN AUTHORED DEFINITION OF 装满. The source gives one line and
++  *    no capacity, no address width and no definition of "full"; this replica
++  *    defines it as all 256 bytes of a `ram8` being addressable and writable with
++  *    every address reading back what was written, states that definition in the
++  *    brief, and asserts it over the whole range.
++  *  * LEVEL 38 CARRIES THE SOURCE'S ACHIEVEMENT, as a record rather than a pass
++  *    condition: "成就：≤ 65 个门". See that level's comment for the mapping and
++  *    for why 65 is not this level's `threeStar.gate`.
++  *
++  * THE PALETTE RULE, inherited from batch 2 and stated once more because this
++  * batch uses it twice: a level offers the parts unlocked at or before it whose
++  * pins can attach to something on it, plus its own rewards, MINUS any part that
++  * is not its own reward and would answer the level by itself. Level 28 withholds
++  * `mem1` (its pins ARE the level's pins, and it would hide the loop the level
++  * teaches) and level 38 withholds `counter8` (the same, one drop-in counter).
++  * Both are measured in the test file, neither is listed anywhere it would answer
++  * the level, and both comments say which rule is being applied. The "plus its own
++  * rewards" half is bounded too: a level lists its own rewards only where those
++  * pins can ATTACH, which is why level 28 -- one bit wide throughout -- hands out
++  * `ram8` without listing it (batch 1's level-14 reason), exactly as chapter 1's
++  * capstone rewards `mem1` without listing it.
++  *
++  * STORAGE IS FREE ON BOTH METRICS BY RULING, and that decides what several
++  * targets in this batch can be. `delay8`, `reg8`, `counter8` and `ram8` state no
++  * `gateCost` and cost no delay unit (`core/defs/wide.ts`, the storage section
++  * note: the gate metric measures what the PLAYER built, and a storage element
++  * cuts the combinational path in both directions). So the floor for a level whose
++  * answer is an unlocked storage part is that part's own 0/0, and this file states
++  * that floor rather than the price of rebuilding the part from gates -- levels
++  * 29, 35, 36 and 37 do exactly that, and each of their comments says what the
++  * hand-built alternative measures, because a player who builds the loop instead
++  * of dropping the part in should know why it scores one star.
++  *
++  * TWO COINCIDENCES THE BRIEF'S OWN TABLE CREATES, recorded here so a reviewer
++  * does not read them as slips:
++  *
++  *  * levels 28 and 35 ask for the same storage rule under different pin names
++  *    (`set`/`value` against `d`/`load`). They are framed differently -- 28 is
++  *    where the loop is built and its palette withholds the packaged part; 35 is
++  *    where the packaged part is used -- and their checks assert different things.
++  *  * levels 33 and 34 have the same shape and the same behaviour. 33 is the byte
++  *    selector graded by 256 fuzz vectors; 34 is the shared line graded by a
++  *    four-row truth table. Batch 1 recorded the same coincidence for levels 15
++  *    and 16.
++  *
++  * NOT JOINED YET: `ch2/index.ts` assembles the chapter and still lists batch 1
++  * alone, so this file is reachable only through its own test until the chapter
++  * assembly task appends it.
++  */
++
++ /**
++  * The one-bit shelf every level here draws from: chapter 1's gates, its two
++  * constants and the delay line, in the order chapter 1 hands them out.
++  * `delay_line` is level 28's storage element -- the only one that can break a
++  * one-bit loop without also being the level's answer.
++  */
++ const GATES_1BIT = [
++   'nand',
++   'not',
++   'and',
++   'or',
++   'nor',
++   'xor',
++   'xnor',
++   'and3',
++   'or3',
++   'const_on',
++   'const_off',
++   'delay_line',
++ ] as const;
++
++ /** The level's own plumbing: always in the palette, never unlocked (`defs/index.ts`). */
++ const LEVEL_IO = ['level_input', 'level_output'] as const;
++
++ /** What batch 1's level 13 unlocked: the two byte packers and the byte constant. */
++ const BYTE_WIRING = ['splitter', 'maker', 'const8'] as const;
++
++ /**
++  * Level 22's one-bit conditional pass. It is a 1-bit part with 1-bit pins, so it
++  * attaches on every one-bit level in this batch; this file offers it wherever a
++  * "take this or keep that" choice is part of the level (28, 30, 31, 32, 35) and
++  * leaves it off the byte-wide ones, where a player would reach for gates anyway.
++  */
++ const SWITCH_1 = ['switch'] as const;
++
++ /**
++  * The five pin shapes this batch uses, so a level's io is one named constant
++  * instead of six lines of literal in the middle of a spec.
++  */
++ const IO_SET_VALUE_OUT: LevelIo = {
++   inputs: [
++     { id: 'set', width: 1 },
++     { id: 'value', width: 1 },
++   ],
++   outputs: [{ id: 'out', width: 1 }],
++ };
++ const IO_A8_OUT8: LevelIo = { inputs: [{ id: 'a', width: 8 }], outputs: [{ id: 'out', width: 8 }] };
++ const IO_ENABLE_OUT: LevelIo = {
++   inputs: [{ id: 'enable', width: 1 }],
++   outputs: [{ id: 'out', width: 1 }],
++ };
++ const IO_A1_INV1_OUT1: LevelIo = {
++   inputs: [
++     { id: 'a', width: 1 },
++     { id: 'inv', width: 1 },
++   ],
++   outputs: [{ id: 'out', width: 1 }],
++ };
++ const IO_A1_ON1_OUT1: LevelIo = {
++   inputs: [
++     { id: 'a', width: 1 },
++     { id: 'on', width: 1 },
++   ],
++   outputs: [{ id: 'out', width: 1 }],
++ };
++ const IO_A8_B8_SEL1_OUT8: LevelIo = {
++   inputs: [
++     { id: 'a', width: 8 },
++     { id: 'b', width: 8 },
++     { id: 'sel', width: 1 },
++   ],
++   outputs: [{ id: 'out', width: 8 }],
++ };
++ const IO_D1_LOAD1_OUT1: LevelIo = {
++   inputs: [
++     { id: 'd', width: 1 },
++     { id: 'load', width: 1 },
++   ],
++   outputs: [{ id: 'out', width: 1 }],
++ };
++ const IO_D8_LOAD1_OUT8: LevelIo = {
++   inputs: [
++     { id: 'd', width: 8 },
++     { id: 'load', width: 1 },
++   ],
++   outputs: [{ id: 'out', width: 8 }],
++ };
++ const IO_D8_ADDR8_LOAD1_OUT8: LevelIo = {
++   inputs: [
++     { id: 'd', width: 8 },
++     { id: 'addr', width: 8 },
++     { id: 'load', width: 1 },
++   ],
++   outputs: [{ id: 'out', width: 8 }],
++ };
++ const IO_EN1_RESET1_OUT8: LevelIo = {
++   inputs: [
++     { id: 'en', width: 1 },
++     { id: 'reset', width: 1 },
++   ],
++   outputs: [{ id: 'out', width: 8 }],
++ };
++
++ /**
++  * Level 33's fuzz seed: the level's index in the high byte and the byte width in
++  * the low one, exactly as batches 2 and 3 seed their levels.
++  *
++  * A fixed literal, not a drawn one: the same seed produces the same 256 vectors
++  * on every run and on every board edit, which is what makes the level's coverage
++  * -- that both `sel` values are driven, many times each -- a fact about the level
++  * rather than about the run. The test file measures it against this literal.
++  */
++ const SEED_33 = 0x3308;
++
++ /**
++  * The four vectors level 34's table states, and the rule they publish.
++  *
++  * Four rows rather than 2^17 combinations, which is the brief's shape for this
++  * level: it states WHO DRIVES THE LINE, at a scale a reader can check by eye,
++  * while the byte-wide coverage belongs to level 33's fuzz check. Both `sel`
++  * values appear on the same pair of operands, so the table separates "the
++  * selected line" from "always the first" and "always the second", and the two
++  * operand pairs are asymmetric patterns, so a circuit that shuffled the bits
++  * within the byte would fail one of them.
++  */
++ const BUS_VECTORS: readonly { readonly a: number; readonly b: number; readonly sel: number }[] = [
++   { a: 0x00, b: 0xff, sel: 0 },
++   { a: 0x0f, b: 0xf0, sel: 0 },
++   { a: 0x00, b: 0xff, sel: 1 },
++   { a: 0x0f, b: 0xf0, sel: 1 },
++ ];
++
++ /** The bus rule the level teaches: exactly the selected line reaches `out`. */
++ function selectedLine(a: number, b: number, sel: number): number {
++   return sel === 1 ? b : a;
++ }
++
++ /** Level 34's four rows, with each row's output stated by the rule above. */
++ const BUS_ROWS: readonly TruthRow[] = BUS_VECTORS.map(({ a, b, sel }) => ({
++   inputs: { a, b, sel },
++   outputs: { out: selectedLine(a, b, sel) },
++ }));
++
++ /**
++  * The byte level 37 writes into address `k`.
++  *
++  * `k * 7 + 1` modulo 256 is a bijection (7 is odd, so it is invertible), so no
++  * two addresses hold the same byte. That is what makes an address decode which
++  * aliases two cells -- or ignores `addr` altogether -- visible: the read-back
++  * pass decides one address at a time, and the byte it expects there is one no
++  * other address was written with. `k = 73` is the single address this stores a 0
++  * in, and it is one of 256 expectations rather than the whole test.
++  */
++ function boxByte(k: number): number {
++   return (k * 7 + 1) & 0xff;
++ }
++
++ /**
++  * Level 37's script: write all 256 addresses, then read all 256 back.
++  *
++  * THE CHECK THAT MAKES "装满" MEAN SOMETHING, and the reason it is generated
++  * rather than written out. Step `k + 1` (one clock edge each, starting one tick
++  * in because a step at tick 0 runs no edge) writes `boxByte(k)` into address `k`
++  * with `load` high, and asserts the byte on the output on the same step. Steps
++  * 257..512 then re-read every address with `load` LOW and `d` driven with the
++  * COMPLEMENT of the stored byte, after all 256 writes have happened -- so the
++  * pass proves the box holds 256 bytes at once rather than that the last one
++  * written can be read, and every read would have to come back as `~stored` for a
++  * wire from `d` to pass a single one of them.
++  */
++ function littleBoxSteps(): ScriptStep[] {
++   const steps: ScriptStep[] = [
++     { tick: 0, inputs: { d: 0, addr: 0, load: 0 }, expect: { out: 0 } },
++   ];
++   for (let addr = 0; addr < 256; addr += 1) {
++     steps.push({
++       tick: addr + 1,
++       inputs: { d: boxByte(addr), addr, load: 1 },
++       expect: { out: boxByte(addr) },
++     });
++   }
++   for (let addr = 0; addr < 256; addr += 1) {
++     steps.push({
++       tick: 257 + addr,
++       inputs: { d: ~boxByte(addr) & 0xff, addr, load: 0 },
++       expect: { out: boxByte(addr) },
++     });
++   }
++   return steps;
++ }
++
++ /**
++  * Level 38's script: reset, 256 enabled edges, the wrap, and the precedence of
++  * `reset` over `en`.
++  *
++  * 265 steps. The run from tick 2 to tick 257 is 256 consecutive edges whose
++  * expectations are the count itself, so the check walks every byte and comes
++  * back to 0 at exactly 256: a counter that wrapped at 128, or that saturated at
++  * 255, fails one of those 256 expectations rather than a hand-picked one. Tick
++  * 260 then asserts `reset` over `en` on an edge where BOTH are high and the
++  * count is 2 -- if the enable won, the output would be 3. The last two steps sit
++  * on tick 263: the first runs the edge that resumes the count, the second runs
++  * no edge at all and must still read 1, which is what a circuit that counted
++  * combinationically would fail.
++  */
++ function counterSteps(): ScriptStep[] {
++   const steps: ScriptStep[] = [
++     { tick: 0, inputs: { en: 0, reset: 1 }, expect: { out: 0 } },
++     // One edge with `reset` and `en` both high: the clear wins, so this reads 0.
++     { tick: 1, inputs: { en: 1, reset: 1 }, expect: { out: 0 } },
++   ];
++   for (let edge = 1; edge <= 256; edge += 1) {
++     steps.push({ tick: edge + 1, inputs: { en: 1, reset: 0 }, expect: { out: edge & 0xff } });
++   }
++   steps.push({ tick: 258, inputs: { en: 1, reset: 0 }, expect: { out: 1 } });
++   steps.push({ tick: 259, inputs: { en: 1, reset: 0 }, expect: { out: 2 } });
++   steps.push({ tick: 260, inputs: { en: 1, reset: 1 }, expect: { out: 0 } });
++   steps.push({ tick: 261, inputs: { en: 0, reset: 0 }, expect: { out: 0 } });
++   steps.push({ tick: 262, inputs: { en: 0, reset: 0 }, expect: { out: 0 } });
++   steps.push({ tick: 263, inputs: { en: 1, reset: 0 }, expect: { out: 1 } });
++   steps.push({ tick: 263, inputs: { en: 0, reset: 0 }, expect: { out: 1 } });
++   return steps;
++ }
++
++ /**
++  * Level 30's two scripts: the beat, the hold, and the resumption; then the held-low
++  * case on its own.
++  *
++  * Sixteen enabled ticks whose expectations alternate 0/1/0/1 -- eight whole
++  * periods, because "the output has a period" is not measurable from one tick --
++  * followed by four ticks with `enable` low that must all read the 1 the last
++  * enabled tick left, and four more that resume the beat from that held value
++  * (a falling edge first: `1 XOR 1` is 0). The second script holds `enable` low
++  * from reset for eight ticks and demands 0 throughout, which is the other way a
++  * clock source fails: an oscillator with no gate on it satisfies the first
++  * script's first sixteen ticks and fails at tick 16, and it fails this one at
++  * tick 1.
++  */
++ const OSCILLATOR_STEPS: readonly ScriptStep[] = [
++   ...Array.from({ length: 16 }, (_, tick) => ({
++     tick,
++     inputs: { enable: 1 },
++     expect: { out: tick % 2 },
++   })),
++   ...Array.from({ length: 4 }, (_, i) => ({
++     tick: 16 + i,
++     inputs: { enable: 0 },
++     expect: { out: 1 },
++   })),
++   ...Array.from({ length: 4 }, (_, i) => ({
++     tick: 20 + i,
++     inputs: { enable: 1 },
++     expect: { out: i % 2 },
++   })),
++ ];
++
++ /** The held-low half: `enable` low from reset, so a gated source never moves. */
++ const HELD_LOW_STEPS: readonly ScriptStep[] = Array.from({ length: 8 }, (_, tick) => ({
++   tick,
++   inputs: { enable: 0 },
++   expect: { out: 0 },
++ }));
++
++
+
+ ❯ test/levels/ch2-batch4.test.ts:852:20
+    850|     expect(module).toContain('runChecks');
+    851|     expect(module).toContain('ABSOLUTE');
+    852|     expect(module).toContain('same tick');
+       |                    ^
+    853|   });
+    854| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  test/levels/ch2-batch4.test.ts > the targets separate the constructions they were measured against > level 31: XNOR is correct and costs one NAND equivalent more than one star
+AssertionError: [{"check":"truth-table","inputs":{"a":0,"inv":0},"expected":{"out":0},"actual":{"out":1},"tick":0,"reason":"mismatch"},{"check":"truth-table","inputs":{"a":1,"inv":0},"expected":{"out":1},"actual":{"out":0},"tick":0,"reason":"mismatch"},{"check":"truth-table","inputs":{"a":0,"inv":1},"expected":{"out":1},"actual":{"out":0},"tick":0,"reason":"mismatch"},{"check":"truth-table","inputs":{"a":1,"inv":1},"expected":{"out":0},"actual":{"out":1},"tick":0,"reason":"mismatch"}]: expected [ Array(4) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "actual": {
++       "out": 1,
++     },
++     "check": "truth-table",
++     "expected": {
++       "out": 0,
++     },
++     "inputs": {
++       "a": 0,
++       "inv": 0,
++     },
++     "reason": "mismatch",
++     "tick": 0,
++   },
++   {
++     "actual": {
++       "out": 0,
++     },
++     "check": "truth-table",
++     "expected": {
++       "out": 1,
++     },
++     "inputs": {
++       "a": 1,
++       "inv": 0,
++     },
++     "reason": "mismatch",
++     "tick": 0,
++   },
++   {
++     "actual": {
++       "out": 0,
++     },
++     "check": "truth-table",
++     "expected": {
++       "out": 1,
++     },
++     "inputs": {
++       "a": 0,
++       "inv": 1,
++     },
++     "reason": "mismatch",
++     "tick": 0,
++   },
++   {
++     "actual": {
++       "out": 1,
++     },
++     "check": "truth-table",
++     "expected": {
++       "out": 0,
++     },
++     "inputs": {
++       "a": 1,
++       "inv": 1,
++     },
++     "reason": "mismatch",
++     "tick": 0,
++   },
++ ]
+
+ ❯ test/levels/ch2-batch4.test.ts:1675:62
+    1673|     const level = specOf('ch2-31-bit-inverter');
+    1674|     const result = grade(xnorInverter(), registry, level);
+    1675|     expect(result.failures, JSON.stringify(result.failures)).toEqual([…
+       |                                                              ^
+    1676|     expect(result.metrics).toEqual({ gate: 5, delay: 1, tick: 0 });
+    1677|     expect(result.stars).toBe(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  test/levels/ch2-batch4.test.ts > the targets separate the constructions they were measured against > level 33 and 34: the gate-built selector is one gate over and two units deeper
+AssertionError: ch2-33-input-selector: expected { gate: 25, delay: 3, tick: +0 } to deeply equal { gate: 33, delay: 3, tick: +0 }
+
+- Expected
++ Received
+
+  {
+    "delay": 3,
+-   "gate": 33,
++   "gate": 25,
+    "tick": 0,
+  }
+
+ ❯ test/levels/ch2-batch4.test.ts:1687:34
+    1685|       const result = grade(gateBuiltSelector(), registry, specOf(id));
+    1686|       expect(result.failures, `${id}: ${JSON.stringify(result.failures…
+    1687|       expect(result.metrics, id).toEqual({ gate: 33, delay: 3, tick: 0…
+       |                                  ^
+    1688|       expect(result.stars, id).toBe(1);
+    1689|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 120 passed (125)
+   Start at  03:25:06
+   Duration  566ms (transform 46%, tests 41%, import 12%, worker 2%)
+
+[ELIFECYCLE] Test failed. See above for more details.

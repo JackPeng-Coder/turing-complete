@@ -1,0 +1,33 @@
+fix(core): price the built-in 1-bit gates in NAND equivalents
+
+Fix round 2 of the Task 3 review: the gate metric was still two different
+units. `gateCost()` falls back to `cost`, and the phase-0 `gate()` factory
+stated only `cost: 1`, so a built-in `and` was worth 1 while one bit of `and8`
+was worth 2 -- both stamped "NAND equivalent".
+
+* `defs/index.ts`: every 1-bit gate now states `gateCost` on the basis
+  `wide.ts` documents -- NAND 1, NOT 1, AND 2, OR 3, NOR 4, XOR 4, XNOR 5,
+  AND3 4, OR3 6 -- with each number's all-NAND construction in a comment and
+  in one table. `cost` stays 1 on all nine gates, so the DELAY metric is
+  unchanged.
+* The now-false doc claims are corrected (`defs/index.ts`, `registry.ts`,
+  `grader.ts`, plus `wide.ts`'s "Exact for the widths..." line): `cost` is the
+  per-node delay unit, `gateCost` the NAND-equivalent count, the two coincide
+  only for `nand`/`not`, and the `?? cost` fallback exists for the defs whose
+  two values genuinely agree because both are zero (rails, wiring, storage).
+* `ashr8`'s sign fill is now documented as a deliberate exclusion from the
+  "amount >= 8 -> 0" rule (ratified; behaviour unchanged).
+* Recalibrated the three chapter-1 targets their own reference solutions no
+  longer met: ch1-06 gate 2 -> 4, ch1-10 gate 2 -> 6, ch1-11 gate 2 -> 4
+  (measured, not guessed). No delay or tick metric or target moved.
+* New tests: a shipped-set check that every level's reference solution meets
+  every one of its own `threeStar` bounds (and has a reference circuit at all);
+  explicit phase-0 gate counts in `registry.test.ts`; and a cross-check in
+  `defs-wide.test.ts` that each bit-sliced wide cell costs its width times the
+  registered 1-bit gate -- so the two tables cannot drift into two bases.
+
+Verified: full suite 350 passed / 16 files, `tsc --noEmit` 0 diagnostics,
+`pnpm build` exit 0, `pnpm smoke` 2 passed. Mutation checks: removing a
+built-in gate's `gateCost` fails the freeze, the explicit-count and the
+cross-basis tests; reverting ch1-11's target to 2 fails the new shipped-set
+check while the freeze stays green.

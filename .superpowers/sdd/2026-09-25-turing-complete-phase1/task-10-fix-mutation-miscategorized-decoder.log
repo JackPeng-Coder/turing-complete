@@ -1,0 +1,119 @@
+$ vitest run "test/core/defs-wide.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/core/defs-wide.test.ts (60 tests | 1 failed) 62ms
+   ❯ wide defs: the brief's contract (11)
+     ✓ declares every id with the exact pin ids and widths the brief gives 2ms
+     ✓ is reachable through the registry the way the game reaches it 2ms
+     ✓ keeps every wide def pure combinational 2ms
+     × categorizes every wide part as wide and const8 as a source 7ms
+     ✓ keeps the DELAY cost at one unit per operator, nothing for a source or a wire 1ms
+     ✓ states a NAND-equivalent gateCost for every def, explicitly 1ms
+     ✓ gives every operator more than one NAND equivalent, and no part less than its delay 0ms
+     ✓ composes each count out of the others, so the constructions are checkable 0ms
+     ✓ prices each bit-sliced cell on the same NAND basis as the registered 1-bit gate 0ms
+     ✓ scales every count with the width the generator is asked for 1ms
+     ✓ registers the whole family without a duplicate id 0ms
+   ✓ wide storage defs: the brief's contract and the decided edge rules (8)
+     ✓ declares every storage def with the ids, pins, state and costs the brief gives 1ms
+     ✓ is registered, and every id is one level data can spell 0ms
+     ✓ mux8 selects a or b on sel, combinationally 0ms
+     ✓ delay8 publishes the byte it holds and never its inputs 0ms
+     ✓ reg8 samples d on the edge when load is high, and reset beats load 0ms
+     ✓ counter8 counts on the edge when en is high, wraps to 0, and reset beats en 0ms
+     ✓ ram8 writes the addressed byte on the edge and selects it on the fly 0ms
+     ✓ ram8 keeps all 256 of its bytes, and keeps them per instance 4ms
+   ✓ wide bitwise operators (6)
+     ✓ matches a reference truth table on the boundary vectors 1ms
+     ✓ treats the 8-bit patterns as unsigned, never as negative numbers 0ms
+     ✓ evaluates NOT and its double negation 0ms
+     ✓ is its own inverse under XOR 1ms
+     ✓ relates nand8/nor8/xnor8 to their negations 1ms
+     ✓ reads an unwired input as zero 0ms
+   ✓ add8 (2)
+     ✓ adds with carry-in on the boundary vectors 0ms
+     ✓ reports bit 8 as the carry out and wraps the low eight bits 2ms
+   ✓ neg8 (2)
+     ✓ negates the boundary vectors by two's complement 0ms
+     ✓ equals (256 - a) & 0xff for every byte, and inverts itself 4ms
+   ✓ comparators (3)
+     ✓ compares unsigned patterns 0ms
+     ✓ compares signed patterns across the sign boundary 1ms
+     ✓ reports equality for every pair, and its result is a single bit 2ms
+   ✓ shifts (4)
+     ✓ shifts left, dropping bits above bit 7 0ms
+     ✓ shifts right logically, filling with zeros 0ms
+     ✓ shifts right arithmetically, replicating the sign bit 1ms
+     ✓ gives 0 for an amount of 8 or more, and matches the reference below that 4ms
+   ✓ rotates (3)
+     ✓ rotates around the byte 0ms
+     ✓ treats an amount of 8 or more as amount % 8 3ms
+     ✓ is the inverse of the other direction 1ms
+   ✓ mul8 and div8 (5)
+     ✓ multiplies, keeping the low eight bits 0ms
+     ✓ equals (a * b) & 0xff on a grid 1ms
+     ✓ divides with truncation toward zero 0ms
+     ✓ returns 0xff for division by zero, as decided, and never throws 0ms
+     ✓ divides by a non-zero divisor exactly as floor does 1ms
+   ✓ const8, switch and switch8 (3)
+     ✓ drives a constant with no inputs 0ms
+     ✓ passes a through when on is 1 and forces zero when on is 0 0ms
+     ✓ cascades: switching an already-switched value stays off 0ms
+   ✓ splitter and maker (3)
+     ✓ splits a byte into eight one-bit pins, least significant first 0ms
+     ✓ makes a byte out of eight one-bit pins 0ms
+     ✓ round-trips maker(splitter(x)) === x for every byte 1ms
+   ✓ the width generator (7)
+     ✓ defaults to eight bits 0ms
+     ✓ builds the whole family at a non-default width 1ms
+     ✓ parameterises the suffixed operators too 0ms
+     ✓ clamps a requested width into the range it documents 0ms
+     ✓ clamps before it allocates, so an absurd width cannot ask for gigabytes 0ms
+     ✓ rejects nothing silently: an unknown id is simply absent 0ms
+     ✓ is not re-counted by params.width, which widens every pin instead 3ms
+   ✓ wide defs through the kernel (3)
+     ✓ adds two level inputs and carries out of bit 8 1ms
+     ✓ carries every byte through splitter -> maker at the pin level 5ms
+     ✓ drives an 8-bit operator from 1-bit level inputs 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide defs: the brief's contract > categorizes every wide part as wide and const8 as a source
+AssertionError: expected [ 'add8', 'and8', 'ashr8', …(25) ] to deeply equal [ 'add8', 'and8', 'ashr8', …(28) ]
+
+- Expected
++ Received
+
+@@ -1,13 +1,10 @@
+  [
+    "add8",
+    "and8",
+    "ashr8",
+    "counter8",
+-   "decoder1",
+-   "decoder2",
+-   "decoder3",
+    "delay8",
+    "div8",
+    "equal8",
+    "less_s",
+    "less_u",
+
+ ❯ test/core/defs-wide.test.ts:265:58
+    263|     // See `WIDE_MODULE_IDS`: it is derived, because the hand-maintain…
+    264|     // of this line could not know about a family it had never heard o…
+    265|     expect(r.byCategory('wide').map((d) => d.id).sort()).toEqual([...W…
+       |                                                          ^
+    266|     // The same membership stated as the exception it is, so it can ne…
+    267|     // become two: exactly `const8` is registered under a category tha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 59 passed (60)
+   Start at  03:07:42
+   Duration  349ms (transform 54%, tests 28%, import 14%, worker 4%)
+
+[ELIFECYCLE] Test failed. See above for more details.

@@ -1,0 +1,73 @@
+fix(levels): correct level 25's decoder brief, and derive the wide-category set
+
+Two connected fixes, both fallout from the two commits before this one: the
+decoder family became real defs (`a5e618a`) and the chapter-2 levels were
+written against a family that did not exist yet (`59bc652`).
+
+LEVEL 25'S BRIEF TOLD THE PLAYER TO DO SOMETHING THE KERNEL CANNOT DO. It said
+to set `params.width = 2` and get the catalog's 2-bit decoder. That is
+impossible: `compile` resolves a pin's width as `inst.params.width ?? pin.width`
+for EVERY pin of an instance (`net.ts`, `effectiveWidth`), so one width literal
+covers the whole part -- a `sel: 1 / out: 2` def compiled at `params.width = 2`
+has both pins two bits wide, which is `sel: 2 / out: 2`, never the catalog's
+`sel: 2 / out: 4`. A decoder's pins MUST differ (`out` is `2 ** w`), so the
+width can only be a property of the DEF, which is exactly how the registered
+family is built: `createDecoderDef(w)`, one part per width, `decoder1` /
+`decoder2` / `decoder3`. The brief now says that instead -- the decoder comes in
+widths, one part each, `decoder1` is the 1-to-2 form this level asks for and
+`decoder2` is the 2-to-4 form a later circuit drops in -- in both languages, and
+no longer mentions `params.width` at all. (Verified rather than argued: a
+compiled `decoder1` at `params.width = 2` reports `{sel: 2, out: 2}`.)
+
+The level's data comment records the RESOLUTION rather than the open question,
+and keeps the rejected mechanism: the generator, the registered widths, and the
+one-override-covers-every-pin rule that makes an instance knob impossible, so
+nobody tries it again. The module header's two wrong claims are corrected with
+it ("LEVEL 25'S DECODER IS WIDTH-PARAMETRISED" and "no def of either id is
+registered in this phase" -- false since `a5e618a`), and level 26's SOURCED line
+now names the generator instead of reading as two ids of one part.
+
+`decoder2` is NOT added to level 25's palette, and the comment says why: no
+level unlocks it (the chapter's unlock walk refuses a palette entry nothing has
+handed out, and no level name introduces the 2-bit decoder), and it would answer
+the level by itself -- wired to the level's one-bit `sel` its second select bit
+is unwired, so its low two output bits are `1 << sel`, the level's whole table
+(measured: `passed: true, stars: 1, gate: 10, delay: 1`). The brief names it, the
+palette does not offer it, and the test pins both halves. `decoder1` stays
+listed because it is the level's OWN reward and `paletteDefsFor` offers a level
+its own rewards before it is passed (batch 2's rule; level 13's `splitter` and
+level 20's `full_adder` are the same case) -- measured, the drop-in scores the
+target exactly (`gate: 1, delay: 1`, three stars), which the comment states and
+the test now takes as a measurement rather than a description.
+
+THE CATEGORY ASSERTION IS DERIVED RATHER THAN EXTENDED. `defs-wide.test.ts`
+asserted `byCategory('wide')` against a hand-maintained literal list of ids, so
+the three new `wide` ids broke it -- the decoder task reported that instead of
+widening its own remit. The expectation now comes from the module's own exported
+tuples (`WIDE_DEF_IDS` + `WIDE_STORAGE_DEF_IDS` + `DECODER_DEF_IDS`, the same
+three `DEF_IDS` is built from), minus `const8`, whose `io` filing is asserted
+directly instead of being a silence (`WIDE_MODULE_IDS.filter(id => category !==
+'wide')` must be exactly `['const8']`). It is not a tautology: an expectation
+built from the registered defs' own category fields, or from `byCategory`
+itself, would move with the bug -- a mis-filed part would leave both sides at
+once -- while ids from the registration tuples keep it an independent fact.
+Mutation-checked: `createDecoderDef` filed as `logic1` fails the assertion (1
+failed / 59 passed), and the file was reverted immediately.
+
+The residual is recorded in the report rather than hidden: a hypothetical FOURTH
+generated family still needs one line in `WIDE_MODULE_IDS`, which is one line in
+one documented expression instead of ids re-typed into a contract table. Making
+it zero-touch would need a combined tuple exported from `wide.ts` (outside this
+fix's declared file scope) and would only move that line into the module.
+
+Tests: the rewritten brief assertion (both languages, the named parts, the
+widths they decode, and `not.toContain('params.width')` so the old wording
+cannot come back unnoticed), the comment-marker test, the `decoder2`-not-offered
+pin, and one new measured test -- level 25's own reward scores the target. No
+assertion was deleted. Full suite 677 passed / 21 files, `tsc --noEmit` clean,
+`vite build` clean, playwright smoke 2 passed. Logs and the report are in
+.superpowers/sdd/2026-09-25-turing-complete-phase1/ (task-10-fix-*.log,
+appended to task-10-report.md). The controller's progress.md is left modified
+and is not part of this commit.
+
+Refs: task-10-report.md (sections "Task 10 follow-up")

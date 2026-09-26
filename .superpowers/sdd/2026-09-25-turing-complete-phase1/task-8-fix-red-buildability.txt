@@ -1,0 +1,114 @@
+✓ Lockfile passes supply-chain policies (verified 6h ago)
+Lockfile is up to date, resolution step is skipped
+Already up to date
+
+Done in 551ms using pnpm v11.7.0
+$ vitest run "test/levels/level-buildability.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/levels/level-buildability.test.ts (40 tests | 3 failed) 32ms
+   ❯ every shipped level can build its own reference solution (19)
+     ✓ files a reference solution for every shipped level 2ms
+     ✓ grades every filed reference against the level it is filed under 14ms
+     ✓ ch1-01-crude-awakening 0ms
+     ✓ ch1-02-nand-gate 0ms
+     ✓ ch1-03-not-gate 0ms
+     ✓ ch1-04-and-gate 0ms
+     ✓ ch1-05-or-gate 0ms
+     ✓ ch1-06-nor-gate 0ms
+     ✓ ch1-07-always-on 0ms
+     ✓ ch1-08-second-tick 0ms
+     ✓ ch1-09-xor-gate 0ms
+     ✓ ch1-10-bigger-or-gate 0ms
+     ✓ ch1-11-bigger-and-gate 0ms
+     ✓ ch1-12-binary-racer 1ms
+     × ch2-13-odd-number-of-signals 5ms
+     ✓ ch2-14-double-trouble 0ms
+     ✓ ch2-15-binary-racer 0ms
+     ✓ ch2-16-counting-signals 0ms
+     ✓ ch2-17-double-the-number 0ms
+   ✓ no shipped level offers a part it has not earned (17)
+     ✓ ch1-01-crude-awakening 0ms
+     ✓ ch1-02-nand-gate 0ms
+     ✓ ch1-03-not-gate 0ms
+     ✓ ch1-04-and-gate 0ms
+     ✓ ch1-05-or-gate 0ms
+     ✓ ch1-06-nor-gate 0ms
+     ✓ ch1-07-always-on 0ms
+     ✓ ch1-08-second-tick 0ms
+     ✓ ch1-09-xor-gate 0ms
+     ✓ ch1-10-bigger-or-gate 0ms
+     ✓ ch1-11-bigger-and-gate 0ms
+     ✓ ch1-12-binary-racer 0ms
+     ✓ ch2-13-odd-number-of-signals 0ms
+     ✓ ch2-14-double-trouble 0ms
+     ✓ ch2-15-binary-racer 0ms
+     ✓ ch2-16-counting-signals 0ms
+     ✓ ch2-17-double-the-number 0ms
+   ✓ chapter 1 palettes are unchanged by offering a level its own rewards (2)
+     ✓ has no chapter-1 level listing its own reward 0ms
+     ✓ draws every chapter-1 reference from parts an earlier level rewards 1ms
+   ❯ the latch part chapter 2 builds from is reachable (2)
+     × hands mem1 to the player by the end of chapter 1 1ms
+     × does not put mem1 in the capstone palette that rewards it 1ms
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 37 passed (40)
+   Start at  02:35:49
+ FAIL  test/levels/level-buildability.test.ts > every shipped level can build its own reference solution > ch2-13-odd-number-of-signals
+AssertionError: ch2-13-odd-number-of-signals uses splitter, which its palette does not offer (palette: nand, not, and, or, nor, xor, xnor, and3, or3, const_on, const_off, delay_line, level_input, level_output): expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ test/levels/level-buildability.test.ts:348:11
+    346|           palette.has(inst.def),
+    347|           `${level.id} uses ${inst.def}, which its palette does not of…
+    348|         ).toBe(true);
+       |           ^
+    349|       }
+    350|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  test/levels/level-buildability.test.ts > the latch part chapter 2 builds from is reachable > hands mem1 to the player by the end of chapter 1
+AssertionError: mem1 is unlocked by no shipped level: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ test/levels/level-buildability.test.ts:432:71
+    430|     expect(lastChapter1, 'no chapter-1 level is shipped').toBeGreaterT…
+    431|     const owned = unlockedComponents(progressThrough(lastChapter1), SH…
+    432|     expect(owned.has('mem1'), 'mem1 is unlocked by no shipped level').…
+       |                                                                       ^
+    433|   });
+    434|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  test/levels/level-buildability.test.ts > the latch part chapter 2 builds from is reachable > does not put mem1 in the capstone palette that rewards it
+AssertionError: expected [] to include 'mem1'
+ ❯ test/levels/level-buildability.test.ts:442:45
+    440|     expect(index, 'ch1-12-binary-racer is not shipped').toBeGreaterTha…
+    441|     const level = specOf('ch1-12-binary-racer');
+    442|     expect(level.rewards?.components ?? []).toContain('mem1');
+       |                                             ^
+    443|     expect(paletteAt(index).has('mem1')).toBe(false);
+   Duration  399ms (transform 64%, import 19%, tests 13%, worker 4%)
+    444|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+[ELIFECYCLE] Test failed. See above for more details.

@@ -1,0 +1,32 @@
+fix(levels): spec 3.3 puts mem1 in chapter 1, and the unlock-chain test reads the spec
+
+FIX 1: spec 3.3's table moves mem1 from the chapter-2 row to the chapter-1 row,
+next to delay_line. Chapter 1's capstone (level 12) rewards it so chapter 2's
+latch level has a storage element to build its loop from, and the table's own
+axis is "components by unlock chapter". A short note records why a memory part
+sits in the chapter-1 row; chapter 2's row is otherwise unchanged (ram8 stays).
+
+The whole table was then re-verified against the level data rather than against
+the brief: chapter 1's 13 rewards and chapter 2's 32 each match their row
+exactly, after the move, in both directions. The one mismatch found is decoder2
+-- named by the chapter-2 row and introduced by no level -- which is the
+deliberate ruling already pinned by unlock-chain.test.ts, so it was reported and
+left alone. Chapters 3-7 and the sandbox row have no levels in this build (38
+levels shipped), so they cannot be checked against data.
+
+FIX 2: test/levels/unlock-chain.test.ts no longer carries its own 33-name copy
+of the spec's chapter-2 row. It parses 3.3's rows out of the design spec at test
+time and checks both directions: rule 2 still walks the spec's list and still
+fails on any part unlocked by zero or two chapter-2 levels (bar decoder2, whose
+zero is the ruling), and a new test asserts the row names every part chapter 2
+hands out -- the direction the copy could not see, and the one that hid ram8 for
+a whole phase. The obsolete extra === ['ram8'] assertion is gone, the header,
+the ram8 comment and the switch test now describe the settled rulings (level 22
+here, the source's level 32 a re-teach), and the chapter-1 row is checked both
+ways with mem1 pinned to ch1-12-binary-racer.
+
+Tests: 918 passed / 23 files, up from 915 -- the three new tests are the
+parse-shape check plus the two row-vs-data directions. Mutation-proved red four
+ways (spec drops ram8; spec re-adds mem1 to the chapter-2 row; level 21 rewards
+full_adder twice; spec names a part no level rewards). tsc --noEmit and
+pnpm build both clean.

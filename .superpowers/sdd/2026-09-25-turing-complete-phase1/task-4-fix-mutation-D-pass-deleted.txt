@@ -1,0 +1,74 @@
+MUTATION D (deliberate, temporary, EXTRA -- not one of the three re-runs): #publishState deleted
+at BOTH call sites (eset() and 	ick()); the method itself is left in place so the file still
+compiles. This is the fix-round-2 alternative the controller offered ("I would rather delete the
+pass than keep an untested one") turned into a test of the new pinning tests: what would deleting
+the pass cost?
+
+Answer, from the run below: exactly the two new pre-seeds ... tests fail, and NOTHING else --
+139 of 141 pass. So the pass is now load-bearing only for the ordering those two tests pin, which
+is precisely the property it exists for, and it is no longer deletable without a red test.
+
+Applied to the FINAL tree (commit 171fd6c, fix round 1), then reverted.
+
+$ vitest run test/core/defs-wide.test.ts test/core/net.test.ts test/core/registry.test.ts
+     ✓ resolves a pin width from the instance over the def 0ms
+     ✓ leaves every width at the def default when the instance sets no params 0ms
+     ✓ reports an unknown pin by name and direction 0ms
+     ✓ gathers a params-wide pin per bit when its driver is narrower 0ms
+     ✓ gives a params-wide pin a coherent 8-bit region when its driver is narrower 0ms
+     ✓ reads a params-wide pin straight from an equally wide driver 0ms
+     ✓ reserves table capacity for params-derived widths and their read regions 0ms
+   ✓ delayOf (4)
+     ✓ sums gate costs along the longest path and counts sources as free 0ms
+     ✓ breaks the path at a storage element instead of counting through it 0ms
+     ✓ walks a diamond ladder in linear time instead of enumerating every path 1ms
+     ✓ terminates on a combinational loop and does not count it as depth 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/net.test.ts > wide storage > pre-seeds the held byte into the table before the settle that follows a tick
+AssertionError: the first sweep after the edge already read the held byte: expected +0 to be 165 // Object.is equality
+
+- Expected
++ Received
+
+- 165
++ 0
+
+ ❯ test/core/net.test.ts:538:82
+    536|     // 0x00: the settled value stays 0xa5 either way, which is why not…
+    537|     // in the suite fails.
+    538|     expect(seen[0], 'the first sweep after the edge already read the h…
+       |                                                                                  ^
+    539|     // The same fact read a second way: the pre-seed carries the byte …
+    540|     // watcher in sweep 1 and commits it there, so the settle confirms…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > pre-seeds a storage output whose zeroed state publishes a 1, before reset() settles
+AssertionError: the first sweep of reset() already read the published 1: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ test/core/net.test.ts:572:80
+    570|
+    571|     sim.reset();
+    572|     expect(seen[0], 'the first sweep of reset() already read the publi…
+       |                                                                                ^
+    573|     expect(p.out('unit.out'), 'and reset() settles on it').toBe(1);
+    574|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  2 failed | 139 passed (141)
+   Start at  01:38:01
+   Duration  485ms (transform 48%, tests 34%, import 14%, worker 4%)
+
+[ELIFECYCLE] Test failed. See above for more details.
+EXIT=1

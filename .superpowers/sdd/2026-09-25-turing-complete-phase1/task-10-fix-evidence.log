@@ -1,0 +1,32 @@
+$ vitest run "test/scratch-l25-evidence.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+stdout | test/scratch-l25-evidence.test.ts > scratch evidence > decoder2 dropped into level 25 passes the level by itself
+decoder2 on level 25: {"passed":true,"stars":1,"metrics":{"gate":10,"delay":1,"tick":0},"failures":[]}
+
+stdout | test/scratch-l25-evidence.test.ts > scratch evidence > decoder1 at params.width = 2 has BOTH pins two bits wide
+decoder1 @ params.width=2: {"sel":2,"out":2}
+
+ ✓ test/scratch-l25-evidence.test.ts (2 tests) 6ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  03:07:29
+   Duration  292ms (transform 70%, import 21%, worker 6%, tests 3%)
+
+===== decoder1 (level 25's own reward) as a drop-in =====
+$ vitest run "test/scratch-l25-own-reward.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+stdout | test/scratch-l25-own-reward.test.ts > scratch evidence 2 > decoder1, this level own reward, ties the three-star target
+decoder1 on level 25: {"passed":true,"stars":3,"target":{"gate":1,"delay":1,"tick":0},"metrics":{"gate":1,"delay":1,"tick":0}}
+
+ ✓ test/scratch-l25-own-reward.test.ts (1 test) 5ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  03:08:52
+   Duration  280ms (transform 71%, import 21%, worker 5%, tests 3%)
+

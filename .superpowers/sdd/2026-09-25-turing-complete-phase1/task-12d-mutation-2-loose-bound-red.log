@@ -1,0 +1,115 @@
+$ vitest run "test/core/signal.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/core/signal.test.ts (19 tests | 4 failed) 12ms
+   ❯ SignalTable (11)
+     ✓ allocates sequential slot ranges 1ms
+     ✓ defaults every slot to 0 0ms
+     ✓ writes and reads single bits 0ms
+     ✓ stores an 8-bit port as 8 separate slots, low bit first 0ms
+     ✓ accepts a Uint8Array for wide ports 1ms
+     ✓ reads back every bit of a wide port whose width is not a multiple of 8 0ms
+     × rejects a value that does not fit the port width 4ms
+     ✓ clear() zeroes every allocated slot and keeps size 0ms
+     ✓ keeps earlier values while allocating more slots 0ms
+     ✓ refuses to over-allocate instead of silently corrupting indices 1ms
+     ✓ never swaps its backing slots, so earlier bases stay valid 0ms
+   ❯ assertWidth (3)
+     × accepts every value of a 31-bit port, zero included 1ms
+     ✓ bounds a 32-bit port at 0xffff_ffff, as its own arm did 0ms
+     × bounds 0, 1 and 2 ** width - 1 in and 2 ** width out at every width 1..32 1ms
+   ❯ Port (2)
+     ✓ reads through to the table so writes are visible 0ms
+     × throws when written a value wider than the port 1ms
+   ✓ formatPort (2)
+     ✓ pads binary to the port width 0ms
+     ✓ formats decimal and hex 0ms
+   ✓ valuesEqual (1)
+     ✓ compares numbers and byte arrays 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/signal.test.ts > SignalTable > rejects a value that does not fit the port width
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ test/core/signal.test.ts:67:41
+     65|     const t = createSignalTable();
+     66|     const base = t.alloc(3);
+     67|     expect(() => t.setPort(base, 3, 8)).toThrow(/width/i);
+       |                                         ^
+     68|   });
+     69|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  test/core/signal.test.ts > assertWidth > accepts every value of a 31-bit port, zero included
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ test/core/signal.test.ts:141:44
+    139|     // sign check survived the change: `2 ** width` is positive, but o…
+    140|     // `v >= 0` half keeps a negative number out.
+    141|     expect(() => assertWidth(2 ** 31, 31)).toThrow(/does not fit a 31-…
+       |                                            ^
+    142|     expect(() => assertWidth(-1, 31)).toThrow(/does not fit a 31-bit p…
+    143|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  test/core/signal.test.ts > assertWidth > bounds 0, 1 and 2 ** width - 1 in and 2 ** width out at every width 1..32
+AssertionError: 2 ** 1 at width 1: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ test/core/signal.test.ts:166:87
+    164|         `2 ** ${width} - 1 at width ${width}`,
+    165|       ).not.toThrow();
+    166|       expect(() => assertWidth(2 ** width, width), `2 ** ${width} at w…
+       |                                                                                       ^
+    167|         new RegExp(`does not fit a ${width}-bit port`),
+    168|       );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  test/core/signal.test.ts > Port > throws when written a value wider than the port
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ test/core/signal.test.ts:186:35
+    184|     const t = createSignalTable();
+    185|     const p = createPort('a', 3, t);
+    186|     expect(() => p.write(0b1000)).toThrow(/width/i);
+       |                                   ^
+    187|   });
+    188| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 15 passed (19)
+   Start at  07:50:40
+   Duration  222ms (transform 48%, import 20%, tests 18%, worker 14%)
+
+[ELIFECYCLE] Test failed. See above for more details.

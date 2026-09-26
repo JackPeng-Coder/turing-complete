@@ -1,0 +1,11 @@
+$ vitest run "test/levels/unlock-chain.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/levels/unlock-chain.test.ts (38 tests) 12ms
+
+ Test Files  1 passed (1)
+      Tests  38 passed (38)
+   Start at  04:02:23
+   Duration  377ms (transform 72%, import 20%, tests 5%, worker 3%)
+

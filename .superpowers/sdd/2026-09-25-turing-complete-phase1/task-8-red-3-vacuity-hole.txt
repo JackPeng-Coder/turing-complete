@@ -1,0 +1,99 @@
+$ vitest run "test/levels/ch2-batch1.test.ts" "test/levels/ch1-part1.test.ts" "test/levels/ch1-part2.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/levels/ch1-part2.test.ts (29 tests) 14ms
+ ✓ test/levels/ch1-part1.test.ts (34 tests) 18ms
+ ❯ test/levels/ch2-batch1.test.ts (56 tests | 6 failed) 47ms
+   ✓ chapter 2, levels 13-17 (13)
+     ✓ exposes five chapter-2 levels with the briefed indices 2ms
+     ✓ uses the ch2-<index>-<slug> id convention 0ms
+     ✓ is what the chapter assembly is built from 0ms
+     ✓ shapes every level exactly as the brief fixes it 0ms
+     ✓ names each level in both languages 1ms
+     ✓ gates every part behind a component unlocked at or before it 2ms
+     ✓ offers nothing from a later level 1ms
+     ✓ gives every level a check with something to compare 1ms
+     ✓ generates the wide truth tables instead of leaving rows out 0ms
+     ✓ enumerates every input combination exactly once 1ms
+     ✓ states each level the brief describes 1ms
+     ✓ states level 14 as an at-least-2 rule over its four pins 0ms
+     ✓ hands out the parts the brief assigns to each level 0ms
+   ❯ the vacuity invariant (12)
+     ✓ accepts a check of every kind that compares something 0ms
+     ✓ rejects a truth table with no rows 0ms
+     ✓ rejects a truth-table row with no expected output 0ms
+     ✓ rejects a script with no steps 0ms
+     ✓ rejects a script that expects nothing 0ms
+     × rejects a constraint with no inputs 4ms
+     × rejects an at-least count every vector satisfies 1ms
+     × rejects a fuzz check with rounds=0 0ms
+     × rejects a fuzz check with no expectation for a pin 0ms
+     × rejects a custom check with no id 0ms
+     × rejects a check of a kind this kernel does not know 0ms
+     ✓ accepts a fuzz check that leaves `rounds` to the default 0ms
+   ✓ every level carries its sourced-vs-authored data comment (5)
+     ✓ ch2-13-odd-number-of-signals 0ms
+     ✓ ch2-14-double-trouble 0ms
+     ✓ ch2-15-binary-racer 0ms
+     ✓ ch2-16-counting-signals 0ms
+     ✓ ch2-17-double-the-number 0ms
+   ✓ reference solutions pass with three stars (5)
+     ✓ ch2-13-odd-number-of-signals 4ms
+     ✓ ch2-14-double-trouble 1ms
+     ✓ ch2-15-binary-racer 2ms
+     ✓ ch2-16-counting-signals 1ms
+     ✓ ch2-17-double-the-number 5ms
+   ✓ three-star targets are the reference solutions own metrics (5)
+     ✓ ch2-13-odd-number-of-signals 1ms
+     ✓ ch2-14-double-trouble 0ms
+     ✓ ch2-15-binary-racer 1ms
+     ✓ ch2-16-counting-signals 1ms
+     ✓ ch2-17-double-the-number 4ms
+   ✓ reference solutions are buildable from the palette they are graded against (5)
+     ✓ ch2-13-odd-number-of-signals 0ms
+     ✓ ch2-14-double-trouble 0ms
+     ✓ ch2-15-binary-racer 0ms
+     ✓ ch2-16-counting-signals 1ms
+     ✓ ch2-17-double-the-number 0ms
+   ✓ plausible wrong circuits fail (5)
+     ✓ ch2-13-odd-number-of-signals 0ms
+     ✓ ch2-14-double-trouble 0ms
+     ✓ ch2-15-binary-racer 0ms
+     ✓ ch2-16-counting-signals 1ms
+     ✓ ch2-17-double-the-number 3ms
+   ✓ an empty circuit fails every level instead of throwing (5)
+     ✓ ch2-13-odd-number-of-signals 0ms
+     ✓ ch2-14-double-trouble 0ms
+     ✓ ch2-15-binary-racer 0ms
+     ✓ ch2-16-counting-signals 0ms
+     ✓ ch2-17-double-the-number 0ms
+   ✓ the level-13 unlock seam (1)
+     ✓ offers exactly its own rewards as parts no earlier level unlocks 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/ch2-batch1.test.ts > the vacuity invariant > rejects a constraint with no inputs
+ FAIL  test/levels/ch2-batch1.test.ts > the vacuity invariant > rejects an at-least count every vector satisfies
+ FAIL  test/levels/ch2-batch1.test.ts > the vacuity invariant > rejects a fuzz check with rounds=0
+ FAIL  test/levels/ch2-batch1.test.ts > the vacuity invariant > rejects a fuzz check with no expectation for a pin
+ FAIL  test/levels/ch2-batch1.test.ts > the vacuity invariant > rejects a custom check with no id
+ FAIL  test/levels/ch2-batch1.test.ts > the vacuity invariant > rejects a check of a kind this kernel does not know
+AssertionError: expected 0 to be greater than 0
+ ❯ test/levels/ch2-batch1.test.ts:436:56
+    434|   for (const { name, check } of vacuous) {
+    435|     it(`rejects ${name}`, () => {
+    436|       expect(vacuityProblems(synthetic(check)).length).toBeGreaterThan…
+       |                                                        ^
+    437|     });
+    438|   }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  6 failed | 113 passed (119)
+   Start at  02:25:50
+   Duration  430ms (transform 64%, import 21%, tests 11%, worker 4%)
+
+[ELIFECYCLE] Test failed. See above for more details.

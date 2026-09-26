@@ -1,0 +1,495 @@
+$ vitest run "test/levels/ch2-batch3.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/levels/ch2-batch3.test.ts (65 tests | 4 failed) 1385ms
+   ✓ chapter 2, levels 23-27 (18)
+     ✓ exposes five chapter-2 levels with the briefed indices 1ms
+     ✓ uses the ch2-<index>-<slug> id convention 0ms
+     ✓ shapes every level exactly as the brief fixes it 0ms
+     ✓ names each level in both languages 1ms
+     ✓ gates every part behind a component unlocked at or before it 3ms
+     ✓ offers nothing from a later level 3ms
+     ✓ gives every level a check with something to compare 1ms
+     ✓ builds the decoder tables instead of leaving rows out 0ms
+     ✓ states the one-bit decoder as a two-line one-hot table 0ms
+     ✓ states the three-bit decoder as an eight-line one-hot table 0ms
+     ✓ states the three fuzz levels with a fixed seed and 256 rounds 1ms
+     ✓ names every pin of a fuzz level and nothing else in its pin maps 0ms
+     ✓ expects the two two's-complement levels the brief names 0ms
+     ✓ expects the eight opcodes the logic engine states, in the brief 1ms
+     ✓ lists every opcode in the brief, in both languages 0ms
+     ✓ tells the player the decoder is width-parametrised 0ms
+     ✓ hands out the parts the brief assigns to each level 0ms
+     ✓ offers each level the parts its own lesson needs 1ms
+   ❯ every level carries its sourced-vs-authored data comment (8)
+     ✓ ch2-23-negative-numbers 1ms
+     ✓ ch2-24-signed-negator 0ms
+     ✓ ch2-25-1-bit-decoder 0ms
+     ✓ ch2-26-3-bit-decoder 0ms
+     ✓ ch2-27-logic-engine 0ms
+     × records that level 23 changes the source level's kind 10ms
+     × records the width-parametrised decoder and how widths resolve 3ms
+     ✓ records that level 27's opcode table is this replica's own 0ms
+   ✓ reference solutions pass with three stars (5)
+     ✓ ch2-23-negative-numbers 12ms
+     ✓ ch2-24-signed-negator 6ms
+     ✓ ch2-25-1-bit-decoder 1ms
+     ✓ ch2-26-3-bit-decoder 2ms
+     ✓ ch2-27-logic-engine 201ms
+   ✓ three-star targets are the reference solutions own metrics (5)
+     ✓ ch2-23-negative-numbers 6ms
+     ✓ ch2-24-signed-negator 4ms
+     ✓ ch2-25-1-bit-decoder 0ms
+     ✓ ch2-26-3-bit-decoder 2ms
+     ✓ ch2-27-logic-engine 221ms
+   ✓ reference solutions are buildable from the palette they are graded against (5)
+     ✓ ch2-23-negative-numbers 0ms
+     ✓ ch2-24-signed-negator 0ms
+     ✓ ch2-25-1-bit-decoder 0ms
+     ✓ ch2-26-3-bit-decoder 0ms
+     ✓ ch2-27-logic-engine 11ms
+   ❯ plausible wrong circuits fail (7)
+     ✓ ch2-23-negative-numbers 1ms
+     ✓ ch2-24-signed-negator 0ms
+     ✓ ch2-25-1-bit-decoder 0ms
+     ✓ ch2-26-3-bit-decoder 0ms
+     ✓ ch2-27-logic-engine 40ms
+     ✓ fails the anti-decoder on the row the swap changes 1ms
+     × fails the pass-through decoder on the first row that is not its own one-hot code 3ms
+   ✓ an empty circuit fails every level instead of throwing (5)
+     ✓ ch2-23-negative-numbers 0ms
+     ✓ ch2-24-signed-negator 0ms
+     ✓ ch2-25-1-bit-decoder 0ms
+     ✓ ch2-26-3-bit-decoder 0ms
+     ✓ ch2-27-logic-engine 0ms
+   ✓ the fuzz levels name the round and the vector that failed (3)
+     ✓ ch2-23-negative-numbers: the first disagreeing round, with its vector 1ms
+     ✓ ch2-24-signed-negator: the first disagreeing round, with its vector 0ms
+     ✓ ch2-27-logic-engine: the first disagreeing round, with its vector 38ms
+   ✓ the fuzz levels drive varying, reproducible vectors (1)
+     ✓ draws 256 different vectors on every run, from the level data alone 420ms
+   ✓ level 27's eight opcodes are all exercised (4)
+     ✓ drives every opcode at least once in the level's own 256-round sequence 213ms
+     ✓ grades every opcode against a circuit broken on exactly that opcode 122ms
+     ✓ grades the shift amount as the low three bits of b 18ms
+     ✓ separates the eight opcodes on vectors a player would try by hand 0ms
+   ❯ the decode targets separate the constructions they measure (3)
+     ✓ level 26: the flat eight-AND3 decode is correct and one star 1ms
+     × level 23: the textbook (a XOR m) - m is correct and one star 1ms
+     ✓ level 24: inverting with a byte XOR is correct and one star 4ms
+   ✓ the two decoder rewards are one width-parametrised definition (1)
+     ✓ wires both decoder levels from gates, not from a decoder drop-in 24ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/ch2-batch3.test.ts > every level carries its sourced-vs-authored data comment > records that level 23 changes the source level's kind
+AssertionError: expected '\n * Chapter 2, levels 23-27: two\'s …' to contain '补码'
+
+- Expected
++ Received
+
+- 补码
++
++  * Chapter 2, levels 23-27: two's complement, the decoders and the eight-bit
++  * logic engine -- the batch where a byte stops being eight wires and starts
++  * being a signed number, and where a level with an instruction set appears.
++  *
++  * WHAT THE SOURCE FIXES, AND WHAT IT DOES NOT. As in batches 1 and 2: the
++  * compendium gives each of these levels exactly three things -- its name
++  * (English and Chinese), its place in the chapter, and one line of teaching
++  * concept. It gives no ports, no widths, no pass conditions, no targets and no
++  * rewards. Everything else below is this replica's design, derived from the name
++  * and that one line -- so every level carries a data comment split into
++  * `SOURCED` and `AUTHORED`, and `test/levels/ch2-batch3.test.ts` fails if either
++  * marker is missing. No number in this file may be presented as the source's
++  * own.
++  *
++  * THREE THINGS THIS BATCH OWES A READER, and each says so in its own level
++  * comment rather than only here:
++  *
++  *  * LEVEL 23 CHANGES THE SOURCE LEVEL'S KIND. The source's level of this name
++  *    is a 限时小游戏 -- a timed mini-game, played against a clock, with no
++  *    circuit specification of any sort. This replica is a circuit game and
++  *    cannot host a typing game, so the level becomes a two's-complement
++  *    arithmetic circuit: the concept the mini-game taught (read a negative
++  *    number) is kept, the form is replaced. That is a deliberate change of kind,
++  *    not a translation, and it is recorded as such -- batch 1 did the same thing
++  *    to level 15 (`Binary Racer`, the other timed mini-game in the chapter).
++  *  * LEVEL 25'S DECODER IS WIDTH-PARAMETRISED, and the kernel's width rule does
++  *    not let one width literal do everything (see that level's comment: two of
++  *    the batch's rewards name parts no def registers yet, so the brief's claim
++  *    about widening the part is a claim about the part as the source defines it,
++  *    with the engine's half of the story recorded next to it).
++  *  * LEVEL 27 HAS AN AUTHORED INSTRUCTION SET. The source says only "用或门和非门
++  *    构建完整逻辑运算集" -- build the complete set of logical operations -- and
++  *    enumerates no opcodes at all. The eight values in that level's comment, and
++  *    in its brief for the player, are therefore this plan's design, and the test
++  *    file measures all eight one at a time rather than trusting a random
++  *    sequence to cover them.
++  *
++  * THE PALETTE RULE, inherited from batch 2 and used once more here: a level
++  * offers the parts unlocked at or before it whose pins can attach to something
++  * on it, plus its own rewards, MINUS any part that is not its own reward and
++  * would answer the level by itself. Level 24 uses that subtraction on `neg8` --
++  * one component with exactly the level's I/O shape, whose documented cell IS the
++  * circuit the level teaches -- and says so in its own comment. Nothing else in
++  * this batch is answered by a single unlocked part.
++  *
++  * REWARDS THAT NAME NO DEF ARE NORMAL HERE. `decoder1` (level 25) and `decoder3`
++  * (level 26) are unlock DATA: no def of either id is registered in this phase,
++  * exactly like batch 2's `full_adder`. The unlock walk is over ids, `ui/palette`
++  * drops an id the registry does not have, and every reference in the test file is
++  * wired from gates -- so a later task can register the decoder family without
++  * moving any number in this file.
++  *
++  * EVERY LEVEL HERE IS PURELY COMBINATIONAL, so `tick` is 0 on every three-star
++  * target, for the same reason batches 1 and 2 state it: no check in this batch
++  * ever ticks the clock, so the metric is genuinely 0 and its target can never be
++  * what denies a player three stars. The metrics that do the work here are `gate`
++  * and `delay`, and every target below is the reference solution's own measured
++  * score -- `three-star targets are the reference solutions own metrics` in the
++  * test file is what holds that to a number rather than a promise.
++  *
++  * NOT JOINED YET: `ch2/index.ts` assembles the chapter and still lists batch 1
++  * alone, so this file is reachable only through its own test until the chapter
++  * assembly task appends it.
++  */
++
++ /**
++  * The one-bit shelf every level in this batch draws from: chapter 1's gates, its
++  * two constants and the delay line, in the order chapter 1 hands them out.
++  * `delay_line` is offered because chapter 1's palettes offered it; no check in
++  * this batch ticks the clock, so nothing below can use it.
++  */
++ const GATES_1BIT = [
++   'nand',
++   'not',
++   'and',
++   'or',
++   'nor',
++   'xor',
++   'xnor',
++   'and3',
++   'or3',
++   'const_on',
++   'const_off',
++   'delay_line',
++ ] as const;
++
++ /** The level's own plumbing: always in the palette, never unlocked (`defs/index.ts`). */
++ const LEVEL_IO = ['level_input', 'level_output'] as const;
++
++ /** What batch 1's level 13 unlocked: the two byte packers and the byte constant. */
++ const BYTE_WIRING = ['splitter', 'maker', 'const8'] as const;
++
++ /** The wide operators batch 1's levels 15-17 unlocked. */
++ const WIDE_OPS = ['less_u', 'equal8', 'add8', 'mul8'] as const;
++
++ /** The bit-sliced byte operators batch 2's levels 18 and 19 unlocked. */
++ const BYTE_OPS = ['and8', 'or8', 'nand8', 'nor8', 'xor8', 'xnor8', 'not8'] as const;
++
++ /** Level 22's reward: a conditional pass, one bit and one byte wide. */
++ const SWITCHES = ['switch', 'switch8'] as const;
++
++ /**
++  * The four pin shapes this batch uses, so a level's io is one named constant
++  * instead of two lines of literal in the middle of a spec.
++  */
++ const IO_A8_OUT8: LevelIo = { inputs: [{ id: 'a', width: 8 }], outputs: [{ id: 'out', width: 8 }] };
++ const IO_SEL1_OUT2: LevelIo = {
++   inputs: [{ id: 'sel', width: 1 }],
++   outputs: [{ id: 'out', width: 2 }],
++ };
++ const IO_SEL3_OUT8: LevelIo = {
++   inputs: [{ id: 'sel', width: 3 }],
++   outputs: [{ id: 'out', width: 8 }],
++ };
++ const IO_A8_B8_OP8_OUT8: LevelIo = {
++   inputs: [
++     { id: 'a', width: 8 },
++     { id: 'b', width: 8 },
++     { id: 'op', width: 8 },
++   ],
++   outputs: [{ id: 'out', width: 8 }],
++ };
++
++ /**
++  * A fuzz seed per level: the level's index in the high byte and the byte width
++  * in the low one, exactly as batch 2 seeds its three.
++  *
++  * Fixed literals, not drawn ones: the same seed produces the same vectors on
++  * every run and on every board edit, which is what makes a fuzz level's coverage
++  * a fact about the level rather than about the run. Three distinct values, so
++  * one level's sequence is never another's -- and level 27's coverage of all
++  * eight opcodes is measured in the test file against this literal.
++  */
++ const SEED_23 = 0x2308;
++ const SEED_24 = 0x2408;
++ const SEED_27 = 0x2708;
++
++ /**
++  * The signed value of an eight-bit two's-complement pattern.
++  *
++  * The whole of what levels 23 and 24 teach, written once: the top bit is the
++  * sign, so a pattern of 128 or more is that pattern minus 256. The bit never
++  * leaves this function -- both levels publish an eight-bit PATTERN again, which
++  * is the contract every port in the kernel has (a port carries 0..255 and
++  * `assertWidth` accepts nothing else).
++  */
++ function signedByte(pattern: number): number {
++   const byte = pattern & 0xff;
++   return byte < 0x80 ? byte : byte - 0x100;
++ }
++
++ /**
++  * Level 23's expectation: how far the byte is from zero.
++  *
++  * `0x01 -> 1`, `0xff -> 1`, `0x80 -> 128`. The one pattern to note is `0x80`:
++  * the most negative byte is also the one whose magnitude needs the sign bit's
++  * own position, and it fits (128 is representable) -- which is why this level
++  * can publish a magnitude at all.
++  */
++ const MAGNITUDE_OF_SIGNED_BYTE = (v: FuzzVector): number => Math.abs(signedByte(v.a ?? 0));
++
++ /**
++  * Level 24's expectation: the low eight bits of `-a`.
++  *
++  * `0x80` negated is `0x80` again -- the one pattern two's complement cannot
++  * reflect -- and the mask is what states that as arithmetic rather than as a
++  * wrap-around the reader has to work out.
++  */
++ const NEGATED_BYTE = (v: FuzzVector): number => (-signedByte(v.a ?? 0)) & 0xff;
++
++ /**
++  * Level 27's opcode: the low three bits of `op`, and nothing else.
++  *
++  * The engine ignores the top five bits, which is a rule the fuzz check has to
++  * state because random bytes set them: the test file drives `op = (high << 3) |
++  * n` for every `high` against the level's own expectation.
++  */
++ const ENGINE_OPCODE = (op: number): number => op & 7;
++
++ /**
++  * `a` shifted arithmetically right by `amount` bits: the sign bit replicates.
++  *
++  * Written as the kernel's own `shiftRightArithmeticOp` defines it -- sign-extend,
++  * shift, mask back to a pattern -- because the reference the target is measured
++  * from is the `ashr8` part, and an expectation that disagreed with the part it
++  * grades would be a level that grades the wrong thing. `amount` is at most 7
++  * here (it is `b`'s low three bits), so the operator's "an amount of `w` or more
++  * fills with the sign" edge is out of reach and the plain shift is the whole
++  * function.
++  */
++ function arithmeticRightByte(a: number, amount: number): number {
++   const signed = (a << 24) >> 24;
++   return (signed >> amount) & 0xff;
++ }
++
++ /**
++  * Level 27's expectation: the eight-opcode table, as a pure function.
++  *
++  * THE SPECIFICATION OF THE LEVEL, not a convenience: the source enumerates no
++  * opcodes, so this switch IS the authored instruction set (the level's brief
++  * lists the same eight values for the player, and the test file checks the two
++  * against each other opcode by opcode). `add` and `sub` keep the low eight bits
++  * and discard the carry out, exactly as `add8`/`add8(a, ~b, 1)` do; the shifts
++  * read `b`'s LOW THREE BITS, which is what makes `sub`'s second operand and a
++  * shift amount two different things in the same byte.
++  */
++ const LOGIC_ENGINE_OUT = (v: FuzzVector): number => {
++   const a = (v.a ?? 0) & 0xff;
++   const b = (v.b ?? 0) & 0xff;
++   const amount = b & 7;
++   switch (ENGINE_OPCODE(v.op ?? 0)) {
++     case 0:
++       return a & b;
++     case 1:
++       return a | b;
++     case 2:
++       return a ^ b;
++     case 3:
++       return ~a & 0xff;
++     case 4:
++       return (a + b) & 0xff;
++     case 5:
++       return (a - b) & 0xff;
++     case 6:
++       // `b & 7` is at most 7, so the logical shifts' "amount of 8 or more" edge
++       // (`shift_l8`/`shift_r8` publish 0 there) is unreachable on this level.
++       return (a << amount) & 0xff;
++     default:
++       // `op & 7` is 0..7 (`noFallthroughCasesInSwitch` is satisfied by the
++       // returns above), so this is opcode 7 and there is no other case.
++       return arithmeticRightByte(a, amount);
++   }
++ };
++
++ export const CH2_BATCH3: readonly LevelSpec[] = [
++   /**
++    * ch2-23-negative-numbers -- Negative Numbers / 负数
++    *
++    * SOURCED: the name in both languages, its position (the 23rd level), and the
++    * concept -- two's-complement representation, i.e. reading a byte as a signed
++    * number. AND the form the source gives it: its level of this name is a
++    * 限时小游戏, a timed mini-game with NO circuit specification at all -- no
++    * ports, no gates, no pass condition.
++    *
++    * AUTHORED, AND THE FIRST THING IT RECORDS IS A CHANGE OF KIND. This replica
++    * cannot host a game played against a clock, so the level is rebuilt as a
++    * two's-complement arithmetic circuit: the concept the mini-game taught is
++    * kept and the form is replaced, which is a deliberate change of the level's
++    * kind rather than a translation of it. This is one of the three places in
++    * this phase where a level's kind changes, and -- like batch 1's level 15,
++    * the chapter's other timed mini-game -- it says so here rather than only in
++    * the module header.
++    *
++    * The rest is authored too: the `a:8 -> out:8` shape; the function itself
++    * (publish the MAGNITUDE of the byte read as two's complement -- a reading of
++    * the sign, which is what the level is for, and deliberately not the negation
++    * level 24 asks for); the fuzz check (the brief fixes its kind, its 256 rounds
++    * and its fixed-seed rule; the seed, the pin maps and the expectation function
++    * are written here); the measured three-star target; and the `div8` reward.
++    *
++    * THE REFERENCE THE TARGET IS MEASURED FROM is `add8(xor8(a, m), 0, m0)`,
++    * where `m` is the sign bit spread over the whole byte and `m0` is that same
++    * bit as the carry-in: `a XOR m` is `a` or `~a`, and adding `m` finishes the
++    * job because subtracting 255 and adding 1 are the same eight-bit operation.
++    * That is one `xor8` (32) and one `add8` (72) = 104 NAND equivalents on a path
++    * two gates deep, and the maker and splitter that spread the sign are wiring
++    * and cost nothing on either metric.
++    *
++    * WHAT THE TARGET SEPARATES, measured in the test file rather than asserted
++    * here: the textbook `(a XOR m) - m`, spelled with a byte NOT of the mask
++    * (112 gates, still two deep, one star), and the alternative that is smaller
++    * but deeper -- a hand-built incrementer whose carry chain is seven ANDs long
++    * (fewer gates, eight units of delay, one star). The level's own answer is the
++    * one that is both cheap and shallow, which is what three stars means here.
++    
+
+ ❯ test/levels/ch2-batch3.test.ts:509:17
+    507|     const l23 = comments.get('ch2-23-negative-numbers') ?? '';
+    508|     expect(l23).toContain('限时小游戏');
+    509|     expect(l23).toContain('补码');
+       |                 ^
+    510|     expect(l23).toContain('kind');
+    511|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  test/levels/ch2-batch3.test.ts > every level carries its sourced-vs-authored data comment > records the width-parametrised decoder and how widths resolve
+AssertionError: expected '\n   * ch2-25-1-bit-decoder -- 1 Bit …' to contain '2-Bit Decoder'
+
+- Expected
++ Received
+
+- 2-Bit Decoder
++
++    * ch2-25-1-bit-decoder -- 1 Bit Decoder / 1 位解码器
++    *
++    * SOURCED: the name in both languages, its position (25th), and the concept --
++    * one-to-two decoding: one select bit, two one-hot outputs. ALSO SOURCED, from
++    * the catalog rather than from a level name: the compendium's component list
++    * for this chapter has `decoder1`, `decoder2` and `decoder3`, while no level
++    * name introduces a 2-bit decoder -- so `decoder1` and `decoder2` are THE SAME
++    * DEFINITION at different widths, not two parts, and the 2-bit decoder is this
++    * level's reward widened. That is what this level's brief tells the player.
++    *
++    * AUTHORED: the `sel:1 -> out:2` shape; the two rows (built by `truthTable`,
++    * which refuses to leave a declared output pin uncompared); the measured
++    * three-star target (ONE NAND equivalent on a path one gate deep: bit 0 is a
++    * `not` of the select bit, bit 1 is the select bit, and the `maker` that packs
++    * the two bits into the level's 2-bit output is wiring); and the palette.
++    *
++    * THE WIDTH CLAIM, AND WHAT THE KERNEL DOES WITH IT -- recorded here because a
++    * reviewer will ask. `params.width` is the only per-instance knob the kernel
++    * has, and it resolves a pin as `inst.params.width ?? pin.width` for EVERY pin
++    * of the instance (`src/core/net.ts`, `effectiveWidth`): one width literal
++    * covers the whole part. So a def declaring `sel: 1 / out: 2` compiled at
++    * `params.width = 2` has BOTH pins two bits wide, which is not the catalog's
++    * 2-bit decoder (`sel: 2 / out: 4`) -- a single width literal cannot make the
++    * two pins differ, and the pins of a decoder MUST differ, because the output
++    * count is `2 ** width`. The brief states the part's width parameterisation as
++    * the source defines it (`params.width = 2` gives the 2-bit decoder); how that
++    * width reaches two differently-sized pins is the decision of the task that
++    * registers the family, and the shape this kernel can express is the one
++    * `createWideDefs(width)` already uses for the operators -- one definition,
++    * generated per width, `decoder1` / `decoder2` / `decoder3`. No def of either
++    * id exists in this phase, so both are reward data and nothing here depends on
++    * them.
++    
+
+ ❯ test/levels/ch2-batch3.test.ts:522:17
+    520|     expect(l25).toContain('params.width');
+    521|     expect(l25).toContain('decoder2');
+    522|     expect(l25).toContain('2-Bit Decoder');
+       |                 ^
+    523|   });
+    524|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  test/levels/ch2-batch3.test.ts > plausible wrong circuits fail > fails the pass-through decoder on the first row that is not its own one-hot code
+AssertionError: expected { sel: +0 } to deeply equal { sel: 1 }
+
+- Expected
++ Received
+
+  {
+-   "sel": 1,
++   "sel": 0,
+  }
+
+ ❯ test/levels/ch2-batch3.test.ts:878:40
+    876|     // `sel = 1` is the first value whose one-hot form is not the valu…
+    877|     const result = grade(wrong['ch2-26-3-bit-decoder']!(), registry, s…
+    878|     expect(result.failures[0]?.inputs).toEqual({ sel: 1 });
+       |                                        ^
+    879|     expect(result.failures[0]?.expected).toEqual({ out: 2 });
+    880|     expect(result.failures[0]?.actual).toEqual({ out: 1 });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  test/levels/ch2-batch3.test.ts > the decode targets separate the constructions they measure > level 23: the textbook (a XOR m) - m is correct and one star
+AssertionError: [{"check":"fuzz","inputs":{"a":56},"expected":{"out":56},"actual":{"out":55},"tick":0,"reason":"mismatch","round":0,"detail":"round 0 of 256 (seed 8968)"}]: expected [ { check: 'fuzz', …(7) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "actual": {
++       "out": 55,
++     },
++     "check": "fuzz",
++     "detail": "round 0 of 256 (seed 8968)",
++     "expected": {
++       "out": 56,
++     },
++     "inputs": {
++       "a": 56,
++     },
++     "reason": "mismatch",
++     "round": 0,
++     "tick": 0,
++   },
++ ]
+
+ ❯ test/levels/ch2-batch3.test.ts:1194:62
+    1192|     const level = specOf('ch2-23-negative-numbers');
+    1193|     const result = grade(graph, registry, level);
+    1194|     expect(result.failures, JSON.stringify(result.failures)).toEqual([…
+       |                                                              ^
+    1195|     expect(result.metrics).toEqual({ gate: 112, delay: 2, tick: 0 });
+    1196|     expect(result.stars).toBe(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 61 passed (65)
+   Start at  02:55:46
+   Duration  1.76s (tests 85%, transform 11%, import 3%, worker 1%)
+
+[ELIFECYCLE] Test failed. See above for more details.

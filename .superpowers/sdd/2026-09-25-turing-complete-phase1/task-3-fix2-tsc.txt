@@ -1,0 +1,2 @@
+COMMAND: node pnpm.mjs exec tsc --noEmit
+EXIT=0

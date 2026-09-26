@@ -1,0 +1,41 @@
+$ vitest run
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/app/progress.test.ts (18 tests) 13ms
+ ✓ test/levels/checks.test.ts (28 tests) 43ms
+ ✓ test/core/defs-wide.test.ts (60 tests) 111ms
+ ✓ test/levels/ch1-part2.test.ts (29 tests) 25ms
+ ✓ test/levels/grader.test.ts (40 tests) 38ms
+ ✓ test/core/registry.test.ts (35 tests) 27ms
+ ✓ test/levels/ch1-part1.test.ts (34 tests) 28ms
+ ✓ test/levels/level-buildability.test.ts (40 tests) 79ms
+ ✓ test/levels/fuzz-custom.test.ts (67 tests) 183ms
+ ✓ test/levels/ch2-batch1.test.ts (58 tests) 144ms
+ ✓ test/core/net.test.ts (55 tests) 453ms
+ ✓ test/core/graph.test.ts (15 tests) 574ms
+   ✓ validateGraph (9)
+     ✓ scans a 50,000-instance cycle without recursing 559ms
+ ✓ test/core/signal.test.ts (16 tests) 13ms
+ ✓ test/persist/storage.test.ts (12 tests) 12ms
+ ✓ test/app/commands.test.ts (6 tests) 10ms
+ ✓ test/smoke/sanity.test.ts (1 test) 4ms
+ ✓ test/ui/view.test.ts (6 tests) 6ms
+ ✓ test/app/store.test.ts (11 tests) 11ms
+ ✓ test/levels/ch2-batch2.test.ts (56 tests) 614ms
+ ✓ test/ui/panels.test.ts (22 tests) 48ms
+ ✓ test/levels/ch2-batch3.test.ts (68 tests) 1710ms
+   ✓ reference solutions pass with three stars (5)
+     ✓ ch2-27-logic-engine 516ms
+   ✓ the fuzz levels drive varying, reproducible vectors (1)
+     ✓ draws 256 different vectors on every run, from the level data alone 417ms
+
+ Test Files  21 passed (21)
+      Tests  677 passed (677)
+   Start at  03:09:14
+   Duration  2.46s (tests 36%, transform 34%, import 15%, environment 12%, worker 3%)
+
+  Transform  transforming modules took 3.92s · 34% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+

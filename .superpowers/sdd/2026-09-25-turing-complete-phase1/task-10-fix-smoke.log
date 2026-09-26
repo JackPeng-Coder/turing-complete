@@ -1,0 +1,20 @@
+$ playwright test
+[WebServer] (node:27912) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] $ tsc --noEmit && vite build
+[WebServer] (node:8816) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:22064) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] $ vite preview "--port" "4173" "--strictPort"
+[WebServer] (node:26588) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 2 tests using 1 worker
+
+(node:13264) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 test\smoke\ui.spec.ts:41:1 › level 1 is playable end to end and shows its epilogue (584ms)
+  ok 2 test\smoke\ui.spec.ts:64:1 › progress survives a reload and unlocks the next level (646ms)
+
+  2 passed (5.9s)

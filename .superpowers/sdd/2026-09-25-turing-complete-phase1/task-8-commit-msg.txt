@@ -1,0 +1,60 @@
+feat(levels): add chapter-2 levels 13-17 and close the vacuity invariant
+
+The first chapter-2 batch: five levels, and the first level data in the
+game with multi-bit pins. Level 13's four-bit input is the first place a
+wire can be narrower than the pin it drives, so `splitter`/`maker` and the
+two generated wide tables (16 and 256 rows) are what this commit
+introduces.
+
+The source compendium fixes three things per level -- name (zh/en),
+position, and one line of concept -- and nothing else, so every port,
+width, check, target and reward here is this replica's design. Each level
+therefore carries a data comment split into `SOURCED` and `AUTHORED`, and
+`test/levels/ch2-batch1.test.ts` fails if either marker goes missing.
+
+* ch2-13 ODD Number of Signals: `a:4 -> out:1`, parity, a 16-row table from
+  `truthTable`. The four-bit width is authored, not sourced (the source says
+  nothing about width); 16 rows exhaust a nibble. Rewards `splitter`,
+  `maker`, `const8`.
+
+* ch2-14 Double Trouble: `a,b,c,d:1 -> out:1`, a `constraint` check with an
+  `at-least` 2 rule. `sum-equals` would have stated parity modulo the 1-bit
+  output pin, which is level 13's function. No reward, per the brief.
+
+* ch2-15 Binary Racer: `a:4 -> out:3`, the count of high bits, 16 rows from
+  `generateRows`. The source's timed minigame cannot be a circuit, so the
+  concept is kept and the timer dropped. Its function coincides with level
+  16's; that follows from the brief's own table and is recorded in the level
+  comment. Rewards `less_u`.
+
+* ch2-16 Counting Signals: `a,b,c,d:1 -> out:3`, the same count from four
+  separate pins -- the half-adder level. Rewards `equal8`.
+
+* ch2-17 Double the Number: `a:8 -> out:8`, 256 generated rows. The
+  reference is wiring (splitter then maker, one slot up), so the measured
+  target is the floor: 0 gates, 0 delay. `add8(a, a)` doubles as well at 72
+  gates and scores one star, which a test measures rather than a comment
+  claiming it. Rewards `add8`, `mul8`.
+
+Every three-star target is the reference solution's own measured metric, and
+a test asserts that equality in both directions, so a guessed target cannot
+survive. All five levels are purely combinational, so `tick` is 0 on all
+five, as in chapter 1.
+
+The chapter-1 and chapter-2 `gives every level a check with something to
+compare` loops now handle all five check kinds and refuse an unknown one.
+The old two-branch shape handled `truth-table`/`script` with no `else`, so a
+`constraint`, `fuzz` or `custom` check -- including a vacuous one -- passed
+it silently; a mutation run of the chapter-2 copy shows all six synthetic
+vacuity shapes passing under the old shape, and the chapter-1 files staying
+green, which is why the hole was invisible. The `fuzz` branch checks the
+EFFECTIVE round count (`rounds ?? DEFAULT_FUZZ_ROUNDS`, imported from the
+checker) and that every pin of the level is bound.
+
+Known seam, recorded in level 13's comment and in task-8-report.md: level 13
+is the first level whose puzzle needs a wide part, so `splitter`/`maker`/
+`const8` are its own rewards -- and `paletteDefsFor` offers the rewards of
+passed levels only, which leaves a first-time player without the splitter
+and the level unbuildable. The fix is one line in `src/app/progress.ts`
+(offer the level's own rewards) or moving those three rewards to an earlier
+level; both are outside this task's declared file scope.

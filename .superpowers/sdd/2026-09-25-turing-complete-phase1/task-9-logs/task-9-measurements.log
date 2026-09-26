@@ -1,0 +1,18 @@
+$ vitest run "test/levels/tmp-measure.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+stdout | test/levels/tmp-measure.test.ts > measurement scratchpad > reports each level and each counterexample
+{"id":"ch2-18-byte-or","threeStar":{"gate":24,"delay":1,"tick":0},"reward":["and8","or8","nand8","nor8"],"palette":25,"failure":{"round":0,"inputs":{"a":136,"b":177},"expected":{"out":185},"actual":{"out":128}}}
+{"id":"ch2-19-byte-not","threeStar":{"gate":8,"delay":1,"tick":0},"reward":["xor8","xnor8","not8"],"palette":28,"failure":{"round":0,"inputs":{"a":152},"expected":{"out":103},"actual":{"out":152}}}
+{"id":"ch2-20-half-adder","threeStar":{"gate":6,"delay":1,"tick":0},"reward":["full_adder"],"palette":15,"failure":null}
+{"id":"ch2-21-full-adder","threeStar":{"gate":15,"delay":3,"tick":0},"reward":["neg8"],"palette":14,"failure":null}
+{"id":"ch2-22-adding-bytes","threeStar":{"gate":120,"delay":17,"tick":0},"reward":["switch","switch8"],"palette":23,"failure":{"round":0,"inputs":{"a":40,"b":72,"cin":1},"expected":{"out":113,"cout":0},"actual":{"out":96,"cout":0}}}
+
+ ✓ test/levels/tmp-measure.test.ts (1 test) 6ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  02:43:00
+   Duration  297ms (transform 71%, import 20%, worker 5%, tests 4%)
+

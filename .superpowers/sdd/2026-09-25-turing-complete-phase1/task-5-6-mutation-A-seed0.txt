@@ -1,0 +1,76 @@
+$ vitest run "test/levels/fuzz-custom.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/levels/fuzz-custom.test.ts (47 tests | 1 failed) 65ms
+   ❯ runChecks / fuzz (21)
+     ✓ passes a correct 8-bit adder, wide output and carry included 11ms
+     ✓ reports the failing round, its input vector, the expectation and the actual 1ms
+     ✓ generates the same vector sequence from the same seed in two independent constructions 1ms
+     × varies the vectors for seed 0 instead of repeating the PRNG fixed point 4ms
+     ✓ names the round an unstable circuit died in 2ms
+     ✓ ties the sequence to the seed 1ms
+     ✓ pins the first vectors of a known seed 0ms
+     ✓ runs the documented default number of rounds when `rounds` is omitted 1ms
+     ✓ clamps a huge `rounds` to the documented cap instead of hanging the editor 26ms
+     ✓ refuses a fuzz check with rounds=0 instead of passing it 1ms
+     ✓ refuses a fuzz check with rounds=-1 instead of passing it 1ms
+     ✓ refuses a fuzz check with rounds=2.5 instead of passing it 1ms
+     ✓ refuses a fuzz check with rounds=NaN instead of passing it 1ms
+     ✓ refuses a fuzz check that declares no input functions 0ms
+     ✓ refuses a fuzz check that declares no output expectations 0ms
+     ✓ refuses a fuzz check on a level with no input pins to vary 1ms
+     ✓ refuses a fuzz check with a function missing for one of the level pins 0ms
+     ✓ refuses a fuzz function declared for a pin the level does not have 0ms
+     ✓ refuses an input function whose value does not fit its pin 0ms
+     ✓ refuses an expectation that does not fit its pin 0ms
+     ✓ turns an authored function that throws into a recorded failure 1ms
+   ✓ runChecks / custom (26)
+     ✓ ships no custom checks of its own 0ms
+     ✓ calls a registered checker with the level io and adopts its outcome 1ms
+     ✓ adopts the failure records of a registered checker verbatim 0ms
+     ✓ fails an unregistered id with missing-check rather than passing it 0ms
+     ✓ refuses a checker inlined in level data 0ms
+     ✓ turns a checker that throws an Error into a recorded failure 1ms
+     ✓ turns a checker that throws a TypeError into a recorded failure 1ms
+     ✓ turns a checker that throws a RangeError into a recorded failure 1ms
+     ✓ classifies an UnstableCircuitError escaping a checker as unstable 1ms
+     ✓ turns undefined outcome into a recorded invalid failure 0ms
+     ✓ turns null outcome into a recorded invalid failure 0ms
+     ✓ turns a string outcome into a recorded invalid failure 0ms
+     ✓ turns a number outcome into a recorded invalid failure 0ms
+     ✓ turns an array outcome into a recorded invalid failure 0ms
+     ✓ turns a missing passed outcome into a recorded invalid failure 0ms
+     ✓ turns a non-boolean passed outcome into a recorded invalid failure 0ms
+     ✓ turns a non-array failures outcome into a recorded invalid failure 0ms
+     ✓ turns a negative ticksUsed outcome into a recorded invalid failure 0ms
+     ✓ turns a fractional ticksUsed outcome into a recorded invalid failure 0ms
+     ✓ turns a null failure record outcome into a recorded invalid failure 0ms
+     ✓ turns a failure record with no actual outcome into a recorded invalid failure 0ms
+     ✓ turns a failure record with an unknown reason outcome into a recorded invalid failure 0ms
+     ✓ adopts failures a checker reported while claiming to have passed 0ms
+     ✓ synthesizes a failure for a checker that reports failure without a record 0ms
+     ✓ runs truth-table, fuzz and custom checks in one spec 1ms
+     ✓ fails loudly on a check kind this kernel does not know 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / fuzz > varies the vectors for seed 0 instead of repeating the PRNG fixed point
+AssertionError: expected 1 to be greater than 1
+ ❯ test/levels/fuzz-custom.test.ts:236:60
+    234|     expect(runChecks(addCircuit(), registry, withChecks(addLevel, [che…
+    235|     expect(seen).toHaveLength(8);
+    236|     expect(new Set(seen.map((v) => `${v.a},${v.b}`)).size).toBeGreater…
+       |                                                            ^
+    237|   });
+    238|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 46 passed (47)
+   Start at  01:59:30
+   Duration  380ms (transform 55%, tests 26%, import 15%, worker 4%)
+
+[ELIFECYCLE] Test failed. See above for more details.

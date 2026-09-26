@@ -1,0 +1,2017 @@
+# Review package: cf9d561..HEAD
+
+## Commits
+452e90d feat(ui): add chapter map, original narrative shell and playwright smoke test
+79b2adb docs: make the smoke test runnable on this host
+63df10e feat(ui): add canvas board, palette, shell and truth table panel
+
+## Files changed
+ .../plans/2026-09-25-turing-complete-phase0.md     |  27 +-
+ playwright.config.ts                               |  29 ++
+ src/main.ts                                        | 161 ++++++++-
+ src/ui/board/interact.ts                           | 373 +++++++++++++++++++++
+ src/ui/board/render.ts                             | 192 +++++++++++
+ src/ui/board/view.ts                               | 118 ++++++-
+ src/ui/map.ts                                      |  54 +++
+ src/ui/narrative.ts                                |  96 ++++++
+ src/ui/palette.ts                                  |  70 ++++
+ src/ui/shell.ts                                    |  58 ++++
+ src/ui/style.css                                   |  47 +++
+ src/ui/theme.ts                                    |  26 ++
+ src/ui/truthTable.ts                               |  86 +++++
+ test/smoke/ui.spec.ts                              |  94 ++++++
+ test/ui/panels.test.ts                             | 326 ++++++++++++++++++
+ test/ui/view.test.ts                               |  52 +++
+ 16 files changed, 1801 insertions(+), 8 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/plans/2026-09-25-turing-complete-phase0.md b/docs/superpowers/plans/2026-09-25-turing-complete-phase0.md
+index 1bcd8b7..1d53f6b 100644
+--- a/docs/superpowers/plans/2026-09-25-turing-complete-phase0.md
++++ b/docs/superpowers/plans/2026-09-25-turing-complete-phase0.md
+@@ -5609,21 +5609,21 @@ git commit -m "feat(ui): add canvas board, palette, shell and truth table panel"
+ **Files:**
+ - Create: `src/ui/map.ts`, `src/ui/narrative.ts`, `test/smoke/ui.spec.ts`, `playwright.config.ts`
+ - Modify: `src/main.ts`
+ - Test: `test/smoke/ui.spec.ts`
+ 
+ **Interfaces:**
+ - Consumes: `Store`、`LEVELS`、`Progress`
+ - Produces:
+   - `src/ui/narrative.ts`：`interface Narrative { readonly before: LocalizedText; readonly after: LocalizedText }`、`const NARRATIVE: Readonly<Record<string, Narrative>>`、`function narrativeFor(levelId: string): Narrative`
+   - `src/ui/map.ts`：`function mountMap(root: HTMLElement, store: Store, onSelect: (levelId: string) => void): { render(): void }`
+-  - `playwright.config.ts`：webServer 启动 `pnpm preview`，端口 4173
++  - `playwright.config.ts`：webServer 通过 `NODE_BIN`/`PNPM_BIN` 启动 `build` + `preview`，端口 4173（本机 PATH 上的 `pnpm` 是坏的包装脚本）
+ 
+ - [ ] **Step 1: 写 `src/ui/narrative.ts`（原创文案）**
+ 
+ ```ts
+ import type { LocalizedText } from '../levels/spec';
+ 
+ export interface Narrative {
+   readonly before: LocalizedText;
+   readonly after: LocalizedText;
+ }
+@@ -5764,37 +5764,56 @@ export function mountMap(
+ 
+ ```css
+ .map-tile-current { border-color: #2fd4a7; }
+ ```
+ 
+ - [ ] **Step 3: 写 `playwright.config.ts`**
+ 
+ ```ts
+ import { defineConfig } from '@playwright/test';
+ 
++// The `pnpm` shim on this host's PATH is a broken PowerShell wrapper, so the
++// preview server is started through the bundled Node binary instead. NODE and
++// PNPM are supplied by the environment; on a normal Linux CI, set both to
++// `pnpm` (or leave them unset and drop the quotes) and the command is the
++// ordinary `pnpm build && pnpm preview`.
++const NODE = process.env.NODE_BIN ?? 'node';
++const PNPM = process.env.PNPM_BIN ?? 'pnpm';
++
+ export default defineConfig({
+   testDir: './test/smoke',
+   testMatch: /.*\.spec\.ts/,
+   timeout: 30_000,
+   use: {
+     baseURL: 'http://127.0.0.1:4173',
+     viewport: { width: 1280, height: 800 },
+   },
+   webServer: {
+-    command: 'pnpm build && pnpm preview --port 4173 --strictPort',
++    command: `"${NODE}" "${PNPM}" build && "${NODE}" "${PNPM}" preview --port 4173 --strictPort`,
+     url: 'http://127.0.0.1:4173',
+     reuseExistingServer: !process.env.CI,
+-    timeout: 120_000,
++    timeout: 180_000,
+   },
+ });
+ ```
+ 
++> **两处本机实测的坑（Task 11 的修复轮报告的）**：
++>
++> 1. `pnpm` 在 PATH 上是一个坏掉的 PowerShell 包装脚本，`webServer.command` 里直接写 `pnpm` 会启动失败。用 `NODE_BIN` / `PNPM_BIN` 环境变量传入真实路径，命令里用 `"${NODE}" "${PNPM}"`。
++> 2. **浏览器版本必须与 `@playwright/test` 匹配**。本机预装的是 `chromium-1223`，而 1.63.0 需要 `1243`，直接跑会报找不到可执行文件。先装一次（约 115 MB）：
++>
++> ```
++> & "<node>" "node_modules\@playwright\test\cli.js" install chromium
++> ```
++>
++> 装完 `%LOCALAPPDATA%\ms-playwright` 下会同时有 1223 与 1243，属正常。
++
+ - [ ] **Step 4: 写冒烟测试 `test/smoke/ui.spec.ts`**
+ 
+ 冒烟测试覆盖用户真正会走的那条路：进关卡 → 从调色板选元件 → 在画板上放置 → 连线 → 看到判定结果 → 刷新后进度还在。
+ 
+ ```ts
+ import { expect, test } from '@playwright/test';
+ 
+ test('level 1 is playable end to end and survives a reload', async ({ page }) => {
+   await page.goto('/');
+   await page.getByRole('button', { name: '开始' }).click(); // dismiss the briefing overlay
+@@ -5830,21 +5849,21 @@ test('progress survives a reload and unlocks the next level', async ({ page }) =
+   const box = (await canvas.boundingBox())!;
+   const cx = box.x + box.width / 2;
+   const cy = box.y + box.height / 2;
+   await page.getByRole('button', { name: '高电平' }).click();
+   await page.mouse.click(cx - 160, cy);
+   await page.getByRole('button', { name: '关卡输出' }).click();
+   await page.mouse.click(cx + 160, cy);
+   await page.mouse.move(cx - 160 + 64, cy);
+   await page.mouse.down();
+   await page.mouse.move(cx + 160, cy, { steps: 12 });
+-  await page.mouse.up();
++Run: `& "<node>" "node_modules\@playwright\test\cli.js" install chromium` 然后 `NODE_BIN=... PNPM_BIN=... pnpm smoke`
+   await expect(page.locator('.truth-table')).toContainText('全部用例通过');
+ 
+   await page.reload();
+   await page.getByRole('button', { name: '开始' }).click(); // level 2's briefing
+   await expect(page.locator('.shell-bar')).toContainText('与非门');
+   await expect(page.getByRole('button', { name: '与非门' })).toBeEnabled();
+ 
+   await page.getByRole('button', { name: '章节地图' }).click();
+   await expect(page.locator('.map-tile').nth(0)).toContainText('★');
+   await expect(page.locator('.map-tile').nth(1)).toBeEnabled();
+diff --git a/playwright.config.ts b/playwright.config.ts
+new file mode 100644
+index 0000000..b452b1b
+--- /dev/null
++++ b/playwright.config.ts
+@@ -0,0 +1,29 @@
++import { defineConfig } from '@playwright/test';
++
++// The `pnpm` shim on this host's PATH is a broken PowerShell wrapper, so the
++// preview server is started through the bundled Node binary instead. NODE and
++// PNPM are supplied by the environment; on a normal Linux CI, set both to
++// `pnpm` (or leave them unset and drop the quotes) and the command is the
++// ordinary `pnpm build && pnpm preview`.
++//
++// This file is deliberately outside `tsconfig.include`: it reads `process.env`
++// and the project has no `@types/node` (nothing may be added to package.json).
++// Playwright transpiles its own config, so it is loaded without `tsc`.
++const NODE = process.env.NODE_BIN ?? 'node';
++const PNPM = process.env.PNPM_BIN ?? 'pnpm';
++
++export default defineConfig({
++  testDir: './test/smoke',
++  testMatch: /.*\.spec\.ts/,
++  timeout: 30_000,
++  use: {
++    baseURL: 'http://127.0.0.1:4173',
++    viewport: { width: 1280, height: 800 },
++  },
++  webServer: {
++    command: `"${NODE}" "${PNPM}" build && "${NODE}" "${PNPM}" preview --port 4173 --strictPort`,
++    url: 'http://127.0.0.1:4173',
++    reuseExistingServer: !process.env.CI,
++    timeout: 180_000,
++  },
++});
+diff --git a/src/main.ts b/src/main.ts
+index 023db71..e663191 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -1,2 +1,161 @@
++import './ui/style.css';
++import { createRegistry } from './core/registry';
++import { BASE_DEFS } from './core/defs/index';
++import { emptyGraph } from './core/graph';
++import { getLevel, LEVEL_ORDER } from './levels/index';
++import { createStore, type AppState, type Store } from './app/store';
++import { CommandStack } from './app/commands';
++import { grade } from './levels/grader';
++import { loadProgress, saveProgress } from './persist/storage';
++import { applyGrade, resumePointOf, type Progress } from './app/progress';
++import { mountShell } from './ui/shell';
++import { mountPalette } from './ui/palette';
++import { mountTruthTable } from './ui/truthTable';
++import { mountMap } from './ui/map';
++import { narrativeFor } from './ui/narrative';
++import { renderBoard } from './ui/board/render';
++import { attachBoardInput } from './ui/board/interact';
++import type { LevelSpec } from './levels/spec';
++
++const registry = createRegistry(BASE_DEFS);
++let progress: Progress = loadProgress();
++const level: LevelSpec = getLevel(resumePointOf(progress, LEVEL_ORDER));
++
++const store: Store<AppState> = createStore<AppState>({
++  level,
++  graph: emptyGraph(level.id),
++  registry,
++  progress,
++  camera: { x: 40, y: 40, zoom: 1 },
++  selected: [],
++  dragging: null,
++  lastGrade: null,
++  status: null,
++});
++
++const stack = new CommandStack();
+ const app = document.querySelector<HTMLDivElement>('#app');
+-if (app) app.textContent = '图灵完备 · 复刻版 — 启动中';
++
++if (app) {
++  // The shell bar is prepended into #app and the screens fill what is left, so
++  // the screens go in first and the bar ends up above them.
++  const screens = document.createElement('div');
++  screens.className = 'screens';
++  const boardScreen = document.createElement('div');
++  boardScreen.className = 'screen screen-board';
++  const mapScreen = document.createElement('div');
++  mapScreen.className = 'screen screen-map';
++  mapScreen.hidden = true;
++  screens.append(boardScreen, mapScreen);
++  app.append(screens);
++
++  const canvas = document.createElement('canvas');
++  canvas.className = 'board';
++
++  const showScreen = (which: 'board' | 'map'): void => {
++    boardScreen.hidden = which !== 'board';
++    mapScreen.hidden = which !== 'map';
++    // A hidden canvas has no box to draw into; repaint when it comes back.
++    if (which === 'board') renderBoard(canvas, store, store.get().camera);
++  };
++
++  const onPick = (defId: string): void => {
++    // The palette only offers ids the registry knows; the guard keeps the
++    // "registry.get throws" contract local rather than implied.
++    if (!registry.has(defId)) return;
++    canvas.dataset.pendingDef = defId;
++    const def = registry.get(defId);
++    store.set({
++      status: {
++        zh: `已选 ${def.name.zh} — 点击画板放置，Esc 取消`,
++        en: `${def.name.en} selected — click the board to place, Esc to cancel`,
++      },
++    });
++  };
++
++  /**
++   * Loads a level into the board; the chapter map calls this. The `before` text
++   * is shown on arrival, every time -- entering a level is the narrative beat,
++   * whether or not it has been passed before.
++   */
++  const openLevel = (levelId: string): void => {
++    const next = getLevel(levelId);
++    stack.clear();
++    canvas.dataset.pendingDef = '';
++    store.set({
++      level: next,
++      graph: emptyGraph(next.id),
++      selected: [],
++      lastGrade: null,
++      status: null,
++    });
++    showScreen('board');
++    showBriefing(narrativeFor(levelId).before);
++  };
++
++  const regrade = (): void => {
++    const { graph, level: current, progress: current0 } = store.get();
++    const result = grade(graph, registry, current);
++    store.set({ lastGrade: result });
++    if (result.passed) {
++      progress = applyGrade(current0, current, result);
++      saveProgress(progress);
++      store.set({ progress });
++      showBriefing(narrativeFor(current.id).after);
++    }
++  };
++
++  const mapRender = mountMap(mapScreen, store, openLevel);
++
++  mountShell(app, store, {
++    onOpenMap: () => {
++      showScreen('map');
++      mapRender.render();
++    },
++  });
++  // DOM order is visual order: the palette strip, then the board, then the
++  // truth table at the bottom.
++  mountPalette(boardScreen, store, onPick);
++  boardScreen.append(canvas);
++  mountTruthTable(boardScreen, store);
++  attachBoardInput(canvas, store, stack, { onChange: regrade });
++
++  // Render on state change only: a continuous rAF loop would repaint a static
++  // board 60 times a second forever. Panning, zooming and dragging all go
++  // through store.set, so they still repaint every frame they change something.
++  store.subscribe(() => {
++    if (!boardScreen.hidden) renderBoard(canvas, store, store.get().camera);
++  });
++  globalThis.addEventListener('resize', () => {
++    if (!boardScreen.hidden) renderBoard(canvas, store, store.get().camera);
++  });
++
++  // The app opens on the resume point's level, so its briefing is the first
++  // thing the player sees.
++  showBriefing(narrativeFor(level.id).before);
++  renderBoard(canvas, store, store.get().camera);
++}
++
++/**
++ * The briefing overlay: a level's `before` text on arrival, its `after` text
++ * when a graded attempt passes. It is pure narrative -- it never grades, never
++ * writes to the store and never reaches the level data, so it cannot influence
++ * a result.
++ *
++ * Only one is ever on screen: a second call replaces the first rather than
++ * stacking a panel the player would have to dismiss twice.
++ */
++function showBriefing(text: { zh: string; en: string }): void {
++  document.querySelector('.briefing')?.remove();
++  const panel = document.createElement('div');
++  panel.className = 'briefing';
++  const body = document.createElement('p');
++  body.textContent = text.zh;
++  body.lang = 'zh-CN';
++  const start = document.createElement('button');
++  start.type = 'button';
++  start.textContent = '开始';
++  start.addEventListener('click', () => panel.remove());
++  panel.append(body, start);
++  document.body.append(panel);
++}
+diff --git a/src/ui/board/interact.ts b/src/ui/board/interact.ts
+new file mode 100644
+index 0000000..30bc554
+--- /dev/null
++++ b/src/ui/board/interact.ts
+@@ -0,0 +1,373 @@
++/**
++ * Board input: pointer and keyboard editing.
++ *
++ * Every mutation goes through the `CommandStack` so the whole editing session is
++ * undoable, and every mutation is followed by `options.onChange()` so the app
++ * can re-render and re-grade. The module keeps only the *transient* pointer
++ * bookkeeping (which pin a drag started from, which part is being moved); the
++ * pixels themselves are drawn from the store.
++ */
++import {
++  addInstance,
++  connect,
++  disconnect,
++  removeInstance,
++  type Graph,
++  type WireEnd,
++} from '../../core/graph';
++import type { CommandStack } from '../../app/commands';
++import type { AppState, Store } from '../../app/store';
++import type { LevelSpec } from '../../levels/spec';
++import { INSTANCE_HEIGHT } from '../theme';
++import { hitTest, screenToWorld, snap, type Point } from './view';
++
++export interface BoardInputOptions {
++  /** Called after any model mutation so the UI can re-render and re-grade. */
++  onChange(): void;
++}
++
++/**
++ * Instance id a freshly placed level IO part must carry.
++ *
++ * `levels/checks.ts` binds a circuit to its level by instance id: `IN_<pin>` for
++ * a level input, `OUT` for a single-output level and `OUT_<pin>` for a
++ * multi-output one. A part dropped from the palette would otherwise be named
++ * by the graph's own allocator (`i1`, `i2`, …), never bind, and make every
++ * level unpassable -- so placement hands out the conventional ids in pin order
++ * and falls back to the allocator only once the level's pins are all placed
++ * (a spare `level_input` is a legal, if redundant, part).
++ */
++export function levelIoInstanceId(
++  level: LevelSpec,
++  graph: Graph,
++  defId: string,
++): string | undefined {
++  const taken = new Set(graph.instances.map((inst) => inst.id));
++  if (defId === 'level_input') {
++    for (const pin of level.io.inputs) {
++      const id = `IN_${pin.id}`;
++      if (!taken.has(id)) return id;
++    }
++    return undefined;
++  }
++  if (defId === 'level_output') {
++    const ids =
++      level.io.outputs.length === 1 ? ['OUT'] : level.io.outputs.map((pin) => `OUT_${pin.id}`);
++    for (const id of ids) {
++      if (!taken.has(id)) return id;
++    }
++  }
++  return undefined;
++}
++
++export function attachBoardInput(
++  canvas: HTMLCanvasElement,
++  store: Store<AppState>,
++  stack: CommandStack,
++  options: BoardInputOptions,
++): () => void {
++  let pendingFrom: WireEnd | null = null;
++  let panning: Point | null = null;
++  let moving: {
++    id: string;
++    startX: number;
++    startY: number;
++    offsetX: number;
++    offsetY: number;
++  } | null = null;
++
++  const localPoint = (event: PointerEvent | WheelEvent): Point => {
++    const rect = canvas.getBoundingClientRect();
++    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
++  };
++
++  const worldPoint = (event: PointerEvent | WheelEvent): Point =>
++    screenToWorld(store.get().camera, localPoint(event));
++
++  const instanceOf = (id: string) => store.get().graph.instances.find((i) => i.id === id);
++
++  const armedDef = (): string => (canvas.dataset.pendingDef ?? '').trim();
++
++  const place = (world: Point, defId: string): void => {
++    // The cursor lands on the part's pin row (its vertical centre) at its left
++    // edge, so a part dropped at (px, py) has its output pin at (px + 64, py):
++    // the row the player then drags along to wire it up.
++    const x = snap(world.x);
++    const y = snap(world.y - INSTANCE_HEIGHT / 2);
++    const id = levelIoInstanceId(store.get().level, store.get().graph, defId);
++    let created: string | null = null;
++    stack.push(
++      {
++        label: `add ${defId}`,
++        do: (g) => {
++          created = addInstance(g, defId, x, y, id).id;
++        },
++        undo: (g) => {
++          if (created) removeInstance(g, created);
++        },
++      },
++      store.get().graph,
++    );
++    options.onChange();
++  };
++
++  const onPointerDown = (event: PointerEvent): void => {
++    canvas.setPointerCapture(event.pointerId);
++    const world = worldPoint(event);
++    const state = store.get();
++    const hit = hitTest(state.graph, state.registry, world);
++
++    if (event.button === 1 || event.shiftKey) {
++      panning = localPoint(event);
++      return;
++    }
++    if (event.button !== 0) return;
++
++    if (hit?.kind === 'pin' && !hit.isInput) {
++      pendingFrom = { inst: hit.inst, port: hit.port };
++      // Published so the board can light up the pin the wire is coming from.
++      store.set({ dragging: { kind: 'wire', fromInst: hit.inst, fromPort: hit.port } });
++      return;
++    }
++
++    if (hit?.kind === 'pin' && hit.isInput) {
++      // Clicking a driven input unplugs it; the player then drags the new wire in.
++      const existing = state.graph.wires.find((w) => w.to.inst === hit.inst && w.to.port === hit.port);
++      if (existing) {
++        stack.push(
++          {
++            label: 'disconnect',
++            do: (g) => disconnect(g, existing.id),
++            undo: (g) => void g.wires.push(existing),
++          },
++          state.graph,
++        );
++        options.onChange();
++      }
++      return;
++    }
++
++    if (hit?.kind === 'instance') {
++      const inst = instanceOf(hit.id);
++      if (!inst) return;
++      moving = {
++        id: hit.id,
++        startX: inst.x,
++        startY: inst.y,
++        offsetX: world.x - inst.x,
++        offsetY: world.y - inst.y,
++      };
++      store.set({
++        selected: [hit.id],
++        dragging: { kind: 'instance', ids: [hit.id], offsetX: moving.offsetX, offsetY: moving.offsetY },
++      });
++      return;
++    }
++
++    if (hit?.kind === 'wire') {
++      const wire = state.graph.wires.find((w) => w.id === hit.id);
++      if (wire) {
++        stack.push(
++          {
++            label: 'delete wire',
++            do: (g) => disconnect(g, wire.id),
++            undo: (g) => void g.wires.push(wire),
++          },
++          state.graph,
++        );
++        options.onChange();
++      }
++      return;
++    }
++
++    // Empty space: place the currently armed palette part, or clear the selection.
++    const defId = armedDef();
++    if (defId) place(world, defId);
++    else store.set({ selected: [] });
++  };
++
++  const onPointerMove = (event: PointerEvent): void => {
++    if (panning) {
++      const now = localPoint(event);
++      const camera = store.get().camera;
++      store.set({
++        camera: {
++          x: camera.x + (now.x - panning.x) / camera.zoom,
++          y: camera.y + (now.y - panning.y) / camera.zoom,
++          zoom: camera.zoom,
++        },
++      });
++      panning = now;
++      return;
++    }
++
++    if (moving) {
++      const inst = instanceOf(moving.id);
++      if (!inst) return;
++      const world = worldPoint(event);
++      inst.x = snap(world.x - moving.offsetX);
++      inst.y = snap(world.y - moving.offsetY);
++      // An in-place edit notifies nothing by reference, and the store's
++      // notification is unconditional by design: `set({})` is the "repaint"
++      // call. It is what makes a dragged part follow the pointer.
++      store.set({});
++    }
++  };
++
++  const onPointerUp = (event: PointerEvent): void => {
++    panning = null;
++
++    if (moving) {
++      const current = instanceOf(moving.id);
++      const { id, startX, startY } = moving;
++      moving = null;
++      if (current && (current.x !== startX || current.y !== startY)) {
++        // The drag already moved the part; the command only has to record how to
++        // replay and reverse that move, so both directions are absolute.
++        const endX = current.x;
++        const endY = current.y;
++        stack.push(
++          {
++            label: 'move',
++            do: (g) => {
++              const target = g.instances.find((i) => i.id === id);
++              if (target) {
++                target.x = endX;
++                target.y = endY;
++              }
++            },
++            undo: (g) => {
++              const target = g.instances.find((i) => i.id === id);
++              if (target) {
++                target.x = startX;
++                target.y = startY;
++              }
++            },
++          },
++          store.get().graph,
++        );
++        options.onChange();
++      }
++      store.set({ dragging: null });
++      return;
++    }
++
++    if (!pendingFrom) {
++      store.set({ dragging: null });
++      return;
++    }
++
++    const from = pendingFrom;
++    pendingFrom = null;
++    const hit = hitTest(store.get().graph, store.get().registry, worldPoint(event));
++    if (hit?.kind === 'pin' && hit.isInput) {
++      const to: WireEnd = { inst: hit.inst, port: hit.port };
++      // One driver per input: an existing wire into this pin is replaced, and
++      // the replacement is a single undoable step.
++      const replaced = store
++        .get()
++        .graph.wires.filter((w) => w.to.inst === to.inst && w.to.port === to.port);
++      let createdId: string | null = null;
++      stack.push(
++        {
++          label: 'connect',
++          do: (g) => {
++            for (const wire of replaced) disconnect(g, wire.id);
++            createdId = connect(g, from, to).id;
++          },
++          undo: (g) => {
++            if (createdId) disconnect(g, createdId);
++            for (const wire of replaced) g.wires.push(wire);
++          },
++        },
++        store.get().graph,
++      );
++      options.onChange();
++    }
++    store.set({ dragging: null });
++  };
++
++  const onWheel = (event: WheelEvent): void => {
++    event.preventDefault();
++    const camera = store.get().camera;
++    const before = screenToWorld(camera, localPoint(event));
++    const zoom = Math.min(4, Math.max(0.25, camera.zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1)));
++    const next = { ...camera, zoom };
++    const after = screenToWorld(next, localPoint(event));
++    // Keep the world point under the cursor pinned while the scale changes.
++    store.set({
++      camera: { zoom, x: next.x + (after.x - before.x), y: next.y + (after.y - before.y) },
++    });
++  };
++
++  const onKeyDown = (event: KeyboardEvent): void => {
++    const key = event.key.toLowerCase();
++    const accel = event.ctrlKey || event.metaKey;
++
++    if (accel && key === 'z' && !event.shiftKey) {
++      event.preventDefault();
++      if (stack.undo(store.get().graph)) {
++        // The recorded commands may bring back or drop whichever parts were
++        // selected, so the selection is not carried across a history step.
++        store.set({ selected: [] });
++        options.onChange();
++      }
++      return;
++    }
++
++    if (accel && ((key === 'z' && event.shiftKey) || key === 'y')) {
++      event.preventDefault();
++      if (stack.redo(store.get().graph)) {
++        store.set({ selected: [] });
++        options.onChange();
++      }
++      return;
++    }
++
++    if (event.key === 'Delete' || event.key === 'Backspace') {
++      const ids = store.get().selected;
++      if (ids.length === 0) return;
++      const removed = store.get().graph.instances.filter((i) => ids.includes(i.id));
++      const wires = store
++        .get()
++        .graph.wires.filter((w) => ids.includes(w.from.inst) || ids.includes(w.to.inst));
++      stack.push(
++        {
++          label: 'delete',
++          do: (g) => {
++            for (const inst of removed) removeInstance(g, inst.id);
++          },
++          undo: (g) => {
++            for (const inst of removed) g.instances.push(inst);
++            for (const wire of wires) g.wires.push(wire);
++          },
++        },
++        store.get().graph,
++      );
++      store.set({ selected: [] });
++      options.onChange();
++      return;
++    }
++
++    if (event.key === 'Escape' && armedDef()) {
++      // Disarm the palette part: without this, stamping stays on forever and
++      // every later click on empty space drops another copy.
++      canvas.dataset.pendingDef = '';
++      store.set({ status: null });
++    }
++  };
++
++  canvas.addEventListener('pointerdown', onPointerDown);
++  canvas.addEventListener('pointermove', onPointerMove);
++  canvas.addEventListener('pointerup', onPointerUp);
++  canvas.addEventListener('wheel', onWheel, { passive: false });
++  globalThis.addEventListener('keydown', onKeyDown);
++
++  return () => {
++    canvas.removeEventListener('pointerdown', onPointerDown);
++    canvas.removeEventListener('pointermove', onPointerMove);
++    canvas.removeEventListener('pointerup', onPointerUp);
++    canvas.removeEventListener('wheel', onWheel);
++    globalThis.removeEventListener('keydown', onKeyDown);
++  };
++}
+diff --git a/src/ui/board/render.ts b/src/ui/board/render.ts
+new file mode 100644
+index 0000000..8153df8
+--- /dev/null
++++ b/src/ui/board/render.ts
+@@ -0,0 +1,192 @@
++/**
++ * Canvas painting for the board.
++ *
++ * Drawing is a pure function of the store's current state: the caller decides
++ * when to repaint (state change or resize), never a rAF loop -- a static board
++ * must not repaint 60 times a second. Panning, zooming and dragging all go
++ * through `store.set`, so every frame in which something actually moves still
++ * repaints.
++ *
++ * Layers, bottom to top: background, grid, wires, parts, pins.
++ */
++import { GRID, PIN_RADIUS, THEME } from '../theme';
++import type { AppState, Store } from '../../app/store';
++import { instanceRect, pinPosition, worldToScreen, type Camera } from './view';
++import type { Graph, Instance } from '../../core/graph';
++import type { ComponentDef, Registry } from '../../core/registry';
++
++function roundedRect(
++  ctx: CanvasRenderingContext2D,
++  x: number,
++  y: number,
++  w: number,
++  h: number,
++  r: number,
++): void {
++  ctx.beginPath();
++  // `roundRect` is the fast path on every current browser; the rectangle
++  // fallback keeps an older one from throwing once per frame.
++  if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, r);
++  else ctx.rect(x, y, w, h);
++}
++
++/**
++ * Draws the grid the parts snap to: a line every `GRID` world pixels, with
++ * every fourth line drawn in the major colour.
++ *
++ * Both passes walk the *visible* world range, so the line count is bounded by
++ * the viewport rather than by the camera position. The minor pass is skipped
++ * once the spacing drops below 4 screen pixels, where it would read as a solid
++ * fill instead of a grid.
++ */
++function drawGrid(ctx: CanvasRenderingContext2D, camera: Camera, w: number, h: number): void {
++  const step = GRID * camera.zoom;
++  const major = step * 4;
++  const worldLeft = -camera.x;
++  const worldTop = -camera.y;
++  const worldRight = w / camera.zoom - camera.x;
++  const worldBottom = h / camera.zoom - camera.y;
++
++  const lines = (spacing: number, style: string): void => {
++    // A zero or negative spacing would step forever; the camera clamps zoom to
++    // 0.25..4, so this only guards against a corrupted camera.
++    if (!(spacing > 0)) return;
++    ctx.strokeStyle = style;
++    ctx.lineWidth = 1;
++    ctx.beginPath();
++    const firstX = Math.floor(worldLeft / spacing) * spacing;
++    for (let x = firstX; x <= worldRight; x += spacing) {
++      const sx = Math.round((x + camera.x) * camera.zoom) + 0.5;
++      ctx.moveTo(sx, 0);
++      ctx.lineTo(sx, h);
++    }
++    const firstY = Math.floor(worldTop / spacing) * spacing;
++    for (let y = firstY; y <= worldBottom; y += spacing) {
++      const sy = Math.round((y + camera.y) * camera.zoom) + 0.5;
++      ctx.moveTo(0, sy);
++      ctx.lineTo(w, sy);
++    }
++    ctx.stroke();
++  };
++
++  if (step >= 4) lines(step, THEME.grid);
++  if (major >= 4) lines(major, THEME.gridMajor);
++}
++
++/**
++ * Text painted on a part.
++ *
++ * Level IO parts show their instance id instead of their type name: the id
++ * (`IN_a`, `OUT`, `OUT_out3`) is what binds the part to the level, and level 12
++ * puts four visually identical outputs on the board.
++ */
++function labelOf(inst: Instance, def: ComponentDef): string {
++  if (def.category === 'level' && /^(IN_|OUT)/.test(inst.id)) return inst.id;
++  return def.name.zh;
++}
++
++function drawWires(
++  ctx: CanvasRenderingContext2D,
++  graph: Graph,
++  camera: Camera,
++  registry: Registry,
++): void {
++  const byId = new Map(graph.instances.map((i) => [i.id, i]));
++  ctx.strokeStyle = THEME.wireOff;
++  ctx.lineWidth = Math.max(1, 1.5 * camera.zoom);
++  ctx.lineCap = 'round';
++  for (const wire of graph.wires) {
++    const from = byId.get(wire.from.inst);
++    const to = byId.get(wire.to.inst);
++    if (!from || !to || !registry.has(from.def) || !registry.has(to.def)) continue;
++    const a = worldToScreen(camera, pinPosition(from, registry.get(from.def), wire.from.port, false));
++    const b = worldToScreen(camera, pinPosition(to, registry.get(to.def), wire.to.port, true));
++    const bend = 30 * camera.zoom;
++    ctx.beginPath();
++    ctx.moveTo(a.x, a.y);
++    ctx.bezierCurveTo(a.x + bend, a.y, b.x - bend, b.y, b.x, b.y);
++    ctx.stroke();
++  }
++}
++
++function drawInstance(
++  ctx: CanvasRenderingContext2D,
++  state: AppState,
++  inst: Instance,
++  camera: Camera,
++): void {
++  const { registry, selected, dragging } = state;
++  if (!registry.has(inst.def)) return;
++  const def = registry.get(inst.def);
++  const rect = instanceRect(inst);
++  const p = worldToScreen(camera, { x: rect.x, y: rect.y });
++  const w = rect.w * camera.zoom;
++  const h = rect.h * camera.zoom;
++  const isSelected = selected.includes(inst.id);
++
++  ctx.fillStyle = THEME.componentFill;
++  ctx.strokeStyle = isSelected ? THEME.selection : THEME.componentStroke;
++  ctx.lineWidth = isSelected ? 2 : 1;
++  roundedRect(ctx, p.x, p.y, w, h, 4 * camera.zoom);
++  ctx.fill();
++  ctx.stroke();
++
++  ctx.fillStyle = THEME.componentText;
++  ctx.font = `${Math.max(9, 11 * camera.zoom)}px system-ui, sans-serif`;
++  ctx.textAlign = 'center';
++  ctx.textBaseline = 'middle';
++  ctx.fillText(labelOf(inst, def), p.x + w / 2, p.y + h / 2);
++
++  const radius = PIN_RADIUS * camera.zoom;
++  const wireArmed =
++    dragging?.kind === 'wire' && dragging.fromInst === inst.id ? dragging.fromPort : null;
++
++  for (const pin of def.inputs) {
++    const pos = worldToScreen(camera, pinPosition(inst, def, pin.id, true));
++    ctx.fillStyle = THEME.pinOff;
++    ctx.beginPath();
++    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
++    ctx.fill();
++  }
++  for (const pin of def.outputs) {
++    const pos = worldToScreen(camera, pinPosition(inst, def, pin.id, false));
++    const armed = pin.id === wireArmed;
++    ctx.fillStyle = armed ? THEME.pinOn : THEME.pinOff;
++    ctx.beginPath();
++    ctx.arc(pos.x, pos.y, armed ? radius + 2 : radius, 0, Math.PI * 2);
++    ctx.fill();
++  }
++}
++
++export function renderBoard(
++  canvas: HTMLCanvasElement,
++  store: Store<AppState>,
++  camera: Camera,
++): void {
++  const ctx = canvas.getContext('2d');
++  if (!ctx) return;
++
++  // Backing store follows the CSS box times the device pixel ratio; reassigning
++  // `width`/`height` reallocates the buffer and clears it, so only do it when
++  // the size actually changed.
++  const dpr = globalThis.devicePixelRatio || 1;
++  const w = canvas.clientWidth;
++  const h = canvas.clientHeight;
++  const bw = Math.max(1, Math.round(w * dpr));
++  const bh = Math.max(1, Math.round(h * dpr));
++  if (canvas.width !== bw || canvas.height !== bh) {
++    canvas.width = bw;
++    canvas.height = bh;
++  }
++
++  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
++  ctx.fillStyle = THEME.bg;
++  ctx.fillRect(0, 0, w, h);
++  drawGrid(ctx, camera, w, h);
++
++  const state = store.get();
++  const { graph, registry } = state;
++  // Wires under parts: a part body must stay readable where a wire runs into it.
++  drawWires(ctx, graph, camera, registry);
++  for (const inst of graph.instances) drawInstance(ctx, state, inst, camera);
++}
+diff --git a/src/ui/board/view.ts b/src/ui/board/view.ts
+index 6443531..0e1712a 100644
+--- a/src/ui/board/view.ts
++++ b/src/ui/board/view.ts
+@@ -1,13 +1,125 @@
+ /**
+  * The board's viewport transform: camera position in world units (the pan
+  * offset, screen pixels at zoom 1) plus the zoom factor.
+  *
+- * Only the type lives here for now -- `app/store.ts` imports it type-only to
+- * declare `AppState`. The world/screen conversions, snapping and hit testing
+- * that operate on a `Camera` are added by the board task that owns this file.
++ * This module is the board's geometry: the world/screen conversions, grid
++ * snapping, part rectangles, pin layout and hit testing. Everything in here is
++ * a pure function of its arguments -- no DOM, no store -- which is why it is
++ * the one board file with unit tests that run without a browser.
+  */
++import type { ComponentDef, Registry } from '../../core/registry';
++import type { Graph, Instance } from '../../core/graph';
++import { GRID, INSTANCE_HEIGHT, INSTANCE_WIDTH, PIN_RADIUS } from '../theme';
++
+ export interface Camera {
+   x: number;
+   y: number;
+   zoom: number;
+ }
++
++export interface Point {
++  x: number;
++  y: number;
++}
++
++export function worldToScreen(camera: Camera, p: Point): Point {
++  return { x: (p.x + camera.x) * camera.zoom, y: (p.y + camera.y) * camera.zoom };
++}
++
++export function screenToWorld(camera: Camera, p: Point): Point {
++  return { x: p.x / camera.zoom - camera.x, y: p.y / camera.zoom - camera.y };
++}
++
++/**
++ * Rounds to the 8 pixel grid.
++ *
++ * The `=== 0` branch normalises `-0` to `0`. `Math.round(-0.375)` is `-0` and
++ * `-0 * 8` stays `-0`, so without it a part dropped just left of the origin
++ * would store `-0` as its coordinate: `Object.is(-0, 0)` is false, which makes
++ * every position comparison in the editor (and in tests) disagree about two
++ * coordinates that are the same grid cell.
++ */
++export function snap(v: number): number {
++  const snapped = Math.round(v / GRID) * GRID;
++  return snapped === 0 ? 0 : snapped;
++}
++
++export function instanceRect(inst: Instance): { x: number; y: number; w: number; h: number } {
++  return { x: inst.x, y: inst.y, w: INSTANCE_WIDTH, h: INSTANCE_HEIGHT };
++}
++
++/** Pin layout: inputs along the left edge, outputs along the right edge. */
++export function pinPosition(
++  inst: Instance,
++  def: ComponentDef,
++  pinId: string,
++  isInput: boolean,
++): Point {
++  const pins = isInput ? def.inputs : def.outputs;
++  const index = pins.findIndex((p) => p.id === pinId);
++  const count = Math.max(1, pins.length);
++  const y = inst.y + INSTANCE_HEIGHT / 2 + (index - (count - 1) / 2) * 14;
++  const x = isInput ? inst.x : inst.x + INSTANCE_WIDTH;
++  return { x, y };
++}
++
++export type Hit =
++  | { kind: 'instance'; id: string }
++  | { kind: 'pin'; inst: string; port: string; isInput: boolean }
++  | { kind: 'wire'; id: string }
++  | null;
++
++function distance(a: Point, b: Point): number {
++  return Math.hypot(a.x - b.x, a.y - b.y);
++}
++
++function pointInRect(p: Point, r: { x: number; y: number; w: number; h: number }): boolean {
++  return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
++}
++
++function distanceToSegment(p: Point, a: Point, b: Point): number {
++  const dx = b.x - a.x;
++  const dy = b.y - a.y;
++  const lengthSq = dx * dx + dy * dy;
++  if (lengthSq === 0) return distance(p, a);
++  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq));
++  return distance(p, { x: a.x + t * dx, y: a.y + t * dy });
++}
++
++export function hitTest(graph: Graph, registry: Registry, world: Point): Hit {
++  const tolerance = PIN_RADIUS + 3;
++  // pins first, then wires, then bodies -- smallest target wins
++  for (const inst of graph.instances) {
++    if (!registry.has(inst.def)) continue;
++    const def = registry.get(inst.def);
++    for (const pin of def.inputs) {
++      if (distance(pinPosition(inst, def, pin.id, true), world) <= tolerance) {
++        return { kind: 'pin', inst: inst.id, port: pin.id, isInput: true };
++      }
++    }
++    for (const pin of def.outputs) {
++      if (distance(pinPosition(inst, def, pin.id, false), world) <= tolerance) {
++        return { kind: 'pin', inst: inst.id, port: pin.id, isInput: false };
++      }
++    }
++  }
++
++  const byId = new Map(graph.instances.map((i) => [i.id, i]));
++  for (const wire of graph.wires) {
++    const from = byId.get(wire.from.inst);
++    const to = byId.get(wire.to.inst);
++    if (!from || !to) continue;
++    const fromDef = registry.has(from.def) ? registry.get(from.def) : null;
++    const toDef = registry.has(to.def) ? registry.get(to.def) : null;
++    if (!fromDef || !toDef) continue;
++    const a = pinPosition(from, fromDef, wire.from.port, false);
++    const b = pinPosition(to, toDef, wire.to.port, true);
++    if (distanceToSegment(world, a, b) <= 4) return { kind: 'wire', id: wire.id };
++  }
++
++  for (let i = graph.instances.length - 1; i >= 0; i -= 1) {
++    const inst = graph.instances[i]!;
++    if (pointInRect(world, instanceRect(inst))) return { kind: 'instance', id: inst.id };
++  }
++  return null;
++}
+diff --git a/src/ui/map.ts b/src/ui/map.ts
+new file mode 100644
+index 0000000..e50c8cf
+--- /dev/null
++++ b/src/ui/map.ts
+@@ -0,0 +1,54 @@
++import { LEVELS } from '../levels/index';
++import type { AppState, Store } from '../app/store';
++import { isUnlocked } from '../app/progress';
++import { THEME } from './theme';
++
++/**
++ * The chapter map: one tile per level, in level order.
++ *
++ * A tile is disabled while its level is locked (`isUnlocked` is strictly
++ * linear: level 1 is always open, every other level needs its predecessor
++ * passed), carries the star count of a passed level, and is highlighted while
++ * it is the level the board has open. Selecting a tile is reported through
++ * `onSelect`; the map never changes the level itself, because the caller owns
++ * the graph, the undo stack and the briefing that a level change implies.
++ */
++export function mountMap(
++  root: HTMLElement,
++  store: Store<AppState>,
++  onSelect: (levelId: string) => void,
++): { render(): void } {
++  const section = document.createElement('section');
++  section.className = 'map';
++  root.append(section);
++
++  const render = (): void => {
++    const { progress, level: current } = store.get();
++    const order = LEVELS.map((l) => l.id);
++    section.replaceChildren();
++    const heading = document.createElement('h2');
++    heading.textContent = '章节地图';
++    section.append(heading);
++    const grid = document.createElement('div');
++    grid.className = 'map-grid';
++    for (const level of LEVELS) {
++      const tile = document.createElement('button');
++      tile.type = 'button';
++      tile.className = 'map-tile';
++      const record = progress.levels[level.id];
++      const unlocked = isUnlocked(progress, level.id, order);
++      tile.disabled = !unlocked;
++      const stars = record?.stars ? ` ${'★'.repeat(record.stars)}` : '';
++      tile.textContent = `${level.index}. ${level.name.zh}${stars}`;
++      if (level.id === current.id) tile.classList.add('map-tile-current');
++      if (record?.passed) tile.style.color = THEME.success;
++      else if (!unlocked) tile.style.color = THEME.textMuted;
++      tile.addEventListener('click', () => onSelect(level.id));
++      grid.append(tile);
++    }
++    section.append(grid);
++  };
++  store.subscribe(render);
++  render();
++  return { render };
++}
+diff --git a/src/ui/narrative.ts b/src/ui/narrative.ts
+new file mode 100644
+index 0000000..987a107
+--- /dev/null
++++ b/src/ui/narrative.ts
+@@ -0,0 +1,96 @@
++import type { LocalizedText } from '../levels/spec';
++
++export interface Narrative {
++  readonly before: LocalizedText;
++  readonly after: LocalizedText;
++}
++
++/**
++ * Original narrative shell. The source material describes an alien abduction
++ * framing; this replica keeps the framing but writes its own character and
++ * lines, and draws no characters at all.
++ */
++export const NARRATIVE: Readonly<Record<string, Narrative>> = {
++  'ch1-01-crude-awakening': {
++    before: {
++      zh: '你在一间金属舱室里醒来。舷窗外面是一颗紫色的星球。墙上的扬声器说：「证明你值得留着。」',
++      en: 'You wake in a metal cell. Through the port: a violet planet. The speaker on the wall says: prove you are worth keeping.',
++    },
++    after: {
++      zh: '门开了。走廊尽头还有一扇门，上面刻着一个与非门的符号。',
++      en: 'The cell opens. Down the corridor, another door, etched with the symbol of a NAND gate.',
++    },
++  },
++  'ch1-02-nand-gate': {
++    before: {
++      zh: '「一切计算都从这一个门开始，」扬声器说，「记住它的真值表。」',
++      en: 'Every computation starts with this one gate, says the speaker. Learn its truth table.',
++    },
++    after: {
++      zh: '门滑开了。你听见远处有什么东西开始运转。',
++      en: 'The door slides open. Somewhere far off, machinery begins to turn.',
++    },
++  },
++  'ch1-03-not-gate': {
++    before: {
++      zh: '「一个输入，翻转它。你只有与非门——想想这意味着什么。」',
++      en: 'One input. Invert it. You only have a NAND. Think about what that implies.',
++    },
++    after: { zh: '「很好。你开始理解『重复』的力量了。」', en: 'Good. You are starting to understand the power of repetition.' },
++  },
++  'ch1-04-and-gate': {
++    before: { zh: '「翻转两次，就回到了原处。但中间那一步是必要的。」', en: 'Invert twice and you are back where you started, but the middle step is necessary.' },
++    after: { zh: '第三扇门开了。空气里有臭氧的味道。', en: 'A third door opens. The air smells of ozone.' },
++  },
++  'ch1-05-or-gate': {
++    before: { zh: '「德摩根留下了一条捷径。找到它，你就能少走很多弯路。」', en: 'De Morgan left a shortcut. Find it and you will save yourself a great deal of walking.' },
++    after: { zh: '扬声器沉默了一会儿，然后说：「有趣。」', en: 'The speaker is quiet for a moment, then says: interesting.' },
++  },
++  'ch1-06-nor-gate': {
++    before: { zh: '「或非门是另一条路的起点。你会发现它和与非门一样好用。」', en: 'NOR is the start of another road. You will find it as useful as NAND.' },
++    after: { zh: '走廊的灯全亮了。你第一次看清了这艘飞船的全貌。', en: 'Every light in the corridor comes on. For the first time you see the ship whole.' },
++  },
++  'ch1-07-always-on': {
++    before: { zh: '「恒定的高电平。最无聊的答案，也是最基础的答案。」', en: 'A constant high. The dullest answer, and the most fundamental one.' },
++    after: { zh: '你意识到自己已经会用两种方式制造 1 和 0 了。', en: 'You realise you now have two ways to make a 1 and a 0.' },
++  },
++  'ch1-08-second-tick': {
++    before: { zh: '「现在开始，时间也是电路的一部分。第几拍，比是不是更重要。」', en: 'From here on, time is part of the circuit. When matters more than whether.' },
++    after: { zh: '你第一次让信号「等」了一下。', en: 'For the first time, you made a signal wait.' },
++  },
++  'ch1-09-xor-gate': {
++    before: { zh: '「四个与非门。监督者认为这是衡量悟性的标准。」', en: 'Four NANDs. The Overseer considers this the measure of a mind.' },
++    after: { zh: '你在墙上刻下了四道划痕。', en: 'You scratch four marks into the wall.' },
++  },
++  'ch1-10-bigger-or-gate': {
++    before: { zh: '「三个输入。别慌，你已经会两个了。」', en: 'Three inputs. Do not panic; you already know how to do two.' },
++    after: { zh: '级联的感觉像搭积木。', en: 'Cascading feels like stacking blocks.' },
++  },
++  'ch1-11-bigger-and-gate': {
++    before: { zh: '「和或门一样简单，是吗？」', en: 'As simple as OR, is it not?' },
++    after: { zh: '你点了点头，然后意识到没人看得见。', en: 'You nod, then remember nobody can see you.' },
++  },
++  'ch1-12-binary-racer': {
++    before: { zh: '「最后一项测试。四个位，一个数。你必须一眼读出来。」', en: 'One final test. Four bits, one number. You must read it at a glance.' },
++    after: {
++      zh: '第一扇真正的门打开了。外面是一条约百米长的走廊，两侧全是空着的电路板插槽。',
++      en: 'The first real door opens. Beyond it, a hundred-metre corridor lined with empty circuit slots.',
++    },
++  },
++};
++
++/**
++ * The briefing shown before a level and the epilogue shown after it is passed.
++ *
++ * A level with no authored text yet -- every chapter after this one, for now --
++ * gets generic text instead of an empty overlay, so the shell degrades to
++ * "nothing to say" rather than to a blank screen the player cannot dismiss.
++ */
++export function narrativeFor(levelId: string): Narrative {
++  return (
++    NARRATIVE[levelId] ?? {
++      before: { zh: '监督者没有留下说明。', en: 'The Overseer left no instructions.' },
++      after: { zh: '电路安静地运转着。', en: 'The circuit runs quietly.' },
++    }
++  );
++}
+diff --git a/src/ui/palette.ts b/src/ui/palette.ts
+new file mode 100644
+index 0000000..288ad8d
+--- /dev/null
++++ b/src/ui/palette.ts
+@@ -0,0 +1,70 @@
++import type { AppState, Store } from '../app/store';
++import { paletteDefsFor } from '../app/progress';
++import { LEVELS } from '../levels/index';
++import { THEME } from './theme';
++
++/**
++ * The parts this level lets the player use, as buttons.
++ *
++ * The list comes from `paletteDefsFor`, not from `level.allowedComponents`:
++ * the helper intersects the level's palette with what the player has actually
++ * unlocked and always keeps the starter set, so level 1 is never empty.
++ *
++ * Labels are the localised component names -- the player must never be shown a
++ * raw def id like `const_on` -- while `onPick` reports the id, because that is
++ * what the board stores.
++ */
++export function mountPalette(
++  root: HTMLElement,
++  store: Store<AppState>,
++  onPick: (defId: string) => void,
++): { render(): void } {
++  const list = document.createElement('aside');
++  list.className = 'palette';
++  root.append(list);
++
++  /**
++   * The store notifies on every change, including each frame of a pan. The
++   * palette's contents only depend on the level and the unlocked set, so it
++   * rebuilds its buttons when that pair changes and not once per frame --
++   * otherwise a drag would drop button hover and focus state 60 times a second.
++   */
++  let shown = '';
++
++  const render = (): void => {
++    const { level, progress, registry } = store.get();
++    const available = paletteDefsFor(progress, LEVELS, level).filter((defId) =>
++      registry.has(defId),
++    );
++    const key = `${level.id}|${available.join(',')}`;
++    if (key === shown) return;
++    shown = key;
++
++    list.replaceChildren();
++    const heading = document.createElement('h2');
++    heading.textContent = '元件';
++    list.append(heading);
++
++    if (available.length === 0) {
++      const empty = document.createElement('span');
++      empty.textContent = '本关暂无可用元件';
++      empty.style.color = THEME.textMuted;
++      list.append(empty);
++      return;
++    }
++
++    for (const defId of available) {
++      const def = registry.get(defId);
++      const button = document.createElement('button');
++      button.type = 'button';
++      button.className = 'palette-item';
++      button.textContent = def.name.zh;
++      button.title = `${def.name.en} — 点击后在画板上放置`;
++      button.addEventListener('click', () => onPick(defId));
++      list.append(button);
++    }
++  };
++  store.subscribe(render);
++  render();
++  return { render };
++}
+diff --git a/src/ui/shell.ts b/src/ui/shell.ts
+new file mode 100644
+index 0000000..3b042e3
+--- /dev/null
++++ b/src/ui/shell.ts
+@@ -0,0 +1,58 @@
++import type { AppState, Store } from '../app/store';
++import { THEME } from './theme';
++
++export interface ShellOptions {
++  /** Leave the board and show the chapter map. */
++  onOpenMap(): void;
++}
++
++/**
++ * The top bar: which level is open, what the player has armed in the palette,
++ * the last grade, and the way back to the chapter map.
++ *
++ * It is the first flex child of the app container so the screens below it get
++ * the remaining height.
++ */
++export function mountShell(
++  root: HTMLElement,
++  store: Store<AppState>,
++  options: ShellOptions,
++): { render(): void } {
++  const bar = document.createElement('header');
++  bar.className = 'shell-bar';
++
++  const title = document.createElement('span');
++  title.className = 'shell-title';
++
++  const mapButton = document.createElement('button');
++  mapButton.type = 'button';
++  mapButton.textContent = '章节地图';
++  mapButton.addEventListener('click', () => options.onOpenMap());
++
++  const status = document.createElement('span');
++  status.className = 'shell-status';
++
++  const metrics = document.createElement('span');
++  metrics.className = 'shell-metrics';
++
++  bar.append(title, mapButton, status, metrics);
++  root.prepend(bar);
++
++  const render = (): void => {
++    const { level, lastGrade, status: message } = store.get();
++    title.textContent = `${level.chapter}-${level.index} ${level.name.zh}`;
++    status.textContent = message ? message.zh : '';
++
++    if (!lastGrade) {
++      metrics.textContent = '尚未评测';
++      metrics.style.color = THEME.textMuted;
++      return;
++    }
++    const stars = lastGrade.stars > 0 ? '★'.repeat(lastGrade.stars) : '未通过';
++    metrics.textContent = `门 ${lastGrade.metrics.gate} · 延迟 ${lastGrade.metrics.delay} · 拍 ${lastGrade.metrics.tick} · 得分 ${lastGrade.score} · ${stars}`;
++    metrics.style.color = lastGrade.passed ? THEME.success : THEME.error;
++  };
++  store.subscribe(render);
++  render();
++  return { render };
++}
+diff --git a/src/ui/style.css b/src/ui/style.css
+new file mode 100644
+index 0000000..30cd5d3
+--- /dev/null
++++ b/src/ui/style.css
+@@ -0,0 +1,47 @@
++/* Literal colours are the one accepted exception to "colours come from
++   theme.ts": a stylesheet cannot import a TypeScript constant without a build
++   step. The values mirror `src/ui/theme.ts`. */
++:root {
++  color-scheme: dark;
++  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
++}
++* { box-sizing: border-box; }
++html, body { margin: 0; height: 100%; background: #0d1117; color: #c9d1d9; }
++#app { display: flex; flex-direction: column; height: 100vh; }
++.shell-bar { display: flex; align-items: center; gap: 16px; padding: 8px 16px; background: #161b22; border-bottom: 1px solid #30363d; flex: 0 0 auto; }
++.shell-title { font-weight: 600; }
++.shell-status { font-size: 13px; color: #7d8590; }
++.shell-metrics { font-variant-numeric: tabular-nums; }
++.palette { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; background: #161b22; border-bottom: 1px solid #30363d; flex: 0 0 auto; }
++.palette h2 { margin: 0 8px 0 0; font-size: 13px; color: #7d8590; align-self: center; }
++.palette-item { padding: 4px 10px; background: #1e2530; border: 1px solid #4a5568; border-radius: 4px; cursor: pointer; color: #c9d1d9; }
++.palette-item:disabled { opacity: 0.45; cursor: not-allowed; }
++.truth-table { padding: 8px 16px; background: #161b22; border-top: 1px solid #30363d; max-height: 28vh; overflow: auto; flex: 0 0 auto; }
++.truth-table table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
++.truth-table td { border: 1px solid #30363d; padding: 2px 8px; }
++.truth-table th { border: 1px solid #30363d; padding: 2px 8px; color: #7d8590; font-weight: 600; }
++/* One screen at a time fills the space below the shell bar. The board screen is
++   a flex column (palette / board / truth table); the map screen scrolls. */
++.screens { flex: 1 1 auto; min-height: 0; display: flex; }
++.screen { flex: 1 1 auto; min-width: 0; min-height: 0; }
++/* `hidden` has to beat `.screen-board`'s own `display: flex`. An author rule
++   outranks the user-agent `[hidden] { display: none }` whatever its
++   specificity, so without this the board stays on screen next to the map --
++   it merely stops being the flex child that grows. */
++.screen[hidden] { display: none; }
++.screen-board { display: flex; flex-direction: column; }
++.screen-map { overflow: auto; }
++/* The board is an ordinary in-flow flex child, never an absolutely positioned
++   layer: its DOM box and its drawable area have to be the same rectangle, or
++   canvas.clientWidth/clientHeight stop matching the pointer coordinates. */
++.board { flex: 1 1 auto; min-height: 0; width: 100%; display: block; background: #0d1117; touch-action: none; }
++.map { padding: 16px; }
++.map h2 { margin: 0 0 12px; font-size: 15px; color: #7d8590; }
++.map-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
++.map-tile { padding: 12px; text-align: left; background: #161b22; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; color: #c9d1d9; }
++.map-tile:disabled { opacity: 0.4; cursor: not-allowed; }
++/* The level the board has open, so the player can see where they are. */
++.map-tile-current { border-color: #2fd4a7; }
++.briefing { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; background: rgba(13, 17, 23, 0.96); z-index: 10; padding: 40px; text-align: center; }
++.briefing p { max-width: 52ch; line-height: 1.7; font-size: 17px; color: #c9d1d9; }
++.briefing button { padding: 8px 24px; background: #1e2530; border: 1px solid #2fd4a7; color: #2fd4a7; border-radius: 4px; cursor: pointer; font-size: 15px; }
+diff --git a/src/ui/theme.ts b/src/ui/theme.ts
+new file mode 100644
+index 0000000..24254a5
+--- /dev/null
++++ b/src/ui/theme.ts
+@@ -0,0 +1,26 @@
++/** Original dark industrial palette. No colours are taken from the original game. */
++export const THEME = {
++  bg: '#0d1117',
++  panel: '#161b22',
++  panelBorder: '#30363d',
++  grid: '#1b2029',
++  gridMajor: '#242b36',
++  wireOff: '#3d4759',
++  wireOn: '#2fd4a7',
++  componentFill: '#1e2530',
++  componentStroke: '#4a5568',
++  componentText: '#c9d1d9',
++  pinOff: '#4a5568',
++  pinOn: '#2fd4a7',
++  selection: '#58a6ff',
++  error: '#f85149',
++  success: '#3fb950',
++  text: '#c9d1d9',
++  textMuted: '#7d8590',
++  accent: '#2fd4a7',
++} as const;
++
++export const GRID = 8;
++export const PIN_RADIUS = 4;
++export const INSTANCE_WIDTH = 64;
++export const INSTANCE_HEIGHT = 48;
+diff --git a/src/ui/truthTable.ts b/src/ui/truthTable.ts
+new file mode 100644
+index 0000000..483bb93
+--- /dev/null
++++ b/src/ui/truthTable.ts
+@@ -0,0 +1,86 @@
++import type { AppState, Store } from '../app/store';
++import type { GradeResult } from '../levels/grader';
++import { THEME } from './theme';
++
++/**
++ * The level's test cases: a pass banner with the three metrics, or the rows the
++ * circuit got wrong, each showing the input vector and `actual ≠ expected`.
++ *
++ * Reporting is capped: a failing 16-row level must not turn the panel into a
++ * wall of text, and the first wrong rows are the ones that explain the bug.
++ */
++export function mountTruthTable(root: HTMLElement, store: Store<AppState>): { render(): void } {
++  const panel = document.createElement('section');
++  panel.className = 'truth-table';
++  root.append(panel);
++
++  const rowLimit = 20;
++  /** Level id plus grade identity: the panel shows nothing else. */
++  let shown: { level: string; grade: GradeResult | null } | null = null;
++
++  const render = (): void => {
++    const { lastGrade, level } = store.get();
++    if (shown && shown.level === level.id && shown.grade === lastGrade) return;
++    shown = { level: level.id, grade: lastGrade };
++
++    panel.replaceChildren();
++    const heading = document.createElement('h2');
++    heading.textContent = lastGrade?.passed ? '全部用例通过' : '用例';
++    heading.style.color = !lastGrade
++      ? THEME.textMuted
++      : lastGrade.passed
++        ? THEME.success
++        : THEME.error;
++    panel.append(heading);
++
++    if (!lastGrade) return;
++
++    if (lastGrade.passed) {
++      const p = document.createElement('p');
++      p.textContent = `门 ${lastGrade.metrics.gate} · 延迟 ${lastGrade.metrics.delay} · 拍 ${lastGrade.metrics.tick}`;
++      panel.append(p);
++      return;
++    }
++
++    // A graph-level error stops the checker before it can produce a single
++    // failing row, so say what the error was instead of showing an empty panel.
++    const error = lastGrade.issues.find((issue) => issue.severity === 'error');
++    if (error) {
++      const p = document.createElement('p');
++      p.textContent = error.message.zh;
++      p.style.color = THEME.error;
++      panel.append(p);
++    }
++
++    if (lastGrade.failures.length === 0) return;
++
++    const table = document.createElement('table');
++    const header = document.createElement('tr');
++    for (const pin of level.io.inputs) header.append(cell('th', pin.id));
++    for (const pin of level.io.outputs) header.append(cell('th', pin.id));
++    table.append(header);
++
++    for (const failure of lastGrade.failures.slice(0, rowLimit)) {
++      const row = document.createElement('tr');
++      for (const pin of level.io.inputs) row.append(cell('td', String(failure.inputs[pin.id] ?? 0)));
++      for (const pin of level.io.outputs) {
++        const want = failure.expected[pin.id];
++        const got = failure.actual[pin.id];
++        const c = cell('td', want === undefined ? String(got ?? 0) : `${got ?? 0} ≠ ${want}`);
++        if (want !== undefined && got !== want) c.style.color = THEME.error;
++        row.append(c);
++      }
++      table.append(row);
++    }
++    panel.append(table);
++  };
++  store.subscribe(render);
++  render();
++  return { render };
++}
++
++function cell(tag: 'td' | 'th', text: string): HTMLTableCellElement {
++  const el = document.createElement(tag);
++  el.textContent = text;
++  return el;
++}
+diff --git a/test/smoke/ui.spec.ts b/test/smoke/ui.spec.ts
+new file mode 100644
+index 0000000..8399667
+--- /dev/null
++++ b/test/smoke/ui.spec.ts
+@@ -0,0 +1,94 @@
++import { expect, test, type Page } from '@playwright/test';
++
++/**
++ * End-to-end smoke test: the path a player actually walks.
++ *
++ * Enter a level -> dismiss the briefing -> pick a part from the palette -> drop
++ * it on the canvas -> wire it up -> read the grade -> reload and find the
++ * progress still there.
++ *
++ * The drag offsets are deliberately hard-coded against the board's geometry:
++ * `pinPosition()` puts an output pin at `x + INSTANCE_WIDTH (64)`, vertically
++ * centred, and a part dropped at cursor `(px, py)` lands with its pin row on
++ * `py`. If the part size changes, these offsets have to change with it -- that
++ * coupling is the point, because pointer feel is part of the UI contract.
++ */
++
++/** Centre of the board canvas, in page coordinates. */
++async function boardCentre(page: Page): Promise<{ cx: number; cy: number }> {
++  const box = (await page.locator('canvas.board').boundingBox())!;
++  return { cx: box.x + box.width / 2, cy: box.y + box.height / 2 };
++}
++
++/** Drops Constant On on the left and Level Output on the right. */
++async function placeParts(page: Page): Promise<{ cx: number; cy: number }> {
++  const { cx, cy } = await boardCentre(page);
++  await page.getByRole('button', { name: '高电平' }).click();
++  await page.mouse.click(cx - 160, cy);
++  await page.getByRole('button', { name: '关卡输出' }).click();
++  await page.mouse.click(cx + 160, cy);
++  return { cx, cy };
++}
++
++/** Drags a wire from the source's output pin to the output part's input pin. */
++async function wireParts(page: Page, cx: number, cy: number): Promise<void> {
++  await page.mouse.move(cx - 160 + 64, cy);
++  await page.mouse.down();
++  await page.mouse.move(cx + 160, cy, { steps: 12 });
++  await page.mouse.up();
++}
++
++test('level 1 is playable end to end and shows its epilogue', async ({ page }) => {
++  await page.goto('/');
++  // The briefing overlay covers the board, so it has to go before the canvas
++  // can be touched at all.
++  await page.getByRole('button', { name: '开始' }).click();
++  await expect(page.locator('.shell-bar')).toContainText('原力觉醒');
++  // One screen at a time: the empty map screen is not in the way.
++  await expect(page.locator('.screen-map')).toBeHidden();
++
++  const { cx, cy } = await placeParts(page);
++  await page.screenshot({ path: 'test-results/smoke-level1-parts-placed.png' });
++
++  await wireParts(page, cx, cy);
++
++  // The level is a single truth-table row that must read 1.
++  await expect(page.locator('.truth-table')).toContainText('全部用例通过');
++  await expect(page.locator('.shell-metrics')).toContainText('得分');
++
++  // Passing a level shows its epilogue, which never takes part in grading.
++  await expect(page.locator('.briefing')).toContainText('门开了');
++  await page.screenshot({ path: 'test-results/smoke-level1-passed.png' });
++});
++
++test('progress survives a reload and unlocks the next level', async ({ page }) => {
++  await page.goto('/');
++  await page.getByRole('button', { name: '开始' }).click();
++
++  const { cx, cy } = await placeParts(page);
++  await wireParts(page, cx, cy);
++  await expect(page.locator('.truth-table')).toContainText('全部用例通过');
++
++  await page.reload();
++  await page.getByRole('button', { name: '开始' }).click(); // level 2's briefing
++  await expect(page.locator('.shell-bar')).toContainText('与非门');
++  await expect(page.getByRole('button', { name: '与非门' })).toBeEnabled();
++
++  await page.getByRole('button', { name: '章节地图' }).click();
++  // One screen at a time: showing the map must take the board off screen
++  // rather than leave it in the column next to the tiles.
++  await expect(page.locator('.screen-board')).toBeHidden();
++  await expect(page.locator('.screen-map')).toBeVisible();
++  await expect(page.locator('.map-tile').nth(0)).toContainText('★');
++  await expect(page.locator('.map-tile').nth(1)).toBeEnabled();
++  await expect(page.locator('.map-tile').nth(2)).toBeDisabled();
++  await page.screenshot({ path: 'test-results/smoke-chapter-map.png' });
++
++  // A tile is real navigation: back to the board, on that level, with that
++  // level's briefing.
++  await page.locator('.map-tile').nth(0).click();
++  await expect(page.locator('.screen-map')).toBeHidden();
++  await expect(page.locator('.screen-board')).toBeVisible();
++  await expect(page.locator('.shell-bar')).toContainText('原力觉醒');
++  await expect(page.locator('.briefing')).toContainText('金属舱室');
++});
+diff --git a/test/ui/panels.test.ts b/test/ui/panels.test.ts
+new file mode 100644
+index 0000000..5b1872d
+--- /dev/null
++++ b/test/ui/panels.test.ts
+@@ -0,0 +1,326 @@
++// @vitest-environment jsdom
++import { describe, expect, it } from 'vitest';
++import { createStore, type AppState, type Store } from '../../src/app/store';
++import { emptyProgress, applyGrade, type Progress } from '../../src/app/progress';
++import { createRegistry } from '../../src/core/registry';
++import { BASE_DEFS } from '../../src/core/defs/index';
++import { addInstance, connect, emptyGraph } from '../../src/core/graph';
++import { getLevel, LEVELS } from '../../src/levels/index';
++import { grade } from '../../src/levels/grader';
++import { mountPalette } from '../../src/ui/palette';
++import { mountTruthTable } from '../../src/ui/truthTable';
++import { mountShell } from '../../src/ui/shell';
++import { mountMap } from '../../src/ui/map';
++import { NARRATIVE, narrativeFor } from '../../src/ui/narrative';
++import { THEME } from '../../src/ui/theme';
++import { levelIoInstanceId } from '../../src/ui/board/interact';
++
++const registry = createRegistry(BASE_DEFS);
++
++/**
++ * `Store<AppState>` rather than an inferred literal state: without the
++ * annotation TypeScript widens `lastGrade: null` to the type `null` and the
++ * panel tests cannot set a grade on the store at all.
++ */
++function makeStore(levelId: string): Store<AppState> {
++  return createStore<AppState>({
++    level: getLevel(levelId),
++    graph: emptyGraph(levelId),
++    registry,
++    progress: emptyProgress(),
++    camera: { x: 0, y: 0, zoom: 1 },
++    selected: [],
++    dragging: null,
++    lastGrade: null,
++    status: null,
++  });
++}
++
++describe('palette panel', () => {
++  it('offers nothing but the starter components while nothing is unlocked', () => {
++    // level 2 needs a NAND, which only level 1's reward unlocks
++    const store = makeStore('ch1-02-nand-gate');
++    const root = document.createElement('div');
++    mountPalette(root, store, () => {});
++    const labels = [...root.querySelectorAll('button')].map((b) => b.textContent);
++    expect(labels).toEqual(['关卡输入', '关卡输出']);
++  });
++
++  it('offers a part once its unlocking level is passed', () => {
++    const store = makeStore('ch1-02-nand-gate');
++    const passed = applyGrade(emptyProgress(), getLevel('ch1-01-crude-awakening'), {
++      passed: true,
++      metrics: { gate: 0, delay: 0, tick: 0 },
++      score: 0,
++      stars: 3,
++      failures: [],
++      issues: [],
++    });
++    store.set({ progress: passed });
++    const root = document.createElement('div');
++    mountPalette(root, store, () => {});
++    const labels = [...root.querySelectorAll('button')].map((b) => b.textContent);
++    expect(labels).toContain('与非门');
++  });
++
++  it('reports the picked part id, not its label', () => {
++    const store = makeStore('ch1-01-crude-awakening');
++    const root = document.createElement('div');
++    const picked: string[] = [];
++    mountPalette(root, store, (defId) => picked.push(defId));
++    const on = [...root.querySelectorAll('button')].find((b) => b.textContent === '高电平');
++    on?.click();
++    expect(picked).toEqual(['const_on']);
++  });
++});
++
++describe('truth table panel', () => {
++  it('reports a pass with the three metrics', () => {
++    const store = makeStore('ch1-01-crude-awakening');
++    store.set({
++      lastGrade: {
++        passed: true,
++        metrics: { gate: 0, delay: 0, tick: 0 },
++        score: 0,
++        stars: 3,
++        failures: [],
++        issues: [],
++      },
++    });
++    const root = document.createElement('div');
++    mountTruthTable(root, store);
++    expect(root.textContent).toContain('全部用例通过');
++    expect(root.textContent).toContain('门 0');
++  });
++
++  it('lists failing rows with expected and actual values', () => {
++    const store = makeStore('ch1-04-and-gate');
++    store.set({
++      lastGrade: {
++        passed: false,
++        metrics: { gate: 1, delay: 1, tick: 0 },
++        score: 5,
++        stars: 0,
++        failures: [
++          {
++            check: 'truth-table',
++            inputs: { a: 0, b: 0 },
++            expected: { out: 0 },
++            actual: { out: 1 },
++            tick: 0,
++            reason: 'mismatch',
++          },
++        ],
++        issues: [],
++      },
++    });
++    const root = document.createElement('div');
++    mountTruthTable(root, store);
++    expect(root.textContent).toContain('1 ≠ 0');
++  });
++});
++
++describe('shell bar', () => {
++  it('shows the level name and score once graded', () => {
++    const store = makeStore('ch1-04-and-gate');
++    const root = document.createElement('div');
++    mountShell(root, store, { onOpenMap: () => {} });
++    expect(root.textContent).toContain('与门');
++    store.set({
++      lastGrade: {
++        passed: true,
++        metrics: { gate: 2, delay: 2, tick: 0 },
++        score: 10,
++        stars: 3,
++        failures: [],
++        issues: [],
++      },
++    });
++    expect(root.textContent).toContain('得分 10');
++    expect(root.textContent).toContain('★★★');
++  });
++
++  it('offers a way back to the chapter map', () => {
++    const store = makeStore('ch1-04-and-gate');
++    const root = document.createElement('div');
++    let opened = 0;
++    mountShell(root, store, {
++      onOpenMap: () => {
++        opened += 1;
++      },
++    });
++    (root.querySelector('button') as HTMLButtonElement).click();
++    expect(opened).toBe(1);
++  });
++});
++
++/**
++ * Dropping a part from the palette is the only way a player can put level IO
++ * on the board, and `levels/checks.ts` binds a circuit to its level by instance
++ * id (`IN_<pin>`, `OUT`, `OUT_<pin>`). Without these ids every placement would
++ * be named `i1`, `i2`, … and no level could ever be passed.
++ */
++describe('level io placement', () => {
++  it('names the single level output OUT', () => {
++    const level = getLevel('ch1-01-crude-awakening');
++    expect(levelIoInstanceId(level, emptyGraph(level.id), 'level_output')).toBe('OUT');
++  });
++
++  it('hands out one level input per declared pin, then stops naming them', () => {
++    const level = getLevel('ch1-02-nand-gate');
++    const g = emptyGraph(level.id);
++    expect(levelIoInstanceId(level, g, 'level_input')).toBe('IN_a');
++    addInstance(g, 'level_input', 0, 0, 'IN_a');
++    expect(levelIoInstanceId(level, g, 'level_input')).toBe('IN_b');
++    addInstance(g, 'level_input', 0, 0, 'IN_b');
++    // every level input is placed: an extra part falls back to a plain id
++    expect(levelIoInstanceId(level, g, 'level_input')).toBeUndefined();
++  });
++
++  it('names the four outputs of the binary racer in pin order', () => {
++    const level = getLevel('ch1-12-binary-racer');
++    const g = emptyGraph(level.id);
++    const ids: string[] = [];
++    for (let i = 0; i < 4; i += 1) {
++      const id = levelIoInstanceId(level, g, 'level_output');
++      expect(id).toBeDefined();
++      ids.push(id!);
++      addInstance(g, 'level_output', 0, 0, id);
++    }
++    expect(ids).toEqual(['OUT_out3', 'OUT_out2', 'OUT_out1', 'OUT_out0']);
++  });
++
++  it('leaves ordinary gates to the graph id allocator', () => {
++    const level = getLevel('ch1-04-and-gate');
++    expect(levelIoInstanceId(level, emptyGraph(level.id), 'nand')).toBeUndefined();
++  });
++
++  it('makes level 1 pass with two palette placements and one wire', () => {
++    const level = getLevel('ch1-01-crude-awakening');
++    const g = emptyGraph(level.id);
++    const source = addInstance(g, 'const_on', 0, 0);
++    const sink = addInstance(g, 'level_output', 128, 0, levelIoInstanceId(level, g, 'level_output'));
++    connect(g, { inst: source.id, port: 'out' }, { inst: sink.id, port: 'in' });
++
++    expect(sink.id).toBe('OUT');
++    const result = grade(g, registry, level);
++    expect(result.failures).toEqual([]);
++    expect(result.passed).toBe(true);
++    expect(result.stars).toBe(3);
++  });
++});
++
++describe('narrative coverage', () => {
++  it('writes dedicated text for every chapter 1 level', () => {
++    for (const level of LEVELS.filter((l) => l.chapter === 1)) {
++      expect(NARRATIVE[level.id], `no narrative for ${level.id}`).toBeDefined();
++      const text = narrativeFor(level.id);
++      expect(text.before.zh.length).toBeGreaterThan(4);
++      expect(text.after.en.length).toBeGreaterThan(4);
++    }
++  });
++
++  it('falls back to generic text for a level with no narrative yet', () => {
++    const text = narrativeFor('ch9-not-written-yet');
++    expect(text.before.zh.length).toBeGreaterThan(0);
++    expect(text.before.zh).not.toBe(NARRATIVE['ch1-04-and-gate']!.before.zh);
++  });
++
++  /**
++   * Both locales are rendered by the same overlay; a missing `en` would ship a
++   * briefing that reads `undefined` to an English player, and the fallback path
++   * has to be complete for the same reason.
++   */
++  it('has both locales for every chapter 1 level, before and after', () => {
++    for (const level of LEVELS.filter((l) => l.chapter === 1)) {
++      const text = narrativeFor(level.id);
++      expect(text.before.en.length, `before.en for ${level.id}`).toBeGreaterThan(4);
++      expect(text.after.zh.length, `after.zh for ${level.id}`).toBeGreaterThan(4);
++    }
++    const fallback = narrativeFor('ch9-not-written-yet');
++    expect(fallback.before.en.length).toBeGreaterThan(0);
++    expect(fallback.after.zh.length).toBeGreaterThan(0);
++  });
++});
++
++describe('chapter map', () => {
++  function mapStore(levelId: string, progress: Progress = emptyProgress()): Store<AppState> {
++    const store = makeStore(levelId);
++    store.set({ progress });
++    return store;
++  }
++
++  /**
++   * jsdom parses the inline colour and reports it back normalised, so a
++   * comparison against `THEME.success` has to be made in the same units.
++   */
++  function rgbOf(hex: string): string {
++    const r = parseInt(hex.slice(1, 3), 16);
++    const g = parseInt(hex.slice(3, 5), 16);
++    const b = parseInt(hex.slice(5, 7), 16);
++    return `rgb(${r}, ${g}, ${b})`;
++  }
++
++  const passedLevel1: Progress = {
++    version: 1,
++    levels: {
++      'ch1-01-crude-awakening': {
++        passed: true,
++        best: { gate: 0, delay: 0, tick: 0 },
++        stars: 3,
++      },
++    },
++  };
++
++  it('shows one tile per level and disables the ones still locked', () => {
++    const root = document.createElement('div');
++    mountMap(root, mapStore('ch1-01-crude-awakening'), () => {});
++    const tiles = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
++    expect(tiles).toHaveLength(LEVELS.length);
++    expect(tiles[0]!.disabled).toBe(false);
++    expect(tiles[1]!.disabled).toBe(true);
++    expect(tiles[2]!.disabled).toBe(true);
++  });
++
++  it('marks the level that is open, and only that one', () => {
++    const root = document.createElement('div');
++    mountMap(root, mapStore('ch1-02-nand-gate', passedLevel1), () => {});
++    const tiles = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
++    expect(tiles.filter((t) => t.classList.contains('map-tile-current'))).toEqual([tiles[1]]);
++  });
++
++  it('shows the stars of a passed level and unlocks its successor', () => {
++    const root = document.createElement('div');
++    mountMap(root, mapStore('ch1-01-crude-awakening', passedLevel1), () => {});
++    const tiles = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
++    expect(tiles[0]!.textContent).toContain('★');
++    expect(tiles[0]!.style.color).toBe(rgbOf(THEME.success));
++    expect(tiles[1]!.disabled).toBe(false);
++    expect(tiles[2]!.disabled).toBe(true);
++    // a tile that is neither passed nor unlocked is dimmed, not tinted green
++    expect(tiles[2]!.style.color).toBe(rgbOf(THEME.textMuted));
++  });
++
++  it('reports the selected level id and ignores clicks on locked tiles', () => {
++    const root = document.createElement('div');
++    const picked: string[] = [];
++    mountMap(root, mapStore('ch1-01-crude-awakening', passedLevel1), (id) => picked.push(id));
++    const tiles = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
++    tiles[1]!.click();
++    tiles[2]!.click(); // still locked: a disabled button fires nothing
++    expect(picked).toEqual(['ch1-02-nand-gate']);
++  });
++
++  it('re-renders when progress changes', () => {
++    const store = mapStore('ch1-01-crude-awakening');
++    const root = document.createElement('div');
++    mountMap(root, store, () => {});
++    const before = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
++    expect(before[1]!.disabled).toBe(true);
++
++    store.set({ progress: passedLevel1 });
++    const after = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
++    expect(after).toHaveLength(LEVELS.length);
++    expect(after[1]!.disabled).toBe(false);
++  });
++});
+diff --git a/test/ui/view.test.ts b/test/ui/view.test.ts
+new file mode 100644
+index 0000000..af9e457
+--- /dev/null
++++ b/test/ui/view.test.ts
+@@ -0,0 +1,52 @@
++import { describe, expect, it } from 'vitest';
++import { addInstance, emptyGraph } from '../../src/core/graph';
++import { BASE_DEFS } from '../../src/core/defs/index';
++import { createRegistry } from '../../src/core/registry';
++import { hitTest, pinPosition, screenToWorld, snap, worldToScreen } from '../../src/ui/board/view';
++
++const registry = createRegistry(BASE_DEFS);
++
++describe('camera', () => {
++  it('round-trips world and screen coordinates', () => {
++    const camera = { x: 100, y: 50, zoom: 2 };
++    const world = { x: 13, y: 27 };
++    const screen = worldToScreen(camera, world);
++    expect(screenToWorld(camera, screen)).toEqual(world);
++  });
++
++  it('translates without scaling when zoom is 1', () => {
++    expect(worldToScreen({ x: 10, y: 20, zoom: 1 }, { x: 5, y: 5 })).toEqual({ x: 15, y: 25 });
++  });
++});
++
++describe('snap', () => {
++  it('snaps to the 8 pixel grid', () => {
++    expect(snap(0)).toBe(0);
++    expect(snap(3)).toBe(0);
++    expect(snap(5)).toBe(8);
++    expect(snap(13)).toBe(16);
++    expect(Object.is(snap(-3), 0)).toBe(true); // -0 and 0 are the same grid cell
++  });
++});
++
++describe('hitTest', () => {
++  it('finds an instance by its body', () => {
++    const g = emptyGraph();
++    const inst = addInstance(g, 'nand', 100, 100);
++    const hit = hitTest(g, registry, { x: 100, y: 100 });
++    expect(hit).toEqual({ kind: 'instance', id: inst.id });
++  });
++
++  it('prefers a pin over the body underneath it', () => {
++    const g = emptyGraph();
++    const inst = addInstance(g, 'nand', 100, 100);
++    const pin = { inst: inst.id, port: 'a', isInput: true };
++    const pos = pinPosition(g.instances[0]!, registry.get('nand'), 'a', true);
++    const hit = hitTest(g, registry, pos);
++    expect(hit).toEqual({ kind: 'pin', ...pin });
++  });
++
++  it('returns null in empty space', () => {
++    expect(hitTest(emptyGraph(), registry, { x: 5000, y: 5000 })).toBeNull();
++  });
++});

@@ -1,0 +1,27 @@
+$ vitest run
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/signal.test.ts (16 tests) 10ms
+ ✓ test/core/registry.test.ts (24 tests) 19ms
+ ✓ test/app/commands.test.ts (6 tests) 8ms
+ ✓ test/ui/view.test.ts (6 tests) 8ms
+ ✓ test/app/progress.test.ts (14 tests) 11ms
+ ✓ test/levels/grader.test.ts (12 tests) 20ms
+ ✓ test/persist/storage.test.ts (12 tests) 13ms
+ ✓ test/smoke/sanity.test.ts (1 test) 4ms
+ ✓ test/app/store.test.ts (11 tests) 10ms
+ ✓ test/levels/checks.test.ts (28 tests) 41ms
+ ✓ test/levels/ch1-part1.test.ts (34 tests) 24ms
+ ✓ test/levels/ch1-part2.test.ts (29 tests) 24ms
+ ✓ test/core/net.test.ts (36 tests) 215ms
+ ✓ test/core/graph.test.ts (15 tests) 332ms
+   ✓ validateGraph (9)
+     ✓ scans a 50,000-instance cycle without recursing 319ms
+ ✓ test/ui/panels.test.ts (22 tests) 43ms
+
+ Test Files  15 passed (15)
+      Tests  266 passed (266)
+   Start at  00:25:09
+   Duration  1.38s (transform 40%, environment 19%, import 19%, tests 16%, worker 6%)
+

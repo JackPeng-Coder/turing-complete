@@ -1,0 +1,290 @@
+MUTATION C (deliberate, temporary): am8.evaluate publishes d (o[0] = toUint(i[0], W))
+instead of the byte its ddr selects -- the read path mirroring an input value, which is the
+one thing Global Constraint 5's carve-out for ddr does NOT sanction. Applied to the FINAL tree
+(commit 171fd6c, fix round 1), then reverted.
+
+Count reconciliation, same as mutations A and B: the old logs said 138 tests with net at 52; this
+tree has 141 (net 55: the pre-commit 52->53 difference, plus the two pre-seeds ... tests added
+in fix round 1). The two candidates for the pre-commit difference are run alone at the bottom of
+this log; both PASS under this mutation.
+
+$ vitest run test/core/defs-wide.test.ts test/core/net.test.ts test/core/registry.test.ts
+$ vitest run "test/core/defs-wide.test.ts" "test/core/net.test.ts" "test/core/registry.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/registry.test.ts (26 tests) 16ms
+ ❯ test/core/defs-wide.test.ts (60 tests | 2 failed) 72ms
+   ✓ wide defs: the brief's contract (11)
+     ✓ declares every id with the exact pin ids and widths the brief gives 3ms
+     ✓ is reachable through the registry the way the game reaches it 2ms
+     ✓ keeps every wide def pure combinational 3ms
+     ✓ categorizes every wide part as wide and const8 as a source 1ms
+     ✓ keeps the DELAY cost at one unit per operator, nothing for a source or a wire 0ms
+     ✓ states a NAND-equivalent gateCost for every def, explicitly 1ms
+     ✓ gives every operator more than one NAND equivalent, and no part less than its delay 1ms
+     ✓ composes each count out of the others, so the constructions are checkable 0ms
+     ✓ prices each bit-sliced cell on the same NAND basis as the registered 1-bit gate 0ms
+     ✓ scales every count with the width the generator is asked for 1ms
+     ✓ registers the whole family without a duplicate id 0ms
+   ❯ wide storage defs: the brief's contract and the decided edge rules (8)
+     ✓ declares every storage def with the ids, pins, state and costs the brief gives 1ms
+     ✓ is registered, and every id is one level data can spell 0ms
+     ✓ mux8 selects a or b on sel, combinationally 1ms
+     ✓ delay8 publishes the byte it holds and never its inputs 0ms
+     ✓ reg8 samples d on the edge when load is high, and reset beats load 0ms
+     ✓ counter8 counts on the edge when en is high, wraps to 0, and reset beats en 0ms
+     × ram8 writes the addressed byte on the edge and selects it on the fly 7ms
+     × ram8 keeps all 256 of its bytes, and keeps them per instance 4ms
+   ✓ wide bitwise operators (6)
+     ✓ matches a reference truth table on the boundary vectors 1ms
+     ✓ treats the 8-bit patterns as unsigned, never as negative numbers 0ms
+     ✓ evaluates NOT and its double negation 0ms
+     ✓ is its own inverse under XOR 1ms
+     ✓ relates nand8/nor8/xnor8 to their negations 0ms
+     ✓ reads an unwired input as zero 0ms
+   ✓ add8 (2)
+     ✓ adds with carry-in on the boundary vectors 0ms
+     ✓ reports bit 8 as the carry out and wraps the low eight bits 3ms
+   ✓ neg8 (2)
+     ✓ negates the boundary vectors by two's complement 0ms
+     ✓ equals (256 - a) & 0xff for every byte, and inverts itself 6ms
+   ✓ comparators (3)
+     ✓ compares unsigned patterns 0ms
+     ✓ compares signed patterns across the sign boundary 2ms
+     ✓ reports equality for every pair, and its result is a single bit 1ms
+   ✓ shifts (4)
+     ✓ shifts left, dropping bits above bit 7 0ms
+     ✓ shifts right logically, filling with zeros 0ms
+     ✓ shifts right arithmetically, replicating the sign bit 2ms
+     ✓ gives 0 for an amount of 8 or more, and matches the reference below that 3ms
+   ✓ rotates (3)
+     ✓ rotates around the byte 0ms
+     ✓ treats an amount of 8 or more as amount % 8 6ms
+     ✓ is the inverse of the other direction 1ms
+   ✓ mul8 and div8 (5)
+     ✓ multiplies, keeping the low eight bits 0ms
+     ✓ equals (a * b) & 0xff on a grid 1ms
+     ✓ divides with truncation toward zero 0ms
+     ✓ returns 0xff for division by zero, as decided, and never throws 0ms
+     ✓ divides by a non-zero divisor exactly as floor does 1ms
+   ✓ const8, switch and switch8 (3)
+     ✓ drives a constant with no inputs 0ms
+     ✓ passes a through when on is 1 and forces zero when on is 0 0ms
+     ✓ cascades: switching an already-switched value stays off 0ms
+   ✓ splitter and maker (3)
+     ✓ splits a byte into eight one-bit pins, least significant first 0ms
+     ✓ makes a byte out of eight one-bit pins 0ms
+     ✓ round-trips maker(splitter(x)) === x for every byte 2ms
+   ✓ the width generator (7)
+     ✓ defaults to eight bits 0ms
+     ✓ builds the whole family at a non-default width 1ms
+     ✓ parameterises the suffixed operators too 0ms
+     ✓ clamps a requested width into the range it documents 0ms
+     ✓ clamps before it allocates, so an absurd width cannot ask for gigabytes 0ms
+     ✓ rejects nothing silently: an unknown id is simply absent 0ms
+     ✓ is not re-counted by params.width, which widens every pin instead 2ms
+   ✓ wide defs through the kernel (3)
+     ✓ adds two level inputs and carries out of bit 8 1ms
+     ✓ carries every byte through splitter -> maker at the pin level 7ms
+     ✓ drives an 8-bit operator from 1-bit level inputs 1ms
+ ❯ test/core/net.test.ts (55 tests | 2 failed) 227ms
+   ✓ compile (10)
+     ✓ allocates one slot per bit of every pin 3ms
+     ✓ records the origin instance of every expanded instance 1ms
+     ✓ rejects invalid graphs 1ms
+     ✓ sizes the signal table for the circuit instead of the 65,536 default 133ms
+     ✓ rejects a malformed params.width (0) as a validation issue 1ms
+     ✓ rejects a malformed params.width (-1) as a validation issue 0ms
+     ✓ rejects a malformed params.width (1.5) as a validation issue 0ms
+     ✓ rejects a malformed params.width (NaN) as a validation issue 0ms
+     ✓ rejects a malformed params.width (4097) as a validation issue 0ms
+     ✓ rejects a malformed params.width (9007199254740991) as a validation issue 0ms
+   ✓ Simulation (11)
+     ✓ evaluates a NAND for every input combination 1ms
+     ✓ propagates through a chain of gates in one settle 0ms
+     ✓ treats an unwired input as zero 0ms
+     ✓ throws UnstableCircuitError for a combinational feedback loop 2ms
+     ✓ settles a delay_line held loop and publishes state on the edge 1ms
+     ✓ a delay line holds its sampled value when its input changes 0ms
+     ✓ keeps an externally driven output (level_input) through a settle 0ms
+     ✓ binds level I/O by pin name: drives a level_input, reads a level_output pin 0ms
+     ✓ settles a feedback loop that a storage element breaks 0ms
+     ✓ settles a wide pin whose read-back form differs from the written form 0ms
+     ✓ reset clears state and the tick counter 0ms
+   ❯ wide storage (17)
+     ✓ publishes every bit of a wide register, not just the low one 1ms
+     ✓ publishes a multi-byte storage def through the same path 0ms
+     ✓ pre-seeds the held byte into the table before the settle that follows a tick 0ms
+     ✓ pre-seeds a storage output whose zeroed state publishes a 1, before reset() settles 0ms
+     ✓ holds its byte between the input flip and the next clock edge (latch) 0ms
+     ✓ clears on reset, and reset beats load on the same edge 0ms
+     ✓ delays a byte by exactly one tick 0ms
+     ✓ counts one step per tick, holds when en is low, and wraps to 0 at 256 1ms
+     ✓ settles a 1-bit inverting ring that a delay_line breaks, and toggles once per tick 0ms
+     ✓ settles an 8-bit inverting ring that a delay8 breaks, and toggles the whole byte 0ms
+     ✓ throws UnstableCircuitError for the same rings with the storage element gone 1ms
+     × stores and reads back a byte at any address, 0 and 255 included 6ms
+     × is combinational on its read path and edge-triggered on its write path 1ms
+     ✓ gives every instance its own 256 bytes 0ms
+     ✓ reserves table capacity for a bank of 8-bit storage parts and their read regions 58ms
+     ✓ publishes a 1-bit storage def across a pin an instance widened 1ms
+     ✓ refuses a storage def that could never publish what it holds 1ms
+   ✓ wide ports (6)
+     ✓ shows only the driving bit when a 1-bit output feeds an 8-bit input beside a live signal 0ms
+     ✓ takes only the low bit when an 8-bit output drives a 1-bit input 0ms
+     ✓ transfers every bit when an 8-bit output drives an 8-bit input 0ms
+     ✓ hands back a read region that belongs to one pin and is fresh after settle 0ms
+     ✓ zero-extends a narrower driver into a 12-bit input 1ms
+     ✓ materialises a region only for a pin whose driver is narrower 0ms
+   ✓ per-instance pin widths (7)
+     ✓ resolves a pin width from the instance over the def 0ms
+     ✓ leaves every width at the def default when the instance sets no params 0ms
+     ✓ reports an unknown pin by name and direction 0ms
+     ✓ gathers a params-wide pin per bit when its driver is narrower 0ms
+     ✓ gives a params-wide pin a coherent 8-bit region when its driver is narrower 0ms
+     ✓ reads a params-wide pin straight from an equally wide driver 0ms
+     ✓ reserves table capacity for params-derived widths and their read regions 1ms
+   ✓ delayOf (4)
+     ✓ sums gate costs along the longest path and counts sources as free 0ms
+     ✓ breaks the path at a storage element instead of counting through it 0ms
+     ✓ walks a diamond ladder in linear time instead of enumerating every path 2ms
+     ✓ terminates on a combinational loop and does not count it as depth 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide storage defs: the brief's contract and the decided edge rules > ram8 writes the addressed byte on the edge and selects it on the fly
+AssertionError: memory starts empty: expected 255 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 255
+
+ ❯ test/core/defs-wide.test.ts:555:70
+    553|     expect(def.stateBytes, '256 bytes of storage').toBe(256);
+    554|     // inputs: [d, addr, load]
+    555|     expect(publish(def, state, [0xff, 0, 0]), 'memory starts empty').t…
+       |                                                                      ^
+    556|     edge(def, state, [0xff, 0, 1]);
+    557|     expect(state[0]).toBe(0xff);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide storage defs: the brief's contract and the decided edge rules > ram8 keeps all 256 of its bytes, and keeps them per instance
+AssertionError: addr 0: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ test/core/defs-wide.test.ts:580:68
+    578|     for (let addr = 0; addr < 256; addr += 1) edge(def, state, [value(…
+    579|     for (let addr = 0; addr < 256; addr += 1) {
+    580|       expect(publish(def, state, [0x00, addr, 0]), `addr ${addr}`).toB…
+       |                                                                    ^
+    581|     }
+    582|     // The state is the instance's, not the def's: a second array is u…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > stores and reads back a byte at any address, 0 and 255 included
+AssertionError: addr 0x10 with no edge: expected 90 to be 165 // Object.is equality
+
+- Expected
++ Received
+
+- 165
++ 90
+
+ ❯ test/core/net.test.ts:816:70
+    814|       p.set(pin('addr'), addr);
+    815|       sim.settle();
+    816|       expect(p.out(out), `addr 0x${addr.toString(16)} with no edge`).t…
+       |                                                                      ^
+    817|     }
+    818|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > is combinational on its read path and edge-triggered on its write path
+AssertionError: d does not leak into the read path: expected 171 to be 17 // Object.is equality
+
+- Expected
++ Received
+
+- 17
++ 171
+
+ ❯ test/core/net.test.ts:838:62
+    836|     p.set(pin('d'), 0xab);
+    837|     sim.settle();
+    838|     expect(p.out(out), 'd does not leak into the read path').toBe(0x11…
+       |                                                              ^
+    839|
+    840|     // An address change needs no edge at all.
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  4 failed | 137 passed (141)
+   Start at  01:37:42
+   Duration  546ms (transform 44%, tests 40%, import 13%, worker 4%)
+
+[ELIFECYCLE] Test failed. See above for more details.
+EXIT=1
+
+--- candidate 1 of the 52-vs-53 count difference, run alone under the same mutation ---
+$ vitest run "test/core/net.test.ts" "-t" "multi-byte storage def"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/net.test.ts (55 tests | 54 skipped) 4ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 54 skipped (55)
+   Start at  01:37:44
+   Duration  286ms (transform 72%, import 19%, worker 6%, tests 2%)
+
+EXIT=0
+
+--- candidate 2 of the 52-vs-53 count difference, run alone under the same mutation ---
+$ vitest run "test/core/net.test.ts" "-t" "1-bit storage def across a pin"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/net.test.ts (55 tests | 54 skipped) 3ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 54 skipped (55)
+   Start at  01:37:45
+   Duration  287ms (transform 73%, import 18%, worker 7%, tests 2%)
+
+EXIT=0
+
+--- COUNT RECONCILIATION: THE TEST THAT DIFFERS (settled after the run above) --------------
+The single test that accounts for the old logs' "138 tests / net 52" versus the final tree's
+"139 tests / net 53" is
+
+  test/core/net.test.ts > wide storage > publishes a multi-byte storage def through the same path
+
+-- the 12-bit `reg12` holder with TWO state bytes, which was added to `net.test.ts` AFTER the old
+mutation runs and BEFORE the old GREEN run (hence mutation A's report line claiming "139 passed"
+while its own log said 138).
+
+How that is known, from the logs rather than from memory: the four pre-commit logs that cover the
+52-test tree (task-4-red-1, task-4-red-2, task-4-mutation-B, task-4-mutation-C) are all VERBOSE --
+129..157 per-test lines each -- and the string "multi-byte" occurs ZERO times in all four, while
+"publishes a 1-bit storage def across a pin an instance widened" occurs exactly once in each. So
+the widened 1-bit test was already in the 52-test tree and the 12-bit one was not. (The other
+candidate the review named is therefore ruled out, not merely deprioritised.)
+
+Is the extra test discriminating for this mutation? NO -- it is indifferent to A, B and C, which is
+why its absence did not change any of the three verdicts. Shown two ways: it is run alone under
+this same mutation above and passes (exit 0), and by construction -- it registers its own `reg12`
+def, so no shipped def's publish body is in the picture at all, and every assertion of it is read
+after a settle, which republishes through `evaluate` whatever the pass did or failed to do.

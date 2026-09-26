@@ -1,0 +1,182 @@
+MUTATION A (deliberate, temporary): Simulation.#publishState reverted to the pre-task-4 body,
+which writes state[p] onto output pin p one bit per pin instead of asking the def's own
+valuate. Applied to the FINAL tree (commit 171fd6c, fix round 1), then reverted.
+
+The count question this log settles: the task-4 mutation logs reported 138 tests with
+	est/core/net.test.ts at 52, while the final tree has net at 53. The two candidate tests for
+that one-test difference are named and run by themselves at the bottom of this log; both PASS
+under this mutation, i.e. whichever of them was the one added after the old mutation runs, it is
+indifferent to mutation A. Neither is the test that catches A -- the two pre-seeds ... tests
+below are, and they exist only from fix round 1.
+
+$ vitest run test/core/defs-wide.test.ts test/core/net.test.ts test/core/registry.test.ts
+$ vitest run "test/core/defs-wide.test.ts" "test/core/net.test.ts" "test/core/registry.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/registry.test.ts (26 tests) 14ms
+ ✓ test/core/defs-wide.test.ts (60 tests) 65ms
+ ❯ test/core/net.test.ts (55 tests | 2 failed) 217ms
+   ✓ compile (10)
+     ✓ allocates one slot per bit of every pin 2ms
+     ✓ records the origin instance of every expanded instance 1ms
+     ✓ rejects invalid graphs 1ms
+     ✓ sizes the signal table for the circuit instead of the 65,536 default 125ms
+     ✓ rejects a malformed params.width (0) as a validation issue 1ms
+     ✓ rejects a malformed params.width (-1) as a validation issue 0ms
+     ✓ rejects a malformed params.width (1.5) as a validation issue 0ms
+     ✓ rejects a malformed params.width (NaN) as a validation issue 0ms
+     ✓ rejects a malformed params.width (4097) as a validation issue 0ms
+     ✓ rejects a malformed params.width (9007199254740991) as a validation issue 0ms
+   ✓ Simulation (11)
+     ✓ evaluates a NAND for every input combination 1ms
+     ✓ propagates through a chain of gates in one settle 0ms
+     ✓ treats an unwired input as zero 0ms
+     ✓ throws UnstableCircuitError for a combinational feedback loop 9ms
+     ✓ settles a delay_line held loop and publishes state on the edge 1ms
+     ✓ a delay line holds its sampled value when its input changes 0ms
+     ✓ keeps an externally driven output (level_input) through a settle 0ms
+     ✓ binds level I/O by pin name: drives a level_input, reads a level_output pin 0ms
+     ✓ settles a feedback loop that a storage element breaks 0ms
+     ✓ settles a wide pin whose read-back form differs from the written form 0ms
+     ✓ reset clears state and the tick counter 0ms
+   ❯ wide storage (17)
+     ✓ publishes every bit of a wide register, not just the low one 1ms
+     ✓ publishes a multi-byte storage def through the same path 0ms
+     × pre-seeds the held byte into the table before the settle that follows a tick 6ms
+     × pre-seeds a storage output whose zeroed state publishes a 1, before reset() settles 1ms
+     ✓ holds its byte between the input flip and the next clock edge (latch) 0ms
+     ✓ clears on reset, and reset beats load on the same edge 0ms
+     ✓ delays a byte by exactly one tick 0ms
+     ✓ counts one step per tick, holds when en is low, and wraps to 0 at 256 1ms
+     ✓ settles a 1-bit inverting ring that a delay_line breaks, and toggles once per tick 0ms
+     ✓ settles an 8-bit inverting ring that a delay8 breaks, and toggles the whole byte 0ms
+     ✓ throws UnstableCircuitError for the same rings with the storage element gone 1ms
+     ✓ stores and reads back a byte at any address, 0 and 255 included 0ms
+     ✓ is combinational on its read path and edge-triggered on its write path 0ms
+     ✓ gives every instance its own 256 bytes 0ms
+     ✓ reserves table capacity for a bank of 8-bit storage parts and their read regions 51ms
+     ✓ publishes a 1-bit storage def across a pin an instance widened 0ms
+     ✓ refuses a storage def that could never publish what it holds 1ms
+   ✓ wide ports (6)
+     ✓ shows only the driving bit when a 1-bit output feeds an 8-bit input beside a live signal 1ms
+     ✓ takes only the low bit when an 8-bit output drives a 1-bit input 0ms
+     ✓ transfers every bit when an 8-bit output drives an 8-bit input 0ms
+     ✓ hands back a read region that belongs to one pin and is fresh after settle 0ms
+     ✓ zero-extends a narrower driver into a 12-bit input 0ms
+     ✓ materialises a region only for a pin whose driver is narrower 0ms
+   ✓ per-instance pin widths (7)
+     ✓ resolves a pin width from the instance over the def 0ms
+     ✓ leaves every width at the def default when the instance sets no params 0ms
+     ✓ reports an unknown pin by name and direction 0ms
+     ✓ gathers a params-wide pin per bit when its driver is narrower 0ms
+     ✓ gives a params-wide pin a coherent 8-bit region when its driver is narrower 0ms
+     ✓ reads a params-wide pin straight from an equally wide driver 0ms
+     ✓ reserves table capacity for params-derived widths and their read regions 0ms
+   ✓ delayOf (4)
+     ✓ sums gate costs along the longest path and counts sources as free 0ms
+     ✓ breaks the path at a storage element instead of counting through it 0ms
+     ✓ walks a diamond ladder in linear time instead of enumerating every path 2ms
+     ✓ terminates on a combinational loop and does not count it as depth 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/net.test.ts > wide storage > pre-seeds the held byte into the table before the settle that follows a tick
+AssertionError: the first sweep after the edge already read the held byte: expected +0 to be 165 // Object.is equality
+
+- Expected
++ Received
+
+- 165
++ 0
+
+ ❯ test/core/net.test.ts:538:82
+    536|     // 0x00: the settled value stays 0xa5 either way, which is why not…
+    537|     // in the suite fails.
+    538|     expect(seen[0], 'the first sweep after the edge already read the h…
+       |                                                                                  ^
+    539|     // The same fact read a second way: the pre-seed carries the byte …
+    540|     // watcher in sweep 1 and commits it there, so the settle confirms…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/core/net.test.ts > wide storage > pre-seeds a storage output whose zeroed state publishes a 1, before reset() settles
+AssertionError: the first sweep of reset() already read the published 1: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ test/core/net.test.ts:572:80
+    570|
+    571|     sim.reset();
+    572|     expect(seen[0], 'the first sweep of reset() already read the publi…
+       |                                                                                ^
+    573|     expect(p.out('unit.out'), 'and reset() settles on it').toBe(1);
+    574|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  2 failed | 139 passed (141)
+   Start at  01:37:02
+   Duration  530ms (transform 45%, tests 38%, import 13%, worker 4%)
+
+[ELIFECYCLE] Test failed. See above for more details.
+EXIT=1
+
+--- candidate 1 of the 52-vs-53 count difference, run alone under the same mutation ---
+$ vitest run test/core/net.test.ts -t "multi-byte storage def"
+$ vitest run "test/core/net.test.ts" "-t" "multi-byte storage def"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/net.test.ts (55 tests | 54 skipped) 4ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 54 skipped (55)
+   Start at  01:37:10
+   Duration  286ms (transform 74%, import 18%, worker 5%, tests 2%)
+
+EXIT=0
+
+--- candidate 2 of the 52-vs-53 count difference, run alone under the same mutation ---
+$ vitest run test/core/net.test.ts -t "1-bit storage def across a pin"
+$ vitest run "test/core/net.test.ts" "-t" "1-bit storage def across a pin"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/net.test.ts (55 tests | 54 skipped) 4ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 54 skipped (55)
+   Start at  01:37:12
+   Duration  290ms (transform 74%, import 18%, worker 6%, tests 2%)
+
+EXIT=0
+
+--- COUNT RECONCILIATION: THE TEST THAT DIFFERS (settled after the run above) --------------
+The single test that accounts for the old logs' "138 tests / net 52" versus the final tree's
+"139 tests / net 53" is
+
+  test/core/net.test.ts > wide storage > publishes a multi-byte storage def through the same path
+
+-- the 12-bit `reg12` holder with TWO state bytes, which was added to `net.test.ts` AFTER the old
+mutation runs and BEFORE the old GREEN run (hence mutation A's report line claiming "139 passed"
+while its own log said 138).
+
+How that is known, from the logs rather than from memory: the four pre-commit logs that cover the
+52-test tree (task-4-red-1, task-4-red-2, task-4-mutation-B, task-4-mutation-C) are all VERBOSE --
+129..157 per-test lines each -- and the string "multi-byte" occurs ZERO times in all four, while
+"publishes a 1-bit storage def across a pin an instance widened" occurs exactly once in each. So
+the widened 1-bit test was already in the 52-test tree and the 12-bit one was not. (The other
+candidate the review named is therefore ruled out, not merely deprioritised.)
+
+Is the extra test discriminating for this mutation? NO -- it is indifferent to A, B and C, which is
+why its absence did not change any of the three verdicts. Shown two ways: it is run alone under
+this same mutation above and passes (exit 0), and by construction -- it registers its own `reg12`
+def, so no shipped def's publish body is in the picture at all, and every assertion of it is read
+after a settle, which republishes through `evaluate` whatever the pass did or failed to do.

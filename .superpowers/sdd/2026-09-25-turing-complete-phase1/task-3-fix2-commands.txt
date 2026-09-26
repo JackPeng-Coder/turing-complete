@@ -1,0 +1,60 @@
+FIX ROUND 2 — command index
+Worktree: D:\Documents\turing-complete\.worktrees\phase1  (branch phase1)
+Commit under test: 0ebb7bc (fix round 1) -> 2027b75 (this round)
+Logs live beside this file: D:\Documents\turing-complete\.superpowers\sdd\2026-09-25-turing-complete-phase1\
+
+`pnpm` is not on PATH in this session; every command below was run as
+  & "C:\Users\ME\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe" `
+    "C:\Users\ME\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs" <args>
+so "<NODE> <PNPM>" stands for that pair. Each log starts with the exact command line and ends
+with EXIT=<code> (files are written with Set-Content first, then Tee-Object -Append, so no log
+carries stale output from an earlier run).
+
+# | command                                          | exit | log
+--|--------------------------------------------------|------|-------------------------------------------
+1 | <NODE> <PNPM> test test/levels/zz-measure-ch1.test.ts
+  | 0 | task-3-fix2-measure-before.txt
+  |   | PRE-RECALIBRATION (source priced, targets not yet moved). Prints all twelve chapter-1
+  |   | reference solutions' gate/delay/tick/score against their targets. Three MISSES:
+  |   | ch1-06 gate 4 > 2, ch1-10 gate 6 > 2, ch1-11 gate 4 > 2 -- every delay and tick identical
+  |   | to the frozen table. This is the measurement the recalibration is based on.
+2 | <NODE> <PNPM> test test/levels/zz-measure-ch1.test.ts
+  | 0 | task-3-fix2-measure-after.txt
+  |   | Same fixture after the three targets were raised: twelve MEETS, twelve stars-3.
+  |   | The temporary fixture (test/levels/zz-measure-ch1.test.ts) was deleted before the commit.
+3 | <NODE> <PNPM> test test/core/registry.test.ts test/core/defs-wide.test.ts
+  |   test/levels/grader.test.ts test/levels/ch1-part1.test.ts test/levels/ch1-part2.test.ts
+  | 0 | task-3-fix2-green-focused.txt
+  |   | 5 files, 181 tests passed. These are the files covering the amended code.
+4 | MUTATION 1 (RED on purpose): gate() stops emitting gateCost for the built-in `and`, so it
+  | falls back to `?? cost` = 1 -- "a built-in gate's gateCost is removed"; then the same
+  | focused command as row 3
+  | 1 | task-3-fix2-red-mutation-1.txt
+  |   | 3 failed: grader freeze "ch1-11 ... expected {gate:2,...} to deeply equal {gate:4,...}",
+  |   | registry "prices every 1-bit gate ... and: expected undefined to be 2", defs-wide
+  |   | "prices each bit-sliced cell on the same NAND basis ... no gateCost on the 1-bit gate and".
+  |   | (ch1-part1/part2 stayed green: "passes with three stars" is the weaker assertion.)
+  |   | Reverted immediately with the reverse edit; the committed factory emits `gateCost`.
+5 | MUTATION 2 (RED on purpose): ch1-11's recalibrated target put back to gate 2, which its own
+  | reference solution (gate 4) fails; then <NODE> <PNPM> test test/levels/grader.test.ts
+  |   test/levels/ch1-part1.test.ts test/levels/ch1-part2.test.ts
+  | 1 | task-3-fix2-red-mutation-2.txt
+  |   | 2 failed: the new shipped-set check ("ch1-11-bigger-and-gate gate: reference 4 > target 2")
+  |   | and ch1-part2's stars assertion. The freeze test stayed green -- it pins measured values,
+  |   | not target satisfaction, which is why the shipped-set check exists. Reverted immediately.
+6 | <NODE> <PNPM> test
+  | 0 | task-3-fix2-green-full.txt
+  |   | Full suite: 16 files, 350 tests passed (347 before this round: +3, no test deleted without
+  |   | a replacement; two were reshaped -- see the report).
+7 | <NODE> <PNPM> exec tsc --noEmit
+  | 0 | task-3-fix2-tsc.txt
+  |   | 0 diagnostics (the log holds only the command and EXIT=0: tsc prints nothing on success).
+8 | <NODE> <PNPM> build
+  | 0 | task-3-fix2-build.txt
+  |   | tsc --noEmit && vite build: 32 modules, dist/assets/index-Lk4_vByB.js 50.67 kB.
+9 | <NODE> <PNPM> smoke
+  | 0 | task-3-fix2-smoke.txt
+  |   | playwright: 2 passed (4.9s). Nothing here touches src/ui or src/app; "did not break the
+  |   | app" check that also rebuilds through the project's own webServer command.
+10| git add <the 9 changed files>; git commit -F task-3-fix2-commit-msg.txt
+  | 0 | task-3-fix2-commit.txt (the commit as made: 2027b75, 9 files, +246/-64)

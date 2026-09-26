@@ -1,0 +1,33 @@
+$ vitest run
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/signal.test.ts (16 tests) 11ms
+ ✓ test/core/registry.test.ts (26 tests) 23ms
+ ✓ test/ui/view.test.ts (6 tests) 8ms
+ ✓ test/app/progress.test.ts (14 tests) 11ms
+ ✓ test/persist/storage.test.ts (12 tests) 13ms
+ ✓ test/app/store.test.ts (11 tests) 9ms
+ ✓ test/levels/ch1-part1.test.ts (34 tests) 29ms
+ ✓ test/levels/ch1-part2.test.ts (29 tests) 26ms
+ ✓ test/levels/grader.test.ts (40 tests) 33ms
+ ✓ test/levels/checks.test.ts (28 tests) 97ms
+ ✓ test/core/defs-wide.test.ts (60 tests) 121ms
+ ✓ test/levels/fuzz-custom.test.ts (67 tests) 126ms
+ ✓ test/app/commands.test.ts (6 tests) 8ms
+ ✓ test/smoke/sanity.test.ts (1 test) 2ms
+ ✓ test/core/net.test.ts (55 tests) 343ms
+ ✓ test/core/graph.test.ts (15 tests) 404ms
+   ✓ validateGraph (9)
+     ✓ scans a 50,000-instance cycle without recursing 390ms
+ ✓ test/ui/panels.test.ts (22 tests) 45ms
+
+ Test Files  17 passed (17)
+      Tests  442 passed (442)
+   Start at  02:14:39
+   Duration  1.53s (transform 45%, tests 19%, import 18%, environment 15%, worker 4%)
+
+  Transform  transforming modules took 3.14s · 45% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+

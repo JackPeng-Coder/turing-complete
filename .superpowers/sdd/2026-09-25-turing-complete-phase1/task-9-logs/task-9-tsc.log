@@ -1,0 +1,7 @@
+$ pnpm exec tsc --noEmit
+cwd: D:\Documents\turing-complete\.worktrees\phase1
+
+
+
+exit code: 0
+(no output above the exit line means no diagnostics)

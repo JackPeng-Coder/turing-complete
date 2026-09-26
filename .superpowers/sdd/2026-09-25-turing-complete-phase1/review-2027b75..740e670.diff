@@ -1,0 +1,1773 @@
+# Review package: 2027b75..740e670
+
+## Commits
+740e670 feat(core): add the 8-bit storage family and a layout-free publish path
+9ccff8b docs(phase1): close Task 3 and merge the two checker tasks
+
+## Files changed
+ .../2026-09-25-turing-complete-phase1/progress.md  | 101 +++-
+ src/core/defs/index.ts                             |  28 +-
+ src/core/defs/wide.ts                              | 267 ++++++++++-
+ src/core/net.ts                                    |  60 ++-
+ src/core/registry.ts                               |   8 +-
+ test/core/defs-wide.test.ts                        | 273 ++++++++++-
+ test/core/net.test.ts                              | 518 ++++++++++++++++++++-
+ test/core/registry.test.ts                         |  50 +-
+ 8 files changed, 1259 insertions(+), 46 deletions(-)
+
+## Diff
+diff --git a/.superpowers/sdd/2026-09-25-turing-complete-phase1/progress.md b/.superpowers/sdd/2026-09-25-turing-complete-phase1/progress.md
+index 2ad6c22..381e709 100644
+--- a/.superpowers/sdd/2026-09-25-turing-complete-phase1/progress.md
++++ b/.superpowers/sdd/2026-09-25-turing-complete-phase1/progress.md
+@@ -198,15 +198,108 @@ a three-line cap closes it completely, so leaving it half-closed is worse than e
+ extreme. Routed to Task 3, which already owns `core/defs` and touches the same validation
+ neighbourhood. — Cost if wrong: a hand-authored level with a width above 4096 is rejected
+ rather than attempted; no legitimate level comes close to 4096 bits.
+ 
+ Ruling: Task 3 must keep `tsc --noEmit`, `pnpm build` and `pnpm smoke` output **in a log
+ file**, not only inline in its report. Task 2's reviewer could not verify those three claims
+ from the artifacts and had to re-derive the type-safety argument by hand. The cost of keeping
+ the logs is one redirect; the cost of not keeping them is a reviewer spending its budget
+ re-doing a verifiable check. — Cost if wrong: a few KB of scratch per task.
+ 
+-Task 3: BASE `e27d81a` (new convention, adopted from here on: commit all controller
+-  bookkeeping FIRST, then take BASE = HEAD immediately before dispatching. This makes the
+-  review range exactly the implementer's commits plus nothing else, and removes the repeated
+-  BASE corrections Tasks 1 and 2 needed).
++Task 3: BASE `e27d81a`, implementer commit `a57908a` — DONE_WITH_CONCERNS; fix round 1 dispatched.
++Task 3: controller-found Important: the wide family conflated the **gate** metric with the
++  **delay** metric. `delayOf` (net.ts:616,639,648) and `gateCost` (grader.ts:29-34) both
++  consume `def.cost`, so setting `cost: 1` on every wide operator fixed delay correctly and
++  made an `add8` count as **one gate**. Spec §5.4 defines the gate metric as expanding
++  "电路 + 自定义组件 + 宽位组件" into NAND equivalents, while spec §3.2 defines a wide
++  component as contributing 1 unit of **delay**. The two metrics deliberately differ for wide
++  parts: gate multiplies, delay does not.
++  Why this mattered enough to stop and fix: Tasks 8–11 author every `threeStar.gate` target,
++  and they would have been measured against a metric the spec does not describe. Fixing it
++  after 26 levels existed would have invalidated all 26 sets of targets.
++  Ruling: add an explicit NAND-equivalent gate cost with `cost` as the fallback (so phase-0
++  defs and all 12 chapter-1 scores stay byte-identical), and pin the asymmetry with a test
++  asserting one `and8` has `delay === 1` and `gate > 1`. — Cost if wrong: the gate numbers for
++  wide parts are my chosen constructions rather than the original game's, which is already
++  true of every chapter-2 number (see the source-fidelity ruling).
++Task 3: review clean on the round-1 range — Finding 1 ADDRESSED; task quality Approved. The
++  reviewer independently re-derived all 24 `gateCost` values at width 8 from the stated
++  constructions and confirmed the phase-0 freeze is assertion-based (literal metrics AND
++  scores for 12 reference circuits, cross-checked against `scoreOf`, with each `threeStar`
++  bound compared directly) rather than an absence of change.
++Task 3: fix round 2/5 dispatched — the same conflation one level up: the phase-0 built-in
++  gates still fall through `?? def.cost` and are worth 1 each, so a built-in `and` costs 1
++  while one bit of `and8` costs 2, both under the label "NAND equivalent".
++
++Ruling: fix the **metric**, not the documentation — and lift my own freeze instruction for
++the three chapter-1 gate targets it moves. The reviewer recommended the opposite (keep the
++numbers, correct the two doc comments) because fixing the metric moves `ch1-06` gate 2→4,
++`ch1-10` 2→6, `ch1-11` 2→4 and those levels would stop meeting their own `threeStar.gate`.
++I overrule that recommendation on the authority of spec §5.4, which defines gate as
++"电路 + 自定义组件 + 宽位组件全部展开后，**NAND 等价门**的总数" with no carve-out for the
++built-in gates: the spec is the binding authority, the plan argues from it, and the
++documentation is what is wrong. The freeze was my instruction and it exists to stop
++*accidental* score drift, not to entrench a metric that contradicts the spec.
++Recalibration rule: re-measure the 12 chapter-1 reference solutions and set `threeStar.gate`
++to the measured value only where the reference no longer meets it; delay and tick must not
++move; and add a machine check that **every** level's reference solution meets **all** of its
++own `threeStar` bounds. That last test is worth more than the three edited numbers — it
++turns the phase-0 principle ("a target its own reference solution fails is a defect") into
++something that cannot silently rot across chapters 3–7.
++— Cost if wrong: three chapter-1 three-star gate thresholds become more generous (2→4, 2→6,
++2→4), so three levels get slightly easier to three-star. The alternative is 26 chapter-2
++targets authored against a metric the spec does not define, which is worse and harder to
++undo later.
++
++Task 3: ruling ratified — `shift_*`/`rot_*` are barrel shifters (3 stages × 8 muxes = 24
++  muxes → 96 NAND at width 8; +29 for the `amount >= width` corner rules on logical shifts,
++  +44 for `ashr8` sign-fill), **not** the `8 × mux2` I suggested in the fix dispatch. My
++  suggestion was wrong: the `amount` pin is 8 bits wide, so 8 muxes is a shift-by-one and
++  cannot produce `shift_l8(1, 7) = 0x80`. The implementer deviated with a stated reason and
++  the deviation is correct. — Cost if wrong: the gate counts for the shift family are 4×
++  higher than a naive reading would give, which makes those levels' star targets stricter.
++Task 3: honest-limits note carried forward — the per-operator `gateCost` values are counts of
++  **documented constructions, not proven minima**. The implementer names `mul8` (704) and
++  `div8` (950) as the two it would least defend as tight. Tasks 8–11 must therefore treat a
++  `threeStar.gate` target as "achievable with a good solution" and measure it from the
++  reference solution, not from the bare `gateCost` of the parts used.
++
++Task 3: ruling ratified — `splitter`/`maker` pin **count** is a def-factory parameter, not
++  `params.width`. Task 2's rule widens *every* pin of an instance, so an instance knob would
++  have made all eight outputs 4 bits instead of re-counting them. Registered at 8; a level
++  needing 4 bits uses `b0..b3`. **Recorded limitation: the project cannot instantiate these
++  two at a non-8 count**, and per-instance counts would need a def-level hook in `net.ts`.
++  Later chapters (`byte_indexer`, `bit_indexer`) may need that hook; not this phase.
++
++Task 3: fix round 2/5 (1 addressed, 0 open — built-in gates priced at 1 NAND equivalent while
++  the wide family was priced per the documented basis; commits 0ebb7bc..2027b75). All nine
++  built-in gates now state an explicit `gateCost` (nand 1, not 1, and 2, or 3, nor 4, xor 4,
++  xnor 5, and3 4, or3 6) with an all-NAND construction derived per cell; `cost` stayed 1 on
++  all nine so delay is provably unchanged; the false doc claims were corrected in four places.
++Task 3: complete (commits e27d81a..2027b75, review clean after 2 fix rounds).
++  Recalibrated chapter-1 targets (measured, raised only, no delay/tick moved):
++  `ch1-06-nor-gate` gate 2→4, `ch1-10-bigger-or-gate` gate 2→6, `ch1-11-bigger-and-gate`
++  gate 2→4. The other nine chapter-1 references were unaffected.
++  New phase-wide guarantee: `test/levels/grader.test.ts` walks the **shipped** level set and
++  asserts every level's reference solution meets **all** of its own `threeStar` bounds. That
++  test fails for a missed bound while the freeze test stays green — mutation-proven — which is
++  the machine check that keeps chapters 3–7 honest.
++Task 3: minor (deferred): `src/levels/grader.ts:38-39` says the `?? def.cost` fallback is for
++  defs "zero on both", but a synthetic test def with `cost: 1` and no `gateCost` legitimately
++  uses it, and `registry.ts:54-58` permits absence for any part worth ≤ 1 NAND. Doc wording
++  narrower than the mechanism; no behaviour.
++Task 3: minor (deferred): the four items adjudicated as not worth fixing this round —
++  `toUint`'s `Uint8Array` branch unexercised (carrier for phase 5's 16/32-bit defs),
++  `makeOp`'s negative intermediate at w=32 (value correct), the freeze test's copied circuits
++  that could drift from `ch1-part1`/`part2`'s local `solutions`, and no `grade()` end-to-end on
++  a wide-part level spec. Final review to triage.
++
++Ruling: Tasks 5 and 6 (`fuzz` and `custom` checkers) are merged into **one** dispatch. They
++add two variants to the same `LevelCheck` union in the same two files, and both carry the same
++`missing-rows` lesson — an empty specification must not pass silently. The skill's own
++guidance is to batch same-shape work rather than pay a dispatch and a review seat per variant.
++— Cost if wrong: if one of the two needed its own judgment, its review is bundled with the
++other's and a fix round must address both. The plan's task numbering stays as documentation;
++this ledger records the merge so a reader is not confused by the gap that Task 5–6 creates.
++Task 4: BASE `2027b75`.
++
+ 
+diff --git a/src/core/defs/index.ts b/src/core/defs/index.ts
+index 088df74..f3f742a 100644
+--- a/src/core/defs/index.ts
++++ b/src/core/defs/index.ts
+@@ -1,12 +1,12 @@
+ import type { ComponentDef } from '../registry';
+-import { WIDE_DEF_IDS, createWideDefs } from './wide';
++import { WIDE_DEF_IDS, WIDE_STORAGE_DEFS, WIDE_STORAGE_DEF_IDS, createWideDefs } from './wide';
+ 
+ // ---------------------------------------------------------------------------
+ // GATE COST: the 1-bit NAND-equivalent basis, the same one `wide.ts` prices its
+ // bit-sliced cells against.
+ //
+ // The unit is one 2-input NAND (spec §5.4: 展开时每个基础门的贡献 = 1). `cost`
+ // is the DELAY unit and stays 1 for every gate below; `gateCost` is how many
+ // 2-input NANDs the gate expands to in a standard all-NAND construction:
+ //
+ //   gate | NANDs | construction
+@@ -107,27 +107,33 @@ const PHASE0_DEF_IDS = [
+   'xnor',
+   'and3',
+   'or3',
+   'delay_line',
+   'mem1',
+   'level_input',
+   'level_output',
+ ] as const;
+ 
+ /**
+- * Every def id the game ships: phase 0's one-bit parts, then the wide family.
++ * Every def id the game ships: phase 0's one-bit parts, then the wide family --
++ * the operators, then the storage parts.
+  *
+  * The wide ids are not repeated here -- `wide.ts` owns them next to the defs
+- * they name, and `test/core/defs-wide.test.ts` pins that the two lists agree, so
+- * a wide def can never be registered under an id that level data cannot spell.
++ * they name, and `test/core/defs-wide.test.ts` pins that each list agrees with
++ * the defs it registers, so a wide def can never be registered under an id that
++ * level data cannot spell.
+  */
+-export const DEF_IDS = [...PHASE0_DEF_IDS, ...WIDE_DEF_IDS] as const;
++export const DEF_IDS = [
++  ...PHASE0_DEF_IDS,
++  ...WIDE_DEF_IDS,
++  ...WIDE_STORAGE_DEF_IDS,
++] as const;
+ 
+ export type DefId = (typeof DEF_IDS)[number];
+ 
+ export const BASE_DEFS: readonly ComponentDef[] = [
+   source('const_on', '高电平', 'Constant On', 1),
+   source('const_off', '低电平', 'Constant Off', 0),
+ 
+   // Truth tables are written out in full. The index is the input vector with
+   // input `a` as bit 0, so index 0b10 means a=0, b=1. Writing them out makes
+   // every gate auditable at a glance instead of requiring the reader to
+@@ -227,11 +233,23 @@ export const BASE_DEFS: readonly ComponentDef[] = [
+ 
+   // The wide (8-bit) family. Registered at the default width -- 8 is the only
+   // width this phase opens; `createWideDefs(width)` is the hook for 16/32/64.
+   //
+   // The same NAND basis as the gates above, scaled by the width: `and8` is 8 x
+   // AND = 16, `add8` is 8 full adders = 72. The constructions live next to each
+   // def in `wide.ts`, and `test/core/defs-wide.test.ts` cross-checks its
+   // per-bit cells against these 1-bit gates, so the two tables cannot drift
+   // into two different bases.
+   ...createWideDefs(),
++
++  // The 8-bit storage family (task 4): a byte mux, a byte delay, a register, a
++  // counter and a 256-byte RAM. Registered from a literal list rather than a
++  // width generator -- a 32-bit RAM would be 4 GiB of state per instance; see
++  // the section note in `wide.ts`.
++  //
++  // Every one of them publishes what it holds through its own `evaluate`, the
++  // same call the settle sweep makes, which is what lets the kernel publish an
++  // eight-bit register correctly (see `Simulation.#publishState`). They are free
++  // on BOTH metrics, like the two 1-bit memories above: an asserted clear beats
++  // an asserted load/en, and the counter wraps to 0 at 256.
++  ...WIDE_STORAGE_DEFS,
+ ];
+diff --git a/src/core/defs/wide.ts b/src/core/defs/wide.ts
+index 93905b6..f38bc5f 100644
+--- a/src/core/defs/wide.ts
++++ b/src/core/defs/wide.ts
+@@ -1,31 +1,39 @@
+ import type { ComponentCategory, ComponentDef, PinDef } from '../registry';
+ import type { PortValue } from '../signal';
+ 
+ /**
+  * The wide (8-bit) family: bitwise, arithmetic, shift, compare and the two bit
+- * packers. Every def here is pure combinational -- no state, no clock edge --
+- * and every one of them is a *generator* result, so phase 5 can register the
+- * same operators at 16/32/64 bits without a second copy of the semantics.
++ * packers -- all pure combinational, no state and no clock edge, and every one
++ * of them a *generator* result, so phase 5 can register the same operators at
++ * 16/32/64 bits without a second copy of the semantics.
++ *
++ * Task 4 added the STATEFUL half of the family at the bottom of this file
++ * (`mux8`, `delay8`, `reg8`, `counter8`, `ram8`), which is registered from a
++ * literal list rather than generated; the section note there says why, and what
++ * each def keeps in `state`.
+  *
+  * Three rules this module establishes, because nothing in the project had a
+  * width other than 1 before it:
+  *
+  *  * **Ids and pin names are the contract.** `and8.a`, `add8.cout`,
+- *    `splitter.b0` and the rest are addressed verbatim by the chapter-2 level
+- *    data, so they are written out literally in `createWideDefs` rather than
+- *    derived from a clever naming scheme.
++ *    `splitter.b0`, `reg8.load` and the rest are addressed verbatim by the
++ *    chapter-2 level data, so they are written out literally in `createWideDefs`
++ *    (and in the storage list) rather than derived from a clever naming scheme.
+  *  * **Values are unsigned patterns, never negative numbers.** An 8-bit port
+  *    carries 0..255; two's complement exists only *inside* `less_s` and `ashr8`,
+  *    which convert to a signed value to read the sign and then return an
+  *    unsigned pattern again. `assertWidth` accepts nothing else on the way in.
+- *  * **Edge behaviour is decided, not accidental** -- see each operator.
++ *  * **Edge behaviour is decided, not accidental** -- see each operator, and for
++ *    the storage parts see the DECIDED rules at each def: `reset` beats
++ *    `load` / `en`, `counter8` wraps to 0, and `ram8` reads combinationally
++ *    while it writes on the edge.
+  *
+  * PARAMETERS (`splitter` / `maker`). The brief requires their pin COUNT to be
+  * configurable, and the only per-instance knob is `params.width`. That knob
+  * cannot do this job: the kernel resolves a pin's width as
+  * `inst.params.width ?? pin.width` for EVERY pin of the instance (`net.ts`,
+  * `effectiveWidth`), so `params.width = 4` on a splitter would not give it four
+  * outputs -- it would give all eight of them four bits each, which is a
+  * different and wrong component. The pin count is therefore a parameter of the
+  * DEF, not of the instance: `createWideDefs(width)` builds a splitter with
+  * exactly `width` one-bit outputs and a maker with exactly `width` one-bit
+@@ -790,10 +798,255 @@ export function createWideDefs(width: number = DEFAULT_WIDE_WIDTH): readonly Com
+     constDef(w),
+     splitterDef(w),
+     makerDef(w),
+     // The one-bit conditional pass is width-independent and keeps its bare id,
+     // so `createWideDefs(8)` yields the pair `switch` / `switch8` the contract
+     // asks for.
+     switchDef('switch', { zh: '开关', en: 'Switch' }, 1),
+     switchDef(`switch${w}`, { zh: `${w} 位开关`, en: `${w}-Bit Switch` }, w),
+   ];
+ }
++
++// ---------------------------------------------------------------------------
++// THE STORAGE FAMILY (task 4)
++//
++// The stateful half of the eight-bit family: a multiplexer, a delay, a register,
++// a counter and a byte-addressed memory. Ids and pin names are the contract the
++// chapter-2 level data is written against, exactly as the operators above are,
++// and every edge rule is DECIDED here rather than inherited -- each def says
++// which one it follows.
++//
++// WHY THIS IS NOT WIDTH-GENERATED. `createWideDefs(width)` exists so phase 5 can
++// register 16/32/64-bit operators without a second family; these five are
++// registered at eight bits only, from the literal list at the bottom of this
++// section. The reason is `stateBytes`: it is a per-instance allocation, and a
++// `ram{w}` holds `2 ** w` bytes -- at the generator's own `MAX_WIDE_WIDTH` of 32
++// a single RAM instance would ask the heap for 4 GiB. Phase 5 can add a
++// generator for the holders once it has decided what a wide RAM means; nothing
++// here should inherit that decision from a default parameter.
++//
++// STATE LAYOUT: EACH DEF'S OWN. A storage def keeps what it holds in its
++// `stateBytes` bytes and reads it back in its own `evaluate`. The one-byte
++// holders keep their byte in `state[0]`; `ram8` keeps 256 bytes and publishes
++// the one its `addr` selects. The kernel has no layout of its own to agree with
++// any more: `Simulation.#publishState` used to write `state[p]` onto output pin
++// `p`, one bit per pin, which is only correct for a 1-bit value -- an eight-bit
++// register would have had `0b00000001` written onto its pin, invisible only
++// because the settle that follows republishes through `evaluate`, and fatal for
++// the one def that had no `evaluate` to do that. So the mapping from state to
++// pin is stated once, here, next to the state it describes.
++//
++// COST: FREE ON BOTH METRICS. `cost` is 0, because a storage element cuts the
++// combinational path in both directions and contributes no DELAY unit (Global
++// Constraint 4: `delayOf` charges it nothing, its cost shows up in the tick
++// metric instead). `gateCost` is left to the `?? cost` fallback for the same
++// reason phase 0 left it there on `delay_line` and `mem1`: storage is zero on
++// BOTH metrics, and a second explicit 0 would only give the two zeroes a way to
++// drift apart. `mux8` is the one combinational part in this section and states
++// its count -- 8 x MUX2 -- with the operators above.
++// ---------------------------------------------------------------------------
++
++/**
++ * The storage family's width: eight bits, hard-coded here together with the `8`
++ * in every id below.
++ *
++ * `DEFAULT_WIDE_WIDTH` happens to be the same number, and is deliberately not
++ * used: the ids are a contract with the level data, so the width they name and
++ * the width their pins are built at must not be able to drift apart.
++ */
++const W = 8;
++
++/**
++ * Publishes the byte a one-byte holder keeps in `state[0]`.
++ *
++ * Shared by `delay8`, `reg8` and `counter8`, so the storage contract's publish
++ * rule is written once: the `inputs` parameter is accepted (the kernel passes
++ * it) and deliberately never read, because a storage element that publishes its
++ * input is a wire. A missing state byte reads 0, matching `delay_line`.
++ */
++const publishByte = (
++  _i: readonly PortValue[],
++  o: PortValue[],
++  state: Uint8Array | undefined,
++): void => {
++  o[0] = state?.[0] ?? 0;
++};
++
++/**
++ * `mux8`: `sel = 0` passes `a`, `sel = 1` passes `b`.
++ *
++ * Pure combinational -- no state, no edge -- so it costs one DELAY unit like
++ * every other operator, and its GATE metric is 8 x MUX2 = 32: a byte-wide 2:1
++ * mux is one 2:1 mux per bit, on the same NAND basis as the rest of this file.
++ */
++const mux8: ComponentDef = combinational(
++  'mux8',
++  { zh: '8 位多路选择器', en: '8-Bit Multiplexer' },
++  'wide',
++  [
++    { id: 'a', width: W },
++    { id: 'b', width: W },
++    { id: 'sel', width: 1 },
++  ],
++  wideOut(W),
++  1,
++  W * MUX2,
++  (i, o) => {
++    o[0] = bit(i[2]) === 1 ? toUint(i[1], W) : toUint(i[0], W);
++  },
++);
++
++/**
++ * `delay8`: whatever byte was on `a` at the previous clock edge.
++ *
++ * `clockEdge` samples and `evaluate` publishes what was sampled; neither half
++ * touches the other's job. That split is what makes this a delay rather than a
++ * wire, and it is the contract phase 0 paid two bugs for.
++ */
++const delay8: ComponentDef = {
++  id: 'delay8',
++  name: { zh: '8 位延迟线', en: '8-Bit Delay Line' },
++  category: 'wide',
++  inputs: [{ id: 'a', width: W }],
++  outputs: wideOut(W),
++  cost: 0,
++  sequential: true,
++  stateBytes: 1,
++  evaluate: publishByte,
++  clockEdge: (i, _o, state) => {
++    state[0] = toUint(i[0], W);
++  },
++};
++
++/**
++ * `reg8`: an eight-bit register with a load enable and a clear.
++ *
++ * On a clock edge: `reset = 1` clears it, else `load = 1` samples `d`, else it
++ * holds. **DECIDED: `reset` beats `load`** when both are asserted on the same
++ * edge -- a clear is unconditional, so `d` cannot win an edge the level asked to
++ * be a clear. Both inputs are *sampled*, not level-triggered: asserting `reset`
++ * between two edges leaves the output alone until the next one.
++ */
++const reg8: ComponentDef = {
++  id: 'reg8',
++  name: { zh: '8 位寄存器', en: '8-Bit Register' },
++  category: 'wide',
++  inputs: [
++    { id: 'd', width: W },
++    { id: 'load', width: 1 },
++    { id: 'reset', width: 1 },
++  ],
++  outputs: wideOut(W),
++  cost: 0,
++  sequential: true,
++  stateBytes: 1,
++  // Publishes the held byte only: reading `d`, `load` or `reset` here would make
++  // the register a wire, and reading them is never necessary.
++  evaluate: publishByte,
++  clockEdge: (i, _o, state) => {
++    if (bit(i[2]) === 1) state[0] = 0;
++    else if (bit(i[1]) === 1) state[0] = toUint(i[0], W);
++  },
++};
++
++/**
++ * `counter8`: counts clock edges while `en = 1`.
++ *
++ * **DECIDED: the count wraps to 0 at 256** (255 + 1 = 0) rather than
++ * saturating, so the counter is a period-256 time base that keeps moving.
++ * **DECIDED: `reset` beats `en`** on the same edge, by the same rule `reg8`
++ * uses: an asserted clear is not something an enable can override. `en` low
++ * holds the count across any number of edges.
++ */
++const counter8: ComponentDef = {
++  id: 'counter8',
++  name: { zh: '8 位计数器', en: '8-Bit Counter' },
++  category: 'wide',
++  inputs: [
++    { id: 'en', width: 1 },
++    { id: 'reset', width: 1 },
++  ],
++  outputs: wideOut(W),
++  cost: 0,
++  sequential: true,
++  stateBytes: 1,
++  evaluate: publishByte,
++  clockEdge: (i, _o, state) => {
++    if (bit(i[1]) === 1) state[0] = 0;
++    else if (bit(i[0]) === 1) state[0] = ((state[0] ?? 0) + 1) & 0xff;
++  },
++};
++
++/**
++ * `ram8`: 256 bytes of storage, read at `addr`.
++ *
++ * THE READ PATH IS COMBINATIONAL, THE WRITE PATH IS NOT. `load = 1` writes `d`
++ * at `addr` on a clock edge; a read follows `addr` with no edge at all, which is
++ * why this `evaluate` -- alone among the project's storage defs -- reads an
++ * input.
++ *
++ * Global Constraint 5 forbids `evaluate` from reading its inputs for the reason
++ * it gives: a storage element that mirrors an input is a wire. Reading `addr`
++ * does not do that, and the distinction is exact: `addr` can only SELECT a byte
++ * of `state`, and the value published is always one a clock edge put there, so
++ * no input's *value* can reach a pin through this path. `d` (i[0]) and `load`
++ * (i[2]) are deliberately never read here, so nothing on the write path can leak
++ * into the read path either. A version that published `d` would be exactly the
++ * wire the contract exists to prevent, and the tests pin both halves.
++ *
++ * `stateBytes` is 256, honestly: one byte per address (2 ** W), and the kernel
++ * allocates one such array per instance -- state is not stored in the signal
++ * table, whose capacity is about pins.
++ */
++const ram8: ComponentDef = {
++  id: 'ram8',
++  name: { zh: '8 位存储器', en: '8-Bit RAM' },
++  category: 'wide',
++  inputs: [
++    { id: 'd', width: W },
++    { id: 'addr', width: W },
++    { id: 'load', width: 1 },
++  ],
++  outputs: wideOut(W),
++  cost: 0,
++  sequential: true,
++  stateBytes: 2 ** W,
++  evaluate: (i, o, state) => {
++    o[0] = state?.[toUint(i[1], W)] ?? 0;
++  },
++  clockEdge: (i, _o, state) => {
++    if (bit(i[2]) === 1) state[toUint(i[1], W)] = toUint(i[0], W);
++  },
++};
++
++/**
++ * Ids `WIDE_STORAGE_DEFS` registers, in order, as a literal tuple so `DEF_IDS`
++ * can spread it and `DefId` still narrows to the individual strings.
++ *
++ * These are the five the task-4 brief fixes at eight bits; they are not derived
++ * from a width parameter (see the section note above), so this list and the defs
++ * above it are pinned against each other by `test/core/defs-wide.test.ts`
++ * instead.
++ */
++export const WIDE_STORAGE_DEF_IDS = [
++  'mux8',
++  'delay8',
++  'reg8',
++  'counter8',
++  'ram8',
++] as const;
++
++/**
++ * The storage family, at eight bits, in `WIDE_STORAGE_DEF_IDS` order.
++ *
++ * Offered as a plain list rather than a `createStorageDefs(width)` generator on
++ * purpose: the ids say eight bits, `ram8`'s state is 2 ** 8 bytes, and a phase
++ * that wants a 16-bit register should decide what `ram16` is before a default
++ * parameter decides it for them.
++ */
++export const WIDE_STORAGE_DEFS: readonly ComponentDef[] = [
++  mux8,
++  delay8,
++  reg8,
++  counter8,
++  ram8,
++];
+diff --git a/src/core/net.ts b/src/core/net.ts
+index 8524fb5..bbded9a 100644
+--- a/src/core/net.ts
++++ b/src/core/net.ts
+@@ -216,20 +216,30 @@ export function compile(graph: Graph, registry: Registry): Netlist {
+   const instances: CompiledInstance[] = [];
+   const refs = new Map<string, string>();
+   const byId = new Map<string, CompiledInstance>();
+   const outputBases = new Map<string, number>();
+   const outputPins: OutputPin[] = [];
+   const inputWidths = new Map<string, number>();
+   const outputWidths = new Map<string, number>();
+ 
+   for (const inst of graph.instances) {
+     const def = registry.get(inst.def);
++    // A storage element publishes what it holds through its own `evaluate` (see
++    // `Simulation.#publishState`), so one without it could never put its state on
++    // a pin. That is a defect in the DEF rather than in the circuit, and this is
++    // the only place a graph and a catalog meet -- so it is refused here, loudly,
++    // instead of holding zero in silence.
++    if (def.sequential && def.stateBytes > 0 && !def.evaluate) {
++      throw new Error(
++        `${def.id}: a storage element must declare evaluate() to publish what it holds`,
++      );
++    }
+     const inWidths = def.inputs.map((pin) => effectiveWidth(inst, pin));
+     const outWidths = def.outputs.map((pin) => effectiveWidth(inst, pin));
+     const inputs = inWidths.map((width) => table.alloc(width));
+     def.inputs.forEach((pin, i) => inputWidths.set(`${inst.id}.${pin.id}`, inWidths[i]!));
+     const outPin: number[] = [];
+     const outputs = outWidths.map((width, i) => {
+       const pin = def.outputs[i]!;
+       const base = table.alloc(width);
+       outputBases.set(`${inst.id}.${pin.id}`, base);
+       outputWidths.set(`${inst.id}.${pin.id}`, width);
+@@ -380,37 +390,61 @@ export class Simulation {
+   /** Clears every signal and every storage element, then settles from scratch. */
+   reset(): void {
+     this.#table.clear();
+     for (const state of this.#state) state.fill(0);
+     this.#tickCount = 0;
+     this.#publishState();
+     this.settle();
+   }
+ 
+   /**
+-   * Publishes storage outputs from their private state.
++   * Publishes storage outputs from their private state: one pass, before the
++   * settle that follows every `reset()` and `tick()`.
++   *
++   * THIS KERNEL KNOWS NO STATE LAYOUT OF ITS OWN. It used to: the previous
++   * version wrote `state[p]` onto output pin `p`, one bit per pin, which is only
++   * correct while each state byte is a 1-bit value. An 8-bit register keeping its
++   * byte in one state byte got `0b00000001` written onto its pin -- invisible
++   * only because the settle that follows republished through `evaluate`, and
++   * fatal for the one case the pass was there to serve: a storage def with no
++   * `evaluate`, which had nothing to correct it. Now the DEF publishes, through
++   * the same `evaluate` the settle sweep calls, so the two paths cannot hold two
++   * opinions about how a byte becomes a pin: `delay_line` and `mem1` publish the
++   * bit they always did, `reg8` publishes all eight of its bits, and `ram8`
++   * publishes the byte its `addr` selects, because selecting it is what its
++   * `evaluate` reads `addr` for.
+    *
+-   * `evaluate` does this too (and `settle` calls it), so this only exists so
+-   * that a def with state but no `evaluate` still holds, and so that a caller
+-   * reading right after `reset`/`tick` sees the held value. It is only correct
+-   * while each state byte maps to one 1-bit value, which holds for `delay_line`
+-   * and `mem1`; wide registers in a later phase need a publish hook. The write
+-   * still covers the pin's whole resolved width -- a `1` published onto a pin an
+-   * instance widened to 8 bits is `0b00000001`, not a stale high byte.
++   * The pass still earns its keep: it writes the table directly, so the first
++   * sweep of the settle that follows already reads the held value rather than
++   * the pre-edge one, and a caller reading right after `reset`/`tick` sees the
++   * held value without waiting on the sweep. Running a def's `evaluate` a second
++   * time per edge (here and in `settle`) is safe because `evaluate` must be pure
++   * -- the registry says so, and the second call reaches the same value from the
++   * same state.
++   *
++   * A storage def with no `evaluate` cannot be published at all, so `compile`
++   * refuses one instead of letting it hold zero in silence.
+    */
+   #publishState(): void {
++    const inputs: PortValue[] = [];
++    const outputs: PortValue[] = [];
+     for (let i = 0; i < this.#instances.length; i += 1) {
+       const inst = this.#instances[i]!;
+-      if (!inst.def.sequential) continue;
+-      const state = this.#state[i]!;
++      const evaluate = inst.def.evaluate;
++      if (!inst.def.sequential || !evaluate) continue;
++      this.#readInputs(inst, inputs);
++      outputs.length = 0;
++      evaluate(inputs, outputs, this.#state[i], { tick: this.#tickCount });
+       for (let p = 0; p < inst.outputs.length; p += 1) {
+-        this.#table.setPort(inst.outputs[p]!, inst.outputWidths[p]!, state[p] === 1 ? 1 : 0);
++        const value = outputs[p];
++        if (value === undefined) continue;
++        this.#table.setPort(inst.outputs[p]!, inst.outputWidths[p]!, value);
+       }
+     }
+   }
+ 
+   /**
+    * Assembles a pin's value one bit at a time, following `drive` per bit.
+    *
+    * Deliberately NOT `getPort(drive[base], width)`: that reads `width`
+    * *consecutive* slots from wherever the driver happens to sit, so a driver
+    * narrower than the pin pulls in the slots allocated after it -- other pins'
+@@ -482,21 +516,23 @@ export class Simulation {
+       if (this.#table.slots[base + bit] !== held) return false;
+     }
+     return true;
+   }
+ 
+   /**
+    * Runs the circuit to a fixed point and reports how many sweeps that took.
+    *
+    * Every def with an `evaluate` runs, storage elements included: they publish
+    * the value they hold (`state`) and never their inputs, which is what makes a
+-   * delay line hold for a full tick. A def that produced no value for a pin
++   * delay line hold for a full tick. (`ram8` reads its `addr` input as well, to
++   * select which held byte it publishes -- the one storage def for which that is
++   * correct, argued at the def.) A def that produced no value for a pin
+    * leaves that pin alone, so `level_input` -- driven from outside through its
+    * output slot -- survives the sweep.
+    *
+    * The sweep is parallel (Jacobi): all instances are evaluated against the
+    * values committed by the previous sweep, staged, and committed together.
+    * Two properties follow, and the game needs both. The outcome cannot depend on
+    * the order instances happen to sit in the document, and a genuine oscillator
+    * cannot fake a fixed point -- with in-place (Gauss-Seidel) evaluation a ring
+    * of two inverters "converges" to a self-consistent-looking 1/0 pair, which
+    * would be reported as stable.
+diff --git a/src/core/registry.ts b/src/core/registry.ts
+index 885f78b..3fcc8d9 100644
+--- a/src/core/registry.ts
++++ b/src/core/registry.ts
+@@ -58,22 +58,26 @@ export interface ComponentDef {
+    * than one NAND states the field.
+    */
+   readonly gateCost?: number;
+   /** Storage elements sample on the clock edge and do not add combinational delay. */
+   readonly sequential: boolean;
+   /**
+    * Combinational transfer function: reads inputs, writes outputs, must be pure.
+    *
+    * Storage elements use it to PUBLISH the value they are holding: they read
+    * `state` (the third parameter) and must never read `inputs`, otherwise a
+-   * delay line degrades into a wire. Combination components ignore `state` and
+-   * keep the two-argument `(i, o) => …` shape.
++   * delay line degrades into a wire. One input IS read by one storage element:
++   * a memory's read ADDRESS (`ram8.addr`), which only SELECTS among the bytes
++   * already held in `state` and can never itself become the published value --
++   * see the def. Nothing else on a storage element's input side may be read.
++   * Combination components ignore `state` and keep the two-argument
++   * `(i, o) => …` shape.
+    *
+    * `state` is typed `Uint8Array | undefined` rather than `Uint8Array` so that
+    * a storage element cannot pretend it always has state. It is a required
+    * parameter, not an optional one -- TypeScript rejects omitting it -- so
+    * combinational call sites pass `undefined` explicitly.
+    */
+   readonly evaluate?: (
+     inputs: readonly PortValue[],
+     outputs: PortValue[],
+     state: Uint8Array | undefined,
+diff --git a/test/core/defs-wide.test.ts b/test/core/defs-wide.test.ts
+index 934142e..c908a74 100644
+--- a/test/core/defs-wide.test.ts
++++ b/test/core/defs-wide.test.ts
+@@ -1,16 +1,18 @@
+ import { describe, expect, it } from 'vitest';
+ import { BASE_DEFS, DEF_IDS } from '../../src/core/defs/index';
+ import {
+   DEFAULT_WIDE_WIDTH,
+   MAX_WIDE_WIDTH,
+   WIDE_DEF_IDS,
++  WIDE_STORAGE_DEFS,
++  WIDE_STORAGE_DEF_IDS,
+   clampWidth,
+   createWideDefs,
+ } from '../../src/core/defs/wide';
+ import { Simulation, compile } from '../../src/core/net';
+ import { createRegistry, type ComponentDef } from '../../src/core/registry';
+ import type { PortValue } from '../../src/core/signal';
+ import { build } from '../fixtures/build';
+ 
+ const registry = createRegistry(BASE_DEFS);
+ 
+@@ -58,20 +60,89 @@ const CONTRACT: readonly ContractRow[] = [
+     outputs: [['out', 8]],
+   },
+   { id: 'switch', inputs: [['a', 1], ['on', 1]], outputs: [['out', 1]] },
+   { id: 'switch8', inputs: [['a', 8], ['on', 1]], outputs: [['out', 8]] },
+ ];
+ 
+ const CONTRACT_IDS = CONTRACT.map((row) => row.id);
+ /** The 8-bit operators; `const8` is a source and lives under `io`. */
+ const WIDE_OP_IDS = CONTRACT_IDS.filter((id) => id !== 'const8');
+ 
++/**
++ * The Task-4 brief's table, transcribed verbatim: the storage family. The ids
++ * and pin names are the same kind of contract as the operators above -- the
++ * chapter-2 level data addresses them literally -- and each row states what only
++ * a storage def has on top of that: whether it is sequential, how many state
++ * BYTES it holds, and both metrics.
++ *
++ * `gateCost: undefined` is "same as `cost`", which is 0: a storage element is
++ * free on the GATE metric exactly as phase 0's `delay_line` and `mem1` are
++ * (`registry.ts` documents the pair of zeroes). Nothing in a register is a NAND
++ * in the combinational expansion -- its cost shows up in the tick metric
++ * instead. `mux8` is the one combinational def here, so it states its count:
++ * 8 bits x MUX2(4) = 32 on the basis documented in `wide.ts`.
++ */
++const STORAGE_CONTRACT: readonly (ContractRow & {
++  readonly sequential: boolean;
++  readonly stateBytes: number;
++  readonly cost: number;
++  readonly gateCost: number | undefined;
++})[] = [
++  {
++    id: 'mux8',
++    inputs: [['a', 8], ['b', 8], ['sel', 1]],
++    outputs: [['out', 8]],
++    sequential: false,
++    stateBytes: 0,
++    cost: 1,
++    gateCost: 32,
++  },
++  {
++    id: 'delay8',
++    inputs: [['a', 8]],
++    outputs: [['out', 8]],
++    sequential: true,
++    stateBytes: 1,
++    cost: 0,
++    gateCost: undefined,
++  },
++  {
++    id: 'reg8',
++    inputs: [['d', 8], ['load', 1], ['reset', 1]],
++    outputs: [['out', 8]],
++    sequential: true,
++    stateBytes: 1,
++    cost: 0,
++    gateCost: undefined,
++  },
++  {
++    id: 'counter8',
++    inputs: [['en', 1], ['reset', 1]],
++    outputs: [['out', 8]],
++    sequential: true,
++    stateBytes: 1,
++    cost: 0,
++    gateCost: undefined,
++  },
++  {
++    id: 'ram8',
++    inputs: [['d', 8], ['addr', 8], ['load', 1]],
++    outputs: [['out', 8]],
++    sequential: true,
++    stateBytes: 256,
++    cost: 0,
++    gateCost: undefined,
++  },
++];
++
++const STORAGE_IDS = STORAGE_CONTRACT.map((row) => row.id);
++
+ /** Runs a def the way `settle` does: inputs in, outputs staged, no state. */
+ function evalDef(def: ComponentDef, inputs: readonly PortValue[]): PortValue[] {
+   const outputs: PortValue[] = [];
+   def.evaluate!(inputs, outputs, undefined, { tick: 0 });
+   return outputs;
+ }
+ 
+ const toNumber = (v: PortValue | undefined): number => {
+   if (typeof v === 'number') return v;
+   return Array.from(v ?? []).reduce((acc, byte, i) => acc + byte * 2 ** (8 * i), 0);
+@@ -120,36 +191,46 @@ describe('wide defs: the brief\'s contract', () => {
+     const r = createRegistry(BASE_DEFS);
+     for (const id of CONTRACT_IDS) {
+       expect(r.has(id), id).toBe(true);
+       expect(r.get(id).id, id).toBe(id);
+     }
+     // The palette and the level data address defs by id, and `DefId` is derived
+     // from `DEF_IDS`, so a wide id missing there is invisible to level authors.
+     for (const id of CONTRACT_IDS) expect([...DEF_IDS], id).toContain(id);
+     expect(WIDE_DEF_IDS).toEqual(CONTRACT_IDS);
+     expect(createWideDefs().map((d) => d.id)).toEqual(CONTRACT_IDS);
++    // The task-4 storage family is registered from its own literal list rather
++    // than generated by the width parameter (`createWideDefs(32)` must never
++    // build a 4 GiB RAM), so the same pair of assertions pins it here.
++    expect(WIDE_STORAGE_DEF_IDS).toEqual(STORAGE_IDS);
++    expect(WIDE_STORAGE_DEFS.map((d) => d.id)).toEqual(STORAGE_IDS);
+   });
+ 
+   it('keeps every wide def pure combinational', () => {
+     for (const id of CONTRACT_IDS) {
+       const def = registry.get(id);
+       expect(typeof def.evaluate, id).toBe('function');
+       expect(def.sequential, id).toBe(false);
+       expect(def.stateBytes, id).toBe(0);
+       expect(def.clockEdge, id).toBeUndefined();
+       expect(def.hidden, id).toBeUndefined();
+     }
+   });
+ 
+-  it('categorizes the operators as wide and const8 as a source', () => {
++  it('categorizes every wide part as wide and const8 as a source', () => {
+     const r = createRegistry(BASE_DEFS);
+-    expect(r.byCategory('wide').map((d) => d.id).sort()).toEqual([...WIDE_OP_IDS].sort());
++    // The storage family is built at eight bits too, so it belongs to `wide`
++    // alongside the operators: `memory1` is phase 0's ONE-BIT memory group
++    // (`delay_line`, `mem1`) and there is no `memory8`.
++    expect(r.byCategory('wide').map((d) => d.id).sort()).toEqual(
++      [...WIDE_OP_IDS, ...STORAGE_IDS].sort(),
++    );
+     // `const8` has no inputs and only drives a level, so it belongs with
+     // `const_on` / `const_off` rather than with the gates.
+     expect(r.get('const8').category).toBe('io');
+     expect(r.byCategory('io').map((d) => d.id)).toContain('const8');
+   });
+ 
+   it('keeps the DELAY cost at one unit per operator, nothing for a source or a wire', () => {
+     // `cost` is the delay unit `delayOf` charges per node, so a value above 1
+     // would give a wide part a multi-unit delay and contradict the phase-1 rule
+     // that every component contributes exactly one unit of delay (spec §3.2).
+@@ -308,20 +389,208 @@ describe('wide defs: the brief\'s contract', () => {
+     expect(at(16, 'rot_l16')).toBe(256); // 4 stages x 16 muxes x 4
+   });
+ 
+   it('registers the whole family without a duplicate id', () => {
+     expect(new Set(CONTRACT_IDS).size).toBe(CONTRACT_IDS.length);
+     expect(new Set(BASE_DEFS.map((d) => d.id)).size).toBe(BASE_DEFS.length);
+     expect(createRegistry(BASE_DEFS).size).toBe(BASE_DEFS.length);
+   });
+ });
+ 
++// ---------------------------------------------------------------------------
++// Task 4: the storage family.
++//
++// Same contract discipline as the operators above, plus the rules this task
++// DECIDES rather than inherits. Each is argued at its def in `wide.ts` and
++// pinned here as behaviour:
++//
++//   * `reset` beats `load` / `en` when both are asserted on one edge.
++//   * `counter8` wraps to 0 at 256 -- an 8-bit rollover, not a saturation.
++//   * `ram8` reads combinationally (an address change is visible at once) and
++//     writes on the edge. Its `evaluate` reads `addr` as a SELECTOR into state
++//     and never `d` / `load`, so no input's value can flow through to a pin --
++//     which is the property the storage contract exists to protect.
++//   * `mux8` is pure combinational and worth 8 x MUX2 = 32 NANDs.
++// ---------------------------------------------------------------------------
++describe('wide storage defs: the brief\'s contract and the decided edge rules', () => {
++  const r = createRegistry(BASE_DEFS);
++
++  /** Runs `evaluate` the way `settle` does: state in, outputs staged. */
++  function publish(
++    def: ComponentDef,
++    state: Uint8Array,
++    inputs: readonly PortValue[] = [],
++  ): number {
++    const outputs: PortValue[] = [];
++    def.evaluate!(inputs, outputs, state, { tick: 0 });
++    return toNumber(outputs[0]);
++  }
++
++  /**
++   * Applies one clock edge the way `tick` does -- and asserts the half of the
++   * storage contract `clockEdge` must never break: it samples into `state` and
++   * writes no outputs at all.
++   */
++  function edge(def: ComponentDef, state: Uint8Array, inputs: readonly PortValue[]): void {
++    const outputs: PortValue[] = [];
++    def.clockEdge!(inputs, outputs, state, { tick: 1 });
++    expect(outputs, `${def.id}: clockEdge wrote outputs`).toEqual([]);
++  }
++
++  it('declares every storage def with the ids, pins, state and costs the brief gives', () => {
++    for (const row of STORAGE_CONTRACT) {
++      const def = r.get(row.id);
++      expect(def.inputs.map((p) => [p.id, p.width]), `${row.id} inputs`).toEqual(row.inputs);
++      expect(def.outputs.map((p) => [p.id, p.width]), `${row.id} outputs`).toEqual(row.outputs);
++      expect(def.sequential, row.id).toBe(row.sequential);
++      // Storage holds state, a combinational def holds none, and the kernel
++      // allocates exactly this many bytes per instance.
++      expect(def.stateBytes, row.id).toBe(row.stateBytes);
++      expect(def.cost, row.id).toBe(row.cost);
++      expect(def.gateCost, row.id).toBe(row.gateCost);
++      // One publisher per def, and one sampler per storage def: `evaluate` is
++      // how the kernel publishes (`Simulation.#publishState`), so a storage def
++      // without it is refused by `compile` rather than holding zero in silence.
++      expect(typeof def.evaluate, row.id).toBe('function');
++      expect(typeof def.clockEdge, row.id).toBe(row.sequential ? 'function' : 'undefined');
++      expect(def.hidden, row.id).toBeUndefined();
++    }
++  });
++
++  it('is registered, and every id is one level data can spell', () => {
++    for (const id of STORAGE_IDS) {
++      expect(r.has(id), id).toBe(true);
++      expect(r.get(id).id, id).toBe(id);
++      // Level data and the palette address defs by id, and `DefId` is derived
++      // from `DEF_IDS`: an id missing there cannot be used by a level at all.
++      expect([...DEF_IDS], id).toContain(id);
++    }
++    // The two families are disjoint, so a storage id is never also an operator's.
++    expect(new Set([...STORAGE_IDS, ...CONTRACT_IDS]).size).toBe(
++      STORAGE_IDS.length + CONTRACT_IDS.length,
++    );
++  });
++
++  it('mux8 selects a or b on sel, combinationally', () => {
++    const def = r.get('mux8');
++    expect(def.stateBytes).toBe(0);
++    expect(def.clockEdge).toBeUndefined();
++    for (const [a, b] of BYTE_PAIRS) {
++      expect(at('mux8', a, b, 0), `sel=0, a=0x${a.toString(16)}`).toBe(a);
++      expect(at('mux8', a, b, 1), `sel=1, b=0x${b.toString(16)}`).toBe(b);
++    }
++    expect(at('mux8', 0xf0, 0x0f, 0)).toBe(0xf0);
++    expect(at('mux8', 0xf0, 0x0f, 1)).toBe(0x0f);
++    // An unwired `sel` reads 0 like every other unwired pin, so `a` passes.
++    expect(at('mux8', 0xf0, 0x0f)).toBe(0xf0);
++  });
++
++  it('delay8 publishes the byte it holds and never its inputs', () => {
++    const def = r.get('delay8');
++    const state = new Uint8Array(def.stateBytes);
++    state[0] = 0x5a;
++    // The input is the opposite of the held byte: publishing is all `evaluate`
++    // may do here, so a mirroring implementation would show 0x00.
++    expect(publish(def, state, [0x00])).toBe(0x5a);
++    edge(def, state, [0x3c]);
++    expect(state[0]).toBe(0x3c);
++    expect(publish(def, state, [0xff])).toBe(0x3c);
++    // Sample-then-publish is the whole delay: what arrives on the edge appears
++    // only after it.
++    edge(def, state, [0x00]);
++    expect(publish(def, state, [0xff])).toBe(0x00);
++  });
++
++  it('reg8 samples d on the edge when load is high, and reset beats load', () => {
++    const def = r.get('reg8');
++    const state = new Uint8Array(def.stateBytes);
++    // inputs: [d, load, reset]
++    edge(def, state, [0x12, 0, 0]);
++    expect(state[0], 'load low: nothing is written').toBe(0x00);
++    edge(def, state, [0x12, 1, 0]);
++    expect(state[0]).toBe(0x12);
++    edge(def, state, [0x34, 0, 0]);
++    expect(state[0], 'load low: the held byte stays').toBe(0x12);
++    // DECIDED (task 4): reset wins when both are asserted on the same edge.
++    edge(def, state, [0x34, 1, 1]);
++    expect(state[0], 'reset beats load').toBe(0x00);
++    edge(def, state, [0x56, 1, 0]);
++    expect(state[0]).toBe(0x56);
++    edge(def, state, [0x78, 0, 1]);
++    expect(state[0], 'reset alone still clears').toBe(0x00);
++    edge(def, state, [0x9a, 1, 0]);
++    // `evaluate` is state only, so all three inputs are hostile here.
++    expect(publish(def, state, [0x00, 0, 1])).toBe(0x9a);
++  });
++
++  it('counter8 counts on the edge when en is high, wraps to 0, and reset beats en', () => {
++    const def = r.get('counter8');
++    const state = new Uint8Array(def.stateBytes);
++    // inputs: [en, reset]
++    edge(def, state, [0, 0]);
++    expect(state[0], 'en low: no count').toBe(0x00);
++    edge(def, state, [1, 0]);
++    expect(state[0]).toBe(0x01);
++    state[0] = 0x7f;
++    edge(def, state, [1, 0]);
++    expect(state[0]).toBe(0x80);
++    // DECIDED (task 4): 255 + 1 wraps to 0 rather than saturating.
++    state[0] = 0xff;
++    edge(def, state, [1, 0]);
++    expect(state[0]).toBe(0x00);
++    state[0] = 0x05;
++    edge(def, state, [1, 1]);
++    expect(state[0], 'reset beats en').toBe(0x00);
++    state[0] = 0x05;
++    edge(def, state, [0, 1]);
++    expect(state[0], 'reset alone still clears').toBe(0x00);
++    state[0] = 0x2a;
++    expect(publish(def, state, [1, 1]), 'en and reset never reach the output').toBe(0x2a);
++  });
++
++  it('ram8 writes the addressed byte on the edge and selects it on the fly', () => {
++    const def = r.get('ram8');
++    const state = new Uint8Array(def.stateBytes);
++    expect(def.stateBytes, '256 bytes of storage').toBe(256);
++    // inputs: [d, addr, load]
++    expect(publish(def, state, [0xff, 0, 0]), 'memory starts empty').toBe(0x00);
++    edge(def, state, [0xff, 0, 1]);
++    expect(state[0]).toBe(0xff);
++    expect(state[1], 'only the addressed byte is written').toBe(0x00);
++    edge(def, state, [0x11, 255, 1]);
++    expect(state[255]).toBe(0x11);
++    edge(def, state, [0x22, 0x10, 0]);
++    expect(state[0x10], 'load low: nothing is written').toBe(0x00);
++    // The read is a SELECTION from state: `addr` picks the byte, and neither `d`
++    // nor `load` -- both hostile below -- can reach the output.
++    expect(publish(def, state, [0xab, 0, 1])).toBe(0xff);
++    expect(publish(def, state, [0xab, 255, 1])).toBe(0x11);
++    expect(publish(def, state, [0xab, 0x80, 1]), 'never written, so not d').toBe(0x00);
++    expect(publish(def, state, [0xab, 0x10, 0])).toBe(0x00);
++  });
++
++  it('ram8 keeps all 256 of its bytes, and keeps them per instance', () => {
++    const def = r.get('ram8');
++    const state = new Uint8Array(def.stateBytes);
++    const other = new Uint8Array(def.stateBytes);
++    // Distinct per address (7 is odd, so the map is a bijection mod 256): an
++    // aliasing bug -- a 128-byte store, or an `addr & 0x7f` mask -- cannot pass.
++    const value = (addr: number): number => (addr * 7 + 1) & 0xff;
++    for (let addr = 0; addr < 256; addr += 1) edge(def, state, [value(addr), addr, 1]);
++    for (let addr = 0; addr < 256; addr += 1) {
++      expect(publish(def, state, [0x00, addr, 0]), `addr ${addr}`).toBe(value(addr));
++    }
++    // The state is the instance's, not the def's: a second array is untouched.
++    expect(Array.from(other).every((byte) => byte === 0)).toBe(true);
++  });
++});
++
+ describe('wide bitwise operators', () => {
+   const expected: Record<string, (a: number, b: number) => number> = {
+     and8: (a, b) => a & b,
+     or8: (a, b) => a | b,
+     nand8: (a, b) => ~(a & b) & 0xff,
+     nor8: (a, b) => ~(a | b) & 0xff,
+     xor8: (a, b) => a ^ b,
+     xnor8: (a, b) => ~(a ^ b) & 0xff,
+   };
+ 
+diff --git a/test/core/net.test.ts b/test/core/net.test.ts
+index 7954fd3..414af93 100644
+--- a/test/core/net.test.ts
++++ b/test/core/net.test.ts
+@@ -1,18 +1,18 @@
+ import { describe, expect, it } from 'vitest';
+ import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
+ import { BASE_DEFS } from '../../src/core/defs/index';
+ import { createRegistry } from '../../src/core/registry';
+ import type { ComponentDef, Registry } from '../../src/core/registry';
+ import { CircuitValidationError, UnstableCircuitError } from '../../src/core/errors';
+ import type { PortValue } from '../../src/core/signal';
+-import { SETTLE_LIMIT, Simulation, compile, delayOf } from '../../src/core/net';
++import { SETTLE_LIMIT, Simulation, compile, delayOf, type Netlist } from '../../src/core/net';
+ 
+ const registry = createRegistry(BASE_DEFS);
+ 
+ const toNumber = (v: PortValue): number =>
+   typeof v === 'number' ? v : Array.from(v).reduce((acc, byte, i) => acc + byte * 2 ** (8 * i), 0);
+ 
+ /** A NAND whose pins are addressed by name as `"<instId>.<pinId>"`. */
+ function nandFixture(): {
+   graph: Graph;
+   nand: string;
+@@ -302,20 +302,536 @@ describe('Simulation', () => {
+     const net = compile(g, registry);
+     const sim = new Simulation(net, registry);
+     sim.tick();
+     expect(sim.tickCount).toBe(1);
+     sim.reset();
+     expect(sim.tickCount).toBe(0);
+     expect(sim.read(net.outputBase(`${delay.id}.out`), 1)).toBe(0);
+   });
+ });
+ 
++/**
++ * Slot-addressed accessors for the storage tests, in the two directions a test
++ * needs: `out` reads a pin as an unsigned number, `set` drives one the way a
++ * level drives a `level_input`'s output slot.
++ *
++ * Both go through the netlist's resolved per-instance widths, so a test cannot
++ * accidentally read a neighbouring pin's bits instead of the whole pin.
++ */
++interface Probe {
++  out(key: string): number;
++  set(key: string, value: number): void;
++}
++
++function probe(sim: Simulation, net: Netlist): Probe {
++  return {
++    out: (key) => toNumber(sim.read(net.outputBase(key), net.outputWidth(key))),
++    set: (key, value) => sim.write(net.outputBase(key), net.outputWidth(key), value),
++  };
++}
++
++/**
++ * The storage fixture: one instance of `def` whose every input pin is wired from
++ * its own `level_input`.
++ *
++ * A `level_input` declares 1-bit pins, so the width a wide input needs exists
++ * only on the instance (`params.width`) -- the same value the palette's drop
++ * path writes. `in` resolves a pin name to the feed that drives it and throws on
++ * a name the def does not have, so a typo in a test is not a silently unwired
++ * pin reading 0.
++ */
++function storageFixture(def: string): {
++  graph: Graph;
++  /** `"<instId>.out"` of the part under test. */
++  out: string;
++  /** `"<feedId>.out"` of the `level_input` driving one of its input pins. */
++  in: (pin: string) => string;
++} {
++  const g = emptyGraph();
++  const unit = addInstance(g, def, 320, 0, 'unit');
++  const feeds = new Map<string, string>();
++  registry.get(def).inputs.forEach((pin, i) => {
++    const feed = addInstance(g, 'level_input', 0, i * 40, `IN_${pin.id}`);
++    feed.params.width = pin.width;
++    connect(g, { inst: feed.id, port: 'out' }, { inst: unit.id, port: pin.id });
++    feeds.set(pin.id, feed.id);
++  });
++  return {
++    graph: g,
++    out: `${unit.id}.out`,
++    in: (pin) => {
++      const feed = feeds.get(pin);
++      if (!feed) throw new Error(`${def} has no input pin ${pin}`);
++      return `${feed}.out`;
++    },
++  };
++}
++
++/**
++ * The stateful half of the wide family, through the kernel.
++ *
++ * Three of these are the acceptance classes the phase names -- a latch, an
++ * oscillator and a counter -- and the rest pin the mechanism they all depend on:
++ * the kernel publishes storage from the def's own `evaluate`, so an 8-bit
++ * register publishes eight bits and `ram8` publishes the addressed byte. The
++ * assertions deliberately sit *between* the input flip and the clock edge: a
++ * test that only reads after a tick cannot tell a register from a wire, which is
++ * exactly how phase 0's `delay_line` degraded unnoticed.
++ */
++describe('wide storage', () => {
++  it('publishes every bit of a wide register, not just the low one', () => {
++    // The kernel's publish pass used to write `state[p]` onto output pin `p`,
++    // one bit per pin -- one bit of an eight-bit register's byte. Whatever the
++    // route, what a caller reads after a tick has to be the whole byte, and every
++    // byte below has a bit above the low one set, so a publish that kept only the
++    // low bit cannot pass.
++    const { graph, out, in: pin } = storageFixture('reg8');
++    const net = compile(graph, registry);
++    const sim = new Simulation(net, registry);
++    const p = probe(sim, net);
++
++    expect(net.outputWidth(out)).toBe(8);
++    sim.reset();
++    p.set(pin('load'), 1);
++    p.set(pin('reset'), 0);
++    for (const byte of [0xa5, 0x5a, 0xfe, 0x01]) {
++      p.set(pin('d'), byte);
++      sim.tick();
++      expect(p.out(out), `d = 0x${byte.toString(16)}`).toBe(byte);
++    }
++  });
++
++  it('publishes a multi-byte storage def through the same path', () => {
++    // The mechanism is not "eight bits wide": a def says how many state bytes it
++    // has and what to publish, and the kernel runs that. This 12-bit holder keeps
++    // TWO state bytes and publishes a byte-array port -- the form `PortValue`
++    // takes above eight bits, which no shipped storage def reaches.
++    const reg12: ComponentDef = {
++      id: 'reg12',
++      name: { zh: '12 位寄存器', en: '12-Bit Register' },
++      category: 'wide',
++      inputs: [{ id: 'd', width: 12 }],
++      outputs: [{ id: 'out', width: 12 }],
++      cost: 0,
++      sequential: true,
++      stateBytes: 2,
++      evaluate: (_i, o, state) => {
++        o[0] = new Uint8Array([state?.[0] ?? 0, state?.[1] ?? 0]);
++      },
++      clockEdge: (i, _o, state) => {
++        const d = toNumber(i[0] ?? 0);
++        state[0] = d & 0xff;
++        state[1] = (d >>> 8) & 0x0f;
++      },
++    };
++    const wide = createRegistry([...BASE_DEFS, reg12]);
++    const g = emptyGraph();
++    const feed = addInstance(g, 'level_input', 0, 0, 'IN_D');
++    feed.params.width = 12;
++    const unit = addInstance(g, 'reg12', 80, 0, 'unit');
++    connect(g, { inst: feed.id, port: 'out' }, { inst: unit.id, port: 'd' });
++    const net = compile(g, wide);
++    const sim = new Simulation(net, wide);
++    const p = probe(sim, net);
++
++    sim.reset();
++    expect(p.out('unit.out')).toBe(0x000);
++    p.set('IN_D.out', 0xabc);
++    sim.settle();
++    expect(p.out('unit.out'), 'no edge yet').toBe(0x000);
++    sim.tick();
++    expect(p.out('unit.out')).toBe(0xabc);
++    p.set('IN_D.out', 0xfff);
++    sim.settle();
++    expect(p.out('unit.out'), 'held between edges').toBe(0xabc);
++    sim.tick();
++    expect(p.out('unit.out')).toBe(0xfff);
++  });
++
++  it('holds its byte between the input flip and the next clock edge (latch)', () => {
++    const { graph, out, in: pin } = storageFixture('reg8');
++    const net = compile(graph, registry);
++    const sim = new Simulation(net, registry);
++    const p = probe(sim, net);
++
++    sim.reset();
++    p.set(pin('load'), 1);
++    p.set(pin('reset'), 0);
++    p.set(pin('d'), 0x3c);
++    sim.tick();
++    expect(p.out(out)).toBe(0x3c);
++
++    // Flip the data and drop `load`, with no edge in between: neither may reach
++    // the output.
++    p.set(pin('d'), 0x00);
++    p.set(pin('load'), 0);
++    sim.settle();
++    expect(p.out(out), 'input flipped, no edge yet').toBe(0x3c);
++
++    sim.tick();
++    expect(p.out(out), 'load was low at the edge').toBe(0x3c);
++
++    // Raising `load` again is not an edge either.
++    p.set(pin('load'), 1);
++    sim.settle();
++    expect(p.out(out), 'load raised, no edge yet').toBe(0x3c);
++
++    sim.tick();
++    expect(p.out(out), 'the edge samples the flipped input').toBe(0x00);
++  });
++
++  it('clears on reset, and reset beats load on the same edge', () => {
++    const { graph, out, in: pin } = storageFixture('reg8');
++    const net = compile(graph, registry);
++    const sim = new Simulation(net, registry);
++    const p = probe(sim, net);
++
++    sim.reset();
++    p.set(pin('load'), 1);
++    p.set(pin('reset'), 0);
++    p.set(pin('d'), 0xff);
++    sim.tick();
++    expect(p.out(out)).toBe(0xff);
++
++    // DECIDED (task 4): `reset` wins over `load` when both are asserted on the
++    // same edge, and `reset` is sampled at the edge rather than level-triggered.
++    p.set(pin('reset'), 1);
++    sim.settle();
++    expect(p.out(out), 'reset is sampled at the edge, like every input').toBe(0xff);
++    sim.tick();
++    expect(p.out(out), 'reset beats load').toBe(0x00);
++
++    // The clear was that edge's business, not a permanent mask: with `reset`
++    // dropped, the next edge samples `d` again.
++    p.set(pin('reset'), 0);
++    sim.tick();
++    expect(p.out(out)).toBe(0xff);
++  });
++
++  it('delays a byte by exactly one tick', () => {
++    const { graph, out, in: pin } = storageFixture('delay8');
++    const net = compile(graph, registry);
++    const sim = new Simulation(net, registry);
++    const p = probe(sim, net);
++
++    sim.reset();
++    expect(p.out(out)).toBe(0x00);
++    p.set(pin('a'), 0xa5);
++    sim.settle();
++    expect(p.out(out), 'no edge yet').toBe(0x00);
++    sim.tick();
++    expect(p.out(out)).toBe(0xa5);
++
++    p.set(pin('a'), 0x00);
++    sim.settle();
++    expect(p.out(out), 'the sampled byte is held until the next edge').toBe(0xa5);
++    sim.tick();
++    expect(p.out(out)).toBe(0x00);
++  });
++
++  it('counts one step per tick, holds when en is low, and wraps to 0 at 256', () => {
++    const { graph, out, in: pin } = storageFixture('counter8');
++    const net = compile(graph, registry);
++    const sim = new Simulation(net, registry);
++    const p = probe(sim, net);
++
++    sim.reset();
++    p.set(pin('en'), 1);
++    p.set(pin('reset'), 0);
++    sim.tick();
++    expect(p.out(out)).toBe(1);
++
++    // DECIDED (task 4): `reset` beats `en` on the same edge.
++    p.set(pin('reset'), 1);
++    sim.settle();
++    expect(p.out(out), 'reset is sampled at the edge, like every input').toBe(1);
++    sim.tick();
++    expect(p.out(out), 'reset beats en').toBe(0);
++
++    p.set(pin('reset'), 0);
++    sim.tick();
++    expect(p.out(out)).toBe(1);
++    sim.tick();
++    expect(p.out(out)).toBe(2);
++    sim.tick();
++    expect(p.out(out)).toBe(3);
++
++    p.set(pin('en'), 0);
++    sim.settle();
++    expect(p.out(out), 'en low is not an edge').toBe(3);
++    sim.tick();
++    sim.tick();
++    expect(p.out(out), 'en low: two edges change nothing').toBe(3);
++
++    p.set(pin('en'), 1);
++    for (let i = 0; i < 252; i += 1) sim.tick();
++    expect(p.out(out), '3 + 252 = 255, the top of the byte').toBe(255);
++    // DECIDED (task 4): the wrap is to 0 -- an 8-bit rollover, not a saturation.
++    sim.tick();
++    expect(p.out(out), '255 + 1 wraps to 0').toBe(0);
++    sim.tick();
++    expect(p.out(out), 'and keeps counting from there').toBe(1);
++  });
++
++  it('settles a 1-bit inverting ring that a delay_line breaks, and toggles once per tick', () => {
++    // Spec §12's oscillator: `nand(a, 1)` inverts, and the delay line samples
++    // instead of propagating, so the loop is not combinational and the circuit
++    // has a stable state between edges.
++    const g = emptyGraph();
++    const one = addInstance(g, 'const_on', 0, 0);
++    const nand = addInstance(g, 'nand', 60, 0);
++    const delay = addInstance(g, 'delay_line', 120, 0);
++    connect(g, { inst: one.id, port: 'out' }, { inst: nand.id, port: 'b' });
++    connect(g, { inst: delay.id, port: 'out' }, { inst: nand.id, port: 'a' });
++    connect(g, { inst: nand.id, port: 'out' }, { inst: delay.id, port: 'in' });
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    const p = probe(sim, net);
++
++    sim.reset();
++    expect(sim.settle().stable, 'the storage element breaks the loop').toBe(true);
++    expect(p.out(`${delay.id}.out`)).toBe(0);
++    expect(p.out(`${nand.id}.out`), 'settled, not oscillating').toBe(1);
++    sim.tick();
++    expect(p.out(`${delay.id}.out`)).toBe(1);
++    sim.tick();
++    expect(p.out(`${delay.id}.out`)).toBe(0);
++  });
++
++  it('settles an 8-bit inverting ring that a delay8 breaks, and toggles the whole byte', () => {
++    // The same ring one byte wide. It doubles as the wide publish's regression:
++    // the byte the ring carries is 0xff, so a publish that kept only the low bit
++    // would put 0x01 on this pin.
++    const g = emptyGraph();
++    const inv = addInstance(g, 'not8', 60, 0);
++    const delay = addInstance(g, 'delay8', 120, 0);
++    connect(g, { inst: delay.id, port: 'out' }, { inst: inv.id, port: 'a' });
++    connect(g, { inst: inv.id, port: 'out' }, { inst: delay.id, port: 'a' });
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    const p = probe(sim, net);
++
++    sim.reset();
++    expect(sim.settle().stable, 'the storage element breaks the loop').toBe(true);
++    expect(p.out(`${delay.id}.out`)).toBe(0x00);
++    expect(p.out(`${inv.id}.out`), 'the whole byte, not its low bit').toBe(0xff);
++    sim.tick();
++    expect(p.out(`${delay.id}.out`)).toBe(0xff);
++    sim.tick();
++    expect(p.out(`${delay.id}.out`)).toBe(0x00);
++    sim.tick();
++    expect(p.out(`${delay.id}.out`)).toBe(0xff);
++  });
++
++  it('throws UnstableCircuitError for the same rings with the storage element gone', () => {
++    // The other half of the oscillator claim: both rings above are stable
++    // *because* of the storage element, not because the settle loop is lenient.
++    // Each twin has the same shape with the delay taken out of the loop.
++    const bit = emptyGraph();
++    const one = addInstance(bit, 'const_on', 0, 0);
++    const nand = addInstance(bit, 'nand', 60, 0);
++    connect(bit, { inst: one.id, port: 'out' }, { inst: nand.id, port: 'b' });
++    connect(bit, { inst: nand.id, port: 'out' }, { inst: nand.id, port: 'a' });
++    expect(() => new Simulation(compile(bit, registry), registry).settle()).toThrow(
++      UnstableCircuitError,
++    );
++
++    // `switch8` with `on` high is a plain wire, so this is `not8` feeding itself.
++    const wide = emptyGraph();
++    const not = addInstance(wide, 'not8', 60, 0);
++    const wire = addInstance(wide, 'switch8', 120, 0);
++    const on = addInstance(wide, 'const_on', 0, 0);
++    connect(wide, { inst: not.id, port: 'out' }, { inst: wire.id, port: 'a' });
++    connect(wide, { inst: on.id, port: 'out' }, { inst: wire.id, port: 'on' });
++    connect(wide, { inst: wire.id, port: 'out' }, { inst: not.id, port: 'a' });
++    expect(() => new Simulation(compile(wide, registry), registry).settle()).toThrow(
++      UnstableCircuitError,
++    );
++  });
++
++  it('stores and reads back a byte at any address, 0 and 255 included', () => {
++    const { graph, out, in: pin } = storageFixture('ram8');
++    const net = compile(graph, registry);
++    const sim = new Simulation(net, registry);
++    const p = probe(sim, net);
++
++    sim.reset();
++    p.set(pin('load'), 1);
++    for (const [addr, value] of [
++      [0x00, 0xff],
++      [0x10, 0xa5],
++      [0xff, 0x5a],
++    ] as const) {
++      p.set(pin('addr'), addr);
++      p.set(pin('d'), value);
++      sim.tick();
++      expect(p.out(out), `addr 0x${addr.toString(16)}`).toBe(value);
++    }
++
++    // Read back with no further edge: the read path is combinational, so
++    // selecting another address is enough, and an address never written reads 0.
++    p.set(pin('load'), 0);
++    for (const [addr, want] of [
++      [0x10, 0xa5],
++      [0xff, 0x5a],
++      [0x00, 0xff],
++      [0x0f, 0x00],
++    ] as const) {
++      p.set(pin('addr'), addr);
++      sim.settle();
++      expect(p.out(out), `addr 0x${addr.toString(16)} with no edge`).toBe(want);
++    }
++  });
++
++  it('is combinational on its read path and edge-triggered on its write path', () => {
++    // The subtlest def in the family: `addr` selects which stored byte the
++    // output shows right now, while `d` and `load` are only sampled at the edge.
++    const { graph, out, in: pin } = storageFixture('ram8');
++    const net = compile(graph, registry);
++    const sim = new Simulation(net, registry);
++    const p = probe(sim, net);
++
++    sim.reset();
++    p.set(pin('addr'), 3);
++    p.set(pin('d'), 0x11);
++    p.set(pin('load'), 1);
++    sim.tick();
++    expect(p.out(out)).toBe(0x11);
++
++    // `d` changes with `load` still asserted: nothing may show before an edge.
++    p.set(pin('d'), 0xab);
++    sim.settle();
++    expect(p.out(out), 'd does not leak into the read path').toBe(0x11);
++
++    // An address change needs no edge at all.
++    p.set(pin('addr'), 4);
++    sim.settle();
++    expect(p.out(out), 'an unwritten address reads 0').toBe(0x00);
++    p.set(pin('addr'), 3);
++    sim.settle();
++    expect(p.out(out), 'back to 3, still no edge').toBe(0x11);
++
++    sim.tick();
++    expect(p.out(out), 'the edge latched 0xab at 3').toBe(0xab);
++    p.set(pin('addr'), 4);
++    sim.settle();
++    expect(p.out(out), 'address 4 was never written').toBe(0x00);
++  });
++
++  it('gives every instance its own 256 bytes', () => {
++    const g = emptyGraph();
++    const units: string[] = [];
++    // One `level_input` per input pin, in `def.inputs` order: d, addr, load.
++    const pins: string[][] = [];
++    for (const [i, name] of ['one', 'two'].entries()) {
++      const unit = addInstance(g, 'ram8', 320, i * 240, name);
++      const keys: string[] = [];
++      registry.get('ram8').inputs.forEach((pin, j) => {
++        const feed = addInstance(g, 'level_input', 0, i * 240 + j * 40, `${name}_${pin.id}`);
++        feed.params.width = pin.width;
++        connect(g, { inst: feed.id, port: 'out' }, { inst: unit.id, port: pin.id });
++        keys.push(`${feed.id}.out`);
++      });
++      units.push(`${unit.id}.out`);
++      pins.push(keys);
++    }
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    const p = probe(sim, net);
++
++    sim.reset();
++    for (const [i, byte] of [0x11, 0x22].entries()) {
++      const [d, addr, load] = pins[i]!;
++      p.set(d!, byte);
++      p.set(addr!, 0x40);
++      p.set(load!, 1);
++    }
++    sim.tick();
++    // Same address, same edge, two memories: neither one wrote into the other.
++    expect(p.out(units[0]!)).toBe(0x11);
++    expect(p.out(units[1]!)).toBe(0x22);
++  });
++
++  it('reserves table capacity for a bank of 8-bit storage parts and their read regions', () => {
++    // `ram8` is the widest part in the kernel so far: 17 input slots and 8
++    // output slots per instance, plus a materialised read region for every wide
++    // input a narrower driver feeds (a 1-bit `level_input` is narrower than both
++    // `d` and `addr`). `capacityFor` has to reserve all of it up front -- the
++    // table is fixed and `alloc` only throws.
++    const g = emptyGraph();
++    const banks = 200;
++    for (let i = 0; i < banks; i += 1) {
++      const unit = addInstance(g, 'ram8', 320, i * 200);
++      for (const [j, pin] of ['d', 'addr', 'load'].entries()) {
++        const feed = addInstance(g, 'level_input', 0, i * 200 + j * 30);
++        connect(g, { inst: feed.id, port: 'out' }, { inst: unit.id, port: pin });
++      }
++    }
++    const net = compile(g, registry);
++    // Per bank: 3 feed slots + (8 + 8 + 1) input slots + 8 output slots + (8 + 8)
++    // region slots = 44, all of them allocated.
++    expect(net.slotCount).toBe(banks * 44);
++    expect(new Simulation(net, registry).settle().stable).toBe(true);
++  });
++
++  it('publishes a 1-bit storage def across a pin an instance widened', () => {
++    // `delay_line` declares 1-bit pins and task 2 resolved widths per instance,
++    // so a `params.width = 8` delay line has an 8-bit output pin. The held `1`
++    // must still land as 0b00000001, with no stale high byte -- the behaviour the
++    // pre-task-4 publish path documented and this one inherits unchanged.
++    const g = emptyGraph();
++    const feed = addInstance(g, 'level_input', 0, 0, 'IN_A');
++    feed.params.width = 8;
++    const delay = addInstance(g, 'delay_line', 80, 0, 'delay');
++    delay.params.width = 8;
++    connect(g, { inst: feed.id, port: 'out' }, { inst: delay.id, port: 'in' });
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    const p = probe(sim, net);
++
++    expect(net.outputWidth('delay.out')).toBe(8);
++    sim.reset();
++    p.set('IN_A.out', 1);
++    sim.settle();
++    expect(p.out('delay.out'), 'no edge yet').toBe(0);
++    sim.tick();
++    expect(p.out('delay.out')).toBe(0b0000_0001);
++    p.set('IN_A.out', 0);
++    sim.tick();
++    expect(p.out('delay.out')).toBe(0);
++  });
++
++  it('refuses a storage def that could never publish what it holds', () => {
++    // The publish pass runs a def's `evaluate`; it has no state layout of its own
++    // to fall back on (see `Simulation.#publishState`), so a storage def with
++    // state and no `evaluate` could only ever hold zero in silence. `compile` is
++    // where a netlist becomes runnable, so it is refused there instead.
++    const mute: ComponentDef = {
++      id: 'mute_store',
++      name: { zh: '沉默存储', en: 'Mute Store' },
++      category: 'memory1',
++      inputs: [{ id: 'in', width: 1 }],
++      outputs: [{ id: 'out', width: 1 }],
++      cost: 0,
++      sequential: true,
++      stateBytes: 1,
++      clockEdge: (i, _o, state) => {
++        state[0] = i[0] === 1 ? 1 : 0;
++      },
++    };
++    const withMute = createRegistry([...BASE_DEFS, mute]);
++    const g = emptyGraph();
++    addInstance(g, 'mute_store', 0, 0);
++    expect(() => compile(g, withMute)).toThrow(/mute_store/);
++  });
++});
++
+ /**
+  * A source the test drives directly through its output slot: `level_input` at an
+  * arbitrary width. `evaluate` writes nothing on purpose, so whatever the test
+  * wrote into the slot survives the settle sweep -- which is how these tests put
+  * a live, toggling signal in the slots next to a pin under test.
+  */
+ function feedDef(width: number): ComponentDef {
+   return {
+     id: `feed${width}`,
+     name: { zh: '测试源', en: 'Test Feed' },
+diff --git a/test/core/registry.test.ts b/test/core/registry.test.ts
+index 10b6648..b91ee68 100644
+--- a/test/core/registry.test.ts
++++ b/test/core/registry.test.ts
+@@ -1,14 +1,14 @@
+ import { describe, expect, it } from 'vitest';
+ import { createRegistry } from '../../src/core/registry';
+ import { BASE_DEFS, DEF_IDS } from '../../src/core/defs/index';
+-import { WIDE_DEF_IDS } from '../../src/core/defs/wide';
++import { WIDE_DEF_IDS, WIDE_STORAGE_DEF_IDS } from '../../src/core/defs/wide';
+ import { extractField, insertField, packBits, unpackBits } from '../../src/core/fields';
+ 
+ // `evaluate(inputs, outputs, state, ctx)`: `state` is the instance's private
+ // storage, placed third. Only storage elements read it -- every combinational
+ // def ignores it, so its call sites pass `undefined` (the parameter cannot be
+ // omitted: `state: Uint8Array | undefined` is required, which is what forces a
+ // storage def to say out loud that it has no state to read).
+ 
+ describe('registry', () => {
+   it('registers every base def and can look them up', () => {
+@@ -36,21 +36,30 @@ describe('registry', () => {
+     expect(logic).toContain('xor');
+     expect(logic).not.toContain('const_on');
+   });
+ });
+ 
+ describe('base defs', () => {
+   const r = createRegistry(BASE_DEFS);
+ 
+   it('marks exactly the storage elements as sequential', () => {
+     const sequential = r.all().filter((d) => d.sequential).map((d) => d.id);
+-    expect(sequential.sort()).toEqual(['delay_line', 'mem1']);
++    // Phase 0's two one-bit memories plus task 4's eight-bit half; `mux8` is
++    // combinational and is deliberately absent.
++    expect(sequential.sort()).toEqual([
++      'counter8',
++      'delay8',
++      'delay_line',
++      'mem1',
++      'ram8',
++      'reg8',
++    ]);
+   });
+ 
+   it('hides the level IO plumbing from the palette but keeps it registered', () => {
+     const plumbing = r.all().filter((d) => d.category === 'level');
+     expect(plumbing.map((d) => d.id).sort()).toEqual(['level_input', 'level_output']);
+     expect(plumbing.every((d) => d.hidden === true)).toBe(true);
+     expect(r.get('level_input').cost).toBe(0);
+     expect(r.get('level_output').cost).toBe(0);
+   });
+ 
+@@ -95,21 +104,21 @@ describe('base defs', () => {
+     expect(r.byCategory('logic1').map((d) => d.id).sort()).toEqual(
+       Object.keys(NAND_EQUIVALENTS).sort(),
+     );
+   });
+ 
+   it('leaves gateCost to the `?? cost` fallback only where both metrics are zero', () => {
+     // The fallback still has a job: a rail, level plumbing, a wire and the
+     // storage elements are zero gates AND zero delay, so a second explicit 0
+     // would only give the two zeroes a way to drift apart. Every part that is
+     // worth a gate states its own count instead.
+-    const wide = new Set<string>(WIDE_DEF_IDS);
++    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS]);
+     for (const d of r.all()) {
+       if (wide.has(d.id) || d.category === 'logic1') continue;
+       expect(d.cost, `${d.id} leans on the fallback but is not free`).toBe(0);
+       expect(d.gateCost, d.id).toBeUndefined();
+     }
+   });
+ 
+   it('evaluates NAND', () => {
+     const def = r.get('nand');
+     for (const [a, b, want] of [
+@@ -195,52 +204,67 @@ describe('base defs', () => {
+     expect(state[0]).toBe(0); // `set` low: nothing is written
+     def.clockEdge!([1, 1], out, state, { tick: 1 });
+     expect(state[0]).toBe(1); // the write is latched into state
+     expect(out[0]).toBe(0); // and `clockEdge` must not touch the outputs
+     // All inputs are zero here: a real memory still publishes the latched 1.
+     def.evaluate!([0, 0], out, state, { tick: 1 });
+     expect(out[0]).toBe(1);
+   });
+ });
+ 
+-// Beyond the brief: guards the task's global constraints (1-bit pins, the cost
+-// rules, `stateBytes` per output) and the truth tables the brief only checks
+-// for cost.
++// Beyond the brief: guards the task's global constraints (1-bit pins on the
++// phase-0 parts, the cost rules, the publish rule) and the truth tables the
++// brief only checks for cost.
+ describe('base defs: extra coverage', () => {
+   const r = createRegistry(BASE_DEFS);
+   const evalTo = (id: string, inputs: number[]): number | Uint8Array | undefined => {
+     const out: (number | Uint8Array)[] = [0];
+     r.get(id).evaluate!(inputs, out, undefined, { tick: 0 });
+     return out[0];
+   };
+ 
+   it('declares 1-bit pins on every def outside the wide family', () => {
+     // Phase 0 shipped only 1-bit parts, and every def it shipped still is one.
+-    // The wide family (Task 3) is where a pin wider than one bit first appears,
+-    // and `defs-wide.test.ts` pins its exact pin widths against the task brief's
+-    // table -- a stronger statement than this loop makes, so these defs are
+-    // excluded here rather than having this invariant weakened to "some pins".
+-    const wide = new Set<string>(WIDE_DEF_IDS);
++    // The wide family -- task 3's operators and task 4's storage parts -- is
++    // where a pin wider than one bit appears, and `defs-wide.test.ts` pins its
++    // exact pin widths against each task brief's table, a stronger statement
++    // than this loop makes; those defs are excluded here rather than weakening
++    // this invariant to "some pins".
++    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS]);
+     for (const d of r.all()) {
+       if (wide.has(d.id)) continue;
+       for (const p of [...d.inputs, ...d.outputs]) {
+         expect(p.width, `${d.id}.${p.id}`).toBe(1);
+       }
+     }
+     expect(r.byCategory('wide').length).toBeGreaterThan(0);
+   });
+ 
+-  it('reserves one state byte per output slot for storage elements only', () => {
++  it('gives every def a publisher, and sizes storage honestly', () => {
++    // The kernel's publish pass calls `evaluate` and knows no state layout of
++    // its own (see `Simulation.#publishState`), so a def with state and no
++    // `evaluate` could never publish what it holds -- `compile` refuses one
++    // rather than letting it hold zero in silence. This is the catalog half of
++    // that rule.
+     for (const d of r.all()) {
+       expect(typeof d.evaluate, d.id).toBe('function');
+       expect(typeof d.clockEdge, d.id).toBe(d.sequential ? 'function' : 'undefined');
+-      expect(d.stateBytes, d.id).toBe(d.sequential ? d.outputs.length : 0);
++      // A combinational def holds nothing; a storage def holds something, and
++      // enough of it to publish every bit of its output pins. The exact numbers
++      // are pinned per def in `defs-wide.test.ts`; this is the rule they obey,
++      // and it replaces phase 0's "one state byte per output pin", which a
++      // 256-byte `ram8` cannot satisfy and an 8-bit register should not need.
++      expect(d.stateBytes > 0, d.id).toBe(d.sequential);
++      if (d.sequential) {
++        const outputBits = d.outputs.reduce((bits, pin) => bits + pin.width, 0);
++        expect(d.stateBytes * 8, d.id).toBeGreaterThanOrEqual(outputBits);
++      }
+     }
+   });
+ 
+   it('matches an independently written truth table for every gate', () => {
+     const one = (v: boolean): number => (v ? 1 : 0);
+     const predicates: Record<string, (b: readonly number[]) => number> = {
+       nand: (b) => one(!(b[0] === 1 && b[1] === 1)),
+       not: (b) => one(b[0] !== 1),
+       and: (b) => one(b[0] === 1 && b[1] === 1),
+       or: (b) => one(b[0] === 1 || b[1] === 1),

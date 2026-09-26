@@ -1,0 +1,126 @@
+$ vitest run "test/levels/checks.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/levels/checks.test.ts (27 tests | 4 failed) 33ms
+   ✓ runChecks / truth-table (5)
+     ✓ fails an empty circuit without throwing 2ms
+     ✓ fails a circuit with an unstable feedback loop without throwing 4ms
+     ✓ refuses a truth-table check that declares no rows 0ms
+     ✓ refuses a truth-table row that declares no output to compare 0ms
+     ✓ reports an unbuildable circuit as a failed outcome instead of throwing 0ms
+   ✓ runChecks / malformed level data (5)
+     ✓ rejects an unpinnable authored input value (2) instead of throwing 1ms
+     ✓ rejects an unpinnable authored input value (0.5) instead of throwing 1ms
+     ✓ rejects an unpinnable authored input value (-1) instead of throwing 0ms
+     ✓ rejects an unpinnable authored input value (NaN) instead of throwing 0ms
+     ✓ classifies a RangeError raised inside a check as an invalid failure 0ms
+   ✓ truth-table discrimination (3)
+     ✓ passes the or-of-nands-with-inverters solution (NOR-as-AND is wrong, AND is right) 0ms
+     ✓ rejects a NAND that is missing the final inverter 0ms
+     ✓ rejects a circuit whose level output is never wired 0ms
+   ✓ generateRows (1)
+     ✓ generates a complete table that the same circuits pass and fail against 1ms
+   ✓ multi-output binding (2)
+     ✓ binds one OUT_<pinId> connector per output pin 0ms
+     ✓ rejects a half adder whose carry output is left unwired 0ms
+   ✓ script check (2)
+     ✓ passes const_on through a delay line 1ms
+     ✓ rejects a bare const_on because it is high from tick 0 0ms
+   ✓ constraint check (2)
+     ✓ accepts a half adder sum built from XOR 0ms
+     ✓ rejects OR where parity is required 0ms
+   ❯ level I/O width binding (7)
+     ✓ carries an 8-bit level input through an 8-bit component and back out 3ms
+     ✓ makes every 8-bit value round trip, not just the low bit 0ms
+     × refuses a bound level input whose compiled width disagrees with the spec 7ms
+     × refuses a bound level output whose compiled width disagrees with the spec 2ms
+     × names the pin and both widths in the mismatch it reports 2ms
+     ✓ keeps the Phase-0 behaviour for a level pin the circuit does not contain 1ms
+     × binds an 8-bit level built by the build() fixture 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/checks.test.ts > level I/O width binding > refuses a bound level input whose compiled width disagrees with the spec
+AssertionError: expected 'mismatch' to be 'missing-io' // Object.is equality
+
+Expected: "missing-io"
+Received: "mismatch"
+
+ ❯ test/levels/checks.test.ts:475:41
+    473|     const outcome = runChecks(wideSolution({ output: 8 }), wideRegistr…
+    474|     expect(outcome.passed).toBe(false);
+    475|     expect(outcome.failures[0]?.reason).toBe('missing-io');
+       |                                         ^
+    476|   });
+    477|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  test/levels/checks.test.ts > level I/O width binding > refuses a bound level output whose compiled width disagrees with the spec
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ test/levels/checks.test.ts:480:28
+    478|   it('refuses a bound level output whose compiled width disagrees with…
+    479|     const outcome = runChecks(wideSolution({ input: 8 }), wideRegistry…
+    480|     expect(outcome.passed).toBe(false);
+       |                            ^
+    481|     expect(outcome.failures[0]?.reason).toBe('missing-io');
+    482|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  test/levels/checks.test.ts > level I/O width binding > names the pin and both widths in the mismatch it reports
+AssertionError: the given combination of arguments (undefined and string) is invalid for this assertion. You can use an array, a map, an object, a set, a string, or a weakset instead of a string
+ ❯ test/levels/checks.test.ts:487:25
+    485|     const net = compile(wideSolution({ input: 8 }), wideRegistry);
+    486|     const io = bindLevelIo(new Simulation(net, wideRegistry), net, wid…
+    487|     expect(io.mismatch).toContain('OUT.in');
+       |                         ^
+    488|     expect(io.mismatch).toContain('1');
+    489|     expect(io.mismatch).toContain('8');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  test/levels/checks.test.ts > level I/O width binding > binds an 8-bit level built by the build() fixture
+AssertionError: expected [ [ 'IN_a', undefined ], …(1) ] to deeply equal [ [ 'IN_a', 8 ], [ 'OUT', 8 ] ]
+
+- Expected
++ Received
+
+  [
+    [
+      "IN_a",
+-     8,
++     undefined,
+    ],
+    [
+      "OUT",
+-     8,
++     undefined,
+    ],
+  ]
+
+ ❯ test/levels/checks.test.ts:513:69
+    511|       { kind: 'output', from: 'a', width: 8 },
+    512|     ]);
+    513|     expect(g.instances.map((inst) => [inst.id, inst.params.width])).to…
+       |                                                                     ^
+    514|       ['IN_a', 8],
+    515|       ['OUT', 8],
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 23 passed (27)
+   Start at  00:22:08
+   Duration  314ms (transform 59%, tests 19%, import 17%, worker 6%)
+
+[ELIFECYCLE] Test failed. See above for more details.

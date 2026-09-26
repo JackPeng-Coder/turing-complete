@@ -1,0 +1,38 @@
+$ vitest run
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/signal.test.ts (16 tests) 14ms
+ ✓ test/core/registry.test.ts (26 tests) 25ms
+ ✓ test/persist/storage.test.ts (12 tests) 13ms
+ ✓ test/levels/ch1-part1.test.ts (34 tests) 25ms
+ ✓ test/levels/checks.test.ts (28 tests) 103ms
+ ✓ test/levels/grader.test.ts (40 tests) 39ms
+ ✓ test/levels/ch1-part2.test.ts (29 tests) 42ms
+ ✓ test/levels/level-buildability.test.ts (40 tests) 83ms
+ ✓ test/core/defs-wide.test.ts (60 tests) 172ms
+ ✓ test/levels/ch2-batch1.test.ts (58 tests) 106ms
+ ✓ test/levels/fuzz-custom.test.ts (67 tests) 193ms
+ ✓ test/app/progress.test.ts (18 tests) 13ms
+ ✓ test/app/commands.test.ts (6 tests) 8ms
+ ✓ test/core/net.test.ts (55 tests) 501ms
+   ✓ compile (10)
+     ✓ sizes the signal table for the circuit instead of the 65,536 default 322ms
+ ✓ test/core/graph.test.ts (15 tests) 553ms
+   ✓ validateGraph (9)
+     ✓ scans a 50,000-instance cycle without recursing 536ms
+ ✓ test/ui/view.test.ts (6 tests) 7ms
+ ✓ test/smoke/sanity.test.ts (1 test) 3ms
+ ✓ test/app/store.test.ts (11 tests) 6ms
+ ✓ test/levels/ch2-batch2.test.ts (56 tests) 463ms
+ ✓ test/ui/panels.test.ts (22 tests) 49ms
+
+ Test Files  20 passed (20)
+      Tests  600 passed (600)
+   Start at  02:50:00
+   Duration  1.84s (transform 39%, tests 25%, import 19%, environment 13%, worker 4%)
+
+  Transform  transforming modules took 3.81s · 39% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+

@@ -1,0 +1,33 @@
+fix(core): bound a narrow port with 2 ** width, not 1 << width
+
+`fitsWidth` bounded every width below 32 with `v >= 0 && v < 1 << width`. `<<`
+converts both operands through int32, so `1 << 31` is `-2 ** 31` and the
+comparison read `v < -2147483648` -- false for every non-negative `v`.
+`assertWidth(v, 31)` therefore rejected EVERY 31-bit value, 0 included, and
+because this guard is what `setPort` / `Simulation.write` run on the way into
+the signal table, `createWideDefs(31)` -- a width `clampWidth` and
+`createWideDefs` both document as admitted -- handed out defs that threw into
+`runChecks` on correct input. Widths 1..30 and 32 were unaffected. `2 ** width`
+is exact across the admitted range, so the narrow arm needs no special case.
+
+The `width >= 32` fast path is KEPT, deliberately. At 32 it accepts exactly the
+values the general form does, but `graph.ts` admits `params.width` up to
+`MAX_PARAM_WIDTH` (4096) and `net.ts` resolves pins from it, and above 32 that
+arm is the NUMBER writer's own limit: `setPort`'s number branch is
+`(v >>> i) & 1`, which carries at most 32 bits. Dropping the arm would admit
+`setPort(base, 33, 2 ** 32)`, which stages 0 bits -- the guard would accept a
+value the writer silently truncates. A `Uint8Array` remains the carrier above
+32 bits, and `assertWidth` sizes it for the full width.
+
+Tests, at the `assertWidth` level in `test/core/signal.test.ts`: widths 31 and
+32 explicitly, plus a sweep over every width 1..32 asserting that 0, 1 and
+`2 ** width - 1` are accepted and `2 ** width` is rejected. All three go red
+with `1 << width` restored (3 failed | 79 passed); the sweep's rejection half
+also goes red with the bound loosened to `<=` (4 failed | 15 passed).
+`test/core/defs-wide.test.ts` adds the staging half of the contract its
+width-loop already records -- `div31`'s 0x7fff_ffff through `createSignalTable`
+at width 31 -- which fails under the same mutation.
+
+The remaining `1 << width` occurrences in `src/` were audited and are reported
+in the task-12 report, section 12d; none is fixed here, and no other file
+changed.

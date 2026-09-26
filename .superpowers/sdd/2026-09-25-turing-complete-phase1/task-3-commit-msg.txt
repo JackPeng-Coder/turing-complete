@@ -1,0 +1,42 @@
+feat(core): add the wide (8-bit) operator family and cap params.width
+
+Phase 1's first defs with a pin wider than one bit: the 24 ids the task brief
+fixes, with their pin names verbatim, because the chapter-2 level data will
+address them by name.
+
+- src/core/defs/wide.ts: `createWideDefs(width = 8)` generates the whole family
+  -- bitwise, add/neg, compares, shifts/rotates, mul/div, const8,
+  splitter/maker, switch/switch8 -- so phase 5 can register 16/32/64 without a
+  second copy of the semantics. Widths are clamped to [1, 32] (`clampWidth`),
+  the range a `number` carrier holds; 64-bit pins are the byte-array path of
+  phase 5.
+- Edge semantics are decided and documented, not accidental: `add8.cout` is bit
+  8; `mul8` keeps the low 8 bits; `div8` by zero is `0xff`; `shift_*` with
+  `amount >= 8` is 0 while `rot_*` is `amount % 8`; `ashr8` sign-fills; `less_s`
+  and `ashr8` read two's complement and return an unsigned pattern, so no
+  negative JS number can reach a port.
+- `splitter` / `maker` pin COUNT is a def parameter, not `params.width`: the
+  kernel resolves a pin's width as `params.width ?? pin.width` for every pin of
+  the instance, so the instance knob would widen all eight outputs instead of
+  re-counting them. Both defs are built by the same generator, and a level that
+  needs four bits uses `b0..b3` (the rest read 0). Per-instance counts need a
+  def-level hook in `net.ts`, which this task does not own.
+- cost is 1 per operator, 0 for `const8` (a source, like `const_on`) and for the
+  two packers (wires): `delayOf` charges `def.cost` per node, so a larger,
+  NAND-equivalent number would give a wide part a multi-unit delay and break the
+  rule that every component contributes exactly one unit of delay.
+- index.ts registers the family at the default width and derives `DEF_IDS` from
+  the phase-0 literal tuple plus `WIDE_DEF_IDS`, so a wide def cannot exist
+  under an id level data cannot spell (the test pins the two lists agree).
+- graph.ts caps `params.width` at `MAX_PARAM_WIDTH = 4096` as `invalid-params`.
+  The old check accepted any positive safe integer, so a hand-authored `1e9`
+  reached `capacityFor`, asked for a typed array it cannot have, and let a bare
+  `RangeError` escape `compile` -> `createSim` -> `runChecks`/`grade` -- the
+  escape Task 2 removed for `alloc` itself.
+- Tests: 47 cases in test/core/defs-wide.test.ts -- the brief's pin contract, per
+  operator boundary vectors plus a property, both widths of the generator, and
+  three circuits driven through `compile`/`Simulation` (wide pins, narrow
+  drivers, the splitter/maker round trip for every byte) -- plus two rows on the
+  existing `invalid-params` case in net.test.ts. registry.test.ts's 1-bit
+  invariant now covers the defs it was written for; the wide defs' exact pin
+  widths are pinned against the brief's table instead.

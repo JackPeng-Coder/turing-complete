@@ -1,0 +1,878 @@
+# Review package: f35213b..2648a4e
+
+## Commits
+2648a4e feat(core): add netlist compiler and edge-triggered simulator
+
+## Files changed
+ src/core/errors.ts    |  40 +++++
+ src/core/net.ts       | 466 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ test/core/net.test.ts | 342 ++++++++++++++++++++++++++++++++++++
+ 3 files changed, 848 insertions(+)
+
+## Diff
+diff --git a/src/core/errors.ts b/src/core/errors.ts
+new file mode 100644
+index 0000000..e43ca2a
+--- /dev/null
++++ b/src/core/errors.ts
+@@ -0,0 +1,40 @@
++import type { GraphIssue } from './graph';
++
++/**
++ * Raised when a combinational circuit has no stable state: the settle loop ran
++ * `SETTLE_LIMIT` times and the signals were still changing.
++ *
++ * This is a real, catchable error rather than a hang, because a feedback loop is
++ * something a player does on purpose (the "循环依赖" level) and both the level
++ * checker and the grader have to keep running and report it.
++ */
++export class UnstableCircuitError extends Error {
++  readonly iterations: number;
++  /** Origin instance ids of the compiled circuit, for highlighting the culprit. */
++  readonly blame: readonly string[];
++
++  constructor(iterations: number, blame: readonly string[]) {
++    super(
++      `circuit did not settle after ${iterations} iterations (combinational feedback loop)`,
++    );
++    this.name = 'UnstableCircuitError';
++    this.iterations = iterations;
++    this.blame = blame;
++  }
++}
++
++/**
++ * Raised by `compile` when `validateGraph` reported error-severity issues.
++ *
++ * Warnings (an unwired input, a feedback loop) are accepted: an unwired input
++ * legally reads 0, and only the simulator can tell whether a loop settles.
++ */
++export class CircuitValidationError extends Error {
++  readonly issues: readonly GraphIssue[];
++
++  constructor(issues: readonly GraphIssue[]) {
++    super(`circuit is invalid: ${issues.map((i) => i.code).join(', ')}`);
++    this.name = 'CircuitValidationError';
++    this.issues = issues;
++  }
++}
+diff --git a/src/core/net.ts b/src/core/net.ts
+new file mode 100644
+index 0000000..fd546c6
+--- /dev/null
++++ b/src/core/net.ts
+@@ -0,0 +1,466 @@
++import { CircuitValidationError, UnstableCircuitError } from './errors';
++import { validateGraph, type Graph, type GraphIssue } from './graph';
++import { assertWidth, createSignalTable, type PortValue, type SignalTable } from './signal';
++import type { ComponentDef, Registry } from './registry';
++
++/** Iteration cap for the settle loop. A combinational loop exhausts it. */
++export const SETTLE_LIMIT = 512;
++
++/** Smallest table `compile` will ask for; tiny circuits still get a real buffer. */
++const MIN_CAPACITY = 64;
++
++/**
++ * A flattened, evaluated circuit: one slot per bit of every pin, plus the
++ * mapping from pins to slots.
++ *
++ * The netlist is a value object owned by `Simulation` (the two are tied together
++ * by a private `WeakMap`); callers address slots, never names, so a hot loop
++ * resolves `"i3.a"` once instead of per evaluation.
++ */
++export interface Netlist {
++  /**
++   * Expanded instances. Phase 0 does not expand custom components, so this is
++   * `graph.instances.length` and `expandedCount` repeats it for the plan's
++   * original spelling.
++   */
++  readonly instanceCount: number;
++  readonly expandedCount: number;
++  /** Bits allocated (one slot per bit of every pin). */
++  readonly slotCount: number;
++  /**
++   * `drive[slot]` is the slot `slot` reads its value from: the identity for
++   * every slot except a wired input pin, which reads the output pin driving it.
++   * Resolving wires up front keeps the settle loop branch-free.
++   */
++  readonly drive: Int32Array;
++  /** Expanded instance key -> origin instance id in the document. */
++  readonly refs: Map<string, string>;
++  /**
++   * Slot the kernel reads (and a driver writes) for the input pin
++   * `"<instId>.<pinId>"`: its driver slot. For an unwired pin that is the pin's
++   * own slot, which is always zero unless the caller writes it -- so an unwired
++   * input reads 0 and a level can still drive it directly.
++   */
++  inputBase(key: string): number;
++  /** Slot of the output pin `"<instId>.<pinId>"`. */
++  outputBase(key: string): number;
++  /** Expanded instance ids, in evaluation order. */
++  instanceIds(): readonly string[];
++  /** Def ids of the expanded instances, in evaluation order. */
++  instanceDefs(): readonly string[];
++  /** `"<instId>.<pinId>"` keys of every output pin. */
++  outputKeys(): readonly string[];
++}
++
++interface CompiledInstance {
++  readonly key: string;
++  readonly origin: string;
++  readonly def: ComponentDef;
++  /** Slot base of each input pin, in `def.inputs` order. */
++  readonly inputs: readonly number[];
++  /** Slot base of each output pin, in `def.outputs` order. */
++  readonly outputs: readonly number[];
++  /** Index of each output pin in the netlist-wide output pin list. */
++  readonly outPin: readonly number[];
++}
++
++interface OutputPin {
++  readonly base: number;
++  readonly width: number;
++}
++
++interface NetInternals {
++  readonly table: SignalTable;
++  readonly instances: readonly CompiledInstance[];
++  readonly outputPins: readonly OutputPin[];
++}
++
++/** Ties a netlist to the storage `compile` built for it, without a public field. */
++const INTERNALS = new WeakMap<Netlist, NetInternals>();
++
++/**
++ * Capacity for `graph`, derived from the circuit instead of the table default.
++ *
++ * `createSignalTable`'s 65,536-slot default cannot hold the spec's
++ * 20,000-instance budget: 20,000 two-input gates occupy 60,000 slots and a
++ * single three-input gate overruns it. The estimate is exact plus a quarter of
++ * headroom, so the requirement is not a knife edge; `alloc` still throws a named
++ * `RangeError` rather than growing the buffer if it were ever wrong.
++ */
++function capacityFor(graph: Graph, registry: Registry): number {
++  let slots = 0;
++  for (const inst of graph.instances) {
++    // `validateGraph` has already rejected unknown def ids, so `get` cannot throw.
++    const def = registry.get(inst.def);
++    for (const pin of def.inputs) slots += pin.width;
++    for (const pin of def.outputs) slots += pin.width;
++  }
++  return Math.max(MIN_CAPACITY, Math.ceil(slots * 1.25) + 16);
++}
++
++/**
++ * Flattens a document into a netlist.
++ *
++ * Error-severity issues are fatal (the circuit is meaningless); warnings are
++ * accepted, because an unwired input legally reads 0 and only the simulator can
++ * tell whether a feedback loop settles.
++ */
++export function compile(graph: Graph, registry: Registry): Netlist {
++  const errors: GraphIssue[] = validateGraph(graph, registry).filter(
++    (i) => i.severity === 'error',
++  );
++  if (errors.length > 0) throw new CircuitValidationError(errors);
++
++  const table = createSignalTable(capacityFor(graph, registry));
++  const instances: CompiledInstance[] = [];
++  const refs = new Map<string, string>();
++  const byId = new Map<string, CompiledInstance>();
++  const inputBases = new Map<string, number>();
++  const outputBases = new Map<string, number>();
++  const outputPins: OutputPin[] = [];
++
++  for (const inst of graph.instances) {
++    const def = registry.get(inst.def);
++    const inputs = def.inputs.map((pin) => {
++      const base = table.alloc(pin.width);
++      inputBases.set(`${inst.id}.${pin.id}`, base);
++      return base;
++    });
++    const outPin: number[] = [];
++    const outputs = def.outputs.map((pin) => {
++      const base = table.alloc(pin.width);
++      outputBases.set(`${inst.id}.${pin.id}`, base);
++      outPin.push(outputPins.length);
++      outputPins.push({ base, width: pin.width });
++      return base;
++    });
++    const compiled: CompiledInstance = {
++      key: inst.id,
++      origin: inst.id,
++      def,
++      inputs,
++      outputs,
++      outPin,
++    };
++    refs.set(inst.id, inst.id);
++    byId.set(inst.id, compiled);
++    instances.push(compiled);
++  }
++
++  // Start from the identity so an unwired input reads its own (zero) slot, then
++  // point every wired input at the output pin that drives it. Giving each
++  // unwired pin its own slot rather than sharing one zero slot is what lets a
++  // caller write an unwired input directly -- and it keeps `slotCount` equal to
++  // the pin bits the circuit actually has.
++  const drive = new Int32Array(table.size);
++  for (let slot = 0; slot < drive.length; slot += 1) drive[slot] = slot;
++  for (const wire of graph.wires) {
++    const from = byId.get(wire.from.inst);
++    const to = byId.get(wire.to.inst);
++    if (!from || !to) continue; // unknown endpoints are a fatal issue, already thrown
++    const fromPin = from.def.outputs.findIndex((p) => p.id === wire.from.port);
++    const toPin = to.def.inputs.findIndex((p) => p.id === wire.to.port);
++    if (fromPin < 0 || toPin < 0) continue; // unknown ports are fatal too
++    const fromBase = from.outputs[fromPin]!;
++    const toBase = to.inputs[toPin]!;
++    const width = Math.min(from.def.outputs[fromPin]!.width, to.def.inputs[toPin]!.width);
++    for (let bit = 0; bit < width; bit += 1) drive[toBase + bit] = fromBase + bit;
++  }
++
++  const instanceIds = instances.map((i) => i.key);
++  const instanceDefs = instances.map((i) => i.def.id);
++  const baseOf = (map: Map<string, number>, kind: string, key: string): number => {
++    const base = map.get(key);
++    if (base === undefined) throw new Error(`no such ${kind} pin: ${key}`);
++    return base;
++  };
++  const net: Netlist = {
++    instanceCount: instances.length,
++    expandedCount: instances.length,
++    slotCount: table.size,
++    drive,
++    refs,
++    inputBase: (key) => drive[baseOf(inputBases, 'input', key)]!,
++    outputBase: (key) => baseOf(outputBases, 'output', key),
++    instanceIds: () => instanceIds,
++    instanceDefs: () => instanceDefs,
++    outputKeys: () => [...outputBases.keys()],
++  };
++  INTERNALS.set(net, { table, instances, outputPins });
++  return net;
++}
++
++export interface SettleReport {
++  readonly iterations: number;
++  readonly stable: boolean;
++}
++
++/**
++ * Runs a compiled circuit, one clock edge at a time.
++ *
++ * Between edges the circuit is a combinatorial function of the level inputs and
++ * the storage elements' held state; `settle` runs it to that fixed point and
++ * `tick` applies one edge and settles again.
++ */
++export class Simulation {
++  readonly net: Netlist;
++  /** The catalog this netlist was compiled against, for callers that need defs. */
++  readonly registry: Registry;
++  readonly #table: SignalTable;
++  readonly #drive: Int32Array;
++  readonly #instances: readonly CompiledInstance[];
++  readonly #outputPins: readonly OutputPin[];
++  /** Private state of every instance, indexed like `#instances`. */
++  readonly #state: Uint8Array[];
++  /** Output values staged by the current settle sweep, indexed like `#outputPins`. */
++  readonly #staged: Array<PortValue | undefined>;
++  #tickCount = 0;
++
++  constructor(net: Netlist, registry: Registry) {
++    const internals = INTERNALS.get(net);
++    if (!internals) throw new Error('netlist was not produced by compile()');
++    this.net = net;
++    this.registry = registry;
++    this.#table = internals.table;
++    this.#drive = net.drive;
++    this.#instances = internals.instances;
++    this.#outputPins = internals.outputPins;
++    this.#state = internals.instances.map((i) => new Uint8Array(i.def.stateBytes));
++    this.#staged = new Array<PortValue | undefined>(internals.outputPins.length).fill(undefined);
++  }
++
++  get tickCount(): number {
++    return this.#tickCount;
++  }
++
++  /** Clears every signal and every storage element, then settles from scratch. */
++  reset(): void {
++    this.#table.clear();
++    for (const state of this.#state) state.fill(0);
++    this.#tickCount = 0;
++    this.#publishState();
++    this.settle();
++  }
++
++  /**
++   * Publishes storage outputs from their private state.
++   *
++   * `evaluate` does this too (and `settle` calls it), so this only exists so
++   * that a def with state but no `evaluate` still holds, and so that a caller
++   * reading right after `reset`/`tick` sees the held value. It is only correct
++   * while each state byte maps to one 1-bit output pin, which holds for
++   * `delay_line` and `mem1`; wide registers in a later phase need a publish hook.
++   */
++  #publishState(): void {
++    for (let i = 0; i < this.#instances.length; i += 1) {
++      const inst = this.#instances[i]!;
++      if (!inst.def.sequential) continue;
++      const state = this.#state[i]!;
++      for (let p = 0; p < inst.outputs.length; p += 1) {
++        this.#table.setBit(inst.outputs[p]!, state[p] === 1 ? 1 : 0);
++      }
++    }
++  }
++
++  /** Reads each input pin through its pre-resolved driver slot. */
++  #readInputs(inst: CompiledInstance, scratch: PortValue[]): void {
++    for (let p = 0; p < inst.inputs.length; p += 1) {
++      const base = inst.inputs[p]!;
++      scratch[p] = this.#table.getPort(this.#drive[base]!, inst.def.inputs[p]!.width);
++    }
++    // Keep the scratch exactly as long as this instance's pin list, so a shorter
++    // instance never sees values left behind by a longer one.
++    scratch.length = inst.inputs.length;
++  }
++
++  /**
++   * True when the table already holds `value` at this pin.
++   *
++   * Compared bit by bit rather than as `PortValue`s on purpose: `valuesEqual`
++   * cannot equate a number with the byte-array form of the same value (a 12-bit
++   * pin reads back as `Uint8Array`), so a value-form comparison would report a
++   * change on every sweep and misdiagnose a healthy circuit as unstable.
++   * `assertWidth` still runs, so a malformed staged value throws loudly instead
++   * of being silently truncated to the bits the comparison looks at.
++   */
++  #holds(base: number, width: number, value: PortValue): boolean {
++    assertWidth(value, width);
++    for (let bit = 0; bit < width; bit += 1) {
++      const held =
++        typeof value === 'number'
++          ? bit < 32
++            ? (value >>> bit) & 1
++            : 0
++          : ((value[bit >> 3] ?? 0) >> (bit & 7)) & 1;
++      if (this.#table.slots[base + bit] !== held) return false;
++    }
++    return true;
++  }
++
++  /**
++   * Runs the circuit to a fixed point and reports how many sweeps that took.
++   *
++   * Every def with an `evaluate` runs, storage elements included: they publish
++   * the value they hold (`state`) and never their inputs, which is what makes a
++   * delay line hold for a full tick. A def that produced no value for a pin
++   * leaves that pin alone, so `level_input` -- driven from outside through its
++   * output slot -- survives the sweep.
++   *
++   * The sweep is parallel (Jacobi): all instances are evaluated against the
++   * values committed by the previous sweep, staged, and committed together.
++   * Two properties follow, and the game needs both. The outcome cannot depend on
++   * the order instances happen to sit in the document, and a genuine oscillator
++   * cannot fake a fixed point -- with in-place (Gauss-Seidel) evaluation a ring
++   * of two inverters "converges" to a self-consistent-looking 1/0 pair, which
++   * would be reported as stable.
++   */
++  settle(): SettleReport {
++    const inputs: PortValue[] = [];
++    const outputs: PortValue[] = [];
++    // Start from a clean stage: a def that produced nothing for a pin (`level_input`)
++    // must not inherit a value staged by an earlier, failed sweep.
++    this.#staged.fill(undefined);
++    for (let iteration = 0; iteration < SETTLE_LIMIT; iteration += 1) {
++      for (let i = 0; i < this.#instances.length; i += 1) {
++        const inst = this.#instances[i]!;
++        const evaluate = inst.def.evaluate;
++        if (!evaluate) continue;
++        this.#readInputs(inst, inputs);
++        outputs.length = 0;
++        evaluate(inputs, outputs, inst.def.sequential ? this.#state[i] : undefined, {
++          tick: this.#tickCount,
++        });
++        for (let p = 0; p < inst.outputs.length; p += 1) {
++          const value = outputs[p];
++          if (value === undefined) continue;
++          this.#staged[inst.outPin[p]!] = value;
++        }
++      }
++
++      let changed = false;
++      for (let k = 0; k < this.#outputPins.length; k += 1) {
++        const value = this.#staged[k];
++        if (value === undefined) continue;
++        this.#staged[k] = undefined;
++        const pin = this.#outputPins[k]!;
++        if (this.#holds(pin.base, pin.width, value)) continue;
++        this.#table.setPort(pin.base, pin.width, value);
++        changed = true;
++      }
++      if (!changed) return { iterations: iteration + 1, stable: true };
++    }
++    throw new UnstableCircuitError(
++      SETTLE_LIMIT,
++      this.#instances.map((i) => i.origin),
++    );
++  }
++
++  /**
++   * Applies one clock edge: every storage element samples, then the circuit
++   * settles.
++   *
++   * Inputs are snapshotted for all storage elements before any of them updates,
++   * so two of them in series shift a value along by one stage per tick rather
++   * than racing through both in a single tick.
++   */
++  tick(): SettleReport {
++    this.#tickCount += 1;
++    const pending: Array<{ index: number; inputs: PortValue[] }> = [];
++    const inputs: PortValue[] = [];
++    for (let i = 0; i < this.#instances.length; i += 1) {
++      const inst = this.#instances[i]!;
++      if (!inst.def.sequential || !inst.def.clockEdge) continue;
++      this.#readInputs(inst, inputs);
++      pending.push({ index: i, inputs: [...inputs] });
++    }
++    const outputs: PortValue[] = [];
++    for (const { index, inputs: sampled } of pending) {
++      const inst = this.#instances[index]!;
++      outputs.length = 0;
++      inst.def.clockEdge!(sampled, outputs, this.#state[index]!, { tick: this.#tickCount });
++    }
++    this.#publishState();
++    return this.settle();
++  }
++
++  read(base: number, width: number): PortValue {
++    return this.#table.getPort(base, width);
++  }
++
++  write(base: number, width: number, v: PortValue): void {
++    this.#table.setPort(base, width, v);
++  }
++}
++
++/**
++ * Longest combinational path, counted in base-gate delays.
++ *
++ * Linear-time DAG longest path: Kahn's algorithm for a topological order, then a
++ * single relaxation pass. Walking paths instead would be exponential on diamond
++ * shaped circuits (2^n paths), and real CPU circuits are full of them.
++ *
++ * Only combinational edges are considered. A storage element's input is sampled
++ * rather than read (nothing propagates into it) and its output is a fresh source
++ * (nothing propagates through it), so storage contributes no delay: its cost
++ * shows up in the tick metric instead.
++ */
++export function delayOf(graph: Graph, registry: Registry): number {
++  const count = graph.instances.length;
++  if (count === 0) return 0;
++
++  const index = new Map<string, number>();
++  graph.instances.forEach((inst, i) => index.set(inst.id, i));
++
++  const cost = new Int32Array(count);
++  const sequential = new Uint8Array(count);
++  for (let i = 0; i < count; i += 1) {
++    // Unknown defs cannot reach here on a validated graph; skipping them keeps a
++    // half-built document from throwing out of a metrics function.
++    const def = registry.has(graph.instances[i]!.def)
++      ? registry.get(graph.instances[i]!.def)
++      : null;
++    cost[i] = def?.cost ?? 0;
++    sequential[i] = def?.sequential ? 1 : 0;
++  }
++
++  const outgoing: number[][] = Array.from({ length: count }, () => []);
++  const inDegree = new Int32Array(count);
++  for (const wire of graph.wires) {
++    const from = index.get(wire.from.inst);
++    const to = index.get(wire.to.inst);
++    if (from === undefined || to === undefined) continue;
++    if (sequential[from] === 1 || sequential[to] === 1) continue;
++    outgoing[from]!.push(to);
++    inDegree[to] = inDegree[to]! + 1;
++  }
++
++  // `delay[i]` is the longest combinational delay arriving at instance i's
++  // output. A source has no predecessors, so it is worth its own cost (a gate
++  // with unwired inputs still takes one gate delay; a source or a storage
++  // element costs nothing).
++  const delay = new Int32Array(count);
++  const queue: number[] = [];
++  for (let i = 0; i < count; i += 1) {
++    if (inDegree[i] !== 0) continue;
++    delay[i] = sequential[i] === 1 ? 0 : cost[i]!;
++    queue.push(i);
++  }
++
++  let longest = 0;
++  for (let head = 0; head < queue.length; head += 1) {
++    const i = queue[head]!;
++    if (delay[i]! > longest) longest = delay[i]!;
++    for (const next of outgoing[i]!) {
++      const candidate = delay[i]! + cost[next]!;
++      if (candidate > delay[next]!) delay[next] = candidate;
++      inDegree[next] = inDegree[next]! - 1;
++      if (inDegree[next] === 0) queue.push(next);
++    }
++  }
++
++  // Instances inside a combinational loop are never queued (their in-degree
++  // never reaches 0), so a loop contributes no depth and the walk still
++  // terminates. `validateGraph` reports the loop as a warning; whether it
++  // settles is the simulator's question, not this metric's.
++  return longest;
++}
+diff --git a/test/core/net.test.ts b/test/core/net.test.ts
+new file mode 100644
+index 0000000..64d2187
+--- /dev/null
++++ b/test/core/net.test.ts
+@@ -0,0 +1,342 @@
++import { describe, expect, it } from 'vitest';
++import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
++import { BASE_DEFS } from '../../src/core/defs/index';
++import { createRegistry } from '../../src/core/registry';
++import type { ComponentDef } from '../../src/core/registry';
++import { UnstableCircuitError } from '../../src/core/errors';
++import type { PortValue } from '../../src/core/signal';
++import { SETTLE_LIMIT, Simulation, compile, delayOf } from '../../src/core/net';
++
++const registry = createRegistry(BASE_DEFS);
++
++const toNumber = (v: PortValue): number =>
++  typeof v === 'number' ? v : Array.from(v).reduce((acc, byte, i) => acc + byte * 2 ** (8 * i), 0);
++
++/** A NAND whose pins are addressed by name as `"<instId>.<pinId>"`. */
++function nandFixture(): {
++  graph: Graph;
++  nand: string;
++} {
++  const g = emptyGraph();
++  const nand = addInstance(g, 'nand', 0, 0);
++  return { graph: g, nand: nand.id };
++}
++
++describe('compile', () => {
++  it('allocates one slot per bit of every pin', () => {
++    const { graph } = nandFixture();
++    const net = compile(graph, registry);
++    expect(net.instanceCount).toBe(1);
++    // 2 inputs + 1 output
++    expect(net.slotCount).toBe(3);
++  });
++
++  it('records the origin instance of every expanded instance', () => {
++    const { graph } = nandFixture();
++    const net = compile(graph, registry);
++    expect([...net.refs.values()]).toEqual([graph.instances[0]!.id]);
++  });
++
++  it('rejects invalid graphs', () => {
++    const g = emptyGraph();
++    addInstance(g, 'nope', 0, 0);
++    expect(() => compile(g, registry)).toThrow(/invalid/i);
++  });
++
++  it('sizes the signal table for the circuit instead of the 65,536 default', () => {
++    // 16,500 three-input gates occupy 66,000 slots (4 each), which is more than
++    // `createSignalTable`'s default capacity: compiling them proves the capacity
++    // is derived from the circuit rather than inherited from the default.
++    const g = emptyGraph();
++    const gates = 16_500;
++    for (let i = 0; i < gates; i += 1) addInstance(g, 'and3', 0, 0, `i${i}`);
++    const net = compile(g, registry);
++    expect(net.slotCount).toBe(gates * 4);
++    expect(net.slotCount).toBeGreaterThan(65_536);
++    expect(new Simulation(net, registry).settle().stable).toBe(true);
++  });
++});
++
++describe('Simulation', () => {
++  it('evaluates a NAND for every input combination', () => {
++    const g = emptyGraph();
++    const nand = addInstance(g, 'nand', 0, 0);
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    const a = net.inputBase(`${nand.id}.a`);
++    const b = net.inputBase(`${nand.id}.b`);
++    const out = net.outputBase(`${nand.id}.out`);
++    for (const [va, vb, want] of [
++      [0, 0, 1],
++      [0, 1, 1],
++      [1, 0, 1],
++      [1, 1, 0],
++    ] as const) {
++      sim.write(a, 1, va);
++      sim.write(b, 1, vb);
++      sim.settle();
++      expect(sim.read(out, 1), `nand(${va},${vb})`).toBe(want);
++    }
++  });
++
++  it('propagates through a chain of gates in one settle', () => {
++    const g = emptyGraph();
++    const n1 = addInstance(g, 'nand', 0, 0);
++    const n2 = addInstance(g, 'not', 40, 0);
++    connect(g, { inst: n1.id, port: 'out' }, { inst: n2.id, port: 'a' });
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    sim.write(net.inputBase(`${n1.id}.a`), 1, 1);
++    sim.write(net.inputBase(`${n1.id}.b`), 1, 1);
++    sim.settle();
++    // nand(1,1) = 0, then not(0) = 1.
++    expect(sim.read(net.outputBase(`${n2.id}.out`), 1)).toBe(1);
++  });
++
++  it('treats an unwired input as zero', () => {
++    const g = emptyGraph();
++    const nand = addInstance(g, 'nand', 0, 0);
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    sim.settle();
++    // nand(0,0) = 1
++    expect(sim.read(net.outputBase(`${nand.id}.out`), 1)).toBe(1);
++  });
++
++  it('throws UnstableCircuitError for a combinational feedback loop', () => {
++    // Two cross-coupled NANDs whose free input is tied high, so each one is an
++    // inverter: the loop has no stable state and must exhaust the settle cap.
++    const g = emptyGraph();
++    const one = addInstance(g, 'const_on', 0, 0);
++    const n1 = addInstance(g, 'nand', 0, 40);
++    const n2 = addInstance(g, 'nand', 0, 80);
++    connect(g, { inst: one.id, port: 'out' }, { inst: n1.id, port: 'b' });
++    connect(g, { inst: one.id, port: 'out' }, { inst: n2.id, port: 'b' });
++    connect(g, { inst: n1.id, port: 'out' }, { inst: n2.id, port: 'a' });
++    connect(g, { inst: n2.id, port: 'out' }, { inst: n1.id, port: 'a' });
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    expect(() => sim.settle()).toThrow(UnstableCircuitError);
++
++    let caught: unknown;
++    try {
++      sim.settle();
++    } catch (error) {
++      caught = error;
++    }
++    expect(caught).toBeInstanceOf(UnstableCircuitError);
++    expect((caught as UnstableCircuitError).iterations).toBe(SETTLE_LIMIT);
++    expect((caught as UnstableCircuitError).blame).toContain(n1.id);
++  });
++
++  it('settles a delay_line held loop and publishes state on the edge', () => {
++    const g = emptyGraph();
++    const src = addInstance(g, 'const_on', 0, 0);
++    const delay = addInstance(g, 'delay_line', 40, 0);
++    connect(g, { inst: src.id, port: 'out' }, { inst: delay.id, port: 'in' });
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    const out = net.outputBase(`${delay.id}.out`);
++    sim.reset();
++    expect(sim.read(out, 1)).toBe(0); // starts empty
++    sim.tick();
++    expect(sim.read(out, 1)).toBe(1); // one edge later the input has arrived
++  });
++
++  it('a delay line holds its sampled value when its input changes', () => {
++    // The timing test that pins the storage semantics: a delay line publishes
++    // what it holds, so flipping its input between clock edges must not change
++    // its output. If `settle` published the input instead of the state, or if the
++    // settle loop skipped storage elements, the delay line would be a plain wire.
++    const g = emptyGraph();
++    const feed = addInstance(g, 'level_input', 0, 0);
++    const delay = addInstance(g, 'delay_line', 40, 0);
++    connect(g, { inst: feed.id, port: 'out' }, { inst: delay.id, port: 'in' });
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    const feedSlot = net.outputBase(`${feed.id}.out`);
++    const out = net.outputBase(`${delay.id}.out`);
++
++    sim.reset();
++    sim.write(feedSlot, 1, 1); // raise the input
++    sim.settle();
++    expect(sim.read(out, 1)).toBe(0); // still holding the old 0: no edge yet
++
++    sim.tick(); // first edge samples the raised input
++    expect(sim.read(out, 1)).toBe(1);
++
++    sim.write(feedSlot, 1, 0); // drop the input again
++    sim.settle();
++    expect(sim.read(out, 1)).toBe(1); // must STILL read 1 until the next edge
++
++    sim.tick(); // second edge samples the dropped input
++    expect(sim.read(out, 1)).toBe(0);
++  });
++
++  it('keeps an externally driven output (level_input) through a settle', () => {
++    // `level_input.evaluate` writes nothing; the checker drives its output slot.
++    // The settle sweep must leave such a pin alone instead of zeroing it.
++    const g = emptyGraph();
++    const feed = addInstance(g, 'level_input', 0, 0);
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    const slot = net.outputBase(`${feed.id}.out`);
++    sim.write(slot, 1, 1);
++    sim.settle();
++    expect(sim.read(slot, 1)).toBe(1);
++  });
++
++  it('binds level I/O by pin name: drives a level_input, reads a level_output pin', () => {
++    // The level checker (Task 6) drives `level_input` output slots and reads the
++    // slot driving a `level_output` input pin. Both only work if a settle sweep
++    // leaves externally driven pins alone and `inputBase` reports the driver.
++    const g = emptyGraph();
++    const inA = addInstance(g, 'level_input', 0, 0, 'IN_A');
++    const inB = addInstance(g, 'level_input', 0, 60, 'IN_B');
++    const nand = addInstance(g, 'nand', 60, 20);
++    const not = addInstance(g, 'not', 120, 20);
++    const out = addInstance(g, 'level_output', 180, 20, 'OUT');
++    connect(g, { inst: inA.id, port: 'out' }, { inst: nand.id, port: 'a' });
++    connect(g, { inst: inB.id, port: 'out' }, { inst: nand.id, port: 'b' });
++    connect(g, { inst: nand.id, port: 'out' }, { inst: not.id, port: 'a' });
++    connect(g, { inst: not.id, port: 'out' }, { inst: out.id, port: 'in' });
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    for (const [va, vb, want] of [
++      [0, 0, 0],
++      [1, 0, 0],
++      [0, 1, 0],
++      [1, 1, 1],
++    ] as const) {
++      sim.reset();
++      sim.write(net.outputBase(`${inA.id}.out`), 1, va);
++      sim.write(net.outputBase(`${inB.id}.out`), 1, vb);
++      sim.settle();
++      expect(sim.read(net.inputBase(`${out.id}.in`), 1), `and(${va},${vb})`).toBe(want);
++    }
++  });
++
++  it('settles a feedback loop that a storage element breaks', () => {
++    // delay_line -> not -> delay_line is a real loop, but the delay line samples
++    // its input instead of propagating it, so the loop is not combinational: the
++    // circuit settles between edges and toggles once per edge.
++    const g = emptyGraph();
++    const delay = addInstance(g, 'delay_line', 0, 0);
++    const inv = addInstance(g, 'not', 60, 0);
++    connect(g, { inst: delay.id, port: 'out' }, { inst: inv.id, port: 'a' });
++    connect(g, { inst: inv.id, port: 'out' }, { inst: delay.id, port: 'in' });
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    const out = net.outputBase(`${delay.id}.out`);
++    sim.reset();
++    expect(sim.read(out, 1)).toBe(0);
++    expect(sim.read(net.outputBase(`${inv.id}.out`), 1)).toBe(1); // settled, not oscillating
++    sim.tick();
++    expect(sim.read(out, 1)).toBe(1);
++    sim.tick();
++    expect(sim.read(out, 1)).toBe(0);
++  });
++
++  it('settles a wide pin whose read-back form differs from the written form', () => {
++    // A 12-bit def writes a number; the table reads a wide port back as two
++    // bytes. Comparing those representations instead of their bits would see a
++    // change on every sweep and report a healthy circuit as unstable.
++    const widePass: ComponentDef = {
++      id: 'wide_pass',
++      name: { zh: '宽通道', en: 'Wide Pass' },
++      category: 'wide',
++      inputs: [{ id: 'in', width: 12 }],
++      outputs: [{ id: 'out', width: 12 }],
++      cost: 1,
++      sequential: false,
++      stateBytes: 0,
++      evaluate: (i, o) => {
++        o[0] = toNumber(i[0] ?? 0);
++      },
++    };
++    const wide = createRegistry([...BASE_DEFS, widePass]);
++    const g = emptyGraph();
++    const pass = addInstance(g, 'wide_pass', 0, 0);
++    const net = compile(g, wide);
++    const sim = new Simulation(net, wide);
++    sim.write(net.inputBase(`${pass.id}.in`), 12, 0xabc);
++    expect(sim.settle().stable).toBe(true);
++    expect(toNumber(sim.read(net.outputBase(`${pass.id}.out`), 12))).toBe(0xabc);
++  });
++
++  it('reset clears state and the tick counter', () => {
++    const g = emptyGraph();
++    const src = addInstance(g, 'const_on', 0, 0);
++    const delay = addInstance(g, 'delay_line', 40, 0);
++    connect(g, { inst: src.id, port: 'out' }, { inst: delay.id, port: 'in' });
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    sim.tick();
++    expect(sim.tickCount).toBe(1);
++    sim.reset();
++    expect(sim.tickCount).toBe(0);
++    expect(sim.read(net.outputBase(`${delay.id}.out`), 1)).toBe(0);
++  });
++});
++
++describe('delayOf', () => {
++  it('sums gate costs along the longest path and counts sources as free', () => {
++    const g = emptyGraph();
++    const inA = addInstance(g, 'level_input', 0, 0);
++    const nand = addInstance(g, 'nand', 60, 0);
++    const not = addInstance(g, 'not', 120, 0);
++    const out = addInstance(g, 'level_output', 180, 0);
++    connect(g, { inst: inA.id, port: 'out' }, { inst: nand.id, port: 'a' });
++    connect(g, { inst: nand.id, port: 'out' }, { inst: not.id, port: 'a' });
++    connect(g, { inst: not.id, port: 'out' }, { inst: out.id, port: 'in' });
++    // level_input 0 + nand 1 + not 1 + level_output 0
++    expect(delayOf(g, registry)).toBe(2);
++    expect(delayOf(emptyGraph(), registry)).toBe(0);
++  });
++
++  it('breaks the path at a storage element instead of counting through it', () => {
++    const g = emptyGraph();
++    const inA = addInstance(g, 'level_input', 0, 0);
++    const first = addInstance(g, 'not', 60, 0);
++    const latch = addInstance(g, 'delay_line', 120, 0);
++    const second = addInstance(g, 'not', 180, 0);
++    connect(g, { inst: inA.id, port: 'out' }, { inst: first.id, port: 'a' });
++    connect(g, { inst: first.id, port: 'out' }, { inst: latch.id, port: 'in' });
++    connect(g, { inst: latch.id, port: 'out' }, { inst: second.id, port: 'a' });
++    // `first` (1) and `second` (1) are separate combinational paths, not a chain
++    // of two: the delay line neither inherits nor passes on a path.
++    expect(delayOf(g, registry)).toBe(1);
++  });
++
++  it('walks a diamond ladder in linear time instead of enumerating every path', () => {
++    // 30 reconverging stages give 2^30 distinct source-to-output paths. A
++    // path-enumerating `delayOf` would hang here; the Kahn longest path returns
++    // immediately. Vitest's per-test timeout is the assertion.
++    const g = emptyGraph();
++    let prev = addInstance(g, 'level_input', 0, 0).id;
++    for (let stage = 0; stage < 30; stage += 1) {
++      const left = addInstance(g, 'not', 0, 0);
++      const right = addInstance(g, 'not', 0, 0);
++      const join = addInstance(g, 'and', 0, 0);
++      connect(g, { inst: prev, port: 'out' }, { inst: left.id, port: 'a' });
++      connect(g, { inst: prev, port: 'out' }, { inst: right.id, port: 'a' });
++      connect(g, { inst: left.id, port: 'out' }, { inst: join.id, port: 'a' });
++      connect(g, { inst: right.id, port: 'out' }, { inst: join.id, port: 'b' });
++      prev = join.id;
++    }
++    // 30 stages of not(1) + and(1).
++    expect(delayOf(g, registry)).toBe(60);
++  });
++
++  it('terminates on a combinational loop and does not count it as depth', () => {
++    const g = emptyGraph();
++    const n1 = addInstance(g, 'nand', 0, 0);
++    const n2 = addInstance(g, 'nand', 0, 40);
++    const src = addInstance(g, 'const_on', 0, 80);
++    const inv = addInstance(g, 'not', 80, 80);
++    connect(g, { inst: n1.id, port: 'out' }, { inst: n2.id, port: 'a' });
++    connect(g, { inst: n2.id, port: 'out' }, { inst: n1.id, port: 'a' });
++    connect(g, { inst: src.id, port: 'out' }, { inst: inv.id, port: 'a' });
++    expect(delayOf(g, registry)).toBe(1);
++  });
++});

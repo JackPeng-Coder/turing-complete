@@ -1,0 +1,125 @@
+$ vitest run "test/core/registry.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/core/registry.test.ts (32 tests | 4 failed) 19ms
+   ✓ registry (4)
+     ✓ registers every base def and can look them up 2ms
+     ✓ throws on unknown component ids 1ms
+     ✓ rejects duplicate ids 0ms
+     ✓ filters by category 1ms
+   ✓ base defs (14)
+     ✓ marks exactly the storage elements as sequential 1ms
+     ✓ hides the level IO plumbing from the palette but keeps it registered 0ms
+     ✓ gives every def at least one output and no duplicate pin ids 1ms
+     ✓ marks sources as zero cost and gates as one 0ms
+     ✓ prices every 1-bit gate on the NAND-equivalent basis, explicitly 0ms
+     ✓ registers full_adder as a 1-bit gate on the same 9-NAND cell as add8 0ms
+     ✓ leaves gateCost to the `?? cost` fallback only where both metrics are zero 0ms
+     ✓ evaluates NAND 0ms
+     ✓ evaluates the 3-input gates 0ms
+     ✓ evaluates the full adder over all eight input combinations 0ms
+     ✓ evaluates XOR and XNOR 0ms
+     ✓ propagates undefined inputs as zero 0ms
+     ✓ delay_line holds its value: evaluate publishes state and ignores its input 0ms
+     ✓ mem1 publishes its latched bit and ignores its inputs 0ms
+   ✓ base defs: extra coverage (5)
+     ✓ declares 1-bit pins on every def outside the wide family 0ms
+     ✓ gives every def a publisher, and sizes storage honestly 1ms
+     ✓ matches an independently written truth table for every gate 1ms
+     ✓ drives the constants and mirrors level IO 0ms
+     ✓ keeps a stored bit through a no-write edge and samples a zero 0ms
+   ✓ fields (5)
+     ✓ packs bit arrays low-bit-first 0ms
+     ✓ unpacks to bit arrays 0ms
+     ✓ extracts and inserts fields 0ms
+     ✓ rejects out-of-range inserts 0ms
+     ✓ round-trips fields in the high bits without sign leakage 0ms
+   ❯ the decoder family (2)
+     × decodes one select bit into a two-line one-hot vector 3ms
+     × decodes three select bits into eight one-hot lines 0ms
+   ❯ shipped level rewards (2)
+     × names only registered defs in rewards.components 3ms
+     × names only registered defs in allowedComponents 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/registry.test.ts > the decoder family > decodes one select bit into a two-line one-hot vector
+Error: unknown component: decoder1
+ ❯ Object.get src/core/registry.ts:122:23
+    120|     get(id: string): ComponentDef {
+    121|       const def = map.get(id);
+    122|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    123|       return def;
+    124|     },
+ ❯ decode test/core/registry.test.ts:439:7
+ ❯ test/core/registry.test.ts:449:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  test/core/registry.test.ts > the decoder family > decodes three select bits into eight one-hot lines
+Error: unknown component: decoder3
+ ❯ Object.get src/core/registry.ts:122:23
+    120|     get(id: string): ComponentDef {
+    121|       const def = map.get(id);
+    122|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    123|       return def;
+    124|     },
+ ❯ decode test/core/registry.test.ts:439:7
+ ❯ test/core/registry.test.ts:473:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  test/core/registry.test.ts > shipped level rewards > names only registered defs in rewards.components
+AssertionError: rewards that name no def: expected [ …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "ch2-25-1-bit-decoder rewards decoder1",
++   "ch2-26-3-bit-decoder rewards decoder3",
++ ]
+
+ ❯ test/core/registry.test.ts:527:49
+    525|     // Every offender at once, not just the first: a batch of new rewa…
+    526|     // cheaper to fix from one list than from one failure per run.
+    527|     expect(missing, 'rewards that name no def').toEqual([]);
+       |                                                 ^
+    528|     // NON-VACUITY. An empty walk passes the assertion above no matter…
+    529|     // level data says, so the walk proves it reached the levels: `ful…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  test/core/registry.test.ts > shipped level rewards > names only registered defs in allowedComponents
+AssertionError: palette ids that name no def: expected [ …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "ch2-25-1-bit-decoder offers decoder1",
++   "ch2-26-3-bit-decoder offers decoder3",
++ ]
+
+ ❯ test/core/registry.test.ts:557:53
+    555|       }
+    556|     }
+    557|     expect(missing, 'palette ids that name no def').toEqual([]);
+       |                                                     ^
+    558|     // The same non-vacuity anchors as above: `full_adder` is only rea…
+    559|     // through the second unjoined batch, and `decoder1` / `decoder3` …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 28 passed (32)
+   Start at  03:01:23
+   Duration  362ms (transform 69%, import 19%, tests 8%, worker 4%)
+
+[ELIFECYCLE] Test failed. See above for more details.

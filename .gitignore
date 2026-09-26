@@ -7,19 +7,19 @@ coverage/
 playwright-report/
 test-results/
 
-# The SDD scratch directory holds per-task briefs, implementer reports, and
-# review-package diffs -- all regenerable intermediates, none of them source.
-# The one exception is the ledger: it is the durable record of what each task
-# did, what its reviewers found, and every ruling made along the way.
-.superpowers/*
-!.superpowers/sdd/
-.superpowers/sdd/*
-!.superpowers/sdd/**/progress.md
-
-# User-supplied research input. Kept on disk as source material, but never
-# shipped: it quotes the original game's dialogue verbatim, and the project
-# claims (see README.md) to contain none of the original's text.
-图灵完备_Turing_Complete_游戏资料全集.md
+# The SDD directory is the durable record of how this project was built: each
+# phase's ledger (what every task did, what its reviewers found, every ruling
+# taken on the user's behalf), the per-task briefs, the implementer reports,
+# the review-package diffs, and the test-evidence logs.
+#
+# It is tracked deliberately. The review diffs are derivable from git history,
+# but the reports and logs are not: they are the evidence behind each task's
+# verdict and each ruling's justification. Everything here is text; nothing
+# here is environment.
+#
+# The research material is tracked too, at the repository owner's request: the
+# user's own compendium and the structure extract derived from it. See
+# README.md for what that means for the project's claim about original text.
 
 # Isolated worktrees for multi-phase work (superpowers:using-git-worktrees).
 .worktrees/

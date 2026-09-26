@@ -1,0 +1,46 @@
+FIX ROUND 1 — command index
+Worktree: D:\Documents\turing-complete\.worktrees\phase1  (branch phase1)
+Commit under test: a57908a (pre-fix) -> 0ebb7bc (fix)
+Logs live beside this file: D:\Documents\turing-complete\.superpowers\sdd\2026-09-25-turing-complete-phase1\
+
+`pnpm` is not on PATH in this session; every command below was run as
+  & "C:\Users\ME\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe" `
+    "C:\Users\ME\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs" <args>
+so "<NODE> <PNPM>" stands for that pair. Each log starts with the exact command line and ends
+with EXIT=<code> (files are written with Set-Content first, then Tee-Object -Append, so no log
+carries stale output from an earlier run).
+
+# | command                                          | exit | log
+--|--------------------------------------------------|------|-------------------------------------------
+1 | <NODE> <PNPM> test test/levels/zz-baseline-capture.test.ts
+  | 0 | task-3-fix-baseline.txt
+  |   | PRE-FIX tree (a57908a). Prints every chapter-1 reference solution's gate/delay/tick/score.
+  |   | The temp test file was deleted before the commit; the log is the frozen numbers' source.
+2 | <NODE> <PNPM> test test/core/defs-wide.test.ts test/core/registry.test.ts test/levels/grader.test.ts
+  | 0 | task-3-fix-green-focused.txt
+  |   | 3 files, 115 tests passed. (The first attempt at this run failed on one of my own new
+  |   | identities -- see the report, F3 note -- and this log is the corrected run.)
+3 | <NODE> <PNPM> test
+  | 0 | task-3-fix-green-full.txt
+  |   | Full suite: 16 files, 347 tests passed (315 before this round: +32 new).
+4 | mutation: gateCost() sums `def.cost` again (the pre-fix conflation), then
+  | <NODE> <PNPM> test test/core/defs-wide.test.ts test/levels/grader.test.ts
+  | 1 | task-3-fix-red-mutation.txt
+  |   | RED on purpose: 2 failed -- "reads gateCost when a def states it and cost when it does
+  |   | not" (expected 5, got 2) and "separates the gate metric from the delay metric on a wide
+  |   | part" (expected 16, got 1). grader.ts was restored from a backup immediately after;
+  |   | the committed file has `total += def.gateCost ?? def.cost;` (git diff confirms).
+5 | <NODE> <PNPM> exec tsc --noEmit
+  | 0 | task-3-fix-tsc.txt
+  |   | 0 diagnostics (the log holds only the command and EXIT=0: tsc prints nothing on success).
+6 | <NODE> <PNPM> build
+  | 0 | task-3-fix-build.txt
+  |   | tsc --noEmit && vite build: 32 modules, dist/assets/index-C52OAPSl.js 50.61 kB.
+7 | git add <the 7 changed files>; git commit -F task-3-fix-commit-msg.txt
+  | 0 | task-3-fix-commit-msg.txt (the message as committed)
+  |   | 0ebb7bc, 7 files changed, 668 insertions(+), 42 deletions(-)
+8 | <NODE> <PNPM> smoke
+  | 0 | task-3-fix-smoke.txt
+  |   | playwright 2 passed (5.0s). Its webServer command rebuilds first, so this also re-checks
+  |   | the build. Nothing in this round touches src/ui/ or src/app/ -- this is a "did not break
+  |   | the app" check, not coverage of the amendment.

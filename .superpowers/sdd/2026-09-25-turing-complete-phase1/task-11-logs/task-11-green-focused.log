@@ -1,0 +1,11 @@
+$ vitest run "test/levels/ch2-batch4.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/levels/ch2-batch4.test.ts (126 tests) 156ms
+
+ Test Files  1 passed (1)
+      Tests  126 passed (126)
+   Start at  03:27:53
+   Duration  547ms (transform 48%, tests 37%, import 12%, worker 2%)
+

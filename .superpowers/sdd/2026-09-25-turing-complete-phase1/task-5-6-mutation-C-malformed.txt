@@ -1,0 +1,197 @@
+$ vitest run "test/levels/fuzz-custom.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/levels/fuzz-custom.test.ts (47 tests | 13 failed) 59ms
+   ✓ runChecks / fuzz (21)
+     ✓ passes a correct 8-bit adder, wide output and carry included 10ms
+     ✓ reports the failing round, its input vector, the expectation and the actual 1ms
+     ✓ generates the same vector sequence from the same seed in two independent constructions 1ms
+     ✓ varies the vectors for seed 0 instead of repeating the PRNG fixed point 0ms
+     ✓ names the round an unstable circuit died in 2ms
+     ✓ ties the sequence to the seed 1ms
+     ✓ pins the first vectors of a known seed 0ms
+     ✓ runs the documented default number of rounds when `rounds` is omitted 1ms
+     ✓ clamps a huge `rounds` to the documented cap instead of hanging the editor 20ms
+     ✓ refuses a fuzz check with rounds=0 instead of passing it 1ms
+     ✓ refuses a fuzz check with rounds=-1 instead of passing it 0ms
+     ✓ refuses a fuzz check with rounds=2.5 instead of passing it 0ms
+     ✓ refuses a fuzz check with rounds=NaN instead of passing it 0ms
+     ✓ refuses a fuzz check that declares no input functions 0ms
+     ✓ refuses a fuzz check that declares no output expectations 0ms
+     ✓ refuses a fuzz check on a level with no input pins to vary 0ms
+     ✓ refuses a fuzz check with a function missing for one of the level pins 0ms
+     ✓ refuses a fuzz function declared for a pin the level does not have 0ms
+     ✓ refuses an input function whose value does not fit its pin 0ms
+     ✓ refuses an expectation that does not fit its pin 0ms
+     ✓ turns an authored function that throws into a recorded failure 1ms
+   ❯ runChecks / custom (26)
+     ✓ ships no custom checks of its own 0ms
+     ✓ calls a registered checker with the level io and adopts its outcome 0ms
+     ✓ adopts the failure records of a registered checker verbatim 0ms
+     ✓ fails an unregistered id with missing-check rather than passing it 1ms
+     ✓ refuses a checker inlined in level data 0ms
+     ✓ turns a checker that throws an Error into a recorded failure 1ms
+     ✓ turns a checker that throws a TypeError into a recorded failure 0ms
+     ✓ turns a checker that throws a RangeError into a recorded failure 1ms
+     ✓ classifies an UnstableCircuitError escaping a checker as unstable 0ms
+     × turns undefined outcome into a recorded invalid failure 5ms
+     × turns null outcome into a recorded invalid failure 1ms
+     × turns a string outcome into a recorded invalid failure 1ms
+     × turns a number outcome into a recorded invalid failure 1ms
+     × turns an array outcome into a recorded invalid failure 1ms
+     × turns a missing passed outcome into a recorded invalid failure 2ms
+     × turns a non-boolean passed outcome into a recorded invalid failure 1ms
+     × turns a non-array failures outcome into a recorded invalid failure 0ms
+     × turns a negative ticksUsed outcome into a recorded invalid failure 0ms
+     × turns a fractional ticksUsed outcome into a recorded invalid failure 0ms
+     × turns a null failure record outcome into a recorded invalid failure 0ms
+     × turns a failure record with no actual outcome into a recorded invalid failure 0ms
+     × turns a failure record with an unknown reason outcome into a recorded invalid failure 0ms
+     ✓ adopts failures a checker reported while claiming to have passed 0ms
+     ✓ synthesizes a failure for a checker that reports failure without a record 0ms
+     ✓ runs truth-table, fuzz and custom checks in one spec 1ms
+     ✓ fails loudly on a check kind this kernel does not know 0ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 13 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / custom > turns undefined outcome into a recorded invalid failure
+AssertionError: expected [Function] to not throw an error but 'TypeError: Cannot read properties of …' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"TypeError: Cannot read properties of undefined (reading 'ticksUsed')"
+
+ ❯ test/levels/fuzz-custom.test.ts:650:63
+    648|     useChecker(id, () => value as CheckOutcome);
+    649|     const spec = customSpec(id);
+    650|     expect(() => runChecks(andCircuit(), registry, spec)).not.toThrow(…
+       |                                                               ^
+    651|     const outcome = runChecks(andCircuit(), registry, spec);
+    652|     expect(outcome.passed).toBe(false);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/13]⎯
+
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / custom > turns null outcome into a recorded invalid failure
+AssertionError: expected [Function] to not throw an error but 'TypeError: Cannot read properties of …' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"TypeError: Cannot read properties of null (reading 'ticksUsed')"
+
+ ❯ test/levels/fuzz-custom.test.ts:650:63
+    648|     useChecker(id, () => value as CheckOutcome);
+    649|     const spec = customSpec(id);
+    650|     expect(() => runChecks(andCircuit(), registry, spec)).not.toThrow(…
+       |                                                               ^
+    651|     const outcome = runChecks(andCircuit(), registry, spec);
+    652|     expect(outcome.passed).toBe(false);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/13]⎯
+
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / custom > turns a string outcome into a recorded invalid failure
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / custom > turns a number outcome into a recorded invalid failure
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / custom > turns an array outcome into a recorded invalid failure
+AssertionError: expected [Function] to not throw an error but 'TypeError: Cannot read properties of …' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"TypeError: Cannot read properties of undefined (reading 'length')"
+
+ ❯ test/levels/fuzz-custom.test.ts:650:63
+    648|     useChecker(id, () => value as CheckOutcome);
+    649|     const spec = customSpec(id);
+    650|     expect(() => runChecks(andCircuit(), registry, spec)).not.toThrow(…
+       |                                                               ^
+    651|     const outcome = runChecks(andCircuit(), registry, spec);
+    652|     expect(outcome.passed).toBe(false);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/13]⎯
+
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / custom > turns a missing passed outcome into a recorded invalid failure
+AssertionError: expected 'custom check "malformed-a missing pas…' to contain '"passed" is undefined'
+
+Expected: ""passed" is undefined"
+Received: "custom check "malformed-a missing passed" reported passed=false without a failure record"
+
+ ❯ test/levels/fuzz-custom.test.ts:655:41
+    653|     expect(outcome.failures[0]?.reason).toBe('invalid');
+    654|     expect(outcome.failures[0]?.detail).toContain('malformed');
+    655|     expect(outcome.failures[0]?.detail).toContain(fragment);
+       |                                         ^
+    656|     expect(() => grade(andCircuit(), registry, spec)).not.toThrow();
+    657|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/13]⎯
+
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / custom > turns a non-boolean passed outcome into a recorded invalid failure
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / custom > turns a negative ticksUsed outcome into a recorded invalid failure
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / custom > turns a fractional ticksUsed outcome into a recorded invalid failure
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ test/levels/fuzz-custom.test.ts:652:28
+    650|     expect(() => runChecks(andCircuit(), registry, spec)).not.toThrow(…
+    651|     const outcome = runChecks(andCircuit(), registry, spec);
+    652|     expect(outcome.passed).toBe(false);
+       |                            ^
+    653|     expect(outcome.failures[0]?.reason).toBe('invalid');
+    654|     expect(outcome.failures[0]?.detail).toContain('malformed');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/13]⎯
+
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / custom > turns a non-array failures outcome into a recorded invalid failure
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / custom > turns a null failure record outcome into a recorded invalid failure
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / custom > turns a failure record with no actual outcome into a recorded invalid failure
+AssertionError: expected undefined to be 'invalid' // Object.is equality
+
+- Expected:
+"invalid"
+
++ Received:
+undefined
+
+ ❯ test/levels/fuzz-custom.test.ts:653:41
+    651|     const outcome = runChecks(andCircuit(), registry, spec);
+    652|     expect(outcome.passed).toBe(false);
+    653|     expect(outcome.failures[0]?.reason).toBe('invalid');
+       |                                         ^
+    654|     expect(outcome.failures[0]?.detail).toContain('malformed');
+    655|     expect(outcome.failures[0]?.detail).toContain(fragment);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/13]⎯
+
+ FAIL  test/levels/fuzz-custom.test.ts > runChecks / custom > turns a failure record with an unknown reason outcome into a recorded invalid failure
+
+AssertionError: expected 'nonsense' to be 'invalid' // Object.is equality
+ Test Files  1 failed (1)
+      Tests  13 failed | 34 passed (47)
+   Start at  01:59:34
+   Duration  395ms (transform 54%, tests 27%, import 14%, worker 4%)
+
+
+Expected: "invalid"
+Received: "nonsense"
+
+ ❯ test/levels/fuzz-custom.test.ts:653:41
+    651|     const outcome = runChecks(andCircuit(), registry, spec);
+    652|     expect(outcome.passed).toBe(false);
+    653|     expect(outcome.failures[0]?.reason).toBe('invalid');
+       |                                         ^
+    654|     expect(outcome.failures[0]?.detail).toContain('malformed');
+    655|     expect(outcome.failures[0]?.detail).toContain(fragment);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/13]⎯
+
+[ELIFECYCLE] Test failed. See above for more details.

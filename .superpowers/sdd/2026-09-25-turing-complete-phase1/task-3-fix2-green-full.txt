@@ -1,0 +1,34 @@
+COMMAND: node pnpm.mjs test   (full suite, post-fix; the temporary measurement fixture has been deleted)
+$ vitest run
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/app/commands.test.ts (6 tests) 10ms
+ ✓ test/core/signal.test.ts (16 tests) 13ms
+ ✓ test/ui/view.test.ts (6 tests) 9ms
+ ✓ test/core/registry.test.ts (26 tests) 24ms
+ ✓ test/app/progress.test.ts (14 tests) 13ms
+ ✓ test/persist/storage.test.ts (12 tests) 12ms
+ ✓ test/app/store.test.ts (11 tests) 9ms
+ ✓ test/levels/checks.test.ts (28 tests) 49ms
+ ✓ test/levels/ch1-part2.test.ts (29 tests) 33ms
+ ✓ test/levels/ch1-part1.test.ts (34 tests) 28ms
+ ✓ test/levels/grader.test.ts (40 tests) 36ms
+ ✓ test/core/defs-wide.test.ts (52 tests) 102ms
+ ✓ test/smoke/sanity.test.ts (1 test) 3ms
+ ✓ test/core/net.test.ts (38 tests) 250ms
+ ✓ test/core/graph.test.ts (15 tests) 379ms
+   ✓ validateGraph (9)
+     ✓ scans a 50,000-instance cycle without recursing 366ms
+ ✓ test/ui/panels.test.ts (22 tests) 41ms
+
+ Test Files  16 passed (16)
+      Tests  350 passed (350)
+   Start at  01:01:06
+   Duration  1.54s (transform 47%, import 17%, tests 15%, environment 15%, worker 5%)
+
+  Transform  transforming modules took 3.10s · 47% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+
+EXIT=0

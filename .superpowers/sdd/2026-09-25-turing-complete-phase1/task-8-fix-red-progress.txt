@@ -1,0 +1,83 @@
+$ vitest run "test/app/progress.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/app/progress.test.ts (18 tests | 2 failed) 11ms
+   ✓ isUnlocked (4)
+     ✓ unlocks the first level from the start 1ms
+     ✓ locks later levels until the previous one passes 0ms
+     ✓ unlocks the next level once the previous one passes 0ms
+     ✓ throws for ids outside the order 1ms
+   ✓ resumePointOf (4)
+     ✓ starts at the first level 0ms
+     ✓ advances past a passed level 0ms
+     ✓ stays at the newest level when everything is passed 0ms
+     ✓ rejects an empty level order instead of returning undefined 0ms
+   ✓ unlockedComponents (3)
+     ✓ always offers the starter components so a level is never unbuildable 0ms
+     ✓ adds a reward only after its level is passed 0ms
+     ✓ does not treat an unpassed level own reward as earned 0ms
+   ❯ paletteDefsFor (4)
+     ✓ filters the level list down to what is unlocked 0ms
+     × offers a level its own rewards, before they are earned 5ms
+     × keeps a reward the level does not offer out of its palette 1ms
+     ✓ adds a passed level rewards to the next level palette 0ms
+   ✓ applyGrade (3)
+     ✓ does not mutate the input progress 0ms
+     ✓ keeps the best score only when it improves 0ms
+     ✓ ignores a failed attempt 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/app/progress.test.ts > paletteDefsFor > offers a level its own rewards, before they are earned
+AssertionError: expected [ 'level_input', 'level_output' ] to deeply equal [ 'nand', 'not', 'level_input', …(1) ]
+
+- Expected
++ Received
+
+  [
+-   "nand",
+-   "not",
+    "level_input",
+    "level_output",
+  ]
+
+ ❯ test/app/progress.test.ts:165:60
+
+    163|     // alone -- so without this rule a first-time palette cannot solve…
+    164|     // it is a palette for.
+    165|     expect(paletteDefsFor(emptyProgress(), levels, other)).toEqual([
+       |                                                            ^
+    166|       'nand',
+    167|       'not',
+ Test Files  1 failed (1)
+      Tests  2 failed | 16 passed (18)
+   Start at  02:35:54
+   Duration  275ms (transform 67%, import 19%, tests 8%, worker 6%)
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/app/progress.test.ts > paletteDefsFor > keeps a reward the level does not offer out of its palette
+AssertionError: expected [ 'level_input', 'level_output' ] to deeply equal [ 'nand', 'level_input', …(1) ]
+
+- Expected
++ Received
+
+  [
+-   "nand",
+    "level_input",
+    "level_output",
+  ]
+
+ ❯ test/app/progress.test.ts:178:21
+    176|     // unlocks it -- and it stays out anyway, because that level does …
+    177|     const palette = paletteDefsFor(emptyProgress(), levels, level);
+    178|     expect(palette).toEqual(['nand', 'level_input', 'level_output']);
+       |                     ^
+    179|     expect(palette).not.toContain('not');
+    180|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+[ELIFECYCLE] Test failed. See above for more details.

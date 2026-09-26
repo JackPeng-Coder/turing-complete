@@ -1,0 +1,122 @@
+$ vitest run "test/levels/zz-scratch-semantics.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/levels/zz-scratch-semantics.test.ts (5 tests | 3 failed) 26ms
+   ❯ script semantics (5)
+     × tick is an absolute target, and a step drives its inputs BEFORE the edges run 9ms
+     ✓ mem1 holds across edges and samples value only when set is high 1ms
+     × a delay line in a loop settles, a purely combinational ring does not 4ms
+     ✓ counter8 counts, wraps at 256, and reset beats en 3ms
+     × ram8 writes on the edge and reads back combinationally at the full range 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/zz-scratch-semantics.test.ts > script semantics > tick is an absolute target, and a step drives its inputs BEFORE the edges run
+AssertionError: expected [ { check: 'script', …(5) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "actual": {
++       "out": 0,
++     },
++     "check": "script",
++     "expected": {
++       "out": 1,
++     },
++     "inputs": {
++       "a": 0,
++     },
++     "reason": "mismatch",
++     "tick": 2,
++   },
++ ]
+
+ ❯ test/levels/zz-scratch-semantics.test.ts:42:29
+     40|       ]),
+     41|     );
+     42|     expect(result.failures).toEqual([]);
+       |                             ^
+     43|     expect(result.passed).toBe(true);
+     44|     expect(result.metrics.tick).toBe(3);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  test/levels/zz-scratch-semantics.test.ts > script semantics > a delay line in a loop settles, a purely combinational ring does not
+Error: build: unknown reference "r"
+ ❯ resolve test/fixtures/build.ts:66:24
+     64|     if (inputId) return { inst: inputId, port: 'out' };
+     65|     const partId = partIds.get(head!);
+     66|     if (!partId) throw new Error(`build: unknown reference "${ref}"`);
+       |                        ^
+     67|     return { inst: partId, port: pin ?? 'out' };
+     68|   };
+ ❯ test/fixtures/build.ts:77:18
+ ❯ build test/fixtures/build.ts:74:16
+ ❯ test/levels/zz-scratch-semantics.test.ts:109:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  test/levels/zz-scratch-semantics.test.ts > script semantics > ram8 writes on the edge and reads back combinationally at the full range
+AssertionError: [{"check":"script","inputs":{"d":1,"addr":0,"load":1},"expected":{"out":1},"actual":{"out":0},"tick":0,"reason":"mismatch"},{"check":"script","inputs":{"d":254,"addr":0,"load":0},"expected":{"out":1},"actual":{"out":0},"tick":256,"reason":"mismatch"}]: expected [ { check: 'script', …(5) }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "actual": {
++       "out": 0,
++     },
++     "check": "script",
++     "expected": {
++       "out": 1,
++     },
++     "inputs": {
++       "addr": 0,
++       "d": 1,
++       "load": 1,
++     },
++     "reason": "mismatch",
++     "tick": 0,
++   },
++   {
++     "actual": {
++       "out": 0,
++     },
++     "check": "script",
++     "expected": {
++       "out": 1,
++     },
++     "inputs": {
++       "addr": 0,
++       "d": 254,
++       "load": 0,
++     },
++     "reason": "mismatch",
++     "tick": 256,
++   },
++ ]
+
+ ❯ test/levels/zz-scratch-semantics.test.ts:176:62
+    174|     }
+    175|     const result = grade(graph, registry, spec(io, steps));
+    176|     expect(result.failures, JSON.stringify(result.failures)).toEqual([…
+       |                                                              ^
+    177|     expect(result.metrics).toEqual({ gate: 0, delay: 0, tick: 511 });
+    178|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 2 passed (5)
+   Start at  03:19:18
+   Duration  311ms (transform 63%, import 18%, tests 14%, worker 5%)
+
+[ELIFECYCLE] Test failed. See above for more details.

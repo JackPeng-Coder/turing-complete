@@ -1,0 +1,176 @@
+$ vitest run "test/core/net.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/core/net.test.ts (36 tests | 11 failed) 102ms
+   ❯ compile (8)
+     ✓ allocates one slot per bit of every pin 2ms
+     ✓ records the origin instance of every expanded instance 0ms
+     ✓ rejects invalid graphs 1ms
+     ✓ sizes the signal table for the circuit instead of the 65,536 default 76ms
+     × rejects a malformed params.width (0) as a validation issue 5ms
+     × rejects a malformed params.width (-1) as a validation issue 1ms
+     × rejects a malformed params.width (1.5) as a validation issue 0ms
+     × rejects a malformed params.width (NaN) as a validation issue 0ms
+   ✓ Simulation (11)
+     ✓ evaluates a NAND for every input combination 0ms
+     ✓ propagates through a chain of gates in one settle 0ms
+     ✓ treats an unwired input as zero 0ms
+     ✓ throws UnstableCircuitError for a combinational feedback loop 2ms
+     ✓ settles a delay_line held loop and publishes state on the edge 1ms
+     ✓ a delay line holds its sampled value when its input changes 0ms
+     ✓ keeps an externally driven output (level_input) through a settle 0ms
+     ✓ binds level I/O by pin name: drives a level_input, reads a level_output pin 1ms
+     ✓ settles a feedback loop that a storage element breaks 0ms
+     ✓ settles a wide pin whose read-back form differs from the written form 0ms
+     ✓ reset clears state and the tick counter 0ms
+   ✓ wide ports (6)
+     ✓ shows only the driving bit when a 1-bit output feeds an 8-bit input beside a live signal 0ms
+     ✓ takes only the low bit when an 8-bit output drives a 1-bit input 0ms
+     ✓ transfers every bit when an 8-bit output drives an 8-bit input 0ms
+     ✓ hands back a read region that belongs to one pin and is fresh after settle 0ms
+     ✓ zero-extends a narrower driver into a 12-bit input 0ms
+     ✓ materialises a region only for a pin whose driver is narrower 0ms
+   ❯ per-instance pin widths (7)
+     × resolves a pin width from the instance over the def 0ms
+     × leaves every width at the def default when the instance sets no params 0ms
+     × reports an unknown pin by name and direction 1ms
+     × gathers a params-wide pin per bit when its driver is narrower 0ms
+     × gives a params-wide pin a coherent 8-bit region when its driver is narrower 0ms
+     × reads a params-wide pin straight from an equally wide driver 1ms
+     × reserves table capacity for params-derived widths and their read regions 1ms
+   ✓ delayOf (4)
+     ✓ sums gate costs along the longest path and counts sources as free 0ms
+     ✓ breaks the path at a storage element instead of counting through it 0ms
+     ✓ walks a diamond ladder in linear time instead of enumerating every path 2ms
+     ✓ terminates on a combinational loop and does not count it as depth 0ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 11 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/net.test.ts > compile > rejects a malformed params.width (0) as a validation issue
+ FAIL  test/core/net.test.ts > compile > rejects a malformed params.width (-1) as a validation issue
+ FAIL  test/core/net.test.ts > compile > rejects a malformed params.width (1.5) as a validation issue
+ FAIL  test/core/net.test.ts > compile > rejects a malformed params.width (NaN) as a validation issue
+AssertionError: expected undefined to be an instance of CircuitValidationError
+ ❯ test/core/net.test.ts:75:22
+     73|         caught = error;
+     74|       }
+     75|       expect(caught).toBeInstanceOf(CircuitValidationError);
+       |                      ^
+     76|       expect((caught as CircuitValidationError).issues.map((issue) => …
+     77|         'invalid-params',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/11]⎯
+
+ FAIL  test/core/net.test.ts > per-instance pin widths > resolves a pin width from the instance over the def
+TypeError: net.outputWidth is not a function
+ ❯ test/core/net.test.ts:541:16
+    539|     const base = net.outputBase('feed.out');
+    540|
+    541|     expect(net.outputWidth('feed.out')).toBe(8);
+       |                ^
+    542|     expect(net.slotCount).toBe(8);
+    543|     sim.write(base, 8, 0xa5);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/11]⎯
+
+ FAIL  test/core/net.test.ts > per-instance pin widths > leaves every width at the def default when the instance sets no params
+TypeError: net.outputWidth is not a function
+ ❯ test/core/net.test.ts:558:16
+    556|     const net = compile(g, registry);
+    557|
+    558|     expect(net.outputWidth('feed.out')).toBe(1);
+       |                ^
+    559|     expect(net.inputWidth('OUT.in')).toBe(1);
+    560|     expect(net.outputWidth('OUT.mirror')).toBe(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/11]⎯
+
+ FAIL  test/core/net.test.ts > per-instance pin widths > reports an unknown pin by name and direction
+AssertionError: expected [Function] to throw error matching /no such input pin: feed\.out/ but got 'net.inputWidth is not a function'
+
+- Expected:
+/no such input pin: feed\.out/
+
++ Received:
+"net.inputWidth is not a function"
+
+ ❯ test/core/net.test.ts:570:46
+    568|     feed.params.width = 8;
+    569|     const net = compile(g, registry);
+    570|     expect(() => net.inputWidth('feed.out')).toThrow(/no such input pi…
+       |                                              ^
+    571|     expect(() => net.outputWidth('feed.in')).toThrow(/no such output p…
+    572|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/11]⎯
+
+ FAIL  test/core/net.test.ts > per-instance pin widths > gathers a params-wide pin per bit when its driver is narrower
+TypeError: net.inputWidth is not a function
+ ❯ test/core/net.test.ts:582:16
+    580|     const observed = net.outputBase('wide.out');
+    581|
+    582|     expect(net.inputWidth('wide.in')).toBe(8);
+       |                ^
+    583|     // The reproduction depends on that adjacency; assert it rather th…
+    584|     // the allocation order documented above.
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/11]⎯
+
+ FAIL  test/core/net.test.ts > per-instance pin widths > gives a params-wide pin a coherent 8-bit region when its driver is narrower
+TypeError: net.inputWidth is not a function
+ ❯ test/core/net.test.ts:611:16
+    609|     // Sized from `params.width`, and not the driver's base: `read(dri…
+    610|     // would sweep up the seven live slots that follow the one-bit dri…
+    611|     expect(net.inputWidth('wide.in')).toBe(8);
+       |                ^
+    612|     expect(base).not.toBe(net.outputBase('bit.out'));
+    613|     // 2 + 8 + 16 pin bits, plus one 8-bit region.
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/11]⎯
+
+ FAIL  test/core/net.test.ts > per-instance pin widths > reads a params-wide pin straight from an equally wide driver
+AssertionError: expected 3 to be 24 // Object.is equality
+
+- Expected
++ Received
+
+- 24
++ 3
+
+ ❯ test/core/net.test.ts:646:27
+    644|     // is materialised and the pin reads the driver's base directly.
+    645|     expect(net.inputBase('wide.in')).toBe(net.outputBase('feed.out'));
+    646|     expect(net.slotCount).toBe(24);
+       |                           ^
+    647|     for (const value of [0x00, 0x01, 0x55, 0x80, 0xab, 0xff]) {
+    648|       sim.write(net.outputBase('feed.out'), 8, value);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/11]⎯
+
+ FAIL  test/core/net.test.ts > per-instance pin widths > reserves table capacity for params-derived widths and their read regions
+AssertionError: expected 72 to be 600 // Object.is equality
+
+- Expected
++ Received
+
+- 600
++ 72
+
+ ❯ test/core/net.test.ts:674:27
+    672|     const net = compile(g, reg);
+    673|
+    674|     expect(net.slotCount).toBe(count * 25);
+       |                           ^
+    675|     expect(new Simulation(net, reg).settle().stable).toBe(true);
+    676|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/11]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  11 failed | 25 passed (36)
+   Start at  00:20:49
+   Duration  396ms (tests 46%, transform 39%, import 11%, worker 4%)
+
+[ELIFECYCLE] Test failed. See above for more details.

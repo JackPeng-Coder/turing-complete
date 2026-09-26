@@ -1,0 +1,124 @@
+# Review package: fd82f2b..HEAD
+
+## Commits
+ec166d8 fix(core): size wide port read-back buffer with ceil(width / 8)
+
+## Files changed
+ src/core/signal.ts       |  7 ++++++-
+ test/core/signal.test.ts | 31 ++++++++++++++++++++++++++++++-
+ 2 files changed, 36 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/src/core/signal.ts b/src/core/signal.ts
+index 6fc25c2..2750525 100644
+--- a/src/core/signal.ts
++++ b/src/core/signal.ts
+@@ -83,21 +83,26 @@ export function createSignalTable(capacity = 65_536): SignalTable {
+         const byte = v[i >> 3] ?? 0;
+         table.slots[base + i] = (byte >> (i & 7)) & 1;
+       }
+     },
+     getPort(base: number, width: number): PortValue {
+       if (width <= 8) {
+         let out = 0;
+         for (let i = 0; i < width; i += 1) out |= table.slots[base + i]! << i;
+         return out;
+       }
+-      const bytes = new Uint8Array(width / 8);
++      // `Math.ceil`, not `width / 8`: the two must agree with `assertWidth`,
++      // which accepts `Math.ceil(width / 8)` bytes on the way in. Flooring
++      // here drops the partial high byte of e.g. a 12-bit port (bits 8-11),
++      // and the mismatch is misdiagnosed downstream as an oscillating circuit
++      // (1-byte read-back vs 2-byte output => `changed` stays true forever).
++      const bytes = new Uint8Array(Math.ceil(width / 8));
+       for (let i = 0; i < width; i += 1) {
+         if (table.slots[base + i]) bytes[i >> 3]! |= 1 << (i & 7);
+       }
+       return bytes;
+     },
+     clear(): void {
+       table.slots.fill(0, 0, size);
+     },
+   };
+ 
+diff --git a/test/core/signal.test.ts b/test/core/signal.test.ts
+index 70bdf0c..91690f8 100644
+--- a/test/core/signal.test.ts
++++ b/test/core/signal.test.ts
+@@ -42,20 +42,31 @@ describe('SignalTable', () => {
+     expect(t.getPort(base, 8)).toBe(0b1010_0101);
+   });
+ 
+   it('accepts a Uint8Array for wide ports', () => {
+     const t = createSignalTable();
+     const base = t.alloc(16);
+     t.setPort(base, 16, new Uint8Array([0x34, 0x12]));
+     expect(t.getPort(base, 16)).toEqual(new Uint8Array([0x34, 0x12]));
+   });
+ 
++  it('reads back every bit of a wide port whose width is not a multiple of 8', () => {
++    const t = createSignalTable();
++    const base = t.alloc(12);
++    // `assertWidth` accepts ceil(12 / 8) = 2 bytes on the way in, so the reader
++    // must size its buffer to ceil(width / 8) too. Sizing it with `width / 8`
++    // floors to 1 byte and silently drops bits 8-11.
++    t.setPort(base, 12, new Uint8Array([0x34, 0x12]));
++    expect(t.getPort(base, 12)).toEqual(new Uint8Array([0x34, 0x02]));
++    expect(t.getBit(base + 9)).toBe(1);
++  });
++
+   it('rejects a value that does not fit the port width', () => {
+     const t = createSignalTable();
+     const base = t.alloc(3);
+     expect(() => t.setPort(base, 3, 8)).toThrow(/width/i);
+   });
+ 
+   it('clear() zeroes every allocated slot and keeps size', () => {
+     const t = createSignalTable();
+     const base = t.alloc(4);
+     t.setPort(base, 4, 0b1111);
+@@ -77,25 +88,43 @@ describe('SignalTable', () => {
+   it('refuses to over-allocate instead of silently corrupting indices', () => {
+     const t = createSignalTable(4);
+     t.alloc(4);
+     expect(() => t.alloc(1)).toThrow(/capacity/i);
+   });
+ 
+   it('never swaps its backing slots, so earlier bases stay valid', () => {
+     const t = createSignalTable(8);
+     const slots = t.slots;
+     expect(slots.length).toBe(8);
++
++    // Fill the table to capacity and write through the captured reference.
+     const base = t.alloc(8);
+-    expect(t.slots).toBe(slots);
+     t.setPort(base, 8, 0b1111_0000);
+     expect(slots[base]).toBe(0);
+     expect(slots[base + 4]).toBe(1);
++
++    // One slot too many. A grow-on-demand table would reallocate here, which
++    // silently invalidates every `base` already handed out (including the
++    // `drive` lookup `net.ts` builds over these indices), so the allocation
++    // must be refused instead. Swallow the refusal to keep asserting after it.
++    let refusal: unknown;
++    try {
++      t.alloc(1);
++    } catch (err) {
++      refusal = err;
++    }
++    expect(refusal).toBeInstanceOf(RangeError);
++
++    expect(t.slots).toBe(slots); // identity: the backing array was not swapped
++    expect(t.getPort(base, 8)).toBe(0b1111_0000); // and the values survived
++    expect(slots[base]).toBe(0);
++    expect(slots[base + 4]).toBe(1);
+   });
+ });
+ 
+ describe('Port', () => {
+   it('reads through to the table so writes are visible', () => {
+     const t = createSignalTable();
+     const p = createPort('a', 3, t);
+     expect(p.read()).toBe(0);
+     p.write(0b101);
+     expect(p.read()).toBe(0b101);

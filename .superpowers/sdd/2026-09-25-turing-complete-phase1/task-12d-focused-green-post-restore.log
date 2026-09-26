@@ -1,0 +1,12 @@
+$ vitest run "test/core/signal.test.ts" "test/core/defs-wide.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/signal.test.ts (19 tests) 13ms
+ ✓ test/core/defs-wide.test.ts (63 tests) 54ms
+
+ Test Files  2 passed (2)
+      Tests  82 passed (82)
+   Start at  07:50:48
+   Duration  340ms (transform 57%, tests 21%, import 15%, worker 6%)
+

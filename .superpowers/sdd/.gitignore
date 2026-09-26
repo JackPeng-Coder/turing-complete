@@ -1,0 +1,13 @@
+# The SDD record is tracked deliberately: the per-task briefs, the implementer
+# reports, the review packages, and the test-evidence logs are the evidence
+# behind each task's verdict and each ruling in the ledgers.
+#
+# This one file stays out of the repository -- it is the rule that would make
+# the rest invisible, so shipping it would be self-defeating. Everything else
+# under this directory is tracked; see the repository root .gitignore.
+*
+!.gitignore
+!2026-09-25-turing-complete-phase0/
+!2026-09-25-turing-complete-phase0/**
+!2026-09-25-turing-complete-phase1/
+!2026-09-25-turing-complete-phase1/**

@@ -1,0 +1,36 @@
+Task 3 verification commands. Every one ran from
+`D:\Documents\turing-complete\.worktrees\phase1` with the bundled runtime, and
+every one was redirected to the log named at the end of its line.
+
+  NODE = C:\Users\ME\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe
+  PNPM = C:\Users\ME\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs
+
+RED    PNPM test test/core/defs-wide.test.ts        exit 1   task-3-red-1-wide.txt
+       module `src/core/defs/wide` does not exist yet: 0 tests collected.
+
+RED    PNPM test test/core/net.test.ts              exit 1   task-3-red-2-net.txt
+       both new invalid-params rows fail: 4097 compiles (no error at all) and
+       MAX_SAFE_INTEGER lets `RangeError: Invalid typed array length` escape compile.
+
+FULL-1 PNPM test                                    exit 1   task-3-full-1.txt
+       interim full run after the implementation: exactly one failure, the phase-0
+       `declares 1-bit pins everywhere` invariant the wide family intentionally breaks.
+
+GREEN  PNPM test test/core/defs-wide.test.ts test/core/net.test.ts test/core/registry.test.ts
+                                                    exit 0   task-3-green-focused.txt
+       3 files, 109 tests passed (47 + 38 + 24).
+
+GREEN  PNPM test                                    exit 0   task-3-green-full.txt
+       16 files, 315 tests passed (266 before this task).
+
+       PNPM exec tsc --noEmit                       exit 0   task-3-tsc.txt
+       0 diagnostics (the log carries the command and the exit code as a header).
+
+       PNPM build                                   exit 0   task-3-build.txt
+       `tsc --noEmit && vite build`: 32 modules, dist/assets/index-DL7UemDA.js 50.08 kB.
+
+       PNPM smoke                                   exit 0   task-3-smoke.txt
+       playwright: 2 passed (level 1 playable end to end; progress survives a reload).
+
+COMMIT git commit -F task-3-commit-msg.txt          a57908a  task-3-commit-msg.txt
+       6 files changed, 1382 insertions(+), 8 deletions(-).

@@ -1,0 +1,23 @@
+feat(levels): chapter 2 batch 4 -- levels 28-38, storage and timing
+
+The storage and timing half of chapter 2, and the first chapter-2 batch the
+`script` checker carries: the loop latch (28), the delayed byte (29), the clock
+source (30), the conditional inverter and switch (31, 32), the byte selector
+and the reframed bus (33, 34), the conditional writes (35, 36), the 256-byte
+box (37) and the counter (38).
+
+- every level carries a SOURCED/AUTHORED data comment; the source fixes names,
+  order and one concept line only, so ports, widths, checks, targets and
+  rewards are this replica's design
+- spec 3.1 forbids a bus protocol (multi-driver arbitration), so level 34 is
+  reframed as driver selection and says so in both its brief and its comment
+- level 30 asserts periodicity over sixteen alternating ticks plus a hold while
+  disabled, and a second script holds a disabled source low from reset
+- level 37's check writes all 256 addresses and reads all 256 back with load
+  low and the complement of the stored byte on `d`
+- level 38 records the source's "achievement: <= 65 gates" as an achievement
+  rather than a pass condition, and withholds `counter8`, the drop-in
+- threeStar targets are each reference solution's own measured metrics
+- the script levels are authored to the checker's real tick semantics: a step's
+  inputs are written and settled BEFORE its tick advances, so holding is proved
+  by a second step at the same tick (levels 28, 29, 35, 36, 38)

@@ -1,0 +1,28 @@
+fix(core): make the width-32 fast path reject negatives, and retire a stale note
+
+`fitsWidth`'s `width >= 32` arm read `v <= 0xffff_ffff`, without the narrow arm's
+`v >= 0`, so `setPort(base, 32, -1)` was accepted and `setPort`'s number branch
+took the value through `ToUint32`, staging it as `0xffff_ffff`: a negative number
+silently reinterpreted as a full unsigned port instead of refused. Both arms are
+non-negative now (`v >= 0 && v <= 0xffff_ffff`), and the docstring records why the
+`v >= 0` half is not redundant there either.
+
+The fast path is KEPT. Its justification was re-verified against `setPort` itself:
+widths above 32 are reachable (`MAX_PARAM_WIDTH` is 4096, `net.ts` resolves pins
+from it), and there the arm is the number writer's own limit -- the number branch
+is `(v >>> i) & 1`, which carries at most 32 bits -- so dropping the arm would
+admit a value the writer silently truncates. A `Uint8Array` is the carrier above
+32 bits, untouched.
+
+`maskOf`'s "RECORDED LIMITATION" paragraph in `defs/wide.ts` is rewritten to the
+current truth: `(1 << w) - 1` goes negative at `w = 31`, the matching guard in
+`signal.ts` was fixed in the same phase (`c830f50`), so width 31 stages these
+masks normally and the limitation is resolved -- `2 ** w - 1` is still required,
+and `MAX_WIDE_WIDTH` = 32 plus the `number` carrier still bound the top of the
+range. `core/fields.ts`'s dormant `(1 << width) - 1` pair is named, not touched.
+
+Tests: `test/core/signal.test.ts` gains one case (16 -> 20 in that file, 937 ->
+938 overall) -- width 32 rejects `-1`, accepts `0` and `0xffff_ffff`, rejects
+`0x1_0000_0000`, the same arm at width 33 also rejects `-1`, and the table-level
+symptom (`setPort(base, 32, -1)`) throws and leaves the port at 0. Reverting the
+arm to `v <= 0xffff_ffff` turns that test red; restored and re-run green.

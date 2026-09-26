@@ -1,0 +1,216 @@
+MUTATION 1 (RED on purpose): the gate() factory stops emitting gateCost for the built-in nd, so it falls back to ?? cost = 1 -- i.e. a built-in gate's gateCost is removed. COMMAND: node pnpm.mjs test <focused set>
+$ vitest run "test/core/registry.test.ts" "test/core/defs-wide.test.ts" "test/levels/grader.test.ts" "test/levels/ch1-part1.test.ts" "test/levels/ch1-part2.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/core/registry.test.ts (26 tests | 1 failed) 18ms
+   ✓ registry (4)
+     ✓ registers every base def and can look them up 2ms
+     ✓ throws on unknown component ids 1ms
+     ✓ rejects duplicate ids 0ms
+     ✓ filters by category 1ms
+   ❯ base defs (12)
+     ✓ marks exactly the storage elements as sequential 1ms
+     ✓ hides the level IO plumbing from the palette but keeps it registered 0ms
+     ✓ gives every def at least one output and no duplicate pin ids 1ms
+     ✓ marks sources as zero cost and gates as one 0ms
+     × prices every 1-bit gate on the NAND-equivalent basis, explicitly 5ms
+     ✓ leaves gateCost to the `?? cost` fallback only where both metrics are zero 1ms
+     ✓ evaluates NAND 0ms
+     ✓ evaluates the 3-input gates 0ms
+     ✓ evaluates XOR and XNOR 0ms
+     ✓ propagates undefined inputs as zero 0ms
+     ✓ delay_line holds its value: evaluate publishes state and ignores its input 0ms
+     ✓ mem1 publishes its latched bit and ignores its inputs 1ms
+   ✓ base defs: extra coverage (5)
+     ✓ declares 1-bit pins on every def outside the wide family 0ms
+     ✓ reserves one state byte per output slot for storage elements only 1ms
+     ✓ matches an independently written truth table for every gate 1ms
+     ✓ drives the constants and mirrors level IO 0ms
+     ✓ keeps a stored bit through a no-write edge and samples a zero 0ms
+   ✓ fields (5)
+     ✓ packs bit arrays low-bit-first 0ms
+     ✓ unpacks to bit arrays 0ms
+     ✓ extracts and inserts fields 0ms
+     ✓ rejects out-of-range inserts 0ms
+     ✓ round-trips fields in the high bits without sign leakage 0ms
+ ✓ test/levels/ch1-part2.test.ts (29 tests) 16ms
+ ✓ test/levels/ch1-part1.test.ts (34 tests) 16ms
+ ❯ test/levels/grader.test.ts (40 tests | 1 failed) 30ms
+   ✓ gateCost (4)
+     ✓ counts gates and ignores sources and level connectors 2ms
+     ✓ is zero for an empty circuit 0ms
+     ✓ reads gateCost when a def states it and cost when it does not 0ms
+     ✓ separates the gate metric from the delay metric on a wide part 1ms
+   ✓ scoreOf (1)
+     ✓ weights delay and ticks above gate count 0ms
+   ✓ starsOf (5)
+     ✓ is 0 when the level is not passed 0ms
+     ✓ is 1 when passed but targets are missed 0ms
+     ✓ is 3 when every target is met 0ms
+     ✓ is 3 when every target is beaten 0ms
+     ✓ is 1 when the level declares no targets 0ms
+   ✓ grade (4)
+     ✓ reports passed + metrics + 3 stars for the reference solution 4ms
+     ✓ never throws on an empty circuit and reports 0 stars 0ms
+     ✓ never throws on an unstable circuit and marks it as a failure 3ms
+     ✓ reports graph issues alongside the grade 1ms
+   ❯ phase-0 regression: the chapter-1 reference scores are frozen (13)
+     ✓ covers all twelve chapter-1 levels, with the same ids 0ms
+     ✓ ch1-01-crude-awakening grades to its frozen metrics and score 0ms
+     ✓ ch1-02-nand-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-03-not-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-04-and-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-05-or-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-06-nor-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-07-always-on grades to its frozen metrics and score 0ms
+     ✓ ch1-08-second-tick grades to its frozen metrics and score 1ms
+     ✓ ch1-09-xor-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-10-bigger-or-gate grades to its frozen metrics and score 0ms
+     × ch1-11-bigger-and-gate grades to its frozen metrics and score 7ms
+     ✓ ch1-12-binary-racer grades to its frozen metrics and score 1ms
+   ✓ every shipped level: its reference solution meets its own three-star bounds (13)
+     ✓ has a reference circuit for every shipped level 0ms
+     ✓ ch1-01-crude-awakening meets every bound its level declares 1ms
+     ✓ ch1-02-nand-gate meets every bound its level declares 0ms
+     ✓ ch1-03-not-gate meets every bound its level declares 0ms
+     ✓ ch1-04-and-gate meets every bound its level declares 0ms
+     ✓ ch1-05-or-gate meets every bound its level declares 0ms
+     ✓ ch1-06-nor-gate meets every bound its level declares 0ms
+     ✓ ch1-07-always-on meets every bound its level declares 0ms
+     ✓ ch1-08-second-tick meets every bound its level declares 0ms
+     ✓ ch1-09-xor-gate meets every bound its level declares 0ms
+     ✓ ch1-10-bigger-or-gate meets every bound its level declares 0ms
+     ✓ ch1-11-bigger-and-gate meets every bound its level declares 0ms
+     ✓ ch1-12-binary-racer meets every bound its level declares 0ms
+ ❯ test/core/defs-wide.test.ts (52 tests | 1 failed) 66ms
+   ❯ wide defs: the brief's contract (11)
+     ✓ declares every id with the exact pin ids and widths the brief gives 4ms
+     ✓ is reachable through the registry the way the game reaches it 3ms
+     ✓ keeps every wide def pure combinational 1ms
+     ✓ categorizes the operators as wide and const8 as a source 0ms
+     ✓ keeps the DELAY cost at one unit per operator, nothing for a source or a wire 0ms
+     ✓ states a NAND-equivalent gateCost for every def, explicitly 1ms
+     ✓ gives every operator more than one NAND equivalent, and no part less than its delay 1ms
+     ✓ composes each count out of the others, so the constructions are checkable 0ms
+     × prices each bit-sliced cell on the same NAND basis as the registered 1-bit gate 4ms
+     ✓ scales every count with the width the generator is asked for 1ms
+     ✓ registers the whole family without a duplicate id 0ms
+   ✓ wide bitwise operators (6)
+     ✓ matches a reference truth table on the boundary vectors 1ms
+     ✓ treats the 8-bit patterns as unsigned, never as negative numbers 0ms
+     ✓ evaluates NOT and its double negation 0ms
+     ✓ is its own inverse under XOR 2ms
+     ✓ relates nand8/nor8/xnor8 to their negations 1ms
+     ✓ reads an unwired input as zero 0ms
+   ✓ add8 (2)
+     ✓ adds with carry-in on the boundary vectors 1ms
+     ✓ reports bit 8 as the carry out and wraps the low eight bits 2ms
+   ✓ neg8 (2)
+     ✓ negates the boundary vectors by two's complement 0ms
+     ✓ equals (256 - a) & 0xff for every byte, and inverts itself 8ms
+   ✓ comparators (3)
+     ✓ compares unsigned patterns 0ms
+     ✓ compares signed patterns across the sign boundary 2ms
+     ✓ reports equality for every pair, and its result is a single bit 1ms
+   ✓ shifts (4)
+     ✓ shifts left, dropping bits above bit 7 0ms
+     ✓ shifts right logically, filling with zeros 0ms
+     ✓ shifts right arithmetically, replicating the sign bit 2ms
+     ✓ gives 0 for an amount of 8 or more, and matches the reference below that 4ms
+   ✓ rotates (3)
+     ✓ rotates around the byte 0ms
+     ✓ treats an amount of 8 or more as amount % 8 4ms
+     ✓ is the inverse of the other direction 1ms
+   ✓ mul8 and div8 (5)
+     ✓ multiplies, keeping the low eight bits 0ms
+     ✓ equals (a * b) & 0xff on a grid 1ms
+     ✓ divides with truncation toward zero 0ms
+     ✓ returns 0xff for division by zero, as decided, and never throws 0ms
+     ✓ divides by a non-zero divisor exactly as floor does 1ms
+   ✓ const8, switch and switch8 (3)
+     ✓ drives a constant with no inputs 1ms
+     ✓ passes a through when on is 1 and forces zero when on is 0 0ms
+     ✓ cascades: switching an already-switched value stays off 0ms
+   ✓ splitter and maker (3)
+     ✓ splits a byte into eight one-bit pins, least significant first 0ms
+     ✓ makes a byte out of eight one-bit pins 0ms
+     ✓ round-trips maker(splitter(x)) === x for every byte 3ms
+   ✓ the width generator (7)
+     ✓ defaults to eight bits 0ms
+     ✓ builds the whole family at a non-default width 1ms
+     ✓ parameterises the suffixed operators too 1ms
+     ✓ clamps a requested width into the range it documents 0ms
+     ✓ clamps before it allocates, so an absurd width cannot ask for gigabytes 0ms
+     ✓ rejects nothing silently: an unknown id is simply absent 0ms
+     ✓ is not re-counted by params.width, which widens every pin instead 2ms
+   ✓ wide defs through the kernel (3)
+     ✓ adds two level inputs and carries out of bit 8 1ms
+     ✓ carries every byte through splitter -> maker at the pin level 5ms
+     ✓ drives an 8-bit operator from 1-bit level inputs 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide defs: the brief's contract > prices each bit-sliced cell on the same NAND basis as the registered 1-bit gate
+Error: no gateCost on the 1-bit gate and
+ ❯ oneBit test/core/defs-wide.test.ts:275:38
+    273|     const oneBit = (id: string): number => {
+    274|       const count = registry.get(id).gateCost;
+    275|       if (count === undefined) throw new Error(`no gateCost on the 1-b…
+       |                                      ^
+    276|       return count;
+    277|     };
+ ❯ test/core/defs-wide.test.ts:289:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  test/core/registry.test.ts > base defs > prices every 1-bit gate on the NAND-equivalent basis, explicitly
+AssertionError: and: expected undefined to be 2 // Object.is equality
+
+- Expected:
+2
+
++ Received:
+undefined
+
+ ❯ test/core/registry.test.ts:91:38
+     89|     };
+     90|     for (const [id, want] of Object.entries(NAND_EQUIVALENTS)) {
+     91|       expect(r.get(id).gateCost, id).toBe(want);
+       |                                      ^
+     92|     }
+     93|     // These nine ARE the `logic1` family, so a tenth gate added witho…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  test/levels/grader.test.ts > phase-0 regression: the chapter-1 reference scores are frozen > ch1-11-bigger-and-gate grades to its frozen metrics and score
+AssertionError: expected { gate: 2, delay: 2, tick: +0 } to deeply equal { gate: 4, delay: 2, tick: +0 }
+
+- Expected
++ Received
+
+  {
+    "delay": 2,
+-   "gate": 4,
++   "gate": 2,
+    "tick": 0,
+  }
+
+ ❯ test/levels/grader.test.ts:370:30
+    368|       expect(result.failures, JSON.stringify(result.failures)).toEqual…
+    369|       expect(result.passed).toBe(true);
+    370|       expect(result.metrics).toEqual(frozen.metrics);
+       |                              ^
+    371|       expect(result.score).toBe(frozen.score);
+    372|       // The frozen score and the frozen metrics have to agree with ea…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  3 failed | 2 passed (5)
+      Tests  3 failed | 178 passed (181)
+   Start at  01:00:49
+   Duration  404ms (transform 60%, import 21%, tests 14%, worker 5%)
+
+[ELIFECYCLE] Test failed. See above for more details.
+EXIT=1

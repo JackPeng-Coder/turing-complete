@@ -1,0 +1,1496 @@
+# Review package: 7f95f40..6cdb37b
+
+## Commits
+6cdb37b fix(core): resolve pin widths per instance, not per definition
+
+## Files changed
+ src/core/graph.ts          |  32 +++++++-
+ src/core/net.ts            | 109 ++++++++++++++++++++-----
+ src/levels/checks.ts       |  63 +++++++++++++--
+ src/ui/board/interact.ts   |  55 +++++++++----
+ test/core/net.test.ts      | 198 ++++++++++++++++++++++++++++++++++++++++++++-
+ test/fixtures/build.ts     |  33 ++++++--
+ test/levels/checks.test.ts | 149 +++++++++++++++++++++++++++++++++-
+ test/ui/panels.test.ts     |  81 +++++++++++++++++--
+ 8 files changed, 658 insertions(+), 62 deletions(-)
+
+## Diff
+diff --git a/src/core/graph.ts b/src/core/graph.ts
+index 1b7a9bb..b44f669 100644
+--- a/src/core/graph.ts
++++ b/src/core/graph.ts
+@@ -49,20 +49,21 @@ export interface Graph {
+   instances: Instance[];
+   wires: Wire[];
+   customComponents: CustomComponentDef[];
+ }
+ 
+ export type IssueCode =
+   | 'unknown-def'
+   | 'unknown-instance'
+   | 'unknown-port'
+   | 'multiple-drivers'
++  | 'invalid-params'
+   | 'dangling-input'
+   | 'feedback-loop';
+ 
+ /**
+  * A defect found in a graph.
+  *
+  * `error` means the circuit is meaningless and the simulator would either crash
+  * or compute nonsense, so `compile` refuses it. `warning` means the player is
+  * probably still working: an unwired input reads 0, and a feedback loop is legal
+  * as long as a storage element makes it settle -- only the simulator can tell.
+@@ -147,26 +148,28 @@ export function cloneGraph(g: Graph): Graph {
+   };
+   if (g.level !== undefined) copy.level = g.level;
+   return copy;
+ }
+ 
+ function pinIds(pins: readonly PinDef[]): Set<string> {
+   return new Set(pins.map((p) => p.id));
+ }
+ 
+ /**
+- * Reports every structural defect in `g`, in a fixed order: unknown defs and
+- * bad wire endpoints first, then multi-driven inputs, then the graph-wide
+- * feedback scan, then unwired inputs.
++ * Reports every structural defect in `g`, in a fixed order: unknown defs, then
++ * malformed instance parameters, then bad wire endpoints, then multi-driven
++ * inputs, then the graph-wide feedback scan, then unwired inputs.
+  *
+  * Never throws and never mutates: an unknown def is reported as an issue rather
+- * than allowed to reach `registry.get`, which throws.
++ * than allowed to reach `registry.get`, which throws, and a malformed
++ * `params.width` likewise rather than allowed to reach the signal table's
++ * `alloc`, which throws.
+  */
+ export function validateGraph(g: Graph, registry: Registry): GraphIssue[] {
+   const issues: GraphIssue[] = [];
+   const byId = new Map<string, Instance>();
+   for (const inst of g.instances) byId.set(inst.id, inst);
+ 
+   /**
+    * How many wires leave each output pin. Nothing reads it yet -- multi-driving
+    * is caught from the input side (`drivenInputs` below) -- but it records the
+    * one legal direction of fan-out explicitly, so a future fan-out limit has the
+@@ -181,20 +184,41 @@ export function validateGraph(g: Graph, registry: Registry): GraphIssue[] {
+       code: 'unknown-def',
+       inst: inst.id,
+       message: { zh: `未知元件类型：${inst.def}`, en: `Unknown component type: ${inst.def}` },
+     });
+     return null;
+   };
+ 
+   const defs = new Map<string, ReturnType<Registry['get']> | null>();
+   for (const inst of g.instances) defs.set(inst.id, defOf(inst));
+ 
++  // A per-instance width override is resolved by `compile` and feeds straight
++  // into slot allocation, so a value `alloc` cannot take has to be reported here
++  // for the same reason an unknown def is: allowed through, it would reach
++  // `table.alloc` and raise a bare `RangeError` out of the grading path instead
++  // of surfacing as a `CircuitValidationError` the caller already handles.
++  // Nothing else in `params` is read by the kernel yet, so nothing else is
++  // judged here.
++  for (const inst of g.instances) {
++    const width = inst.params.width;
++    if (width === undefined || (Number.isSafeInteger(width) && width > 0)) continue;
++    issues.push({
++      severity: 'error',
++      code: 'invalid-params',
++      inst: inst.id,
++      message: {
++        zh: `元件 ${inst.id} 的参数 width 无效：${String(width)}（必须是正整数）`,
++        en: `Instance ${inst.id} has an invalid width parameter: ${String(width)} (must be a positive integer)`,
++      },
++    });
++  }
++
+   const drivenInputs = new Map<string, string[]>();
+   for (const wire of g.wires) {
+     const fromInst = byId.get(wire.from.inst);
+     const toInst = byId.get(wire.to.inst);
+     if (!fromInst || !toInst) {
+       issues.push({
+         severity: 'error',
+         code: 'unknown-instance',
+         message: {
+           zh: `导线 ${wire.id} 指向不存在的元件`,
+diff --git a/src/core/net.ts b/src/core/net.ts
+index 6424afb..8524fb5 100644
+--- a/src/core/net.ts
++++ b/src/core/net.ts
+@@ -1,14 +1,14 @@
+ import { CircuitValidationError, UnstableCircuitError } from './errors';
+-import { validateGraph, type Graph, type GraphIssue } from './graph';
++import { validateGraph, type Graph, type GraphIssue, type Instance } from './graph';
+ import { assertWidth, createSignalTable, type PortValue, type SignalTable } from './signal';
+-import type { ComponentDef, Registry } from './registry';
++import type { ComponentDef, PinDef, Registry } from './registry';
+ 
+ /** Iteration cap for the settle loop. A combinational loop exhausts it. */
+ export const SETTLE_LIMIT = 512;
+ 
+ /** Smallest table `compile` will ask for; tiny circuits still get a real buffer. */
+ const MIN_CAPACITY = 64;
+ 
+ /**
+  * A flattened, evaluated circuit: one slot per bit of every pin, plus the
+  * mapping from pins to slots, plus a read region for the pins that need one.
+@@ -25,63 +25,99 @@ export interface Netlist {
+    */
+   readonly instanceCount: number;
+   readonly expandedCount: number;
+   /** Bits allocated: one slot per bit of every pin, plus every read region. */
+   readonly slotCount: number;
+   /**
+    * `drive[slot]` is the slot `slot` reads its value from: the identity for
+    * every slot except a wired input pin bit, which reads the output pin bit
+    * driving it. Resolving wires up front keeps the settle loop branch-free.
+    *
+-   * It covers the pin slots only. A bit no wire claimed keeps its own slot --
+-   * an input pin's slots are never written by the kernel, so such a bit reads
+-   * 0 -- and a materialised read region is not addressed through `drive`.
++   * It covers the pin slots only. A bit no wire claimed keeps its own slot, so
++   * such a bit reads 0 unless a caller writes that slot -- which is how an
++   * unwired input is driven directly. A materialised read region is not
++   * addressed through `drive`.
+    */
+   readonly drive: Int32Array;
+   /** Expanded instance key -> origin instance id in the document. */
+   readonly refs: Map<string, string>;
+   /**
+    * Slot base of a **contiguous** read region for the input pin
+-   * `"<instId>.<pinId>"`, so `read(inputBase(key), pin.width)` is coherent.
++   * `"<instId>.<pinId>"`, so `read(inputBase(key), inputWidth(key))` is
++   * coherent.
+    *
+    * Usually that is the driver's own base: an unwired pin reads its own slots
+    * (which is why a level can still drive one directly), and a driver as wide as
+    * the pin is one contiguous run of slots. A driver *narrower* than the pin is
+    * neither, so `compile` materialises a region of the pin's own width and this
+    * returns that instead. Returning the driver's base in that case would make
+    * the caller read the slots that physically follow the driver -- other pins'
+    * signals, silently.
+    *
+    * A region is republished from the settled table at the end of every `settle`,
+    * so a caller reads it after settling without asking for anything extra. It is
+    * a read alias only: writing into a region does not drive the pin. To drive a
+    * level input, write the `level_input` output slot (`outputBase`), as before.
+    */
+   inputBase(key: string): number;
+   /** Slot of the output pin `"<instId>.<pinId>"`. */
+   outputBase(key: string): number;
++  /**
++   * Width of the input pin `"<instId>.<pinId>"`, in bits, as compiled.
++   *
++   * This is the width the pin's slots were allocated at and the width its read
++   * region holds, which is `params.width` when the instance sets one and the
++   * def's declared width otherwise -- see `effectiveWidth`. A caller that reads
++   * a pin as a *range* has to use this rather than the def's width, or it reads
++   * past a region that was sized from the instance.
++   */
++  inputWidth(key: string): number;
++  /** Width of the output pin `"<instId>.<pinId>"`, in bits, as compiled. */
++  outputWidth(key: string): number;
+   /** Expanded instance ids, in evaluation order. */
+   instanceIds(): readonly string[];
+   /** Def ids of the expanded instances, in evaluation order. */
+   instanceDefs(): readonly string[];
+   /** `"<instId>.<pinId>"` keys of every output pin. */
+   outputKeys(): readonly string[];
+ }
+ 
++/**
++ * Width of `pin` on `inst`: the instance's own override, else what the def says.
++ *
++ * `ComponentDef` declares exactly one width per `PinDef`, so a single
++ * `params.width` covers every pin of that instance -- the wide output of a
++ * `level_input`, both pins of a `level_output`, every input and output of a
++ * gate. There is deliberately no per-pin-name syntax: nothing needs one yet, and
++ * inventing one here would put a second, unenforced source of width in the
++ * document.
++ *
++ * `validateGraph` has already rejected a `params.width` that is not a positive
++ * integer, so `alloc`'s own width guard can never fire from a width resolved
++ * here.
++ */
++function effectiveWidth(inst: Instance, pin: PinDef): number {
++  return inst.params.width ?? pin.width;
++}
++
+ interface CompiledInstance {
+   readonly key: string;
+   readonly origin: string;
+   readonly def: ComponentDef;
+   /** Slot base of each input pin, in `def.inputs` order. */
+   readonly inputs: readonly number[];
++  /** Width of each input pin, resolved per instance; parallel to `inputs`. */
++  readonly inputWidths: readonly number[];
+   /** Slot base of each output pin, in `def.outputs` order. */
+   readonly outputs: readonly number[];
++  /** Width of each output pin, resolved per instance; parallel to `outputs`. */
++  readonly outputWidths: readonly number[];
+   /** Index of each output pin in the netlist-wide output pin list. */
+   readonly outPin: readonly number[];
+ }
+ 
+ interface OutputPin {
+   readonly base: number;
+   readonly width: number;
+ }
+ 
+ /** A contiguous slot range that `inputBase` can hand to a range-reading caller. */
+@@ -125,79 +161,97 @@ function contiguousRun(drive: Int32Array, base: number, width: number): number {
+ /**
+  * Capacity for `graph`, derived from the circuit instead of the table default.
+  *
+  * `createSignalTable`'s 65,536-slot default cannot hold the spec's
+  * 20,000-instance budget: 20,000 two-input gates occupy 60,000 slots and a
+  * single three-input gate overruns it. The estimate is exact plus a quarter of
+  * headroom, plus the most a read region could ever need (one per driven input
+  * pin wider than 1 bit, which is the only kind that can require one), so the
+  * requirement is not a knife edge; `alloc` still throws a named `RangeError`
+  * rather than growing the buffer if it were ever wrong.
++ *
++ * Every width here is the *resolved* one (`effectiveWidth`), the same values
++ * `compile` allocates from. Sizing this from the def widths would reserve less
++ * than the allocation loop and the regions actually take, and the table would
++ * overrun on a circuit that is perfectly legal.
+  */
+ function capacityFor(graph: Graph, registry: Registry): number {
+   const driven = new Set<string>();
+   for (const wire of graph.wires) driven.add(`${wire.to.inst}.${wire.to.port}`);
+   let slots = 0;
+   let regions = 0;
+   for (const inst of graph.instances) {
+     // `validateGraph` has already rejected unknown def ids, so `get` cannot throw.
+     const def = registry.get(inst.def);
+     for (const pin of def.inputs) {
+-      slots += pin.width;
+-      if (pin.width > 1 && driven.has(`${inst.id}.${pin.id}`)) regions += pin.width;
++      const width = effectiveWidth(inst, pin);
++      slots += width;
++      if (width > 1 && driven.has(`${inst.id}.${pin.id}`)) regions += width;
+     }
+-    for (const pin of def.outputs) slots += pin.width;
++    for (const pin of def.outputs) slots += effectiveWidth(inst, pin);
+   }
+   return Math.max(MIN_CAPACITY, Math.ceil(slots * 1.25) + regions + 16);
+ }
+ 
+ /**
+  * Flattens a document into a netlist.
+  *
+  * Error-severity issues are fatal (the circuit is meaningless); warnings are
+  * accepted, because an unwired input legally reads 0 and only the simulator can
+  * tell whether a feedback loop settles.
+  *
+- * Pin widths are taken from the def as written; a later task resolves
+- * per-instance width overrides, and every width-dependent step below (allocation,
+- * `drive`, the regions, the reads) goes through these same values.
++ * A pin's width is `inst.params.width` when the instance sets one, otherwise the
++ * width the def declares -- see `effectiveWidth`. Every width-dependent step
++ * below (slot allocation, `drive`, the read regions, the per-bit reads, the
++ * write-back and the capacity reservation) goes through those resolved values,
++ * because a pin allocated at one width and read at another is exactly the silent
++ * corruption this kernel exists to keep out.
+  */
+ export function compile(graph: Graph, registry: Registry): Netlist {
+   const errors: GraphIssue[] = validateGraph(graph, registry).filter(
+     (i) => i.severity === 'error',
+   );
+   if (errors.length > 0) throw new CircuitValidationError(errors);
+ 
+   const table = createSignalTable(capacityFor(graph, registry));
+   const instances: CompiledInstance[] = [];
+   const refs = new Map<string, string>();
+   const byId = new Map<string, CompiledInstance>();
+   const outputBases = new Map<string, number>();
+   const outputPins: OutputPin[] = [];
++  const inputWidths = new Map<string, number>();
++  const outputWidths = new Map<string, number>();
+ 
+   for (const inst of graph.instances) {
+     const def = registry.get(inst.def);
+-    const inputs = def.inputs.map((pin) => table.alloc(pin.width));
++    const inWidths = def.inputs.map((pin) => effectiveWidth(inst, pin));
++    const outWidths = def.outputs.map((pin) => effectiveWidth(inst, pin));
++    const inputs = inWidths.map((width) => table.alloc(width));
++    def.inputs.forEach((pin, i) => inputWidths.set(`${inst.id}.${pin.id}`, inWidths[i]!));
+     const outPin: number[] = [];
+-    const outputs = def.outputs.map((pin) => {
+-      const base = table.alloc(pin.width);
++    const outputs = outWidths.map((width, i) => {
++      const pin = def.outputs[i]!;
++      const base = table.alloc(width);
+       outputBases.set(`${inst.id}.${pin.id}`, base);
++      outputWidths.set(`${inst.id}.${pin.id}`, width);
+       outPin.push(outputPins.length);
+-      outputPins.push({ base, width: pin.width });
++      outputPins.push({ base, width });
+       return base;
+     });
+     const compiled: CompiledInstance = {
+       key: inst.id,
+       origin: inst.id,
+       def,
+       inputs,
++      inputWidths: inWidths,
+       outputs,
++      outputWidths: outWidths,
+       outPin,
+     };
+     refs.set(inst.id, inst.id);
+     byId.set(inst.id, compiled);
+     instances.push(compiled);
+   }
+ 
+   // Start from the identity so an unwired input reads its own (zero) slot, then
+   // point every wired input bit at the output pin bit that drives it. Giving each
+   // unwired pin its own slot rather than sharing one zero slot is what lets a
+@@ -208,66 +262,75 @@ export function compile(graph: Graph, registry: Registry): Netlist {
+   for (let slot = 0; slot < drive.length; slot += 1) drive[slot] = slot;
+   for (const wire of graph.wires) {
+     const from = byId.get(wire.from.inst);
+     const to = byId.get(wire.to.inst);
+     if (!from || !to) continue; // unknown endpoints are a fatal issue, already thrown
+     const fromPin = from.def.outputs.findIndex((p) => p.id === wire.from.port);
+     const toPin = to.def.inputs.findIndex((p) => p.id === wire.to.port);
+     if (fromPin < 0 || toPin < 0) continue; // unknown ports are fatal too
+     const fromBase = from.outputs[fromPin]!;
+     const toBase = to.inputs[toPin]!;
+-    const width = Math.min(from.def.outputs[fromPin]!.width, to.def.inputs[toPin]!.width);
++    // Both sides resolved per instance: a driver and a pin may each be wider (or
++    // narrower) than their def declares.
++    const width = Math.min(from.outputWidths[fromPin]!, to.inputWidths[toPin]!);
+     for (let bit = 0; bit < width; bit += 1) drive[toBase + bit] = fromBase + bit;
+   }
+ 
+   // `drive` answers "which single slot drives this bit", which is all a per-bit
+   // read needs. A caller reads a *range* instead (`read(inputBase(key), width)`),
+   // and there the driver is the wrong answer whenever it is narrower than the
+   // pin: the read would run off the end of the driver into the slots that
+   // physically follow it -- other pins' live signals -- rather than the pin's own
+   // zero bits. So for every input pin whose bits are not already one contiguous
+   // run of slots, materialise a region of that pin's width and report that. The
+   // common cases (an unwired pin, a driver as wide as the pin) alias their slots
+   // directly and allocate nothing.
+   const readRegions: ReadRegion[] = [];
+   const readBases = new Map<string, number>();
+   for (const inst of instances) {
+     for (let p = 0; p < inst.inputs.length; p += 1) {
+       const base = inst.inputs[p]!;
+-      const width = inst.def.inputs[p]!.width;
++      const width = inst.inputWidths[p]!;
+       const key = `${inst.key}.${inst.def.inputs[p]!.id}`;
+       const run = contiguousRun(drive, base, width);
+       if (run >= 0) {
+         readBases.set(key, run);
+         continue;
+       }
+       const regionBase = table.alloc(width);
+       readRegions.push({ base: regionBase, width, src: base });
+       readBases.set(key, regionBase);
+     }
+   }
+ 
+   const instanceIds = instances.map((i) => i.key);
+   const instanceDefs = instances.map((i) => i.def.id);
+   const baseOf = (map: Map<string, number>, kind: string, key: string): number => {
+     const base = map.get(key);
+     if (base === undefined) throw new Error(`no such ${kind} pin: ${key}`);
+     return base;
+   };
++  const widthOf = (map: Map<string, number>, kind: string, key: string): number => {
++    const width = map.get(key);
++    if (width === undefined) throw new Error(`no such ${kind} pin: ${key}`);
++    return width;
++  };
+   const net: Netlist = {
+     instanceCount: instances.length,
+     expandedCount: instances.length,
+     slotCount: table.size,
+     drive,
+     refs,
+     inputBase: (key) => baseOf(readBases, 'input', key),
+     outputBase: (key) => baseOf(outputBases, 'output', key),
++    inputWidth: (key) => widthOf(inputWidths, 'input', key),
++    outputWidth: (key) => widthOf(outputWidths, 'output', key),
+     instanceIds: () => instanceIds,
+     instanceDefs: () => instanceDefs,
+     outputKeys: () => [...outputBases.keys()],
+   };
+   INTERNALS.set(net, { table, instances, outputPins, readRegions });
+   return net;
+ }
+ 
+ export interface SettleReport {
+   readonly iterations: number;
+@@ -322,30 +385,32 @@ export class Simulation {
+     this.#publishState();
+     this.settle();
+   }
+ 
+   /**
+    * Publishes storage outputs from their private state.
+    *
+    * `evaluate` does this too (and `settle` calls it), so this only exists so
+    * that a def with state but no `evaluate` still holds, and so that a caller
+    * reading right after `reset`/`tick` sees the held value. It is only correct
+-   * while each state byte maps to one 1-bit output pin, which holds for
+-   * `delay_line` and `mem1`; wide registers in a later phase need a publish hook.
++   * while each state byte maps to one 1-bit value, which holds for `delay_line`
++   * and `mem1`; wide registers in a later phase need a publish hook. The write
++   * still covers the pin's whole resolved width -- a `1` published onto a pin an
++   * instance widened to 8 bits is `0b00000001`, not a stale high byte.
+    */
+   #publishState(): void {
+     for (let i = 0; i < this.#instances.length; i += 1) {
+       const inst = this.#instances[i]!;
+       if (!inst.def.sequential) continue;
+       const state = this.#state[i]!;
+       for (let p = 0; p < inst.outputs.length; p += 1) {
+-        this.#table.setBit(inst.outputs[p]!, state[p] === 1 ? 1 : 0);
++        this.#table.setPort(inst.outputs[p]!, inst.outputWidths[p]!, state[p] === 1 ? 1 : 0);
+       }
+     }
+   }
+ 
+   /**
+    * Assembles a pin's value one bit at a time, following `drive` per bit.
+    *
+    * Deliberately NOT `getPort(drive[base], width)`: that reads `width`
+    * *consecutive* slots from wherever the driver happens to sit, so a driver
+    * narrower than the pin pulls in the slots allocated after it -- other pins'
+@@ -367,21 +432,21 @@ export class Simulation {
+     const bytes = new Uint8Array(Math.ceil(width / 8));
+     for (let bit = 0; bit < width; bit += 1) {
+       if (slots[this.#drive[base + bit]!] === 1) bytes[bit >> 3]! |= 1 << (bit & 7);
+     }
+     return bytes;
+   }
+ 
+   /** Reads each input pin bit by bit through its pre-resolved driver slots. */
+   #readInputs(inst: CompiledInstance, scratch: PortValue[]): void {
+     for (let p = 0; p < inst.inputs.length; p += 1) {
+-      scratch[p] = this.#gather(inst.inputs[p]!, inst.def.inputs[p]!.width);
++      scratch[p] = this.#gather(inst.inputs[p]!, inst.inputWidths[p]!);
+     }
+     // Keep the scratch exactly as long as this instance's pin list, so a shorter
+     // instance never sees values left behind by a longer one.
+     scratch.length = inst.inputs.length;
+   }
+ 
+   /**
+    * Republishes every materialised read region from the values just settled.
+    *
+    * `inputBase` hands out a slot range and the caller then reads it whenever it
+diff --git a/src/levels/checks.ts b/src/levels/checks.ts
+index d45a958..a4711af 100644
+--- a/src/levels/checks.ts
++++ b/src/levels/checks.ts
+@@ -10,20 +10,29 @@ import type {
+   LevelCheck,
+   LevelSpec,
+ } from './spec';
+ 
+ export interface LevelIo {
+   reset(): void;
+   writeInput(name: string, value: number): void;
+   readOutput(name: string): number;
+   tick(): void;
+   readonly sim: Simulation;
++  /**
++   * A level pin whose compiled width disagrees with `spec.io`, if any.
++   *
++   * Set only when such a pin is *present* in the circuit: nothing can be written
++   * to it or read from it without crossing a pin boundary, so `createSim` treats
++   * the circuit as unbound. Absent pins are not reported here -- an incomplete
++   * board still grades, with those pins reading 0 as they always have.
++   */
++  readonly mismatch?: string;
+ }
+ 
+ /**
+  * True when `value` is representable on a `width`-bit pin.
+  *
+  * Delegates to the kernel's own `assertWidth` instead of duplicating its bounds,
+  * so "what the level layer will write" and "what the signal table accepts" can
+  * never drift apart: every value this rejects is one that would have thrown.
+  */
+ function fitsPort(value: number, width: number): boolean {
+@@ -37,54 +46,83 @@ function fitsPort(value: number, width: number): boolean {
+   }
+ }
+ 
+ /**
+  * Binds a compiled circuit to a level's named pins.
+  *
+  * Convention: a `level_input` instance whose id is `IN_<pinId>` supplies that
+  * level input; a `level_output` instance whose id is `OUT` (single output) or
+  * `OUT_<pinId>` (multi-output) mirrors that level output.
+  *
+- * Widths come from the level spec, so multi-bit level pins work without any
+- * special-casing in the caller.
++ * Every base and width comes from the COMPILED pin (`net.outputWidth` /
++ * `net.inputWidth`), which is the instance's `params.width` when it sets one and
++ * the def's declared width otherwise. The def alone is never enough: both
++ * `level_input` and `level_output` declare 1-bit pins, so a level's 8-bit pin
++ * exists in the table only because the instance carrying it says so.
++ *
++ * A pin that is present but compiled at a width other than `spec.io`'s is
++ * reported in `mismatch` and binds nothing. Writing it at the spec width would
++ * run across the neighbouring slots and writing it at the compiled width would
++ * silently drop the high bits; neither is the value the level asked for, so the
++ * check fails loudly instead (`runChecks` maps this to `missing-io`). A pin whose
++ * instance is absent is NOT a mismatch: it keeps its Phase-0 behaviour of
++ * reading 0 and swallowing writes, so a half-built board still grades.
+  */
+ export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): LevelIo {
+   const inputSlots = new Map<string, { base: number; width: number }>();
+   const outputSlots = new Map<string, { base: number; width: number }>();
++  const mismatches: string[] = [];
++
++  const noteMismatch = (key: string, compiled: number, declared: number): void => {
++    mismatches.push(`${key} is ${compiled}-bit in the circuit but the level declares ${declared}`);
++  };
+ 
+   for (const pin of spec.io.inputs) {
++    const key = `IN_${pin.id}.out`;
+     try {
+-      inputSlots.set(pin.id, { base: net.outputBase(`IN_${pin.id}.out`), width: pin.width });
++      const width = net.outputWidth(key);
++      if (width !== pin.width) {
++        noteMismatch(key, width, pin.width);
++        continue;
++      }
++      inputSlots.set(pin.id, { base: net.outputBase(key), width });
+     } catch {
+       /* pin not present in this circuit: it will read as 0 */
+     }
+   }
+ 
+   const outputPins = spec.io.outputs;
+   for (const pin of outputPins) {
+     const keys = outputPins.length === 1 ? ['OUT.in'] : [`OUT_${pin.id}.in`, 'OUT.in'];
+     for (const key of keys) {
+       try {
+-        outputSlots.set(pin.id, { base: net.inputBase(key), width: pin.width });
++        const width = net.inputWidth(key);
++        if (width !== pin.width) {
++          // Present but mis-sized: that is the disagreement to report, not a
++          // reason to go looking for another naming convention.
++          noteMismatch(key, width, pin.width);
++          break;
++        }
++        outputSlots.set(pin.id, { base: net.inputBase(key), width });
+         break;
+       } catch {
+         /* try the next candidate */
+       }
+     }
+   }
+ 
+   const toNumber = (v: PortValue): number => {
+     if (typeof v === 'number') return v;
+     return Array.from(v).reduce((acc, byte, i) => acc + byte * 2 ** (8 * i), 0);
+   };
+ 
+-  return {
++  const io: LevelIo = {
+     sim,
+     reset: () => sim.reset(),
+     tick: () => {
+       sim.tick();
+     },
+     writeInput(name: string, value: number): void {
+       const slot = inputSlots.get(name);
+       if (!slot) return;
+       if (!fitsPort(value, slot.width)) {
+         // Authored level data is untrusted input: a row may name a value the pin
+@@ -96,20 +134,25 @@ export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): Lev
+         return;
+       }
+       sim.write(slot.base, slot.width, value);
+     },
+     readOutput(name: string): number {
+       const slot = outputSlots.get(name);
+       if (!slot) return 0;
+       return toNumber(sim.read(slot.base, slot.width));
+     },
+   };
++
++  // `exactOptionalPropertyTypes` rejects handing an explicit `undefined` to an
++  // optional property, so the field is only present when there is something to
++  // report.
++  return mismatches.length === 0 ? io : { ...io, mismatch: mismatches.join('; ') };
+ }
+ 
+ function enumerateInputs(spec: LevelSpec): Array<Record<string, number>> {
+   const bits = spec.io.inputs.reduce((acc, p) => acc + p.width, 0);
+   const combos: Array<Record<string, number>> = [];
+   const total = 2 ** bits;
+   for (let n = 0; n < total; n += 1) {
+     const row: Record<string, number> = {};
+     let offset = 0;
+     for (const pin of spec.io.inputs) {
+@@ -318,38 +361,48 @@ function failure(
+   check: LevelCheck,
+   inputs: Readonly<Record<string, number>>,
+   expected: Readonly<Record<string, number>>,
+   actual: Readonly<Record<string, number>>,
+   tick: number,
+   reason: NonNullable<CheckFailure['reason']>,
+ ): CheckFailure {
+   return { check: check.kind, inputs, expected, actual, tick, reason };
+ }
+ 
++/**
++ * Why a check had no evaluable circuit: the settle loop ran away (`unstable`),
++ * `compile` refused the graph (`invalid`), or the graph's level I/O does not
++ * match the level's declared pins (`missing-io`, see `bindLevelIo`). Each maps
++ * onto the `CheckFailure` reason of the same name.
++ */
+ interface AttemptFail {
+   error: 'unstable' | 'invalid' | 'missing-io';
+ }
+ 
+ interface AttemptOk {
+   outputs: Record<string, number>;
+   ticksUsed: number;
+ }
+ 
+ function createSim(
+   graph: Graph,
+   registry: Registry,
+   spec: LevelSpec,
+ ): { io: LevelIo } | AttemptFail {
+   try {
+     const net = compile(graph, registry);
+     const sim = new Simulation(net, registry);
+     const io = bindLevelIo(sim, net, spec);
++    // The circuit's level I/O is present but sized against the level: no value
++    // can cross such a pin intact, so the circuit is unbound rather than run at
++    // whichever of the two widths happens to look right.
++    if (io.mismatch !== undefined) return { error: 'missing-io' };
+     return { io };
+   } catch (e) {
+     if (e instanceof UnstableCircuitError) return { error: 'unstable' };
+     if (e instanceof CircuitValidationError) return { error: 'invalid' };
+     throw e;
+   }
+ }
+ 
+ export function countTicksUsed(graph: Graph, registry: Registry, spec: LevelSpec): number {
+   return runChecks(graph, registry, spec).ticksUsed;
+diff --git a/src/ui/board/interact.ts b/src/ui/board/interact.ts
+index 30bc554..0284254 100644
+--- a/src/ui/board/interact.ts
++++ b/src/ui/board/interact.ts
+@@ -19,49 +19,67 @@ import type { CommandStack } from '../../app/commands';
+ import type { AppState, Store } from '../../app/store';
+ import type { LevelSpec } from '../../levels/spec';
+ import { INSTANCE_HEIGHT } from '../theme';
+ import { hitTest, screenToWorld, snap, type Point } from './view';
+ 
+ export interface BoardInputOptions {
+   /** Called after any model mutation so the UI can re-render and re-grade. */
+   onChange(): void;
+ }
+ 
++/** The instance id a freshly placed level-IO part takes, and the pin's width. */
++export interface LevelIoPlacement {
++  /** `IN_<pinId>`, `OUT` or `OUT_<pinId>`, in pin order. */
++  readonly id: string;
++  /** Width the level declares for that pin, in bits. */
++  readonly width: number;
++}
++
+ /**
+- * Instance id a freshly placed level IO part must carry.
++ * The level-IO binding a freshly placed part must carry, or `undefined`.
+  *
+  * `levels/checks.ts` binds a circuit to its level by instance id: `IN_<pin>` for
+  * a level input, `OUT` for a single-output level and `OUT_<pin>` for a
+- * multi-output one. A part dropped from the palette would otherwise be named
+- * by the graph's own allocator (`i1`, `i2`, …), never bind, and make every
+- * level unpassable -- so placement hands out the conventional ids in pin order
+- * and falls back to the allocator only once the level's pins are all placed
+- * (a spare `level_input` is a legal, if redundant, part).
++ * multi-output one. A part dropped from the palette would otherwise be named by
++ * the graph's own allocator (`i1`, `i2`, …), never bind, and make every level
++ * unpassable -- so placement hands out the conventional ids in pin order and
++ * falls back to the allocator only once the level's pins are all placed (a spare
++ * `level_input` is a legal, if redundant, part).
++ *
++ * The width comes back with the id because it is part of the same binding, and
++ * only this function knows which pin the id refers to: `level_input` and
++ * `level_output` declare 1-bit pins, so an 8-bit level pin exists only if the
++ * instance placed for it says `params.width = 8`. Guessing it back from the id
++ * string would be a second, unenforced source of truth.
+  */
+-export function levelIoInstanceId(
++export function levelIoPlacement(
+   level: LevelSpec,
+   graph: Graph,
+   defId: string,
+-): string | undefined {
++): LevelIoPlacement | undefined {
+   const taken = new Set(graph.instances.map((inst) => inst.id));
+   if (defId === 'level_input') {
+     for (const pin of level.io.inputs) {
+       const id = `IN_${pin.id}`;
+-      if (!taken.has(id)) return id;
++      if (!taken.has(id)) return { id, width: pin.width };
+     }
+     return undefined;
+   }
+   if (defId === 'level_output') {
+-    const ids =
+-      level.io.outputs.length === 1 ? ['OUT'] : level.io.outputs.map((pin) => `OUT_${pin.id}`);
+-    for (const id of ids) {
+-      if (!taken.has(id)) return id;
++    const pins = level.io.outputs;
++    if (pins.length === 1) {
++      const pin = pins[0]!;
++      return taken.has('OUT') ? undefined : { id: 'OUT', width: pin.width };
++    }
++    for (const pin of pins) {
++      const id = `OUT_${pin.id}`;
++      if (!taken.has(id)) return { id, width: pin.width };
+     }
+   }
+   return undefined;
+ }
+ 
+ export function attachBoardInput(
+   canvas: HTMLCanvasElement,
+   store: Store<AppState>,
+   stack: CommandStack,
+   options: BoardInputOptions,
+@@ -87,27 +105,34 @@ export function attachBoardInput(
+   const instanceOf = (id: string) => store.get().graph.instances.find((i) => i.id === id);
+ 
+   const armedDef = (): string => (canvas.dataset.pendingDef ?? '').trim();
+ 
+   const place = (world: Point, defId: string): void => {
+     // The cursor lands on the part's pin row (its vertical centre) at its left
+     // edge, so a part dropped at (px, py) has its output pin at (px + 64, py):
+     // the row the player then drags along to wire it up.
+     const x = snap(world.x);
+     const y = snap(world.y - INSTANCE_HEIGHT / 2);
+-    const id = levelIoInstanceId(store.get().level, store.get().graph, defId);
++    const placement = levelIoPlacement(store.get().level, store.get().graph, defId);
+     let created: string | null = null;
+     stack.push(
+       {
+         label: `add ${defId}`,
+         do: (g) => {
+-          created = addInstance(g, defId, x, y, id).id;
++          const inst = addInstance(g, defId, x, y, placement?.id);
++          // The binding is the id AND the width: `compile` sizes a pin from
++          // `params.width ?? def.pin.width`, and `bindLevelIo` refuses a pin
++          // compiled at a width the level does not declare. A dropped 8-bit
++          // level input that carried only the id would therefore be one bit
++          // wide and make the level's own board ungradable.
++          if (placement) inst.params.width = placement.width;
++          created = inst.id;
+         },
+         undo: (g) => {
+           if (created) removeInstance(g, created);
+         },
+       },
+       store.get().graph,
+     );
+     options.onChange();
+   };
+ 
+diff --git a/test/core/net.test.ts b/test/core/net.test.ts
+index 3d619b7..9b8f958 100644
+--- a/test/core/net.test.ts
++++ b/test/core/net.test.ts
+@@ -1,16 +1,16 @@
+ import { describe, expect, it } from 'vitest';
+ import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
+ import { BASE_DEFS } from '../../src/core/defs/index';
+ import { createRegistry } from '../../src/core/registry';
+ import type { ComponentDef, Registry } from '../../src/core/registry';
+-import { UnstableCircuitError } from '../../src/core/errors';
++import { CircuitValidationError, UnstableCircuitError } from '../../src/core/errors';
+ import type { PortValue } from '../../src/core/signal';
+ import { SETTLE_LIMIT, Simulation, compile, delayOf } from '../../src/core/net';
+ 
+ const registry = createRegistry(BASE_DEFS);
+ 
+ const toNumber = (v: PortValue): number =>
+   typeof v === 'number' ? v : Array.from(v).reduce((acc, byte, i) => acc + byte * 2 ** (8 * i), 0);
+ 
+ /** A NAND whose pins are addressed by name as `"<instId>.<pinId>"`. */
+ function nandFixture(): {
+@@ -48,20 +48,43 @@ describe('compile', () => {
+     // `createSignalTable`'s default capacity: compiling them proves the capacity
+     // is derived from the circuit rather than inherited from the default.
+     const g = emptyGraph();
+     const gates = 16_500;
+     for (let i = 0; i < gates; i += 1) addInstance(g, 'and3', 0, 0, `i${i}`);
+     const net = compile(g, registry);
+     expect(net.slotCount).toBe(gates * 4);
+     expect(net.slotCount).toBeGreaterThan(65_536);
+     expect(new Simulation(net, registry).settle().stable).toBe(true);
+   });
++
++  it.each([0, -1, 1.5, Number.NaN])(
++    'rejects a malformed params.width (%s) as a validation issue',
++    (width) => {
++      // An instance width feeds slot allocation, so a value `alloc` cannot take
++      // has to be reported like an unknown def -- as a `GraphIssue` that
++      // `compile` turns into a catchable `CircuitValidationError` -- rather than
++      // allowed to reach `table.alloc`, which throws a bare `RangeError` out of
++      // the level-grading path.
++      const g = emptyGraph();
++      addInstance(g, 'level_input', 0, 0, 'feed').params.width = width;
++      let caught: unknown;
++      try {
++        compile(g, registry);
++      } catch (error) {
++        caught = error;
++      }
++      expect(caught).toBeInstanceOf(CircuitValidationError);
++      expect((caught as CircuitValidationError).issues.map((issue) => issue.code)).toEqual([
++        'invalid-params',
++      ]);
++    },
++  );
+ });
+ 
+ describe('Simulation', () => {
+   it('evaluates a NAND for every input combination', () => {
+     const g = emptyGraph();
+     const nand = addInstance(g, 'nand', 0, 0);
+     const net = compile(g, registry);
+     const sim = new Simulation(net, registry);
+     const a = net.inputBase(`${nand.id}.a`);
+     const b = net.inputBase(`${nand.id}.b`);
+@@ -473,20 +496,193 @@ describe('wide ports', () => {
+     connect(sameGraph, { inst: src.id, port: 'out' }, { inst: dst.id, port: 'in' });
+     expect(compile(sameGraph, same).slotCount).toBe(24);
+ 
+     // Narrower driver: the same circuit plus one 8-bit region for the wide input
+     // (2 + 8 + 16 pin bits, + 8 region bits).
+     const { graph, registry: reg } = narrowDriverFixture();
+     expect(compile(graph, reg).slotCount).toBe(34);
+   });
+ });
+ 
++/**
++ * `bit.out -> wide.in`, where EVERY width above one comes from `params.width`
++ * rather than from a def: `bit` is a 1-bit `pass1`, `feed` is a `level_input`
++ * whose one-bit def pin is widened to 8, and `wide` is another `pass1` raised to
++ * 8 bits. Slot order is the same as `narrowDriverFixture`'s, because instances
++ * are allocated in document order with inputs before outputs:
++ *
++ *   `bit.in` 0, `bit.out` 1, `feed.out` 2..9, `wide.in` 10..17, `wide.out` 18..25
++ *
++ * `bit.out` therefore sits directly against the seven live bits of `feed.out`,
++ * so this is the Task-1 reproduction with the width resolved per instance.
++ */
++function paramsWideFixture(): WideFixture {
++  const registry = createRegistry([...BASE_DEFS, passDef(1)]);
++  const g = emptyGraph();
++  const bit = addInstance(g, 'pass1', 0, 0, 'bit');
++  const feed = addInstance(g, 'level_input', 0, 40, 'feed');
++  feed.params.width = 8;
++  const wide = addInstance(g, 'pass1', 0, 80, 'wide');
++  wide.params.width = 8;
++  connect(g, { inst: bit.id, port: 'out' }, { inst: wide.id, port: 'in' });
++  return { graph: g, registry };
++}
++
++describe('per-instance pin widths', () => {
++  it('resolves a pin width from the instance over the def', () => {
++    // `level_input.out` is declared 1 bit wide; this instance says 8, and that
++    // is what the netlist allocates, reports and lets a caller write.
++    const g = emptyGraph();
++    const feed = addInstance(g, 'level_input', 0, 0, 'feed');
++    feed.params.width = 8;
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    const base = net.outputBase('feed.out');
++
++    expect(net.outputWidth('feed.out')).toBe(8);
++    expect(net.slotCount).toBe(8);
++    sim.write(base, 8, 0xa5);
++    sim.settle();
++    expect(toNumber(sim.read(base, 8))).toBe(0xa5);
++  });
++
++  it('leaves every width at the def default when the instance sets no params', () => {
++    // The Phase-0 regression, pinned by hand as well as by the whole existing
++    // suite: an instance with empty params is allocated, sized and reported
++    // exactly as its def declares.
++    const g = emptyGraph();
++    const feed = addInstance(g, 'level_input', 0, 0, 'feed');
++    const sink = addInstance(g, 'level_output', 0, 40, 'OUT');
++    connect(g, { inst: feed.id, port: 'out' }, { inst: sink.id, port: 'in' });
++    const net = compile(g, registry);
++
++    expect(net.outputWidth('feed.out')).toBe(1);
++    expect(net.inputWidth('OUT.in')).toBe(1);
++    expect(net.outputWidth('OUT.mirror')).toBe(1);
++    // feed.out + OUT.in + OUT.mirror, one bit each.
++    expect(net.slotCount).toBe(3);
++  });
++
++  it('reports an unknown pin by name and direction', () => {
++    const g = emptyGraph();
++    const feed = addInstance(g, 'level_input', 0, 0, 'feed');
++    feed.params.width = 8;
++    const net = compile(g, registry);
++    expect(() => net.inputWidth('feed.out')).toThrow(/no such input pin: feed\.out/);
++    expect(() => net.outputWidth('feed.in')).toThrow(/no such output pin: feed\.in/);
++  });
++
++  it('gathers a params-wide pin per bit when its driver is narrower', () => {
++    const { graph, registry: reg } = paramsWideFixture();
++    const net = compile(graph, reg);
++    const sim = new Simulation(net, reg);
++    const feed = net.outputBase('feed.out');
++    const bitIn = net.inputBase('bit.in');
++    const observed = net.outputBase('wide.out');
++
++    expect(net.inputWidth('wide.in')).toBe(8);
++    // The reproduction depends on that adjacency; assert it rather than trust
++    // the allocation order documented above.
++    expect(feed).toBe(net.outputBase('bit.out') + 1);
++
++    for (const [feedValue, bit] of [
++      [0xff, 1],
++      [0xff, 0],
++      [0x00, 1],
++      [0x00, 0],
++    ] as const) {
++      sim.reset();
++      sim.write(feed, 8, feedValue); // the neighbouring pin toggles 0xff <-> 0x00
++      sim.write(bitIn, 1, bit);
++      sim.settle();
++      expect(toNumber(sim.read(observed, 8)), `feed=${feedValue} bit=${bit}`).toBe(bit);
++    }
++  });
++
++  it('gives a params-wide pin a coherent 8-bit region when its driver is narrower', () => {
++    const { graph, registry: reg } = paramsWideFixture();
++    const net = compile(graph, reg);
++    const sim = new Simulation(net, reg);
++    const feed = net.outputBase('feed.out');
++    const bitIn = net.inputBase('bit.in');
++    const base = net.inputBase('wide.in');
++
++    // Sized from `params.width`, and not the driver's base: `read(driver, 8)`
++    // would sweep up the seven live slots that follow the one-bit driver.
++    expect(net.inputWidth('wide.in')).toBe(8);
++    expect(base).not.toBe(net.outputBase('bit.out'));
++    // 2 + 8 + 16 pin bits, plus one 8-bit region.
++    expect(net.slotCount).toBe(34);
++
++    sim.write(feed, 8, 0xff);
++    sim.write(bitIn, 1, 1);
++    sim.settle();
++    expect(toNumber(sim.read(base, 8))).toBe(1); // bit 0 only, no extra call needed
++
++    sim.write(feed, 8, 0x00); // the neighbour changes; the pin does not
++    sim.settle();
++    expect(toNumber(sim.read(base, 8))).toBe(1);
++
++    sim.write(bitIn, 1, 0);
++    sim.settle();
++    expect(toNumber(sim.read(base, 8))).toBe(0); // refreshed by that settle
++    // Coherent with what the pin's own consumer sees, bit for bit.
++    expect(toNumber(sim.read(base, 8))).toBe(toNumber(sim.read(net.outputBase('wide.out'), 8)));
++  });
++
++  it('reads a params-wide pin straight from an equally wide driver', () => {
++    const reg = createRegistry([...BASE_DEFS, passDef(1)]);
++    const g = emptyGraph();
++    const feed = addInstance(g, 'level_input', 0, 0, 'feed');
++    feed.params.width = 8;
++    const wide = addInstance(g, 'pass1', 0, 40, 'wide');
++    wide.params.width = 8;
++    connect(g, { inst: feed.id, port: 'out' }, { inst: wide.id, port: 'in' });
++    const net = compile(g, reg);
++    const sim = new Simulation(net, reg);
++
++    // Equal widths are one contiguous run of the driver's own slots, so nothing
++    // is materialised and the pin reads the driver's base directly.
++    expect(net.inputBase('wide.in')).toBe(net.outputBase('feed.out'));
++    expect(net.slotCount).toBe(24);
++    for (const value of [0x00, 0x01, 0x55, 0x80, 0xab, 0xff]) {
++      sim.write(net.outputBase('feed.out'), 8, value);
++      sim.settle();
++      expect(toNumber(sim.read(net.outputBase('wide.out'), 8)), `value=${value}`).toBe(value);
++      expect(toNumber(sim.read(net.inputBase('wide.in'), 8)), `value=${value}`).toBe(value);
++    }
++  });
++
++  it('reserves table capacity for params-derived widths and their read regions', () => {
++    // The capacity is fixed at compile time, so it has to be derived from the
++    // SAME widths the allocation loop uses -- read regions included. 24 one-bit
++    // sources driving 24 eight-bit `pass1` instances need 17*24 pin slots plus
++    // 8*24 region slots = 600. A capacity computed from the def widths (or from
++    // the params widths but without the regions) is smaller than that, so
++    // `alloc` would throw "signal table is full" instead of the circuit
++    // compiling -- a wrongly sized region, one step earlier.
++    const reg = createRegistry([...BASE_DEFS, passDef(1)]);
++    const g = emptyGraph();
++    const count = 24;
++    for (let i = 0; i < count; i += 1) {
++      const src = addInstance(g, 'level_input', 0, i * 40, `src${i}`);
++      const dst = addInstance(g, 'pass1', 0, i * 40 + 20, `dst${i}`);
++      dst.params.width = 8;
++      connect(g, { inst: src.id, port: 'out' }, { inst: dst.id, port: 'in' });
++    }
++    const net = compile(g, reg);
++
++    expect(net.slotCount).toBe(count * 25);
++    expect(new Simulation(net, reg).settle().stable).toBe(true);
++  });
++});
++
+ describe('delayOf', () => {
+   it('sums gate costs along the longest path and counts sources as free', () => {
+     const g = emptyGraph();
+     const inA = addInstance(g, 'level_input', 0, 0);
+     const nand = addInstance(g, 'nand', 60, 0);
+     const not = addInstance(g, 'not', 120, 0);
+     const out = addInstance(g, 'level_output', 180, 0);
+     connect(g, { inst: inA.id, port: 'out' }, { inst: nand.id, port: 'a' });
+     connect(g, { inst: nand.id, port: 'out' }, { inst: not.id, port: 'a' });
+     connect(g, { inst: not.id, port: 'out' }, { inst: out.id, port: 'in' });
+diff --git a/test/fixtures/build.ts b/test/fixtures/build.ts
+index a903e5b..044d57d 100644
+--- a/test/fixtures/build.ts
++++ b/test/fixtures/build.ts
+@@ -1,46 +1,67 @@
+-import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
++import { addInstance, connect, emptyGraph, type Graph, type Instance } from '../../src/core/graph';
+ import { BASE_DEFS } from '../../src/core/defs/index';
+ import { createRegistry } from '../../src/core/registry';
+ 
+ export const registry = createRegistry(BASE_DEFS);
+ 
+ export type Node =
+-  | { readonly kind: 'input'; readonly name: string }
++  | { readonly kind: 'input'; readonly name: string; readonly width?: number }
+   | { readonly kind: 'part'; readonly def: string; readonly id: string; readonly from: readonly string[] }
+-  | { readonly kind: 'output'; readonly name?: string; readonly from: string };
++  | { readonly kind: 'output'; readonly name?: string; readonly from: string; readonly width?: number };
++
++/**
++ * Carries a declared level-pin width onto its instance.
++ *
++ * `level_input` / `level_output` declare 1-bit pins, so the width a level's pin
++ * actually has exists only on the instance (`params.width`) -- these are exactly
++ * the values the palette's drop path writes (`ui/board/interact.ts`). Leaving
++ * `width` out means the def's 1 bit, which is what every Phase-0 circuit built
++ * by this fixture relies on. Wide *components* need nothing here: Task 3's wide
++ * defs declare their own pin widths.
++ */
++function setWidth(inst: Instance, width: number | undefined): void {
++  if (width !== undefined) inst.params.width = width;
++}
+ 
+ /**
+  * Builds a circuit from a flat declaration list.
+  *
+  * `from` entries resolve as: a level input name (`IN_<name>.out`), a part id
+  * (`.out`), or an explicit `"partId.pin"`. When a part has more inputs than
+  * `from` entries, the last entry is reused -- that is how a NOT gets wired
+  * from a single source.
+  *
+  * Level inputs are instances named `IN_<name>`; level outputs are instances
+- * named `OUT` (single output) or `OUT_<name>` (multi-output).
++ * named `OUT` (single output) or `OUT_<name>` (multi-output). Either may declare
++ * the width of its level pin, and it is written to the instance as
++ * `params.width` so `levels/checks.ts` can bind it at the width the level asks
++ * for.
+  */
+ export function build(nodes: readonly Node[]): Graph {
+   const g = emptyGraph();
+   const inputIds = new Map<string, string>();
+   const partIds = new Map<string, string>();
+   const outputIds = new Map<string, string>();
+ 
+   for (const node of nodes) {
+     if (node.kind === 'input') {
+-      inputIds.set(node.name, addInstance(g, 'level_input', 0, 0, `IN_${node.name}`).id);
++      const inst = addInstance(g, 'level_input', 0, 0, `IN_${node.name}`);
++      setWidth(inst, node.width);
++      inputIds.set(node.name, inst.id);
+     } else if (node.kind === 'part') {
+       partIds.set(node.id, addInstance(g, node.def, 120, 0).id);
+     } else {
+       const name = node.name ?? 'OUT';
+-      outputIds.set(name, addInstance(g, 'level_output', 240, 0, name).id);
++      const inst = addInstance(g, 'level_output', 240, 0, name);
++      setWidth(inst, node.width);
++      outputIds.set(name, inst.id);
+     }
+   }
+ 
+   const resolve = (ref: string): { inst: string; port: string } => {
+     const [head, pin] = ref.split('.') as [string, string?];
+     const inputId = inputIds.get(head!);
+     if (inputId) return { inst: inputId, port: 'out' };
+     const partId = partIds.get(head!);
+     if (!partId) throw new Error(`build: unknown reference "${ref}"`);
+     return { inst: partId, port: pin ?? 'out' };
+diff --git a/test/levels/checks.test.ts b/test/levels/checks.test.ts
+index e432085..d41ef16 100644
+--- a/test/levels/checks.test.ts
++++ b/test/levels/checks.test.ts
+@@ -1,16 +1,20 @@
+ import { describe, expect, it } from 'vitest';
+ import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
+ import { BASE_DEFS } from '../../src/core/defs/index';
++import { Simulation, compile } from '../../src/core/net';
+ import { createRegistry, type ComponentDef } from '../../src/core/registry';
++import type { PortValue } from '../../src/core/signal';
++import { grade } from '../../src/levels/grader';
+ import type { LevelSpec } from '../../src/levels/spec';
+-import { generateRows, countTicksUsed, runChecks } from '../../src/levels/checks';
++import { bindLevelIo, generateRows, countTicksUsed, runChecks } from '../../src/levels/checks';
++import { build } from '../fixtures/build';
+ 
+ const registry = createRegistry(BASE_DEFS);
+ 
+ /** The truth table for AND. Level data is explicit; nothing is inferred. */
+ const AND_ROWS = [
+   { inputs: { a: 0, b: 0 }, outputs: { out: 0 } },
+   { inputs: { a: 0, b: 1 }, outputs: { out: 0 } },
+   { inputs: { a: 1, b: 0 }, outputs: { out: 0 } },
+   { inputs: { a: 1, b: 1 }, outputs: { out: 1 } },
+ ] as const;
+@@ -377,10 +381,153 @@ describe('constraint check', () => {
+     const inA = addInstance(g, 'level_input', 0, 0, 'IN_a');
+     const inB = addInstance(g, 'level_input', 0, 60, 'IN_b');
+     const or = addInstance(g, 'or', 60, 20);
+     const out = addInstance(g, 'level_output', 120, 20, 'OUT');
+     connect(g, { inst: inA.id, port: 'out' }, { inst: or.id, port: 'a' });
+     connect(g, { inst: inB.id, port: 'out' }, { inst: or.id, port: 'b' });
+     connect(g, { inst: or.id, port: 'out' }, { inst: out.id, port: 'in' });
+     expect(runChecks(g, registry, parity).passed).toBe(false);
+   });
+ });
++
++const toNumber = (v: PortValue): number =>
++  typeof v === 'number' ? v : Array.from(v).reduce((acc, byte, i) => acc + byte * 2 ** (8 * i), 0);
++
++/** Copies its one 8-bit input pin to its one 8-bit output pin; not shipped. */
++const pass8: ComponentDef = {
++  id: 'pass8',
++  name: { zh: '八位直通', en: '8-Bit Pass' },
++  category: 'wide',
++  inputs: [{ id: 'in', width: 8 }],
++  outputs: [{ id: 'out', width: 8 }],
++  cost: 1,
++  sequential: false,
++  stateBytes: 0,
++  evaluate: (i, o) => {
++    o[0] = toNumber(i[0] ?? 0);
++  },
++};
++
++const wideRegistry = createRegistry([...BASE_DEFS, pass8]);
++
++/**
++ * An 8-bit level: one `a` pin and one `out` pin, both 8 bits wide.
++ *
++ * `level_input` / `level_output` declare 1-bit pins, so the width a level needs
++ * lives on the INSTANCE (`params.width`) -- which is the half of spec §3.3 the
++ * kernel has to honour. The rows are generated from the level's own pin widths,
++ * so all 256 values are covered rather than a hand-picked handful.
++ */
++const wideIo: LevelSpec['io'] = {
++  inputs: [{ id: 'a', width: 8 }],
++  outputs: [{ id: 'out', width: 8 }],
++};
++
++const wideSpec: LevelSpec = {
++  ...andSpec,
++  id: 'test-wide-level',
++  chapter: 2,
++  io: wideIo,
++  threeStar: { gate: 1, delay: 1, tick: 0 },
++  checks: [
++    { kind: 'truth-table', rows: generateRows({ ...andSpec, io: wideIo }, ({ a }) => a ?? 0) },
++  ],
++};
++
++/** `IN_a --pass8--> OUT` at 8 bits, with each level pin's width on its instance. */
++function wideSolution(widths: { input?: number; output?: number } = {}): Graph {
++  const g = emptyGraph();
++  const inA = addInstance(g, 'level_input', 0, 0, 'IN_a');
++  const pass = addInstance(g, 'pass8', 60, 0);
++  const out = addInstance(g, 'level_output', 120, 0, 'OUT');
++  if (widths.input !== undefined) inA.params.width = widths.input;
++  if (widths.output !== undefined) out.params.width = widths.output;
++  connect(g, { inst: inA.id, port: 'out' }, { inst: pass.id, port: 'in' });
++  connect(g, { inst: pass.id, port: 'out' }, { inst: out.id, port: 'in' });
++  return g;
++}
++
++describe('level I/O width binding', () => {
++  it('carries an 8-bit level input through an 8-bit component and back out', () => {
++    // The defect this replaces: `level_input` is a 1-bit def, so before the
++    // widths were resolved per instance the guard would write eight bits into
++    // one level input's slot and across its neighbours' slots.
++    const outcome = runChecks(wideSolution({ input: 8, output: 8 }), wideRegistry, wideSpec);
++    expect(outcome.failures).toEqual([]);
++    expect(outcome.passed).toBe(true);
++  });
++
++  it('makes every 8-bit value round trip, not just the low bit', () => {
++    const net = compile(wideSolution({ input: 8, output: 8 }), wideRegistry);
++    const sim = new Simulation(net, wideRegistry);
++    const io = bindLevelIo(sim, net, wideSpec);
++    expect(io.mismatch).toBeUndefined();
++
++    io.reset();
++    for (const value of [0x00, 0x01, 0x55, 0x80, 0xab, 0xff]) {
++      io.writeInput('a', value);
++      sim.settle();
++      expect(io.readOutput('out'), `value=${value}`).toBe(value);
++    }
++  });
++
++  it('refuses a bound level input whose compiled width disagrees with the spec', () => {
++    // `IN_a` left at the def's 1 bit against a level pin declared 8 bits: the
++    // write would run past the pin's slots, so the check fails loudly (and
++    // without throwing out of `runChecks`) instead of corrupting the table.
++    const outcome = runChecks(wideSolution({ output: 8 }), wideRegistry, wideSpec);
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('missing-io');
++  });
++
++  it('refuses a bound level output whose compiled width disagrees with the spec', () => {
++    const outcome = runChecks(wideSolution({ input: 8 }), wideRegistry, wideSpec);
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('missing-io');
++  });
++
++  it('names the pin and both widths in the mismatch it reports', () => {
++    const net = compile(wideSolution({ input: 8 }), wideRegistry);
++    const io = bindLevelIo(new Simulation(net, wideRegistry), net, wideSpec);
++    expect(io.mismatch).toContain('OUT.in');
++    expect(io.mismatch).toContain('1');
++    expect(io.mismatch).toContain('8');
++  });
++
++  it('keeps the Phase-0 behaviour for a level pin the circuit does not contain', () => {
++    // No `IN_a` and no `OUT` at all: nothing to compare, nothing to report, and
++    // the pins read 0 / swallow writes exactly as they did in Phase 0.
++    const g = emptyGraph();
++    addInstance(g, 'pass8', 0, 0, 'pass');
++    const net = compile(g, wideRegistry);
++    const io = bindLevelIo(new Simulation(net, wideRegistry), net, wideSpec);
++    expect(io.mismatch).toBeUndefined();
++    expect(() => io.writeInput('a', 0xff)).not.toThrow();
++    expect(io.readOutput('out')).toBe(0);
++  });
++
++  it('binds an 8-bit level built by the build() fixture', () => {
++    // The fixture is how chapter 2's reference solutions will declare their
++    // level I/O, so it has to put each pin's width on the instance the same way
++    // a palette drop does -- otherwise every one of those levels would report
++    // the mismatch guarded above.
++    const g = build([
++      { kind: 'input', name: 'a', width: 8 },
++      { kind: 'output', from: 'a', width: 8 },
++    ]);
++    expect(g.instances.map((inst) => [inst.id, inst.params.width])).toEqual([
++      ['IN_a', 8],
++      ['OUT', 8],
++    ]);
++    expect(runChecks(g, registry, wideSpec).passed).toBe(true);
++  });
++
++  it('grades as a passable, three-star level at 8 bits', () => {
++    // The whole grading entry point rather than the check loop alone: the
++    // metrics are computed from the same graph and `threeStar` compares against
++    // them, so a wide level has to be winnable, not merely checkable.
++    const result = grade(wideSolution({ input: 8, output: 8 }), wideRegistry, wideSpec);
++    expect(result.failures).toEqual([]);
++    expect(result.passed).toBe(true);
++    expect(result.stars).toBe(3);
++  });
++});
+diff --git a/test/ui/panels.test.ts b/test/ui/panels.test.ts
+index 5b1872d..d907a3e 100644
+--- a/test/ui/panels.test.ts
++++ b/test/ui/panels.test.ts
+@@ -1,26 +1,28 @@
+ // @vitest-environment jsdom
+ import { describe, expect, it } from 'vitest';
+ import { createStore, type AppState, type Store } from '../../src/app/store';
+ import { emptyProgress, applyGrade, type Progress } from '../../src/app/progress';
++import { CommandStack } from '../../src/app/commands';
+ import { createRegistry } from '../../src/core/registry';
+ import { BASE_DEFS } from '../../src/core/defs/index';
+ import { addInstance, connect, emptyGraph } from '../../src/core/graph';
+ import { getLevel, LEVELS } from '../../src/levels/index';
++import type { LevelSpec } from '../../src/levels/spec';
+ import { grade } from '../../src/levels/grader';
+ import { mountPalette } from '../../src/ui/palette';
+ import { mountTruthTable } from '../../src/ui/truthTable';
+ import { mountShell } from '../../src/ui/shell';
+ import { mountMap } from '../../src/ui/map';
+ import { NARRATIVE, narrativeFor } from '../../src/ui/narrative';
+ import { THEME } from '../../src/ui/theme';
+-import { levelIoInstanceId } from '../../src/ui/board/interact';
++import { attachBoardInput, levelIoPlacement } from '../../src/ui/board/interact';
+ 
+ const registry = createRegistry(BASE_DEFS);
+ 
+ /**
+  * `Store<AppState>` rather than an inferred literal state: without the
+  * annotation TypeScript widens `lastGrade: null` to the type `null` and the
+  * panel tests cannot set a grade on the store at all.
+  */
+ function makeStore(levelId: string): Store<AppState> {
+   return createStore<AppState>({
+@@ -156,65 +158,128 @@ describe('shell bar', () => {
+ 
+ /**
+  * Dropping a part from the palette is the only way a player can put level IO
+  * on the board, and `levels/checks.ts` binds a circuit to its level by instance
+  * id (`IN_<pin>`, `OUT`, `OUT_<pin>`). Without these ids every placement would
+  * be named `i1`, `i2`, … and no level could ever be passed.
+  */
+ describe('level io placement', () => {
+   it('names the single level output OUT', () => {
+     const level = getLevel('ch1-01-crude-awakening');
+-    expect(levelIoInstanceId(level, emptyGraph(level.id), 'level_output')).toBe('OUT');
++    expect(levelIoPlacement(level, emptyGraph(level.id), 'level_output')?.id).toBe('OUT');
+   });
+ 
+   it('hands out one level input per declared pin, then stops naming them', () => {
+     const level = getLevel('ch1-02-nand-gate');
+     const g = emptyGraph(level.id);
+-    expect(levelIoInstanceId(level, g, 'level_input')).toBe('IN_a');
++    expect(levelIoPlacement(level, g, 'level_input')?.id).toBe('IN_a');
+     addInstance(g, 'level_input', 0, 0, 'IN_a');
+-    expect(levelIoInstanceId(level, g, 'level_input')).toBe('IN_b');
++    expect(levelIoPlacement(level, g, 'level_input')?.id).toBe('IN_b');
+     addInstance(g, 'level_input', 0, 0, 'IN_b');
+     // every level input is placed: an extra part falls back to a plain id
+-    expect(levelIoInstanceId(level, g, 'level_input')).toBeUndefined();
++    expect(levelIoPlacement(level, g, 'level_input')).toBeUndefined();
+   });
+ 
+   it('names the four outputs of the binary racer in pin order', () => {
+     const level = getLevel('ch1-12-binary-racer');
+     const g = emptyGraph(level.id);
+     const ids: string[] = [];
+     for (let i = 0; i < 4; i += 1) {
+-      const id = levelIoInstanceId(level, g, 'level_output');
++      const id = levelIoPlacement(level, g, 'level_output')?.id;
+       expect(id).toBeDefined();
+       ids.push(id!);
+       addInstance(g, 'level_output', 0, 0, id);
+     }
+     expect(ids).toEqual(['OUT_out3', 'OUT_out2', 'OUT_out1', 'OUT_out0']);
+   });
+ 
+   it('leaves ordinary gates to the graph id allocator', () => {
+     const level = getLevel('ch1-04-and-gate');
+-    expect(levelIoInstanceId(level, emptyGraph(level.id), 'nand')).toBeUndefined();
++    expect(levelIoPlacement(level, emptyGraph(level.id), 'nand')).toBeUndefined();
+   });
+ 
+   it('makes level 1 pass with two palette placements and one wire', () => {
+     const level = getLevel('ch1-01-crude-awakening');
+     const g = emptyGraph(level.id);
+     const source = addInstance(g, 'const_on', 0, 0);
+-    const sink = addInstance(g, 'level_output', 128, 0, levelIoInstanceId(level, g, 'level_output'));
++    const placement = levelIoPlacement(level, g, 'level_output');
++    const sink = addInstance(g, 'level_output', 128, 0, placement?.id);
+     connect(g, { inst: source.id, port: 'out' }, { inst: sink.id, port: 'in' });
+ 
+     expect(sink.id).toBe('OUT');
+     const result = grade(g, registry, level);
+     expect(result.failures).toEqual([]);
+     expect(result.passed).toBe(true);
+     expect(result.stars).toBe(3);
+   });
++
++  /** A chapter-2-shaped level: one 8-bit input, one 8-bit output. */
++  function wideLevel(): LevelSpec {
++    return {
++      ...getLevel('ch1-02-nand-gate'),
++      id: 'test-wide-io',
++      io: { inputs: [{ id: 'a', width: 8 }], outputs: [{ id: 'out', width: 8 }] },
++    };
++  }
++
++  /** Arms `defId` in the palette and clicks empty board space with it. */
++  function drop(canvas: HTMLCanvasElement, defId: string, x: number, y: number): void {
++    canvas.dataset.pendingDef = defId;
++    canvas.dispatchEvent(new PointerEvent('pointerdown', { clientX: x, clientY: y, button: 0 }));
++  }
++
++  it('carries each level pin width into the placement', () => {
++    const level = wideLevel();
++    expect(levelIoPlacement(level, emptyGraph(level.id), 'level_input')).toEqual({
++      id: 'IN_a',
++      width: 8,
++    });
++    expect(levelIoPlacement(level, emptyGraph(level.id), 'level_output')).toEqual({
++      id: 'OUT',
++      width: 8,
++    });
++  });
++
++  it('writes that width into params when the part is dropped on the board', () => {
++    // The id alone is not enough. `compile` sizes a pin from `params.width`, and
++    // `bindLevelIo` refuses a bound pin compiled at a width the level does not
++    // declare -- so a drop that named the part without sizing it would leave the
++    // game's own board ungradable, with an 8-bit level input one bit wide.
++    const level = wideLevel();
++    const store = createStore<AppState>({
++      level,
++      graph: emptyGraph(level.id),
++      registry,
++      progress: emptyProgress(),
++      camera: { x: 0, y: 0, zoom: 1 },
++      selected: [],
++      dragging: null,
++      lastGrade: null,
++      status: null,
++    });
++    const canvas = document.createElement('canvas');
++    // jsdom 28 has PointerEvent but no pointer capture, and the handler captures
++    // the pointer as its first act: stub that gap so the drop is reachable.
++    canvas.setPointerCapture = () => {};
++    const detach = attachBoardInput(canvas, store, new CommandStack(), { onChange: () => {} });
++    try {
++      drop(canvas, 'level_input', 40, 40);
++      drop(canvas, 'level_output', 400, 40);
++    } finally {
++      detach();
++    }
++
++    expect(store.get().graph.instances.map((inst) => [inst.id, inst.params.width])).toEqual([
++      ['IN_a', 8],
++      ['OUT', 8],
++    ]);
++  });
+ });
+ 
+ describe('narrative coverage', () => {
+   it('writes dedicated text for every chapter 1 level', () => {
+     for (const level of LEVELS.filter((l) => l.chapter === 1)) {
+       expect(NARRATIVE[level.id], `no narrative for ${level.id}`).toBeDefined();
+       const text = narrativeFor(level.id);
+       expect(text.before.zh.length).toBeGreaterThan(4);
+       expect(text.after.en.length).toBeGreaterThan(4);
+     }

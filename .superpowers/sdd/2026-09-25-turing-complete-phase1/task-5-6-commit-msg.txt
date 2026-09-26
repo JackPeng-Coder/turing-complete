@@ -1,0 +1,37 @@
+feat(levels): add the fuzz and custom checkers
+
+Spec §5.2's last two check kinds, and the fail-open hazard each of them
+carries: a `fuzz` check with `rounds: 0` (or no pins to vary) and a
+`custom` check naming an id nobody registered would both compare nothing
+and pass every circuit ever built -- the Phase-0 `missing-rows` lesson,
+twice more.
+
+`fuzz` draws its vectors from an in-module xorshift32 seeded from the
+check data, one draw per input pin already inside that pin's width, so a
+level's coverage is a function of its own numbers and nothing else.
+`rounds` defaults to 64 and is clamped to 4096 (measured: 64 rounds ~1ms,
+4096 rounds 26ms on an 8-bit level); `0`, a negative number, a fraction or
+`NaN` is a hard `missing-vectors` failure instead of a silent pass. Input
+and output functions are pure per-pin functions that must name every pin
+of the level and nothing else; a value that does not fit its pin, a
+function that throws, and a circuit that will not settle are all recorded
+failures. The first failing round is reported with its vector, the
+expectation and the actual, plus the round in a new `CheckFailure.round`.
+
+`custom` is `{ kind: 'custom'; id }`, looked up in the registry at
+`src/levels/custom/index.ts` -- which ships EMPTY, because chapter 2 needs
+no checker and shipping a dead one would be dead code. An unregistered id
+is a hard `missing-check` failure, and so is a function inlined in level
+data (the kernel refuses to call it: neither serialisable nor reviewable).
+A registered checker's throw or malformed outcome becomes a recorded
+failure, and its `ticksUsed` joins the run's tick metric, so nothing it
+does can escape `runChecks`/`grade()` on a board edit.
+
+The dispatch is now exhaustive rather than fall-through: the `script`
+branch no longer swallows unknown kinds. That fall-through is exactly how
+a `fuzz` check used to reach `check.steps` and throw `TypeError:
+check.steps is not iterable` out of `runChecks` before this change.
+
+Verified: 422 tests (47 new in test/levels/fuzz-custom.test.ts), tsc
+--noEmit clean, vite build clean. Six mutations of the new guards were
+each caught by a named test (logs: task-5-6-mutation-*.txt).

@@ -1,0 +1,29 @@
+COMMAND: node pnpm.mjs test test/levels/zz-measure-ch1.test.ts   (targets NOT yet recalibrated)
+$ vitest run "test/levels/zz-measure-ch1.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+stdout | test/levels/zz-measure-ch1.test.ts > TEMPORARY: measured chapter-1 reference metrics vs their targets > prints the table
+
+===MEASURE=== ch1-01-crude-awakening   gate   0 delay  0 tick  0 score   0 | target 0/0/0 | passed true stars 3 | MEETS
+===MEASURE=== ch1-02-nand-gate         gate   1 delay  1 tick  0 score   5 | target 1/1/0 | passed true stars 3 | MEETS
+===MEASURE=== ch1-03-not-gate          gate   1 delay  1 tick  0 score   5 | target 1/1/0 | passed true stars 3 | MEETS
+===MEASURE=== ch1-04-and-gate          gate   2 delay  2 tick  0 score  10 | target 2/2/0 | passed true stars 3 | MEETS
+===MEASURE=== ch1-05-or-gate           gate   3 delay  2 tick  0 score  11 | target 3/2/0 | passed true stars 3 | MEETS
+===MEASURE=== ch1-06-nor-gate          gate   4 delay  2 tick  0 score  12 | target 2/2/0 | passed true stars 1 | MISSES (differs from target)
+===MEASURE=== ch1-07-always-on         gate   0 delay  0 tick  0 score   0 | target 0/0/0 | passed true stars 3 | MEETS
+===MEASURE=== ch1-08-second-tick       gate   0 delay  0 tick  3 score  24 | target 0/0/3 | passed true stars 3 | MEETS
+===MEASURE=== ch1-09-xor-gate          gate   4 delay  3 tick  0 score  16 | target 4/3/0 | passed true stars 3 | MEETS
+===MEASURE=== ch1-10-bigger-or-gate    gate   6 delay  2 tick  0 score  14 | target 2/2/0 | passed true stars 1 | MISSES (differs from target)
+===MEASURE=== ch1-11-bigger-and-gate   gate   4 delay  2 tick  0 score  12 | target 2/2/0 | passed true stars 1 | MISSES (differs from target)
+===MEASURE=== ch1-12-binary-racer      gate   0 delay  0 tick  0 score   0 | target 0/0/0 | passed true stars 3 | MEETS
+
+
+ ✓ test/levels/zz-measure-ch1.test.ts (1 test) 8ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  00:59:45
+   Duration  292ms (transform 69%, import 21%, worker 5%, tests 5%)
+
+EXIT=0

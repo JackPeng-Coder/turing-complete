@@ -1,0 +1,25 @@
+=== Item 1: setPort(base, 32, -1) after the fix ===
+setPort(32, -1) threw: value -1 does not fit a 32-bit port width
+  getPort(32) afterwards = 0,0,0,0  <- all zeros, -1 not staged
+
+=== the arm is non-negative at every width >= 32 ===
+width 32: -1 threw; -2147483648 threw; 0 accepted; 4294967295 accepted; 4294967296 threw
+width 33: -1 threw; -2147483648 threw; 0 accepted; 4294967295 accepted; 4294967296 threw
+width 64: -1 threw; -2147483648 threw; 0 accepted; 4294967295 accepted; 4294967296 threw
+
+=== the justification for KEEPING the arm: the number writer carries 32 bits ===
+(2**32 >>> 32) & 1 = 0  <- bit 32 of ANY number is 0
+setPort's number branch for a 33-bit port given 2**32 writes 0 set bits -> would stage 0, not 4294967296
+so without the arm, `v >= 0 && v < 2 ** 33` would ADMIT 2**32 and the writer would silently stage 0 instead of throwing.
+
+=== no regression at width 31 (the guard fixed in c830f50) ===
+setPort(31, 0) accepted
+setPort(31, 1) accepted
+setPort(31, 2147483647) accepted
+setPort(31, 2147483648) threw: value 2147483648 does not fit a 31-bit port width
+setPort(31, -1) threw: value -1 does not fit a 31-bit port width
+
+=== the maskOf claim in defs/wide.ts: maskOf(32) is what the guard admits ===
+div32(5, 0) number branch = 4294967295 (maskOf(32) = 4294967295)
+  staged at width 32 and read back = 255,255,255,255
+MAX_WIDE_WIDTH = 32; clampWidth(1e9) = 32

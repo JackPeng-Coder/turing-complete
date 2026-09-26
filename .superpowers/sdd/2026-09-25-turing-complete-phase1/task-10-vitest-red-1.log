@@ -1,0 +1,27 @@
+$ vitest run "test/levels/ch2-batch3.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/levels/ch2-batch3.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/ch2-batch3.test.ts [ test/levels/ch2-batch3.test.ts ]
+Error: Cannot find module '../../src/levels/content/ch2/batch3' imported from D:/Documents/turing-complete/.worktrees/phase1/test/levels/ch2-batch3.test.ts
+ ❯ test/levels/ch2-batch3.test.ts:17:1
+
+     15| import { CH2_BATCH1 } from '../../src/levels/content/ch2/batch1';
+     16| import { CH2_BATCH2 } from '../../src/levels/content/ch2/batch2';
+     17| import { CH2_BATCH3 } from '../../src/levels/content/ch2/batch3';
+       | ^
+     18| import { grade } from '../../src/levels/grader';
+     19| import type {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  02:54:51
+   Duration  336ms (worker 98%, environment 2%)
+
+[ELIFECYCLE] Test failed. See above for more details.

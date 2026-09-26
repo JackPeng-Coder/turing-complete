@@ -1,0 +1,1808 @@
+# Review package: 3fc19cf..e61d556
+
+## Commits
+e61d556 feat(levels): add the fuzz and custom checkers
+
+## Files changed
+ src/levels/checks.ts            | 706 ++++++++++++++++++++++++++++++++++++++-
+ src/levels/custom/index.ts      |  73 ++++
+ src/levels/spec.ts              |  94 +++++-
+ test/levels/fuzz-custom.test.ts | 717 ++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 1570 insertions(+), 20 deletions(-)
+
+## Diff
+diff --git a/src/levels/checks.ts b/src/levels/checks.ts
+index a4711af..9ac38b6 100644
+--- a/src/levels/checks.ts
++++ b/src/levels/checks.ts
+@@ -1,19 +1,23 @@
+ import { CircuitValidationError, UnstableCircuitError } from '../core/errors';
+ import type { Graph } from '../core/graph';
+ import { Simulation, compile, type Netlist } from '../core/net';
+ import type { Registry } from '../core/registry';
+ import { assertWidth, formatPort, type PortValue } from '../core/signal';
++import { getCustomCheck } from './custom/index';
+ import type {
+   CheckFailure,
+   CheckOutcome,
+   ConstraintRule,
++  FuzzCheck,
++  FuzzSample,
++  FuzzVector,
+   LevelCheck,
+   LevelSpec,
+ } from './spec';
+ 
+ export interface LevelIo {
+   reset(): void;
+   writeInput(name: string, value: number): void;
+   readOutput(name: string): number;
+   tick(): void;
+   readonly sim: Simulation;
+@@ -21,20 +25,39 @@ export interface LevelIo {
+    * A level pin whose compiled width disagrees with `spec.io`, if any.
+    *
+    * Set only when such a pin is *present* in the circuit: nothing can be written
+    * to it or read from it without crossing a pin boundary, so `createSim` treats
+    * the circuit as unbound. Absent pins are not reported here -- an incomplete
+    * board still grades, with those pins reading 0 as they always have.
+    */
+   readonly mismatch?: string;
+ }
+ 
++/**
++ * How many random vectors a `fuzz` check runs when it does not state `rounds`.
++ *
++ * 64 is enough to catch a wrong 8-bit operator almost immediately -- a circuit
++ * that disagrees on any single bit pattern disagrees on roughly half of the
++ * vectors -- while keeping a board edit cheap.
++ */
++export const DEFAULT_FUZZ_ROUNDS = 64;
++
++/**
++ * Hard ceiling on a `fuzz` check's `rounds`.
++ *
++ * `grade()` runs on every board edit, so a level that asks for 10^9 rounds must
++ * not be able to hang the editor: `rounds` is clamped here, and the levels that
++ * want exhaustive coverage use `truth-table`/`constraint` instead. (A `rounds`
++ * that is not a positive integer is not clamped but refused -- see `fuzzIssue`.)
++ */
++export const FUZZ_ROUNDS_CAP = 4096;
++
+ /**
+  * True when `value` is representable on a `width`-bit pin.
+  *
+  * Delegates to the kernel's own `assertWidth` instead of duplicating its bounds,
+  * so "what the level layer will write" and "what the signal table accepts" can
+  * never drift apart: every value this rejects is one that would have thrown.
+  */
+ function fitsPort(value: number, width: number): boolean {
+   try {
+     assertWidth(value, width);
+@@ -209,34 +232,371 @@ function evaluateRule(
+   if (rule.kind === 'sum-equals') {
+     let sum = 0;
+     for (const id of rule.inputs) sum += inputs[id] ?? 0;
+     return sum % 2 ** width;
+   }
+   let count = 0;
+   for (const id of rule.inputs) count += inputs[id] ?? 0;
+   return count >= rule.count ? 1 : 0;
+ }
+ 
++// ---------------------------------------------------------------------------
++// fuzz
++// ---------------------------------------------------------------------------
++
++/**
++ * True when `value` is a whole number that fits a `width`-bit pin.
++ *
++ * Shares `fitsPort` with `writeInput`, so "a value a fuzz function may expect"
++ * and "a value the signal table accepts" cannot drift apart.
++ */
++function fitsPin(value: unknown, width: number): value is number {
++  return typeof value === 'number' && fitsPort(value, width);
++}
++
++/** A safe, short description of an untrusted value, for a failure's `detail`. */
++function describeValue(value: unknown): string {
++  if (value === null) return 'null';
++  if (Array.isArray(value)) return `an array of ${value.length}`;
++  if (typeof value === 'string') return JSON.stringify(value);
++  if (typeof value === 'function') return 'a function';
++  if (typeof value === 'object' || typeof value === 'symbol') {
++    // An object's own `toString` is untrusted too: a throwing one must not
++    // escape the failure that is trying to describe it.
++    try {
++      return String(value);
++    } catch {
++      return `a ${typeof value}`;
++    }
++  }
++  return String(value);
++}
++
++/** `name: message` of a thrown `Error`, or a description of anything else. */
++function describeError(error: unknown): string {
++  return error instanceof Error ? `${error.name}: ${error.message}` : describeValue(error);
++}
++
++/** Only the numeric entries of an authored vector, for a numeric failure record. */
++function numericOnly(vector: Readonly<Record<string, unknown>>): Record<string, number> {
++  const out: Record<string, number> = {};
++  for (const [key, value] of Object.entries(vector)) {
++    if (typeof value === 'number') out[key] = value;
++  }
++  return out;
++}
++
++/** The sentence a failure carries when an authored value cannot fit its pin. */
++function unfitDetail(subject: string, id: string, value: unknown, width: number): string {
++  return `${subject} "${id}" is ${describeValue(value)}, which does not fit a ${width}-bit pin`;
++}
++
++/**
++ * The check's deterministic PRNG: xorshift32, seeded from the check data and
++ * from nothing else.
++ *
++ * Written here rather than taken from a library (the project has no runtime
++ * dependencies) and rather than `Math.random` (a level has to grade the same
++ * way on every board edit, and the same seed has to produce the same vectors in
++ * every run). xorshift32 has a single fixed point at 0, so an all-zero seed is
++ * remapped to the golden-ratio odd constant: a `seed: 0` level would otherwise
++ * drive one vector `rounds` times without ever saying so.
++ */
++function createFuzzRandom(seed: number): () => number {
++  let state = (seed >>> 0) || 0x9e37_79b9;
++  return () => {
++    state = (state ^ (state << 13)) >>> 0;
++    state = (state ^ (state >>> 17)) >>> 0;
++    state = (state ^ (state << 5)) >>> 0;
++    return state;
++  };
++}
++
++/** One validated input pin binding: the drawn sample in, the value to drive out. */
++interface FuzzInputPin {
++  readonly id: string;
++  readonly width: number;
++  readonly fn: (sample: FuzzSample) => number;
++}
++
++/** One validated output pin binding: the driven vector in, the expected value out. */
++interface FuzzOutputPin {
++  readonly id: string;
++  readonly width: number;
++  readonly fn: (inputs: FuzzVector) => number;
++}
++
++/**
++ * A fuzz check that can be run: the resolved round count and the level's pins
++ * bound to validated functions.
++ *
++ * `inputs` / `outputs` are in the level's pin order (never `Object.keys` order),
++ * which is what makes the vector sequence reproducible.
++ */
++interface FuzzRun {
++  readonly rounds: number;
++  readonly inputs: readonly FuzzInputPin[];
++  readonly outputs: readonly FuzzOutputPin[];
++}
++
++/** Why a fuzz check cannot run as written, in the shape a failure record needs. */
++interface FuzzIssue {
++  readonly reason: 'missing-vectors' | 'invalid';
++  readonly expected: Readonly<Record<string, number>>;
++  readonly actual: Readonly<Record<string, number>>;
++  readonly detail: string;
++}
++
++type FuzzPlan = ({ readonly kind: 'plan' } & FuzzRun) | ({ readonly kind: 'issue' } & FuzzIssue);
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === 'object' && value !== null && !Array.isArray(value);
++}
++
++/**
++ * Validates a fuzz check against the level it belongs to.
++ *
++ * Vacuity is reported first, and deliberately: a check that would compare
++ * nothing is the defect this kind exists next to (`rounds: 0`, no input pins, no
++ * expectations -- the `missing-rows` lesson), so it is named as such even when
++ * the same check is also misspelled. Everything after that is a plain authoring
++ * error and comes back as `invalid`: a pin without a function, a function for a
++ * pin the level does not have, a non-integer seed.
++ */
++function planFuzz(check: FuzzCheck, spec: LevelSpec): FuzzPlan {
++  const rounds = check.rounds ?? DEFAULT_FUZZ_ROUNDS;
++  // A check that runs no rounds compares nothing -- the `missing-rows` lesson --
++  // so the round count is the first thing validated, before any pin is bound.
++  if (!Number.isInteger(rounds) || rounds <= 0) {
++    return {
++      kind: 'issue',
++      reason: 'missing-vectors',
++      expected: { rounds: 1 },
++      actual: { rounds },
++      detail: `fuzz check declares rounds=${describeValue(check.rounds)}; it must be a positive integer`,
++    };
++  }
++  if (spec.io.inputs.length === 0) {
++    return {
++      kind: 'issue',
++      reason: 'missing-vectors',
++      expected: { inputs: 1 },
++      actual: { inputs: 0 },
++      detail:
++        'fuzz check on a level with no input pins: every round would drive the same empty vector',
++    };
++  }
++  if (spec.io.outputs.length === 0) {
++    return {
++      kind: 'issue',
++      reason: 'missing-vectors',
++      expected: { outputs: 1 },
++      actual: { outputs: 0 },
++      detail: 'fuzz check on a level with no output pins: there is nothing to compare against',
++    };
++  }
++
++  // Level data is untrusted however it is typed: `inputs` and `outputs` may be
++  // absent, or hold something that is not a function at all.
++  const inputs: Record<string, unknown> = isRecord(check.inputs) ? check.inputs : {};
++  const outputs: Record<string, unknown> = isRecord(check.outputs) ? check.outputs : {};
++  if (Object.keys(inputs).length === 0) {
++    return {
++      kind: 'issue',
++      reason: 'missing-vectors',
++      expected: { inputs: 1 },
++      actual: { inputs: 0 },
++      detail: 'fuzz check declares no input functions: every round would drive the same vector',
++    };
++  }
++  if (Object.keys(outputs).length === 0) {
++    return {
++      kind: 'issue',
++      reason: 'missing-vectors',
++      expected: { outputs: 1 },
++      actual: { outputs: 0 },
++      detail: 'fuzz check declares no output expectations: every circuit would pass it',
++    };
++  }
++  if (!Number.isInteger(check.seed)) {
++    return {
++      kind: 'issue',
++      reason: 'invalid',
++      expected: { seed: 1 },
++      actual: { seed: check.seed },
++      detail: `fuzz check declares seed=${describeValue(check.seed)}, but it must be an integer`,
++    };
++  }
++
++  const boundInputs: FuzzInputPin[] = [];
++  const boundOutputs: FuzzOutputPin[] = [];
++  for (const pin of spec.io.inputs) {
++    const fn = inputs[pin.id];
++    if (typeof fn !== 'function') {
++      return {
++        kind: 'issue',
++        reason: 'invalid',
++        expected: { [pin.id]: 1 },
++        actual: { [pin.id]: 0 },
++        detail: `fuzz check declares no input function for pin "${pin.id}"`,
++      };
++    }
++    boundInputs.push({ id: pin.id, width: pin.width, fn: fn as FuzzInputPin['fn'] });
++  }
++  for (const pin of spec.io.outputs) {
++    const fn = outputs[pin.id];
++    if (typeof fn !== 'function') {
++      return {
++        kind: 'issue',
++        reason: 'invalid',
++        expected: { [pin.id]: 1 },
++        actual: { [pin.id]: 0 },
++        detail: `fuzz check declares no output expectation for pin "${pin.id}"`,
++      };
++    }
++    boundOutputs.push({ id: pin.id, width: pin.width, fn: fn as FuzzOutputPin['fn'] });
++  }
++  for (const key of Object.keys(inputs)) {
++    if (!spec.io.inputs.some((pin) => pin.id === key)) {
++      return {
++        kind: 'issue',
++        reason: 'invalid',
++        expected: { [key]: 0 },
++        actual: { [key]: 1 },
++        detail: `fuzz check declares an input function for "${key}", which is not an input pin`,
++      };
++    }
++  }
++  for (const key of Object.keys(outputs)) {
++    if (!spec.io.outputs.some((pin) => pin.id === key)) {
++      return {
++        kind: 'issue',
++        reason: 'invalid',
++        expected: { [key]: 0 },
++        actual: { [key]: 1 },
++        detail: `fuzz check declares an output expectation for "${key}", which is not an output pin`,
++      };
++    }
++  }
++  return {
++    kind: 'plan',
++    rounds: Math.min(rounds, FUZZ_ROUNDS_CAP),
++    inputs: boundInputs,
++    outputs: boundOutputs,
++  };
++}
++
++/**
++ * The vectors a validated fuzz check drives, one per round.
++ *
++ * A generator so the caller can stop at the first failing round without paying
++ * for the rest of the sequence -- a wrong circuit usually disagrees on round 0,
++ * and the cap allows thousands of rounds.
++ *
++ * Each pin's draw is already inside that pin's width, so the natural input
++ * function (`(sample) => sample.a`) always produces a value the pin can hold.
++ * A pin wider than 32 bits can only use 32 bits of the stream; nothing this
++ * phase builds is wider than eight.
++ */
++function* fuzzVectors(seed: number, plan: FuzzRun): Generator<FuzzVector> {
++  const random = createFuzzRandom(seed);
++  for (let round = 0; round < plan.rounds; round += 1) {
++    const sample: Record<string, number> = {};
++    for (const pin of plan.inputs) sample[pin.id] = random() % 2 ** pin.width;
++    const vector: Record<string, number> = {};
++    for (const pin of plan.inputs) vector[pin.id] = pin.fn(sample);
++    yield vector;
++  }
++}
++
++// ---------------------------------------------------------------------------
++// custom
++// ---------------------------------------------------------------------------
++
++/** The reasons `CheckFailure` declares; a checker may not invent one. */
++const FAILURE_REASONS: readonly string[] = [
++  'mismatch',
++  'unstable',
++  'invalid',
++  'missing-io',
++  'missing-rows',
++  'missing-vectors',
++  'missing-check',
++];
++
++/** Why one adopted failure record cannot be shown as-is, or `undefined`. */
++function failureIssue(item: unknown): string | undefined {
++  if (!isRecord(item)) return `is ${describeValue(item)}, expected an object`;
++  if (typeof item.check !== 'string') {
++    return `has check=${describeValue(item.check)}, expected a check kind`;
++  }
++  for (const field of ['inputs', 'expected', 'actual'] as const) {
++    if (!isRecord(item[field])) {
++      return `has ${field}=${describeValue(item[field])}, expected an object of pin values`;
++    }
++  }
++  if (typeof item.tick !== 'number' || !Number.isFinite(item.tick)) {
++    return `has tick=${describeValue(item.tick)}, expected a number`;
++  }
++  if (item.reason !== undefined && !FAILURE_REASONS.includes(item.reason as string)) {
++    return `has reason=${describeValue(item.reason)}, which is not a known failure reason`;
++  }
++  return undefined;
++}
++
++/**
++ * Why a custom checker's return value cannot be adopted, or `undefined` when it
++ * can.
++ *
++ * The shape is checked here rather than trusted, because the records go straight
++ * into the failure panel: a checker that returns `{ failures: 'none' }` or a
++ * bare `null` must fail its check with a reason, not break the board on the next
++ * keystroke.
++ */
++function outcomeIssue(outcome: unknown): string | undefined {
++  if (!isRecord(outcome)) {
++    return `it returned ${describeValue(outcome)} instead of a CheckOutcome`;
++  }
++  if (typeof outcome.passed !== 'boolean') {
++    return `"passed" is ${describeValue(outcome.passed)}, expected a boolean`;
++  }
++  if (!Array.isArray(outcome.failures)) {
++    return `"failures" is ${describeValue(outcome.failures)}, expected an array`;
++  }
++  if (!Number.isInteger(outcome.ticksUsed) || (outcome.ticksUsed as number) < 0) {
++    return `"ticksUsed" is ${describeValue(outcome.ticksUsed)}, expected a non-negative integer`;
++  }
++  for (const [index, item] of outcome.failures.entries()) {
++    const issue = failureIssue(item);
++    if (issue !== undefined) return `failure record ${index} ${issue}`;
++  }
++  return undefined;
++}
++
+ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): CheckOutcome {
+   const failures: CheckFailure[] = [];
+   let ticksUsed = 0;
+ 
+   for (const check of spec.checks) {
+     // One compilation and one Simulation per check, reused for every row.
+     // Compiling per row would re-run validateGraph and reallocate the signal
+     // table hundreds of times for a single level.
+     const created = createSim(graph, registry, spec);
+     if ('error' in created) {
+       failures.push(failure(check, {}, {}, {}, 0, created.error));
+       continue;
+     }
+     const io = created.io;
++    // The fuzz round in flight, so the `catch` below can still name the round
++    // when the kernel (not the authored data) is what failed. `null` for every
++    // other kind of check.
++    let activeRound: number | null = null;
+ 
+     try {
+       if (check.kind === 'truth-table') {
+         if (!check.rows || check.rows.length === 0) {
+           // A truth-table check with nothing to compare against would pass
+           // every circuit ever built. Refuse it loudly instead.
+           failures.push(
+             failure(
+               check,
+               {},
+@@ -275,51 +635,343 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
+           const got = attempt.outputs[check.rule.output] ?? 0;
+           if (want !== got) {
+             failures.push(
+               failure(check, inputs, { [check.rule.output]: want }, attempt.outputs, 0, 'mismatch'),
+             );
+           }
+         }
+         continue;
+       }
+ 
+-      // script: walk the steps in tick order, driving inputs along the way
+-      io.reset();
+-      ticksUsed = Math.max(ticksUsed, io.sim.tickCount);
+-      const steps = [...check.steps].sort((a, b) => a.tick - b.tick);
+-      for (const step of steps) {
+-        for (const pin of spec.io.inputs) {
+-          io.writeInput(pin.id, step.inputs?.[pin.id] ?? 0);
++      if (check.kind === 'fuzz') {
++        const plan = planFuzz(check, spec);
++        if (plan.kind === 'issue') {
++          failures.push(
++            failure(check, {}, plan.expected, plan.actual, 0, plan.reason, null, plan.detail),
++          );
++          continue;
+         }
+-        io.sim.settle();
+-        while (io.sim.tickCount < step.tick) io.tick();
+-        ticksUsed = Math.max(ticksUsed, io.sim.tickCount);
+-        if (step.expect) {
+-          const actual: Record<string, number> = {};
+-          for (const pin of spec.io.outputs) actual[pin.id] = io.readOutput(pin.id);
+-          if (compare(step.expect, actual)) {
++
++        const vectors = fuzzVectors(check.seed, plan);
++        for (let round = 0; ; round += 1) {
++          activeRound = round;
++          let step: IteratorResult<FuzzVector>;
++          try {
++            step = vectors.next();
++          } catch (e) {
++            // Authored code, not kernel code: a throwing input function is a
++            // level-data defect, and it must not escape into the board-edit
++            // path (see the `RangeError` note in the `catch` below).
+             failures.push(
+-              failure(check, step.inputs ?? {}, step.expect, actual, step.tick, 'mismatch'),
++              failure(
++                check,
++                {},
++                {},
++                {},
++                0,
++                'invalid',
++                round,
++                `fuzz input function threw in round ${round}: ${describeError(e)}`,
++              ),
+             );
++            break;
++          }
++          if (step.done) break;
++          const raw: Readonly<Record<string, unknown>> = step.value;
++          const unpinnable = plan.inputs.find((pin) => !fitsPin(raw[pin.id], pin.width));
++          if (unpinnable !== undefined) {
++            // Writing it would be refused by `writeInput` and leave the pin at
++            // zero, comparing the circuit against a vector it never saw. Say
++            // which pin and which value instead.
++            failures.push(
++              failure(
++                check,
++                numericOnly(raw),
++                {},
++                {},
++                0,
++                'invalid',
++                round,
++                unfitDetail(
++                  'the value of fuzz input pin',
++                  unpinnable.id,
++                  raw[unpinnable.id],
++                  unpinnable.width,
++                ),
++              ),
++            );
++            break;
++          }
++          const inputs: FuzzVector = step.value;
++
++          const expected: Record<string, number> = {};
++          let badExpectation: { id: string; width: number; value: unknown } | undefined;
++          try {
++            for (const pin of plan.outputs) {
++              const value: unknown = pin.fn(inputs);
++              if (!fitsPin(value, pin.width)) {
++                badExpectation = { id: pin.id, width: pin.width, value };
++                break;
++              }
++              expected[pin.id] = value;
++            }
++          } catch (e) {
++            failures.push(
++              failure(
++                check,
++                inputs,
++                {},
++                {},
++                0,
++                'invalid',
++                round,
++                `fuzz output function threw in round ${round}: ${describeError(e)}`,
++              ),
++            );
++            break;
++          }
++          if (badExpectation !== undefined) {
++            // Never masked to the pin width: masking `a + b` on an 8-bit pin
++            // would turn the authored mistake into a comparison that silently
++            // means something else. The expectation is reported unusable, with
++            // the pin and the value, instead.
++            failures.push(
++              failure(
++                check,
++                inputs,
++                typeof badExpectation.value === 'number'
++                  ? { [badExpectation.id]: badExpectation.value }
++                  : {},
++                {},
++                0,
++                'invalid',
++                round,
++                unfitDetail(
++                  'the fuzz expectation for pin',
++                  badExpectation.id,
++                  badExpectation.value,
++                  badExpectation.width,
++                ),
++              ),
++            );
++            break;
++          }
++
++          const attempt = runRow(io, spec, inputs, 0);
++          ticksUsed = Math.max(ticksUsed, attempt.ticksUsed);
++          if (compare(expected, attempt.outputs)) {
++            // The first failing round is enough: no later round can change the
++            // verdict, and a wrong circuit usually disagrees on round 0 while
++            // the cap allows thousands. The record still names the round, the
++            // vector, the expectation and what the circuit actually drove.
++            failures.push(
++              failure(
++                check,
++                inputs,
++                expected,
++                attempt.outputs,
++                0,
++                'mismatch',
++                round,
++                `round ${round} of ${plan.rounds} (seed ${check.seed})`,
++              ),
++            );
++            break;
+           }
+         }
++        continue;
+       }
++
++      if (check.kind === 'custom') {
++        if (typeof check.id !== 'string' || check.id === '') {
++          // Ruling: the kernel takes an id and looks it up in the registry. A
++          // function carried in level data is neither serialisable nor
++          // reviewable, so it is refused -- not called.
++          const detail =
++            typeof check.id === 'function'
++              ? 'custom check inlined a function in level data; name a registered id instead'
++              : `custom check id=${describeValue(check.id)}: expected a non-empty string`;
++          failures.push(failure(check, {}, {}, {}, 0, 'missing-check', null, detail));
++          continue;
++        }
++
++        const checker = getCustomCheck(check.id);
++        if (typeof checker !== 'function') {
++          failures.push(
++            failure(
++              check,
++              {},
++              { [check.id]: 1 },
++              { [check.id]: 0 },
++              0,
++              'missing-check',
++              null,
++              `no custom check is registered under id "${check.id}"`,
++            ),
++          );
++          continue;
++        }
++
++        let outcome: unknown;
++        try {
++          outcome = checker(io, spec);
++        } catch (e) {
++          // A registered checker is code, and code has bugs. Every throw is
++          // absorbed here -- `grade()` runs on every board edit, and Phase 0
++          // had a `RangeError` escape this loop and fire on each one. Unlike
++          // the outer `catch`, nothing is rethrown: a checker's crash is the
++          // level's failure, not the kernel's.
++          failures.push(
++            failure(
++              check,
++              {},
++              {},
++              {},
++              io.sim.tickCount,
++              e instanceof UnstableCircuitError ? 'unstable' : 'invalid',
++              null,
++              `custom check "${check.id}" threw ${describeError(e)}`,
++            ),
++          );
++          continue;
++        }
++
++        const issue = outcomeIssue(outcome);
++        if (issue !== undefined) {
++          failures.push(
++            failure(
++              check,
++              {},
++              {},
++              {},
++              io.sim.tickCount,
++              'invalid',
++              null,
++              `custom check "${check.id}" returned a malformed outcome: ${issue}`,
++            ),
++          );
++          continue;
++        }
++
++        const result = outcome as CheckOutcome;
++        // The checker owns its ticks (it is the only thing that knows how far it
++        // drove the circuit); they join the run's tick metric like every other
++        // check's.
++        ticksUsed = Math.max(ticksUsed, result.ticksUsed);
++        if (!result.passed || result.failures.length > 0) {
++          if (result.failures.length > 0) {
++            // Adopted verbatim: these records are the checker's own report. A
++            // loop rather than `push(...)`, because a checker may return more
++            // records than the argument limit a spread tolerates.
++            for (const record of result.failures) failures.push(record);
++            if (result.passed) {
++              // A contradiction fails safe: the records are kept, and a second
++              // record says why the check failed despite `passed: true`.
++              const count = result.failures.length;
++              const detail = `custom check "${check.id}" reported passed=true despite ${count} failure(s)`;
++              failures.push(failure(check, {}, {}, {}, io.sim.tickCount, 'invalid', null, detail));
++            }
++          } else {
++            // Failing without a record leaves the player nothing to look at,
++            // so the run states one on the checker's behalf.
++            failures.push(
++              failure(
++                check,
++                {},
++                {},
++                {},
++                io.sim.tickCount,
++                'invalid',
++                null,
++                `custom check "${check.id}" reported passed=false without a failure record`,
++              ),
++            );
++          }
++        }
++        continue;
++      }
++
++      if (check.kind === 'script') {
++        // script: walk the steps in tick order, driving inputs along the way
++        io.reset();
++        ticksUsed = Math.max(ticksUsed, io.sim.tickCount);
++        const steps = [...check.steps].sort((a, b) => a.tick - b.tick);
++        for (const step of steps) {
++          for (const pin of spec.io.inputs) {
++            io.writeInput(pin.id, step.inputs?.[pin.id] ?? 0);
++          }
++          io.sim.settle();
++          while (io.sim.tickCount < step.tick) io.tick();
++          ticksUsed = Math.max(ticksUsed, io.sim.tickCount);
++          if (step.expect) {
++            const actual: Record<string, number> = {};
++            for (const pin of spec.io.outputs) actual[pin.id] = io.readOutput(pin.id);
++            if (compare(step.expect, actual)) {
++              failures.push(
++                failure(check, step.inputs ?? {}, step.expect, actual, step.tick, 'mismatch'),
++              );
++            }
++          }
++        }
++        continue;
++      }
++
++      // Every kind `LevelCheck` declares is handled above; this is the guard for
++      // level data that names something else (a stale save, a typo, a check from
++      // a newer kernel). It fails loudly instead of falling through, which is
++      // exactly how a `fuzz` or `custom` check used to reach `check.steps` and
++      // throw a `TypeError` out of `runChecks` on every board edit.
++      const unknown = check as { readonly kind?: unknown };
++      failures.push(
++        failure(
++          check,
++          {},
++          {},
++          {},
++          0,
++          'invalid',
++          null,
++          `unknown check kind ${describeValue(unknown.kind)}; this kernel cannot run it`,
++        ),
++      );
+     } catch (e) {
+       if (e instanceof UnstableCircuitError) {
+-        failures.push(failure(check, {}, {}, {}, io.sim.tickCount, 'unstable'));
++        failures.push(
++          failure(
++            check,
++            {},
++            {},
++            {},
++            io.sim.tickCount,
++            'unstable',
++            activeRound,
++            activeRound === null ? null : `fuzz round ${activeRound} did not settle`,
++          ),
++        );
+       } else if (e instanceof CircuitValidationError || e instanceof RangeError) {
+         // `RangeError` is the kernel's "this value does not fit this port"
+         // signal (`assertWidth`), and level data is hand-authored: absorb it as
+         // a failed check so nothing thrown from inside a check can escape
+         // `runChecks` into the board-edit path. `'invalid'` already means "this
+         // circuit/spec cannot be evaluated as declared".
+-        failures.push(failure(check, {}, {}, {}, io.sim.tickCount, 'invalid'));
++        failures.push(
++          failure(
++            check,
++            {},
++            {},
++            {},
++            io.sim.tickCount,
++            'invalid',
++            activeRound,
++            activeRound === null ? null : `fuzz round ${activeRound}`,
++          ),
++        );
+       } else {
+         throw e;
+       }
+     }
+   }
+ 
+   return { passed: failures.length === 0, failures, ticksUsed };
+ }
+ 
+ /** Drives one input vector into a fresh reset of an already-compiled circuit. */
+@@ -349,30 +1001,48 @@ function compare(
+   return false;
+ }
+ 
+ /**
+  * Builds one failure record.
+  *
+  * `reason` is `NonNullable<...>` rather than `CheckFailure['reason']`: the field
+  * is optional, so the indexed type includes `undefined`, and
+  * `exactOptionalPropertyTypes` rejects assigning a possibly-`undefined` value to
+  * an optional property. Every failure this module builds names a reason anyway.
++ *
++ * `round` and `detail` are likewise "absent when there is nothing to say": only
++ * `fuzz` has rounds, and only the failures whose specifics do not fit a numeric
++ * record carry a sentence.
+  */
+ function failure(
+   check: LevelCheck,
+   inputs: Readonly<Record<string, number>>,
+   expected: Readonly<Record<string, number>>,
+   actual: Readonly<Record<string, number>>,
+   tick: number,
+   reason: NonNullable<CheckFailure['reason']>,
++  round: number | null = null,
++  detail: string | null = null,
+ ): CheckFailure {
+-  return { check: check.kind, inputs, expected, actual, tick, reason };
++  // `round` and `detail` are only attached when they exist: `exactOptional
++  // PropertyTypes` rejects handing an explicit `undefined` to an optional
++  // property, and a caller here has nothing to say with a null either.
++  return {
++    check: check.kind,
++    inputs,
++    expected,
++    actual,
++    tick,
++    reason,
++    ...(round === null ? {} : { round }),
++    ...(detail === null ? {} : { detail }),
++  };
+ }
+ 
+ /**
+  * Why a check had no evaluable circuit: the settle loop ran away (`unstable`),
+  * `compile` refused the graph (`invalid`), or the graph's level I/O does not
+  * match the level's declared pins (`missing-io`, see `bindLevelIo`). Each maps
+  * onto the `CheckFailure` reason of the same name.
+  */
+ interface AttemptFail {
+   error: 'unstable' | 'invalid' | 'missing-io';
+diff --git a/src/levels/custom/index.ts b/src/levels/custom/index.ts
+new file mode 100644
+index 0000000..5009cf3
+--- /dev/null
++++ b/src/levels/custom/index.ts
+@@ -0,0 +1,73 @@
++import type { CheckOutcome, LevelSpec } from '../spec';
++import type { LevelIo } from '../checks';
++
++/**
++ * A level-specific checker: the escape hatch for puzzles no declarative check
++ * can express (spec §5.2 -- mazes, dance machines, AI duels, space invaders).
++ *
++ * It receives the kernel's public level interface and the level's own spec, and
++ * returns a complete `CheckOutcome`, so it decides its own ticks and its own
++ * failure records. Two contracts come with that:
++ *
++ *  * `io`/`spec` and nothing else. No network, no real time, no DOM: a custom
++ *    checker has to run offline, in the same process, while the player edits.
++ *  * failure records must follow `CheckFailure`'s shape and key their
++ *    `inputs` / `expected` / `actual` by the level's own pin ids, because that
++ *    is what the failure table renders. A record that does not is treated as a
++ *    malformed outcome and the check fails as `invalid` -- the player sees a
++ *    reason, never a broken panel.
++ *
++ * `runChecks` calls a checker once per check, on a `Simulation` of its own, and
++ * adopts the returned outcome: `ticksUsed` is merged into the run's tick metric
++ * with `Math.max`, and any failure record it returns makes the check fail even
++ * if it also claimed `passed: true` (contradictions fail safe, never open).
++ */
++
++export type CustomChecker = (io: LevelIo, spec: LevelSpec) => CheckOutcome;
++
++/**
++ * The live registry, keyed by the id a `CustomCheck` names.
++ *
++ * EMPTY BY DESIGN in phase 1: chapter 2's arithmetic is checked by `fuzz`, and
++ * shipping a checker nobody calls would be dead code. Chapter 3 (CPU levels)
++ * registers its own by importing a module that calls `registerCustomCheck`, for
++ * its side effect, before anything grades a level. A `Map` rather than a frozen
++ * object literal because registration is what the mechanism is *for*; nothing
++ * here is reachable from level data, which carries ids only.
++ */
++const checkers = new Map<string, CustomChecker>();
++
++/**
++ * Adds a checker to the registry.
++ *
++ * Validates its arguments, because registration is code: a typo here should
++ * fail at the module that made it, not silently leave a level ungraded later.
++ * Re-registration replaces the previous entry instead of throwing: a module
++ * that registers itself is re-evaluated by Vite's HMR on every edit, and
++ * throwing on the second evaluation would break the dev server rather than
++ * catch anything.
++ */
++export function registerCustomCheck(id: string, checker: CustomChecker): void {
++  if (typeof id !== 'string' || id === '') {
++    throw new TypeError('registerCustomCheck: id must be a non-empty string');
++  }
++  if (typeof checker !== 'function') {
++    throw new TypeError(`registerCustomCheck(${id}): checker must be a function`);
++  }
++  checkers.set(id, checker);
++}
++
++/** Removes a checker; false when the id was not registered. */
++export function unregisterCustomCheck(id: string): boolean {
++  return checkers.delete(id);
++}
++
++/** The checker registered under `id`, or `undefined` -- which `runChecks` fails on. */
++export function getCustomCheck(id: string): CustomChecker | undefined {
++  return checkers.get(id);
++}
++
++/** Every registered id, in registration order. For tests and future tooling. */
++export function customCheckIds(): readonly string[] {
++  return [...checkers.keys()];
++}
+diff --git a/src/levels/spec.ts b/src/levels/spec.ts
+index 2529773..5d7d045 100644
+--- a/src/levels/spec.ts
++++ b/src/levels/spec.ts
+@@ -48,21 +48,89 @@ export type ConstraintRule =
+       readonly inputs: readonly string[];
+       readonly count: number;
+       readonly output: string;
+     };
+ 
+ export interface ConstraintCheck {
+   readonly kind: 'constraint';
+   readonly rule: ConstraintRule;
+ }
+ 
+-export type LevelCheck = TruthTableCheck | ScriptCheck | ConstraintCheck;
++/**
++ * The values a fuzz round *draws* for the level's input pins: one entry per pin,
++ * each already inside that pin's width, produced by the check's own seeded PRNG.
++ *
++ * Used by `FuzzCheck.inputs`, never driven into a circuit as-is: the input
++ * function for a pin decides what that pin is actually written with.
++ */
++export type FuzzSample = Readonly<Record<string, number>>;
++
++/** The values one fuzz round drives into the level's input pins. */
++export type FuzzVector = Readonly<Record<string, number>>;
++
++/**
++ * Random vectors from a fixed seed, repeated `rounds` times.
++ *
++ * Both records are keyed by the level's own pin ids and must name every pin of
++ * the level (`spec.io.inputs` / `spec.io.outputs`) and nothing else; a missing
++ * or unknown name is an `invalid` failure, exactly like `truthTable`'s refusal
++ * to leave an output pin out. The functions are PURE: no network, no real time,
++ * no `Math.random()` -- the kernel's PRNG is the only source of variation, and
++ * the same `seed` always produces the same vectors.
++ */
++export interface FuzzCheck {
++  readonly kind: 'fuzz';
++  /** PRNG seed, coerced with `>>> 0`. Must be an integer. */
++  readonly seed: number;
++  /**
++   * How many random vectors to run. Defaults to `DEFAULT_FUZZ_ROUNDS` and is
++   * clamped to `FUZZ_ROUNDS_CAP` (both in `levels/checks.ts`).
++   *
++   * Omitting it is fine; stating `0`, a negative number, a fraction or `NaN` is
++   * a hard `missing-vectors` failure. A check that runs no rounds would compare
++   * nothing and pass every circuit ever built -- the `missing-rows` lesson.
++   */
++  readonly rounds?: number;
++  /** One pure function per input pin: the drawn sample in, the value to drive out. */
++  readonly inputs: Readonly<Record<string, (sample: FuzzSample) => number>>;
++  /**
++   * One pure function per output pin: the driven vector in, the expected value
++   * out.
++   *
++   * The value is a whole number per pin, whatever the pin's width: a pin wider
++   * than eight bits is compared as the number `LevelIo.readOutput` reads back
++   * (up to 2^53), so an 8-bit sum is written `(a + b) & 0xff`. Nothing is masked
++   * for the author here -- a value that does not fit its pin is an `invalid`
++   * failure naming the pin, not a silently reduced comparison.
++   */
++  readonly outputs: Readonly<Record<string, (inputs: FuzzVector) => number>>;
++}
++
++/**
++ * A level-specific hook, looked up by id in the registry at
++ * `levels/custom/index.ts`.
++ *
++ * Only the id lives in level data. An implementation inlined into a level is
++ * neither serialisable nor reviewable, so the kernel refuses to call one.
++ */
++export interface CustomCheck {
++  readonly kind: 'custom';
++  /** Key into the custom check registry; an unregistered id is `missing-check`. */
++  readonly id: string;
++}
++
++export type LevelCheck =
++  | TruthTableCheck
++  | ScriptCheck
++  | ConstraintCheck
++  | FuzzCheck
++  | CustomCheck;
+ 
+ export interface LevelSpec {
+   readonly id: string;
+   readonly chapter: number;
+   readonly index: number;
+   readonly name: LocalizedText;
+   readonly brief: LocalizedText;
+   readonly hint: LocalizedText;
+   readonly allowedComponents: readonly string[];
+   readonly io: {
+@@ -77,23 +145,45 @@ export interface LevelSpec {
+   };
+   readonly rewards?: { readonly components?: readonly string[] };
+ }
+ 
+ export interface CheckFailure {
+   readonly check: LevelCheck['kind'];
+   readonly inputs: Readonly<Record<string, number>>;
+   readonly expected: Readonly<Record<string, number>>;
+   readonly actual: Readonly<Record<string, number>>;
+   readonly tick: number;
++  /**
++   * 0-based fuzz round this failure came from; absent on every other kind.
++   *
++   * Its own field rather than a value smuggled into `inputs`, because `inputs`
++   * is the vector the circuit was driven with and the failure table renders it
++   * pin by pin.
++   */
++  readonly round?: number;
++  /**
++   * One line naming the specifics -- which round of how many, which pin, which
++   * unregistered id. Not localized: it is for logs, tests and a future UI, and
++   * the numeric records above stay the machine-readable part.
++   */
++  readonly detail?: string;
+   readonly reason?:
+     | 'mismatch'
+     | 'unstable'
+     | 'invalid'
+     | 'missing-io'
+-    | 'missing-rows';
++    | 'missing-rows'
++    /**
++     * A `fuzz` check that would exercise nothing: no usable `rounds`, no input
++     * pins to vary, or no expectation functions to compare with. The `fuzz`
++     * analogue of `missing-rows`.
++     */
++    | 'missing-vectors'
++    /** A `custom` check whose id is not in the registry. */
++    | 'missing-check';
+ }
+ 
+ export interface CheckOutcome {
+   readonly passed: boolean;
+   readonly failures: readonly CheckFailure[];
+   readonly ticksUsed: number;
+ }
+diff --git a/test/levels/fuzz-custom.test.ts b/test/levels/fuzz-custom.test.ts
+new file mode 100644
+index 0000000..9c4ee84
+--- /dev/null
++++ b/test/levels/fuzz-custom.test.ts
+@@ -0,0 +1,717 @@
++import { afterEach, describe, expect, it } from 'vitest';
++import { UnstableCircuitError } from '../../src/core/errors';
++import type { Graph } from '../../src/core/graph';
++import { DEFAULT_FUZZ_ROUNDS, FUZZ_ROUNDS_CAP, runChecks } from '../../src/levels/checks';
++import {
++  customCheckIds,
++  registerCustomCheck,
++  unregisterCustomCheck,
++  type CustomChecker,
++} from '../../src/levels/custom/index';
++import { grade } from '../../src/levels/grader';
++import type {
++  CheckFailure,
++  CheckOutcome,
++  FuzzCheck,
++  FuzzVector,
++  LevelCheck,
++  LevelSpec,
++} from '../../src/levels/spec';
++import { build, registry } from '../fixtures/build';
++
++/**
++ * The two checker kinds that share this file: `fuzz` (random vectors from a
++ * seeded PRNG) and `custom` (a level-specific hook looked up in a registry).
++ *
++ * Both exist for the same reason -- chapter 2's 8-bit arithmetic cannot be
++ * pinned down by a handful of hand-written rows, and chapters 3 and 7 need an
++ * escape hatch -- and both carry the same hazard: a check with nothing to
++ * compare would pass every circuit ever built, exactly like the Phase-0
++ * `truth-table` check with an omitted `rows`.
++ *
++ * Every test here therefore goes through a real `LevelSpec` and a real compiled
++ * circuit via `runChecks` / `grade`, never by calling an internal helper.
++ */
++
++const withChecks = (level: LevelSpec, checks: readonly LevelCheck[]): LevelSpec => ({
++  ...level,
++  checks,
++});
++
++// ---------------------------------------------------------------------------
++// Fixtures: an 8-bit single-output level and an 8-bit adder with a carry.
++// ---------------------------------------------------------------------------
++
++const AND_IO: LevelSpec['io'] = {
++  inputs: [
++    { id: 'a', width: 8 },
++    { id: 'b', width: 8 },
++  ],
++  outputs: [{ id: 'out', width: 8 }],
++};
++
++const andLevel: LevelSpec = {
++  id: 'test-fuzz-and8',
++  chapter: 2,
++  index: 1,
++  name: { zh: '测试八位与门', en: 'Test 8-Bit AND' },
++  brief: { zh: '', en: '' },
++  hint: { zh: '', en: '' },
++  allowedComponents: ['and8', 'level_input', 'level_output'],
++  io: AND_IO,
++  checks: [],
++};
++
++const ADD_IO: LevelSpec['io'] = {
++  inputs: [
++    { id: 'a', width: 8 },
++    { id: 'b', width: 8 },
++  ],
++  outputs: [
++    { id: 'out', width: 8 },
++    { id: 'carry', width: 1 },
++  ],
++};
++
++const addLevel: LevelSpec = {
++  ...andLevel,
++  id: 'test-fuzz-add8',
++  index: 2,
++  name: { zh: '测试八位加法器', en: 'Test 8-Bit Adder' },
++  allowedComponents: ['add8', 'const_off', 'level_input', 'level_output'],
++  io: ADD_IO,
++};
++
++/** `IN_a --and8--> OUT`, both level pins 8 bits wide. */
++function andCircuit(): Graph {
++  return build([
++    { kind: 'input', name: 'a', width: 8 },
++    { kind: 'input', name: 'b', width: 8 },
++    { kind: 'part', def: 'and8', id: 'and', from: ['a', 'b'] },
++    { kind: 'output', from: 'and.out', width: 8 },
++  ]);
++}
++
++/** The same level I/O, but wired to `or8`: a circuit the AND checker rejects. */
++function orCircuit(): Graph {
++  return build([
++    { kind: 'input', name: 'a', width: 8 },
++    { kind: 'input', name: 'b', width: 8 },
++    { kind: 'part', def: 'or8', id: 'or', from: ['a', 'b'] },
++    { kind: 'output', from: 'or.out', width: 8 },
++  ]);
++}
++
++/** `a + b + 0`, with `sum` on `OUT_out` and the ninth bit on `OUT_carry`. */
++function addCircuit(): Graph {
++  return build([
++    { kind: 'input', name: 'a', width: 8 },
++    { kind: 'input', name: 'b', width: 8 },
++    { kind: 'part', def: 'const_off', id: 'zero', from: [] },
++    { kind: 'part', def: 'add8', id: 'add', from: ['a', 'b', 'zero'] },
++    { kind: 'output', name: 'OUT_out', from: 'add.out', width: 8 },
++    { kind: 'output', name: 'OUT_carry', from: 'add.cout', width: 1 },
++  ]);
++}
++
++/** Addition expectations for the two-output adder level, at tick 0. */
++const sum8 = (v: FuzzVector): number => ((v.a ?? 0) + (v.b ?? 0)) & 0xff;
++const carry8 = (v: FuzzVector): number => (((v.a ?? 0) + (v.b ?? 0)) >> 8) & 1;
++
++const addCheck: FuzzCheck = {
++  kind: 'fuzz',
++  seed: 0x5eed,
++  rounds: 128,
++  inputs: { a: (sample) => sample.a ?? 0, b: (sample) => sample.b ?? 0 },
++  outputs: { out: sum8, carry: carry8 },
++};
++
++/** An `and8` circuit that is wired to `OUT_out` only, so `carry` reads 0. */
++function andWiredAsAdder(): Graph {
++  return build([
++    { kind: 'input', name: 'a', width: 8 },
++    { kind: 'input', name: 'b', width: 8 },
++    { kind: 'part', def: 'and8', id: 'and', from: ['a', 'b'] },
++    { kind: 'output', name: 'OUT_out', from: 'and.out', width: 8 },
++  ]);
++}
++
++// ---------------------------------------------------------------------------
++// fuzz
++// ---------------------------------------------------------------------------
++
++describe('runChecks / fuzz', () => {
++  it('passes a correct 8-bit adder, wide output and carry included', () => {
++    const spec = withChecks(addLevel, [addCheck]);
++    const outcome = runChecks(addCircuit(), registry, spec);
++    expect(outcome.failures).toEqual([]);
++    expect(outcome.passed).toBe(true);
++    // Fuzz drives combinational vectors at tick 0, like truth-table rows.
++    expect(outcome.ticksUsed).toBe(0);
++    expect(grade(addCircuit(), registry, spec).passed).toBe(true);
++  });
++
++  it('reports the failing round, its input vector, the expectation and the actual', () => {
++    // A fuzz failure that only said "fuzz failed" would be undebuggable on an
++    // 8-bit level, so the record has to name the round and the exact vector.
++    // The vectors are captured through the check's own output function, which
++    // is what the kernel drives: the round reported must be the FIRST round
++    // whose vector actually fails, and the vector must be that round's.
++    const seen: FuzzVector[] = [];
++    const check: FuzzCheck = {
++      ...addCheck,
++      outputs: {
++        out: (v) => {
++          seen.push(v);
++          return sum8(v);
++        },
++        carry: carry8,
++      },
++    };
++    const outcome = runChecks(andWiredAsAdder(), registry, withChecks(addLevel, [check]));
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures).toHaveLength(1);
++
++    const failure = outcome.failures[0]!;
++    const firstBad = seen.findIndex((v) => sum8(v) !== (v.a! & v.b!) || carry8(v) !== 0);
++    expect(firstBad).toBeGreaterThanOrEqual(0);
++    expect(failure.reason).toBe('mismatch');
++    expect(failure.round).toBe(firstBad);
++    expect(failure.inputs).toEqual(seen[firstBad]);
++    expect(failure.expected).toEqual({ out: sum8(failure.inputs), carry: carry8(failure.inputs) });
++    expect(failure.actual).toEqual({ out: failure.inputs.a! & failure.inputs.b!, carry: 0 });
++    expect(failure.detail).toContain(`round ${firstBad}`);
++  });
++
++  it('generates the same vector sequence from the same seed in two independent constructions', () => {
++    // Two separately-built circuits and two separately-built specs: the vectors
++    // the kernel drives must match element for element, or a level's difficulty
++    // would depend on nothing at all.
++    const capture = (sink: FuzzVector[], seed: number): FuzzCheck => ({
++      ...addCheck,
++      seed,
++      rounds: 16,
++      outputs: {
++        out: (v) => {
++          sink.push(v);
++          return sum8(v);
++        },
++        carry: carry8,
++      },
++    });
++
++    const first: FuzzVector[] = [];
++    const second: FuzzVector[] = [];
++    const run = (sink: FuzzVector[]): boolean =>
++      runChecks(addCircuit(), registry, withChecks(addLevel, [capture(sink, 0x1234)])).passed;
++    expect(run(first)).toBe(true);
++    expect(run(second)).toBe(true);
++
++    expect(first).toHaveLength(16);
++    expect(second).toEqual(first);
++    // ...and the sequence has to actually vary, or "same vectors" would be a
++    // statement about one repeated vector.
++    expect(new Set(first.map((v) => `${v.a},${v.b}`)).size).toBeGreaterThan(8);
++  });
++
++  it('varies the vectors for seed 0 instead of repeating the PRNG fixed point', () => {
++    // xorshift32 with an all-zero state returns 0 forever, which would drive the
++    // same vector on every round while claiming to fuzz. The kernel remaps the
++    // zero seed; this is the test that would catch its removal.
++    const seen: FuzzVector[] = [];
++    const check: FuzzCheck = {
++      ...addCheck,
++      seed: 0,
++      rounds: 8,
++      outputs: {
++        out: (v) => {
++          seen.push(v);
++          return sum8(v);
++        },
++        carry: carry8,
++      },
++    };
++    expect(runChecks(addCircuit(), registry, withChecks(addLevel, [check])).passed).toBe(true);
++    expect(seen).toHaveLength(8);
++    expect(new Set(seen.map((v) => `${v.a},${v.b}`)).size).toBeGreaterThan(1);
++  });
++
++  it('names the round an unstable circuit died in', () => {
++    // Two cross-coupled NANDs with both free inputs tied high never settle, so
++    // `runRow` throws out of the settle loop -- a kernel error, not an authored
++    // one. It still has to say which round, or an 8-bit level's oscillation is
++    // undebuggable.
++    const g = build([
++      { kind: 'part', def: 'const_on', id: 'one', from: [] },
++      { kind: 'part', def: 'nand', id: 'n1', from: ['one', 'n2'] },
++      { kind: 'part', def: 'nand', id: 'n2', from: ['n1', 'one'] },
++    ]);
++    const spec = withChecks(addLevel, [{ ...addCheck, rounds: 4 }]);
++    expect(() => runChecks(g, registry, spec)).not.toThrow();
++    const outcome = runChecks(g, registry, spec);
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('unstable');
++    expect(outcome.failures[0]?.round).toBe(0);
++    expect(outcome.failures[0]?.detail).toContain('round 0');
++  });
++
++  it('ties the sequence to the seed', () => {
++    const capture = (sink: FuzzVector[], seed: number): FuzzCheck => ({
++      ...addCheck,
++      seed,
++      rounds: 8,
++      outputs: {
++        out: (v) => {
++          sink.push(v);
++          return sum8(v);
++        },
++        carry: carry8,
++      },
++    });
++    const a: FuzzVector[] = [];
++    const b: FuzzVector[] = [];
++    runChecks(addCircuit(), registry, withChecks(addLevel, [capture(a, 1)]));
++    runChecks(addCircuit(), registry, withChecks(addLevel, [capture(b, 2)]));
++    expect(b).not.toEqual(a);
++  });
++
++  it('pins the first vectors of a known seed', () => {
++    // A characterization pin, not a derivation: if the PRNG changes, this test
++    // says so instead of quietly changing what every fuzz level covers.
++    const seen: FuzzVector[] = [];
++    const check: FuzzCheck = {
++      ...addCheck,
++      seed: 0x1234,
++      rounds: 3,
++      outputs: {
++        out: (v) => {
++          seen.push(v);
++          return sum8(v);
++        },
++        carry: carry8,
++      },
++    };
++    runChecks(addCircuit(), registry, withChecks(addLevel, [check]));
++    expect(seen.map((v) => [v.a, v.b])).toEqual([
++      [0xf7, 0xe2],
++      [0x2e, 0xf3],
++      [0x20, 0x2b],
++    ]);
++  });
++
++  it('runs the documented default number of rounds when `rounds` is omitted', () => {
++    let rounds = 0;
++    const check: FuzzCheck = {
++      kind: 'fuzz',
++      seed: 7,
++      inputs: { a: (sample) => sample.a ?? 0, b: (sample) => sample.b ?? 0 },
++      outputs: {
++        out: (v) => {
++          rounds += 1;
++          return (v.a ?? 0) & (v.b ?? 0);
++        },
++      },
++    };
++    expect(runChecks(andCircuit(), registry, withChecks(andLevel, [check])).passed).toBe(true);
++    expect(rounds).toBe(DEFAULT_FUZZ_ROUNDS);
++  });
++
++  it('clamps a huge `rounds` to the documented cap instead of hanging the editor', () => {
++    let rounds = 0;
++    const check: FuzzCheck = {
++      kind: 'fuzz',
++      seed: 7,
++      rounds: FUZZ_ROUNDS_CAP + 10_000,
++      inputs: { a: (sample) => sample.a ?? 0, b: (sample) => sample.b ?? 0 },
++      outputs: {
++        out: (v) => {
++          rounds += 1;
++          return (v.a ?? 0) & (v.b ?? 0);
++        },
++      },
++    };
++    expect(runChecks(andCircuit(), registry, withChecks(andLevel, [check])).passed).toBe(true);
++    expect(rounds).toBe(FUZZ_ROUNDS_CAP);
++  });
++
++  it.each([0, -1, 2.5, Number.NaN])(
++    'refuses a fuzz check with rounds=%s instead of passing it',
++    (rounds) => {
++      const spec = withChecks(addLevel, [{ ...addCheck, rounds }]);
++      const outcome = runChecks(addCircuit(), registry, spec);
++      expect(outcome.passed).toBe(false);
++      expect(outcome.failures[0]?.reason).toBe('missing-vectors');
++      expect(outcome.failures[0]?.check).toBe('fuzz');
++      expect(grade(addCircuit(), registry, spec).failures[0]?.reason).toBe('missing-vectors');
++    },
++  );
++
++  it('refuses a fuzz check that declares no input functions', () => {
++    const outcome = runChecks(
++      addCircuit(),
++      registry,
++      withChecks(addLevel, [{ ...addCheck, inputs: {} }]),
++    );
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('missing-vectors');
++    expect(outcome.failures[0]?.detail).toContain('input');
++  });
++
++  it('refuses a fuzz check that declares no output expectations', () => {
++    const outcome = runChecks(
++      addCircuit(),
++      registry,
++      withChecks(addLevel, [{ ...addCheck, outputs: {} }]),
++    );
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('missing-vectors');
++    expect(outcome.failures[0]?.detail).toContain('output');
++  });
++
++  it('refuses a fuzz check on a level with no input pins to vary', () => {
++    const outcome = runChecks(
++      addCircuit(),
++      registry,
++      withChecks({ ...addLevel, io: { inputs: [], outputs: ADD_IO.outputs } }, [addCheck]),
++    );
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('missing-vectors');
++  });
++
++  it('refuses a fuzz check with a function missing for one of the level pins', () => {
++    const outcome = runChecks(
++      addCircuit(),
++      registry,
++      withChecks(addLevel, [{ ...addCheck, inputs: { a: (sample) => sample.a ?? 0 } }]),
++    );
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('invalid');
++    expect(outcome.failures[0]?.detail).toContain('"b"');
++  });
++
++  it('refuses a fuzz function declared for a pin the level does not have', () => {
++    const outcome = runChecks(
++      addCircuit(),
++      registry,
++      withChecks(addLevel, [{ ...addCheck, outputs: { ...addCheck.outputs, nope: () => 0 } }]),
++    );
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('invalid');
++    expect(outcome.failures[0]?.detail).toContain('"nope"');
++  });
++
++  it('refuses an input function whose value does not fit its pin', () => {
++    // Silently dropping the write would keep the pin at 0 and compare the
++    // circuit against a vector it never saw: the failure has to name the pin
++    // and the value instead.
++    const outcome = runChecks(
++      addCircuit(),
++      registry,
++      withChecks(addLevel, [
++        { ...addCheck, inputs: { a: () => 256, b: (sample) => sample.b ?? 0 } },
++      ]),
++    );
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('invalid');
++    expect(outcome.failures[0]?.detail).toContain('256');
++    expect(outcome.failures[0]?.detail).toContain('"a"');
++  });
++
++  it('refuses an expectation that does not fit its pin', () => {
++    // `a + b` reaches 510 on an 8-bit pin. Masking it here would hide an
++    // authoring mistake; stating it is a permanent, loud mismatch.
++    const outcome = runChecks(
++      addCircuit(),
++      registry,
++      withChecks(addLevel, [
++        {
++          ...addCheck,
++          outputs: { out: (v) => (v.a ?? 0) + (v.b ?? 0), carry: carry8 },
++        },
++      ]),
++    );
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('invalid');
++    expect(outcome.failures[0]?.detail).toContain('"out"');
++    expect(outcome.failures[0]?.expected.out).toBeGreaterThan(255);
++  });
++
++  it('turns an authored function that throws into a recorded failure', () => {
++    const spec = withChecks(addLevel, [
++      {
++        ...addCheck,
++        rounds: 4,
++        outputs: {
++          out: () => {
++            throw new TypeError('authored expectation exploded');
++          },
++          carry: carry8,
++        },
++      },
++    ]);
++    expect(() => runChecks(addCircuit(), registry, spec)).not.toThrow();
++    const outcome = runChecks(addCircuit(), registry, spec);
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('invalid');
++    expect(outcome.failures[0]?.round).toBe(0);
++    expect(outcome.failures[0]?.detail).toContain('authored expectation exploded');
++    expect(() => grade(addCircuit(), registry, spec)).not.toThrow();
++  });
++});
++
++// ---------------------------------------------------------------------------
++// custom
++// ---------------------------------------------------------------------------
++
++const registered: string[] = [];
++
++/** Registers a checker for one test; `afterEach` unregisters it again. */
++function useChecker(id: string, checker: CustomChecker): void {
++  registerCustomCheck(id, checker);
++  registered.push(id);
++}
++
++afterEach(() => {
++  for (const id of registered.splice(0)) unregisterCustomCheck(id);
++});
++
++/** A checker that drives the level's own pins and reports what it saw. */
++const sweepAnd: CustomChecker = (io, spec) => {
++  const failures: CheckFailure[] = [];
++  for (const [a, b] of [
++    [0x0f, 0x33],
++    [0xff, 0xff],
++    [0x80, 0x01],
++  ] as const) {
++    io.reset();
++    io.writeInput('a', a);
++    io.writeInput('b', b);
++    io.sim.settle();
++    const got = io.readOutput('out');
++    if (got !== (a & b)) {
++      failures.push({
++        check: 'custom',
++        inputs: { a, b },
++        expected: { out: a & b },
++        actual: { out: got },
++        tick: io.sim.tickCount,
++        reason: 'mismatch',
++      });
++    }
++  }
++  // Ticking is the checker's business: it reports how many ticks it used.
++  io.tick();
++  io.tick();
++  return { passed: failures.length === 0, failures, ticksUsed: io.sim.tickCount };
++};
++
++describe('runChecks / custom', () => {
++  const customSpec = (id: string, level: LevelSpec = andLevel): LevelSpec =>
++    withChecks(level, [{ kind: 'custom', id }]);
++
++  it('ships no custom checks of its own', () => {
++    expect(customCheckIds()).toEqual([]);
++  });
++
++  it('calls a registered checker with the level io and adopts its outcome', () => {
++    let calls = 0;
++    useChecker('sweep-and', (io, spec) => {
++      calls += 1;
++      expect(spec.id).toBe('test-fuzz-and8');
++      return sweepAnd(io, spec);
++    });
++
++    const outcome = runChecks(andCircuit(), registry, customSpec('sweep-and'));
++    expect(outcome.failures).toEqual([]);
++    expect(outcome.passed).toBe(true);
++    expect(outcome.ticksUsed).toBe(2);
++    expect(calls).toBe(1);
++
++    const result = grade(andCircuit(), registry, customSpec('sweep-and'));
++    expect(result.passed).toBe(true);
++    expect(result.metrics.tick).toBe(2);
++  });
++
++  it('adopts the failure records of a registered checker verbatim', () => {
++    useChecker('sweep-and', sweepAnd);
++    const outcome = runChecks(orCircuit(), registry, customSpec('sweep-and'));
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures.length).toBeGreaterThan(0);
++    expect(outcome.failures[0]?.check).toBe('custom');
++    expect(outcome.failures[0]?.reason).toBe('mismatch');
++    expect(outcome.failures[0]?.inputs).toEqual({ a: 0x0f, b: 0x33 });
++    expect(outcome.failures[0]?.actual).toEqual({ out: 0x0f | 0x33 });
++  });
++
++  it('fails an unregistered id with missing-check rather than passing it', () => {
++    const spec = customSpec('nobody-registered-this');
++    expect(() => runChecks(andCircuit(), registry, spec)).not.toThrow();
++    const outcome = runChecks(andCircuit(), registry, spec);
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.check).toBe('custom');
++    expect(outcome.failures[0]?.reason).toBe('missing-check');
++    expect(outcome.failures[0]?.detail).toContain('nobody-registered-this');
++
++    const result = grade(andCircuit(), registry, spec);
++    expect(result.passed).toBe(false);
++    expect(result.failures[0]?.reason).toBe('missing-check');
++  });
++
++  it('refuses a checker inlined in level data', () => {
++    // Ruling: the kernel looks an id up in a registry. A function carried in
++    // level data is neither serialisable nor reviewable, so it is not run.
++    let called = false;
++    const inlined = ((): CheckOutcome => {
++      called = true;
++      return { passed: true, failures: [], ticksUsed: 0 };
++    }) as unknown as string;
++    const outcome = runChecks(andCircuit(), registry, customSpec(inlined));
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('missing-check');
++    expect(outcome.failures[0]?.detail).toContain('inline');
++    expect(called).toBe(false);
++  });
++
++  it.each([
++    ['an Error', new Error('checker exploded')],
++    ['a TypeError', new TypeError('checker exploded')],
++    ['a RangeError', new RangeError('checker exploded')],
++  ])('turns a checker that throws %s into a recorded failure', (_label, thrown) => {
++    const id = `throws-${_label}`;
++    useChecker(id, () => {
++      throw thrown;
++    });
++    const spec = customSpec(id);
++    expect(() => runChecks(andCircuit(), registry, spec)).not.toThrow();
++    const outcome = runChecks(andCircuit(), registry, spec);
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('invalid');
++    expect(outcome.failures[0]?.detail).toContain('checker exploded');
++    expect(() => grade(andCircuit(), registry, spec)).not.toThrow();
++    expect(grade(andCircuit(), registry, spec).passed).toBe(false);
++  });
++
++  it('classifies an UnstableCircuitError escaping a checker as unstable', () => {
++    // A checker that calls `io.sim.settle()` on an oscillating circuit lets the
++    // kernel's own error out: it is the circuit that is unstable, not the
++    // checker, so the failure keeps the reason the rest of the loop uses.
++    useChecker('oscillating', () => {
++      throw new UnstableCircuitError(512, ['n1']);
++    });
++    const outcome = runChecks(andCircuit(), registry, customSpec('oscillating'));
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('unstable');
++    expect(outcome.failures[0]?.detail).toContain('oscillating');
++  });
++
++  // Each case states the fragment of the reason that has to appear, so a case
++  // cannot pass by accident: the checker's id is interpolated into the same
++  // `detail`, and a "contains malformed" assertion would be satisfied by it.
++  it.each<[string, unknown, string]>([
++    ['undefined', undefined, 'instead of a CheckOutcome'],
++    ['null', null, 'instead of a CheckOutcome'],
++    ['a string', 'passed', 'instead of a CheckOutcome'],
++    ['a number', 42, 'instead of a CheckOutcome'],
++    ['an array', [], 'instead of a CheckOutcome'],
++    ['a missing passed', { failures: [], ticksUsed: 0 }, '"passed" is undefined'],
++    ['a non-boolean passed', { passed: 'yes', failures: [], ticksUsed: 0 }, '"passed" is "yes"'],
++    ['a non-array failures', { passed: true, failures: 'none', ticksUsed: 0 }, '"failures" is'],
++    ['a negative ticksUsed', { passed: true, failures: [], ticksUsed: -1 }, '"ticksUsed" is -1'],
++    ['a fractional ticksUsed', { passed: true, failures: [], ticksUsed: 1.5 }, '"ticksUsed" is 1.5'],
++    [
++      'a null failure record',
++      { passed: false, failures: [null], ticksUsed: 0 },
++      'failure record 0 is null',
++    ],
++    [
++      'a failure record with no actual',
++      {
++        passed: false,
++        failures: [{ check: 'custom', inputs: {}, expected: {}, tick: 0 }],
++        ticksUsed: 0,
++      },
++      'has actual=undefined',
++    ],
++    [
++      'a failure record with an unknown reason',
++      {
++        passed: false,
++        failures: [
++          { check: 'custom', inputs: {}, expected: {}, actual: {}, tick: 0, reason: 'nonsense' },
++        ],
++        ticksUsed: 0,
++      },
++      'not a known failure reason',
++    ],
++  ])('turns %s outcome into a recorded invalid failure', (_label, value, fragment) => {
++    const id = `malformed-${_label}`;
++    useChecker(id, () => value as CheckOutcome);
++    const spec = customSpec(id);
++    expect(() => runChecks(andCircuit(), registry, spec)).not.toThrow();
++    const outcome = runChecks(andCircuit(), registry, spec);
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('invalid');
++    expect(outcome.failures[0]?.detail).toContain('malformed');
++    expect(outcome.failures[0]?.detail).toContain(fragment);
++    expect(() => grade(andCircuit(), registry, spec)).not.toThrow();
++  });
++
++  it('adopts failures a checker reported while claiming to have passed', () => {
++    const record: CheckFailure = {
++      check: 'custom',
++      inputs: { a: 0, b: 0 },
++      expected: { out: 1 },
++      actual: { out: 0 },
++      tick: 0,
++      reason: 'mismatch',
++    };
++    useChecker('contradiction', () => ({ passed: true, failures: [record], ticksUsed: 0 }));
++    const outcome = runChecks(andCircuit(), registry, customSpec('contradiction'));
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures).toContainEqual(record);
++  });
++
++  it('synthesizes a failure for a checker that reports failure without a record', () => {
++    useChecker('silent', () => ({ passed: false, failures: [], ticksUsed: 0 }));
++    const outcome = runChecks(andCircuit(), registry, customSpec('silent'));
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('invalid');
++    expect(outcome.failures[0]?.detail).toContain('without a failure record');
++  });
++
++  it('runs truth-table, fuzz and custom checks in one spec', () => {
++    useChecker('sweep-and', sweepAnd);
++    const spec = withChecks(andLevel, [
++      {
++        kind: 'truth-table',
++        rows: [
++          { inputs: { a: 0x0f, b: 0x33 }, outputs: { out: 0x0f & 0x33 } },
++          { inputs: { a: 0xff, b: 0xff }, outputs: { out: 0xff } },
++        ],
++      },
++      {
++        kind: 'fuzz',
++        seed: 99,
++        rounds: 32,
++        inputs: { a: (sample) => sample.a ?? 0, b: (sample) => sample.b ?? 0 },
++        outputs: { out: (v) => (v.a ?? 0) & (v.b ?? 0) },
++      },
++      { kind: 'custom', id: 'sweep-and' },
++    ]);
++    const outcome = runChecks(andCircuit(), registry, spec);
++    expect(outcome.failures).toEqual([]);
++    expect(outcome.passed).toBe(true);
++    expect(grade(andCircuit(), registry, spec).passed).toBe(true);
++  });
++
++  it('fails loudly on a check kind this kernel does not know', () => {
++    // Level data is untrusted, and the dispatch used to fall through to the
++    // script branch: an unknown kind reached `check.steps` and threw out of
++    // `runChecks`. It has to be a recorded failure instead.
++    const bogus = { kind: 'mystery' } as unknown as LevelCheck;
++    const outcome = runChecks(andCircuit(), registry, withChecks(andLevel, [bogus]));
++    expect(outcome.passed).toBe(false);
++    expect(outcome.failures[0]?.reason).toBe('invalid');
++    expect(outcome.failures[0]?.detail).toContain('mystery');
++  });
++});

@@ -1,0 +1,11 @@
+$ vitest run "test/levels/fuzz-custom.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/levels/fuzz-custom.test.ts (47 tests) 55ms
+
+ Test Files  1 passed (1)
+      Tests  47 passed (47)
+   Start at  01:59:15
+   Duration  365ms (transform 57%, tests 23%, import 16%, worker 4%)
+

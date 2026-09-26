@@ -1,0 +1,27 @@
+$ vitest run "test/levels/fuzz-custom.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/levels/fuzz-custom.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/fuzz-custom.test.ts [ test/levels/fuzz-custom.test.ts ]
+Error: Cannot find module '../../src/levels/custom/index' imported from D:/Documents/turing-complete/.worktrees/phase1/test/levels/fuzz-custom.test.ts
+ ❯ test/levels/fuzz-custom.test.ts:5:1
+      3| import type { Graph } from '../../src/core/graph';
+      4| import { DEFAULT_FUZZ_ROUNDS, FUZZ_ROUNDS_CAP, runChecks } from '../..…
+      5| import {
+       | ^
+      6|   customCheckIds,
+      7|   registerCustomCheck,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  01:51:39
+   Duration  246ms (worker 98%, environment 2%)
+
+[ELIFECYCLE] Test failed. See above for more details.

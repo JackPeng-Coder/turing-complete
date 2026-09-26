@@ -1,0 +1,17 @@
+COMMAND: node pnpm.mjs test test/core/registry.test.ts test/core/defs-wide.test.ts test/levels/grader.test.ts test/levels/ch1-part1.test.ts test/levels/ch1-part2.test.ts   (post-fix, focused)
+$ vitest run "test/core/registry.test.ts" "test/core/defs-wide.test.ts" "test/levels/grader.test.ts" "test/levels/ch1-part1.test.ts" "test/levels/ch1-part2.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/registry.test.ts (26 tests) 16ms
+ ✓ test/levels/ch1-part2.test.ts (29 tests) 15ms
+ ✓ test/levels/ch1-part1.test.ts (34 tests) 16ms
+ ✓ test/levels/grader.test.ts (40 tests) 23ms
+ ✓ test/core/defs-wide.test.ts (52 tests) 61ms
+
+ Test Files  5 passed (5)
+      Tests  181 passed (181)
+   Start at  01:00:34
+   Duration  389ms (transform 60%, import 22%, tests 13%, worker 5%)
+
+EXIT=0

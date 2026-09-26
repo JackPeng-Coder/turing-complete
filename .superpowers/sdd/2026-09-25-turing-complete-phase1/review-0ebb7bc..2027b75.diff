@@ -1,0 +1,720 @@
+# Review package: 0ebb7bc..2027b75
+
+## Commits
+2027b75 fix(core): price the built-in 1-bit gates in NAND equivalents
+
+## Files changed
+ src/core/defs/index.ts          | 81 ++++++++++++++++++++++++++++--------
+ src/core/defs/wide.ts           | 34 +++++++++++----
+ src/core/registry.ts            | 15 +++++--
+ src/levels/content/ch1/part1.ts |  4 +-
+ src/levels/content/ch1/part2.ts |  6 ++-
+ src/levels/grader.ts            |  8 ++--
+ test/core/defs-wide.test.ts     | 27 ++++++++++++
+ test/core/registry.test.ts      | 43 +++++++++++++++----
+ test/levels/grader.test.ts      | 92 ++++++++++++++++++++++++++++++++---------
+ 9 files changed, 246 insertions(+), 64 deletions(-)
+
+## Diff
+diff --git a/src/core/defs/index.ts b/src/core/defs/index.ts
+index cd9da69..088df74 100644
+--- a/src/core/defs/index.ts
++++ b/src/core/defs/index.ts
+@@ -1,54 +1,93 @@
+ import type { ComponentDef } from '../registry';
+ import { WIDE_DEF_IDS, createWideDefs } from './wide';
+ 
++// ---------------------------------------------------------------------------
++// GATE COST: the 1-bit NAND-equivalent basis, the same one `wide.ts` prices its
++// bit-sliced cells against.
++//
++// The unit is one 2-input NAND (spec §5.4: 展开时每个基础门的贡献 = 1). `cost`
++// is the DELAY unit and stays 1 for every gate below; `gateCost` is how many
++// 2-input NANDs the gate expands to in a standard all-NAND construction:
++//
++//   gate | NANDs | construction
++//   -----|-------|------------------------------------------------------------
++//   NAND |   1   | the unit
++//   NOT  |   1   | NAND(a, a)
++//   AND  |   2   | NAND(a, b) -> NOT
++//   OR   |   3   | NOT a, NOT b, NAND(~a, ~b)                 [De Morgan]
++//   NOR  |   4   | NOT(or) = OR's three NANDs plus one inverter
++//   XOR  |   4   | the classic four-NAND cell
++//   XNOR |   5   | XOR -> NOT
++//   AND3 |   4   | AND(a, b) (2), then AND(ab, c) (2). Three cannot do it: the
++//        |       | third NAND would invert a product of two signals already in
++//        |       | hand, and no such product is ~(abc).
++//   OR3  |   6   | NOT a, NOT b, NOT c, then a 3-input NAND (itself 3) = 6. The
++//        |       | cascade or(or(a, b), c) is also 3 + 3 = 6.
++//
++// These are documented constructions, not proven minima -- AND3 is the one with
++// a minimality argument, sketched above. `cost` and `gateCost` coincide only for
++// NAND and NOT, and every gate below therefore states BOTH: an `and` worth a
++// single NAND equivalent was the bug this table fixes, since one bit of `and8`
++// is worth 2 on the very same basis.
++// ---------------------------------------------------------------------------
++const NAND = 1;
++const NOT = 1;
++const AND = 2;
++const OR = 3;
++const XOR = 4;
++
+ const gate = (
+   id: string,
+   zh: string,
+   en: string,
+   inputs: number,
+   /** Expected output per input pattern; the index IS the input vector. */
+   table: readonly number[],
++  /** NAND equivalents: 2-input NANDs in this gate's standard all-NAND cell. */
++  gateCost: number,
+ ): ComponentDef => {
+   if (table.length !== 1 << inputs) {
+     throw new Error(`${id}: expected ${1 << inputs} truth-table entries, got ${table.length}`);
+   }
+   return {
+     id,
+     name: { zh, en },
+     category: 'logic1',
+     inputs: Array.from({ length: inputs }, (_, i) => ({
+       id: String.fromCharCode(97 + i),
+       width: 1,
+     })),
+     outputs: [{ id: 'out', width: 1 }],
+-    // `cost` only: for a 1-bit NAND-based gate the delay unit and the
+-    // NAND-equivalent gate count are the same number, so `ComponentDef.gateCost`
+-    // is left unstated and the gate metric falls back to `cost`. Stating one here
+-    // would move a chapter-1 score (see `test/levels/grader.test.ts`, which
+-    // freezes all twelve).
++    // The DELAY unit, one per node (spec §3.2). The gate metric does not read
++    // this -- it reads `gateCost`, whose numbers are in the table above and at
++    // each call site below.
+     cost: 1,
++    gateCost,
+     sequential: false,
+     stateBytes: 0,
+     evaluate: (i, o) => {
+       let index = 0;
+       for (let p = 0; p < inputs; p += 1) index |= (i[p] === 1 ? 1 : 0) << p;
+       o[0] = table[index] === 1 ? 1 : 0;
+     },
+   };
+ };
+ 
+ // Constant sources carry `category: 'io'`, not `'logic1'`: they have no inputs and
+ // simply drive a level, so they do not belong with the gates. The registry test
+ // pins this down by asserting that `byCategory('logic1')` does not contain
+ // `const_on`. Nothing downstream groups the palette by category (the level's
+ // `allowedComponents` decides that), so this only affects the grouping label.
++//
++// 0 on BOTH metrics -- a rail is not a gate -- so this is one of the defs that
++// legitimately leaves `gateCost` to the `?? cost` fallback.
+ const source = (id: string, zh: string, en: string, value: 0 | 1): ComponentDef => ({
+   id,
+   name: { zh, en },
+   category: 'io',
+   inputs: [],
+   outputs: [{ id: 'out', width: 1 }],
+   cost: 0,
+   sequential: false,
+   stateBytes: 0,
+   evaluate: (_i, o) => {
+@@ -86,29 +125,35 @@ export const DEF_IDS = [...PHASE0_DEF_IDS, ...WIDE_DEF_IDS] as const;
+ export type DefId = (typeof DEF_IDS)[number];
+ 
+ export const BASE_DEFS: readonly ComponentDef[] = [
+   source('const_on', '高电平', 'Constant On', 1),
+   source('const_off', '低电平', 'Constant Off', 0),
+ 
+   // Truth tables are written out in full. The index is the input vector with
+   // input `a` as bit 0, so index 0b10 means a=0, b=1. Writing them out makes
+   // every gate auditable at a glance instead of requiring the reader to
+   // evaluate a boolean expression in their head.
+-  gate('nand', '与非门', 'NAND', 2, [1, 1, 1, 0]),
+-  gate('not', '非门', 'NOT', 1, [1, 0]),
+-  gate('and', '与门', 'AND', 2, [0, 0, 0, 1]),
+-  gate('or', '或门', 'OR', 2, [0, 1, 1, 1]),
+-  gate('nor', '或非门', 'NOR', 2, [1, 0, 0, 0]),
+-  gate('xor', '异或门', 'XOR', 2, [0, 1, 1, 0]),
+-  gate('xnor', '同或门', 'XNOR', 2, [1, 0, 0, 1]),
+-  gate('and3', '三路与门', '3-Pin AND', 3, [0, 0, 0, 0, 0, 0, 0, 1]),
+-  gate('or3', '三路或门', '3-Pin OR', 3, [0, 1, 1, 1, 1, 1, 1, 1]),
++  //
++  // The last argument is the gate metric (NAND equivalents, per the table
++  // above); the comment on each line is that number's construction, so no count
++  // here has to be taken on trust.
++  gate('nand', '与非门', 'NAND', 2, [1, 1, 1, 0], NAND),
++  gate('not', '非门', 'NOT', 1, [1, 0], NOT), // NAND(a, a)
++  gate('and', '与门', 'AND', 2, [0, 0, 0, 1], AND), // NAND(a, b) -> NOT
++  gate('or', '或门', 'OR', 2, [0, 1, 1, 1], OR), // NOT a, NOT b, NAND(~a, ~b)
++  gate('nor', '或非门', 'NOR', 2, [1, 0, 0, 0], OR + NOT), // NOT(or)
++  gate('xor', '异或门', 'XOR', 2, [0, 1, 1, 0], XOR), // the four-NAND cell
++  gate('xnor', '同或门', 'XNOR', 2, [1, 0, 0, 1], XOR + NOT), // NOT(xor)
++  // Two ANDs: AND(a, b) then AND(ab, c). AND3 is minimal at 4 (see the table).
++  gate('and3', '三路与门', '3-Pin AND', 3, [0, 0, 0, 0, 0, 0, 0, 1], 2 * AND),
++  // NOT a, NOT b, NOT c, then a 3-input NAND; the OR cascade also totals 6.
++  gate('or3', '三路或门', '3-Pin OR', 3, [0, 1, 1, 1, 1, 1, 1, 1], 2 * OR),
+ 
+   // Level IO plumbing. Always available in the palette; never unlocked.
+   {
+     id: 'level_input',
+     name: { zh: '关卡输入', en: 'Level Input' },
+     category: 'level',
+     inputs: [],
+     outputs: [{ id: 'out', width: 1 }],
+     cost: 0,
+     sequential: false,
+@@ -176,15 +221,17 @@ export const BASE_DEFS: readonly ComponentDef[] = [
+       o[0] = state?.[0] === 1 ? 1 : 0;
+     },
+     clockEdge: (i, _o, state) => {
+       if (i[0] === 1) state[0] = i[1] === 1 ? 1 : 0;
+     },
+   },
+ 
+   // The wide (8-bit) family. Registered at the default width -- 8 is the only
+   // width this phase opens; `createWideDefs(width)` is the hook for 16/32/64.
+   //
+-  // These are the defs that DO state `gateCost`: a wide part is one delay unit
+-  // and many NAND equivalents, so the two metrics stop agreeing here. The
+-  // numbers and their constructions live next to each def in `wide.ts`.
++  // The same NAND basis as the gates above, scaled by the width: `and8` is 8 x
++  // AND = 16, `add8` is 8 full adders = 72. The constructions live next to each
++  // def in `wide.ts`, and `test/core/defs-wide.test.ts` cross-checks its
++  // per-bit cells against these 1-bit gates, so the two tables cannot drift
++  // into two different bases.
+   ...createWideDefs(),
+ ];
+diff --git a/src/core/defs/wide.ts b/src/core/defs/wide.ts
+index e32c3fe..93905b6 100644
+--- a/src/core/defs/wide.ts
++++ b/src/core/defs/wide.ts
+@@ -111,24 +111,31 @@ function maskOf(w: number): number {
+ //   NOR        |   4   | NOT a, NOT b, NAND(a, b)     [AND of the negations]
+ //   XOR        |   4   | the classic four-NAND XOR
+ //   XNOR       |   5   | XOR -> NOT
+ //   MUX2       |   4   | NOT s, NAND(a, ~s), NAND(b, s), NAND of those two
+ //   FULL_ADDER |   9   | the `FULL_ADDER` constant below
+ //
+ // The XOR/MUX2 counts are the standard cells, and `equal8`'s total is the same
+ // 54 whether it is built as (XNOR × 8 → AND tree) or as (XOR × 8 → OR tree →
+ // NOT), which is a useful sign that 54 is not an artifact of one drawing.
+ //
+-// Exact for the widths the game registers -- 8 now, and phase 5's 16/32/64: all
+-// powers of two, which is what makes a `shiftStages(w)`-stage barrel the right
+-// shape. `clampWidth` also admits other widths; a derived count there is the
+-// same construction's arithmetic, not a claim that the construction is optimal.
++// The same basis prices the registered 1-bit gates in `defs/index.ts` -- NAND 1,
++// NOT 1, AND 2, OR 3, NOR 4, XOR 4, XNOR 5, AND3 4, OR3 6 -- and
++// `test/core/defs-wide.test.ts` cross-checks this file's per-bit cells against
++// those defs, so an `and8` bit and a built-in `and` can never be priced two
++// different ways again.
++//
++// Documented for the widths the game registers -- 8 now, and phase 5's 16/32/64:
++// all powers of two, which is what makes a `shiftStages(w)`-stage barrel the
++// right shape. `clampWidth` also admits other widths; a derived count there is
++// the same construction's arithmetic, not a claim that the construction is
++// optimal.
+ // ---------------------------------------------------------------------------
+ 
+ const NAND = 1;
+ const NOT = 1;
+ const AND = 2;
+ const OR = 3;
+ const NOR = 4;
+ const XOR = 4;
+ const XNOR = 5;
+ const MUX2 = 4;
+@@ -300,32 +307,43 @@ function equalOp(a: number, b: number, w: number): number {
+   return u(a, w) === u(b, w) ? 1 : 0;
+ }
+ 
+ /** Logical left shift. Decided: an amount of `w` or more gives 0. */
+ function shiftLeftOp(a: number, amount: number, w: number): number {
+   const s = u(amount, w);
+   if (s >= w) return 0;
+   return u(u(a, w) << s, w);
+ }
+ 
+-/** Logical right shift: zeros shift in from the top. Amount >= `w` gives 0. */
++/**
++ * Logical right shift: zeros shift in from the top. Amount >= `w` gives 0.
++ *
++ * `ashr8` is the arithmetic shift and deliberately does NOT follow this rule --
++ * see `shiftRightArithmeticOp`.
++ */
+ function shiftRightOp(a: number, amount: number, w: number): number {
+   const s = u(amount, w);
+   if (s >= w) return 0;
+   return u(u(a, w) >>> s, w);
+ }
+ 
+ /**
+  * Arithmetic right shift: the sign bit replicates, so a negative pattern stays
+- * negative. An amount of `w` or more fills with the sign bit (`0xff` for a
+- * negative byte) rather than giving 0 -- that is what makes `ashr8` the signed
+- * counterpart of `shift_r8` instead of a duplicate of it.
++ * negative.
++ *
++ * DELIBERATELY EXCLUDED from the "`shift_*` with `amount >= w` gives 0" rule that
++ * `shiftLeftOp` / `shiftRightOp` follow. That rule is the LOGICAL shifts' edge
++ * behaviour; applying it here would make `ashr8` a duplicate of `shift_r8` on
++ * exactly the inputs the sign fill exists for. `ashr8` shifts arithmetically, so
++ * an amount of `w` or more fills with the sign bit (`0xff` for a negative byte,
++ * `0` for a positive one) -- ratified behaviour, not an oversight. Do not "fix"
++ * this to 0.
+  */
+ function shiftRightArithmeticOp(a: number, amount: number, w: number): number {
+   const s = u(amount, w);
+   const signed = toSigned(a, w);
+   if (s >= w) return signed < 0 ? maskOf(w) : 0;
+   return u(signed >> s, w);
+ }
+ 
+ /** Rotate left. Decided: an amount >= `w` behaves as `amount % w`. */
+ function rotateLeftOp(a: number, amount: number, w: number): number {
+diff --git a/src/core/registry.ts b/src/core/registry.ts
+index 1409858..885f78b 100644
+--- a/src/core/registry.ts
++++ b/src/core/registry.ts
+@@ -38,24 +38,31 @@ export interface ComponentDef {
+   readonly cost: number;
+   /**
+    * NAND-equivalent GATE cost: how many 2-input NAND gates this part expands to
+    * once custom and wide components are flattened (spec §5.4). Read by
+    * `gateCost()` in `levels/grader.ts` and by nothing else.
+    *
+    * The two metrics expand wide parts differently on purpose: an `add8` is one
+    * unit of delay but 72 NAND equivalents, so this cannot share a field with
+    * `cost`.
+    *
+-   * Absent means "same as `cost`". That default is exactly right for the 1-bit
+-   * phase-0 family -- a NAND-based gate IS one NAND equivalent, and a source or
+-   * a level connector is zero -- so leaving it out keeps every existing level's
+-   * score byte-identical. Defs whose part is worth more than one NAND state it.
++   * It is also not "one per gate": the NAND basis prices a 1-bit `and` at 2 and
++   * an `or` at 3 (the table is in `defs/index.ts`), and a wide part scales with
++   * its width -- one bit of `and8` is those same 2 NANDs, so the part is 16. The
++   * two numbers coincide for `nand` and `not` only, and every gate states this
++   * field explicitly so no count is inherited by accident.
++   *
++   * Absent means "same as `cost`", which is a real case rather than a legacy
++   * default: a rail (`const_on`), a level connector, a wire-like packer and the
++   * storage elements are zero on BOTH metrics, so a second explicit 0 would only
++   * give the two zeroes a way to drift apart. Any def whose part is worth more
++   * than one NAND states the field.
+    */
+   readonly gateCost?: number;
+   /** Storage elements sample on the clock edge and do not add combinational delay. */
+   readonly sequential: boolean;
+   /**
+    * Combinational transfer function: reads inputs, writes outputs, must be pure.
+    *
+    * Storage elements use it to PUBLISH the value they are holding: they read
+    * `state` (the third parameter) and must never read `inputs`, otherwise a
+    * delay line degrades into a wire. Combination components ignore `state` and
+diff --git a/src/levels/content/ch1/part1.ts b/src/levels/content/ch1/part1.ts
+index 2720d92..422891f 100644
+--- a/src/levels/content/ch1/part1.ts
++++ b/src/levels/content/ch1/part1.ts
+@@ -116,14 +116,16 @@ export const CH1_PART1: readonly LevelSpec[] = [
+     name: { zh: '或非门', en: 'NOR Gate' },
+     brief: {
+       zh: '或门之后再翻一次。两个输入都为低时输出才为高。',
+       en: 'An OR flipped. High only when both inputs are low.',
+     },
+     hint: { zh: '或门的输出接一个非门。', en: 'Put a NOT after the OR.' },
+     allowedComponents: ['nand', 'not', 'and', 'or', 'level_input', 'level_output'],
+     io: IO_2,
+     checks: [truthTable(IO_2, { out: ({ a, b }) => (a || b ? 0 : 1) })],
+     // Three-star target = the reference solution's own metrics; the reference scores exactly it.
+-    threeStar: { gate: 2, delay: 2, tick: 0 },
++    // Gate = 4, not 2: the reference is OR + NOT, and OR is 3 NAND equivalents
++    // (see the basis in `core/defs/index.ts`), not one.
++    threeStar: { gate: 4, delay: 2, tick: 0 },
+     rewards: { components: ['const_on', 'const_off'] },
+   },
+ ];
+diff --git a/src/levels/content/ch1/part2.ts b/src/levels/content/ch1/part2.ts
+index 9ebeb0c..b3b125f 100644
+--- a/src/levels/content/ch1/part2.ts
++++ b/src/levels/content/ch1/part2.ts
+@@ -149,21 +149,22 @@ export const CH1_PART2: readonly LevelSpec[] = [
+       'const_on',
+       'delay_line',
+       'and3',
+       'xor',
+       'level_input',
+       'level_output',
+     ],
+     io: IO_ABC,
+     checks: [truthTable(IO_ABC, { out: ({ a, b, c }) => (a || b || c ? 1 : 0) })],
+     // Three-star target = the reference solution's own metrics; the reference scores exactly it.
+-    threeStar: { gate: 2, delay: 2, tick: 0 },
++    // Gate = 6, not 2: the reference cascades two ORs, 3 NAND equivalents each.
++    threeStar: { gate: 6, delay: 2, tick: 0 },
+     rewards: { components: ['xnor'] },
+   },
+   {
+     id: 'ch1-11-bigger-and-gate',
+     chapter: 1,
+     index: 11,
+     name: { zh: '三路与门', en: 'Bigger AND Gate' },
+     brief: {
+       zh: '三个输入都为高，输出才为高。',
+       en: 'High only when all three inputs are high.',
+@@ -178,21 +179,22 @@ export const CH1_PART2: readonly LevelSpec[] = [
+       'delay_line',
+       'and3',
+       'xor',
+       'or3',
+       'level_input',
+       'level_output',
+     ],
+     io: IO_ABC,
+     checks: [truthTable(IO_ABC, { out: ({ a, b, c }) => (a && b && c ? 1 : 0) })],
+     // Three-star target = the reference solution's own metrics; the reference scores exactly it.
+-    threeStar: { gate: 2, delay: 2, tick: 0 },
++    // Gate = 4, not 2: the reference cascades two ANDs, 2 NAND equivalents each.
++    threeStar: { gate: 4, delay: 2, tick: 0 },
+   },
+   {
+     id: 'ch1-12-binary-racer',
+     chapter: 1,
+     index: 12,
+     name: { zh: '二进制速算', en: 'Binary Racer' },
+     brief: {
+       zh: '四个输入位 b3 b2 b1 b0 组成一个数。一眼读出它——然后原样送到四个输出位。',
+       en: 'Bits b3..b0 form one number. Read it at a glance, then forward it to the four outputs.',
+     },
+diff --git a/src/levels/grader.ts b/src/levels/grader.ts
+index a2008f8..1c15a37 100644
+--- a/src/levels/grader.ts
++++ b/src/levels/grader.ts
+@@ -28,23 +28,25 @@ export function scoreOf(m: Metrics): number {
+ 
+ /**
+  * Total NAND-equivalent gates of the circuit: the GATE metric (spec §5.4,
+  * "电路 + 自定义组件 + 宽位组件全部展开后，NAND 等价门的总数").
+  *
+  * It counts `def.gateCost`, NOT `def.cost`. The two fields are different metrics
+  * on purpose: `cost` is the per-node DELAY unit that `delayOf` charges, and a
+  * wide component is deliberately one unit of delay (spec §3.2) while expanding
+  * to many NAND equivalents here -- an `add8` is 1 delay but 72 gates.
+  *
+- * A def that states no `gateCost` falls back to `cost`, which is what every
+- * 1-bit phase-0 def wants (a NAND is one NAND equivalent, a source is zero) and
+- * what keeps every chapter-1 score unchanged.
++ * The `?? def.cost` fallback is for defs whose two values genuinely agree and are
++ * zero on both: a rail, a level connector, a wire-like packer, a storage element.
++ * It is NOT the 1-bit default -- a 1-bit `and` is 2 NAND equivalents and an `or`
++ * is 3 (see the basis table in `defs/index.ts`), and those gates state their own
++ * counts. `test/core/registry.test.ts` fails if a gate ever stops stating one.
+  */
+ export function gateCost(graph: Graph, registry: Registry): number {
+   let total = 0;
+   for (const inst of graph.instances) {
+     if (!registry.has(inst.def)) continue;
+     const def = registry.get(inst.def);
+     total += def.gateCost ?? def.cost;
+   }
+   return total;
+ }
+diff --git a/test/core/defs-wide.test.ts b/test/core/defs-wide.test.ts
+index 37eaab9..934142e 100644
+--- a/test/core/defs-wide.test.ts
++++ b/test/core/defs-wide.test.ts
+@@ -257,20 +257,47 @@ describe('wide defs: the brief\'s contract', () => {
+     expect(gate('neg8')).toBe(gate('not8') + gate('add8')); // NOT8 + add8, cin high
+     expect(gate('less_s')).toBe(gate('less_u') + 4 + 4); // sign XOR + sign-fix mux
+     expect(gate('mul8')).toBe(8 * (gate('and8') + gate('add8'))); // 8 partials, 8 adds
+     expect(gate('switch8')).toBe(8 * gate('switch')); // one AND per bit
+     expect(gate('shift_l8')).toBe(gate('rot_l8') + 12 + 1 + gate('switch8')); // barrel + OR(12) + NOT(1) + 8 ANDs
+     expect(gate('ashr8')).toBe(gate('rot_l8') + 12 + 8 * 4); // barrel + OR(12) + 8 sign-fill muxes at 4 NANDs
+     expect(gate('shift_r8')).toBe(gate('shift_l8')); // same structure, other direction
+     expect(gate('rot_r8')).toBe(gate('rot_l8'));
+   });
+ 
++  it('prices each bit-sliced cell on the same NAND basis as the registered 1-bit gate', () => {
++    // The finding fix round 2 answered: one bit of `and8` is the same AND cell as
++    // the built-in `and`, so the two cannot be priced differently (the built-ins
++    // used to fall through `?? cost` and be worth 1). `nand8`/`not8` are in the
++    // table for completeness -- both numbers are 1 either way, so they are not
++    // evidence of anything.
++    const oneBit = (id: string): number => {
++      const count = registry.get(id).gateCost;
++      if (count === undefined) throw new Error(`no gateCost on the 1-bit gate ${id}`);
++      return count;
++    };
++    const cells: readonly (readonly [string, string])[] = [
++      ['and8', 'and'],
++      ['or8', 'or'],
++      ['nand8', 'nand'],
++      ['nor8', 'nor'],
++      ['xor8', 'xor'],
++      ['xnor8', 'xnor'],
++      ['not8', 'not'],
++    ];
++    for (const [wide, one] of cells) {
++      expect(registry.get(wide).gateCost, `${wide} vs ${DEFAULT_WIDE_WIDTH} x ${one}`).toBe(
++        DEFAULT_WIDE_WIDTH * oneBit(one),
++      );
++    }
++  });
++
+   it('scales every count with the width the generator is asked for', () => {
+     const at = (width: number, id: string): number => {
+       const def = createWideDefs(width).find((d) => d.id === id);
+       if (!def) throw new Error(`createWideDefs(${width}) has no ${id}`);
+       return def.gateCost!;
+     };
+     expect(at(1, 'not1')).toBe(1); // 1 x NOT
+     expect(at(1, 'add1')).toBe(9); // 1 full adder
+     expect(at(1, 'switch')).toBe(2); // the bare id is always the 1-bit switch
+     expect(at(4, 'and4')).toBe(8); // 4 x AND
+diff --git a/test/core/registry.test.ts b/test/core/registry.test.ts
+index 7e32747..10b6648 100644
+--- a/test/core/registry.test.ts
++++ b/test/core/registry.test.ts
+@@ -63,33 +63,58 @@ describe('base defs', () => {
+   });
+ 
+   it('marks sources as zero cost and gates as one', () => {
+     expect(r.get('const_on').cost).toBe(0);
+     expect(r.get('const_off').cost).toBe(0);
+     for (const id of ['nand', 'not', 'and', 'or', 'nor', 'xor', 'xnor', 'and3', 'or3']) {
+       expect(r.get(id).cost, id).toBe(1);
+     }
+   });
+ 
+-  it('leaves gateCost unstated on the phase-0 defs, so the gate metric falls back to cost', () => {
+-    // `cost` is the DELAY unit and `gateCost` the NAND-equivalent GATE unit; for
+-    // a 1-bit NAND-based part the two are the same number, so phase 0 says
+-    // nothing and `gateCost()` (levels/grader.ts) uses `?? cost`. That fallback
+-    // is what keeps every chapter-1 score byte-identical -- these defs must NOT
+-    // grow an explicit `gateCost`, and if one ever does, this test fails and the
+-    // score change has to be justified rather than discovered.
++  it('prices every 1-bit gate on the NAND-equivalent basis, explicitly', () => {
++    // `gateCost` is the NAND-equivalent GATE unit (spec §5.4), NOT the delay
++    // unit: NAND 1, NOT 1, AND 2, OR 3, NOR 4, XOR 4, XNOR 5, AND3 4, OR3 6, with
++    // each cell's construction written out in `defs/index.ts`. Every gate states
++    // the field, so no count here is inherited from `cost` -- inheriting it is
++    // what made an `and` worth 1 while one bit of `and8` was worth 2.
++    const NAND_EQUIVALENTS: Record<string, number> = {
++      nand: 1,
++      not: 1,
++      and: 2,
++      or: 3,
++      nor: 4,
++      xor: 4,
++      xnor: 5,
++      and3: 4,
++      or3: 6,
++    };
++    for (const [id, want] of Object.entries(NAND_EQUIVALENTS)) {
++      expect(r.get(id).gateCost, id).toBe(want);
++    }
++    // These nine ARE the `logic1` family, so a tenth gate added without a count
++    // cannot slip past the loop above.
++    expect(r.byCategory('logic1').map((d) => d.id).sort()).toEqual(
++      Object.keys(NAND_EQUIVALENTS).sort(),
++    );
++  });
++
++  it('leaves gateCost to the `?? cost` fallback only where both metrics are zero', () => {
++    // The fallback still has a job: a rail, level plumbing, a wire and the
++    // storage elements are zero gates AND zero delay, so a second explicit 0
++    // would only give the two zeroes a way to drift apart. Every part that is
++    // worth a gate states its own count instead.
+     const wide = new Set<string>(WIDE_DEF_IDS);
+     for (const d of r.all()) {
+-      if (wide.has(d.id)) continue;
++      if (wide.has(d.id) || d.category === 'logic1') continue;
++      expect(d.cost, `${d.id} leans on the fallback but is not free`).toBe(0);
+       expect(d.gateCost, d.id).toBeUndefined();
+     }
+-    expect(new Set(r.all().map((d) => d.id)).size).toBeGreaterThan(wide.size);
+   });
+ 
+   it('evaluates NAND', () => {
+     const def = r.get('nand');
+     for (const [a, b, want] of [
+       [0, 0, 1],
+       [0, 1, 1],
+       [1, 0, 1],
+       [1, 1, 0],
+     ] as const) {
+diff --git a/test/levels/grader.test.ts b/test/levels/grader.test.ts
+index aad3ee7..3b6bb1c 100644
+--- a/test/levels/grader.test.ts
++++ b/test/levels/grader.test.ts
+@@ -1,18 +1,19 @@
+ import { describe, expect, it } from 'vitest';
+ import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
+ import { BASE_DEFS } from '../../src/core/defs/index';
+ import { delayOf } from '../../src/core/net';
+ import { createRegistry, type ComponentDef } from '../../src/core/registry';
+ import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
+ import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
+ import type { LevelSpec } from '../../src/levels/spec';
++import { LEVELS, LEVEL_ORDER, getLevel } from '../../src/levels/index';
+ import type { Metrics } from '../../src/levels/grader';
+ import { SCORE_WEIGHTS, gateCost, grade, scoreOf, starsOf } from '../../src/levels/grader';
+ import { build } from '../fixtures/build';
+ 
+ const registry = createRegistry(BASE_DEFS);
+ 
+ /**
+  * A def with the two cost fields set independently, for the tests that have to
+  * see which one `gateCost()` reads. `gateCost` is spread in conditionally
+  * because `exactOptionalPropertyTypes` distinguishes an absent key from an
+@@ -307,48 +308,56 @@ const ch1Reference: Record<string, () => Graph> = {
+       { kind: 'input', name: 'b1' },
+       { kind: 'input', name: 'b0' },
+       { kind: 'output', name: 'OUT_out3', from: 'b3' },
+       { kind: 'output', name: 'OUT_out2', from: 'b2' },
+       { kind: 'output', name: 'OUT_out1', from: 'b1' },
+       { kind: 'output', name: 'OUT_out0', from: 'b0' },
+     ]),
+ };
+ 
+ /**
+- * The metrics and score of each reference solution, captured from the PRE-CHANGE
+- * tree (commit `a57908a`, before `gateCost` existed) and asserted as literals.
++ * The metrics and score of each reference solution, captured from the pre-change
++ * tree (commit `a57908a`), and updated ONLY where fix round 2 moved them by
++ * pricing the built-in 1-bit gates as the NAND equivalents they are:
++ * `ch1-06` gate 2 -> 4 (its reference is OR + NOT, and OR is 3), `ch1-10`
++ * gate 2 -> 6 (two ORs) and `ch1-11` gate 2 -> 4 (two ANDs). Each of those three
++ * levels' `threeStar.gate` was raised to the measured value in the same round,
++ * because a target its own reference solution fails is a defect -- the principle
++ * the shipping-set check at the bottom of this file now enforces mechanically.
+  *
+- * A number moving here is a finding against the change that moved it, NOT a
+- * number to re-baseline: phase-0 defs state no `gateCost`, so the gate metric
+- * falls back to their `cost` and every one of these twelve results must be
+- * byte-identical. If a future wide-family edit moves one of these, the metric
+- * has leaked out of the wide defs and into phase 0 -- which is the whole thing
+- * the `cost` / `gateCost` split exists to prevent.
++ * Every DELAY and TICK literal here is still the pre-change value and must stay
++ * that way: `cost` is the delay unit and fix round 2 did not touch it (`test/core/
++ * defs-wide.test.ts` pins the wide family's delay at one unit per operator, and
++ * the nine 1-bit gates are still `cost: 1`).
++ *
++ * A fourth number moving here is a finding against the change that moved it, NOT
++ * a number to re-baseline: the delay/tick columns must be byte-identical to
++ * `a57908a`, and the gate column moves only when the NAND basis itself changes.
+  */
+ const CH1_REFERENCE: Record<string, { readonly metrics: Metrics; readonly score: number }> = {
+   'ch1-01-crude-awakening': { metrics: { gate: 0, delay: 0, tick: 0 }, score: 0 },
+   'ch1-02-nand-gate': { metrics: { gate: 1, delay: 1, tick: 0 }, score: 5 },
+   'ch1-03-not-gate': { metrics: { gate: 1, delay: 1, tick: 0 }, score: 5 },
+   'ch1-04-and-gate': { metrics: { gate: 2, delay: 2, tick: 0 }, score: 10 },
+   'ch1-05-or-gate': { metrics: { gate: 3, delay: 2, tick: 0 }, score: 11 },
+-  'ch1-06-nor-gate': { metrics: { gate: 2, delay: 2, tick: 0 }, score: 10 },
++  'ch1-06-nor-gate': { metrics: { gate: 4, delay: 2, tick: 0 }, score: 12 },
+   'ch1-07-always-on': { metrics: { gate: 0, delay: 0, tick: 0 }, score: 0 },
+   // Sequential-only: no combinational depth at all, and the two delay lines
+   // show up as ticks instead.
+   'ch1-08-second-tick': { metrics: { gate: 0, delay: 0, tick: 3 }, score: 24 },
+   'ch1-09-xor-gate': { metrics: { gate: 4, delay: 3, tick: 0 }, score: 16 },
+-  'ch1-10-bigger-or-gate': { metrics: { gate: 2, delay: 2, tick: 0 }, score: 10 },
+-  'ch1-11-bigger-and-gate': { metrics: { gate: 2, delay: 2, tick: 0 }, score: 10 },
++  'ch1-10-bigger-or-gate': { metrics: { gate: 6, delay: 2, tick: 0 }, score: 14 },
++  'ch1-11-bigger-and-gate': { metrics: { gate: 4, delay: 2, tick: 0 }, score: 12 },
+   'ch1-12-binary-racer': { metrics: { gate: 0, delay: 0, tick: 0 }, score: 0 },
+ };
+ 
+-describe('phase-0 regression: the chapter-1 reference scores do not move', () => {
++describe('phase-0 regression: the chapter-1 reference scores are frozen', () => {
+   const levels = [...CH1_PART1, ...CH1_PART2];
+   const byId = new Map(levels.map((l) => [l.id, l]));
+ 
+   it('covers all twelve chapter-1 levels, with the same ids', () => {
+     expect(levels).toHaveLength(12);
+     expect(Object.keys(ch1Reference).sort()).toEqual(levels.map((l) => l.id).sort());
+     expect(Object.keys(CH1_REFERENCE).sort()).toEqual(levels.map((l) => l.id).sort());
+   });
+ 
+   for (const [id, make] of Object.entries(ch1Reference)) {
+@@ -357,29 +366,72 @@ describe('phase-0 regression: the chapter-1 reference scores do not move', () =>
+       const frozen = CH1_REFERENCE[id]!;
+       const result = grade(make(), registry, level);
+       expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
+       expect(result.passed).toBe(true);
+       expect(result.metrics).toEqual(frozen.metrics);
+       expect(result.score).toBe(frozen.score);
+       // The frozen score and the frozen metrics have to agree with each other,
+       // so a typo in either literal cannot pass as "one of them is right".
+       expect(result.score).toBe(scoreOf(frozen.metrics));
+     });
++  }
++});
+ 
+-    it(`${id} still meets every three-star target`, () => {
+-      const level = byId.get(id) as LevelSpec;
++/**
++ * The phase-0 principle this file now enforces mechanically: **a level's
++ * `threeStar` bounds must be met by that level's own reference solution** (phase
++ * 0 tightened several targets precisely because they were LOOSER than the
++ * reference; a target the reference FAILS is a defect, not a fixture).
++ *
++ * It walks the SHIPPED level set (`LEVELS`, assembled by `src/levels/index.ts`),
++ * not this file's table, so a level that ships later without a reference circuit
++ * here fails the coverage case instead of being silently skipped.
++ *
++ * This is what fix round 2 turned on: pricing the built-in `and`/`or` on the NAND
++ * basis moved `ch1-06` (2 -> 4), `ch1-10` (2 -> 6) and `ch1-11` (2 -> 4) past
++ * their old targets, and the targets were recalibrated to the measured values in
++ * the level data. The frozen table above says what the numbers ARE; this says
++ * they still satisfy the levels they belong to.
++ */
++describe('every shipped level: its reference solution meets its own three-star bounds', () => {
++  it('has a reference circuit for every shipped level', () => {
++    expect(LEVELS.length).toBeGreaterThan(0);
++    const missing = LEVELS.map((l) => l.id).filter((id) => !(id in ch1Reference));
++    expect(missing, `no reference circuit in this file for: ${missing.join(', ')}`).toEqual([]);
++  });
++
++  for (const id of LEVEL_ORDER) {
++    it(`${id} meets every bound its level declares`, () => {
++      const level = getLevel(id);
++      const make = ch1Reference[id];
++      expect(make, `${id} has no reference circuit in this file`).toBeDefined();
++      if (!make) return;
+       const result = grade(make(), registry, level);
++      expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
++      expect(result.passed).toBe(true);
+       const target = level.threeStar;
+       expect(target, `${id} declares no three-star targets`).toBeDefined();
+-      if (target?.gate !== undefined) {
+-        expect(result.metrics.gate, `${id} gate`).toBeLessThanOrEqual(target.gate);
++      if (!target) return;
++      // Each bound is compared directly, with both numbers in the message: the
++      // rule is "the reference MEETS the target", so a failure has to name the
++      // measured value and the target it beat.
++      const { gate, delay, tick } = result.metrics;
++      if (target.gate !== undefined) {
++        expect(gate, `${id} gate: reference ${gate} > target ${target.gate}`).toBeLessThanOrEqual(
++          target.gate,
++        );
+       }
+-      if (target?.delay !== undefined) {
+-        expect(result.metrics.delay, `${id} delay`).toBeLessThanOrEqual(target.delay);
++      if (target.delay !== undefined) {
++        expect(
++          delay,
++          `${id} delay: reference ${delay} > target ${target.delay}`,
++        ).toBeLessThanOrEqual(target.delay);
+       }
+-      if (target?.tick !== undefined) {
+-        expect(result.metrics.tick, `${id} tick`).toBeLessThanOrEqual(target.tick);
++      if (target.tick !== undefined) {
++        expect(tick, `${id} tick: reference ${tick} > target ${target.tick}`).toBeLessThanOrEqual(
++          target.tick,
++        );
+       }
+       expect(result.stars, `metrics=${JSON.stringify(result.metrics)}`).toBe(3);
+     });
+   }
+ });

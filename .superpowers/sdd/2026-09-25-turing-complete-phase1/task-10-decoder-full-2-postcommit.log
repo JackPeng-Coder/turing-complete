@@ -1,0 +1,151 @@
+$ vitest run
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/app/progress.test.ts (18 tests) 13ms
+ ✓ test/levels/checks.test.ts (28 tests) 49ms
+ ❯ test/core/defs-wide.test.ts (60 tests | 1 failed) 125ms
+   ❯ wide defs: the brief's contract (11)
+     ✓ declares every id with the exact pin ids and widths the brief gives 6ms
+     ✓ is reachable through the registry the way the game reaches it 5ms
+     ✓ keeps every wide def pure combinational 4ms
+     × categorizes every wide part as wide and const8 as a source 12ms
+     ✓ keeps the DELAY cost at one unit per operator, nothing for a source or a wire 1ms
+     ✓ states a NAND-equivalent gateCost for every def, explicitly 1ms
+     ✓ gives every operator more than one NAND equivalent, and no part less than its delay 4ms
+     ✓ composes each count out of the others, so the constructions are checkable 1ms
+     ✓ prices each bit-sliced cell on the same NAND basis as the registered 1-bit gate 0ms
+     ✓ scales every count with the width the generator is asked for 1ms
+     ✓ registers the whole family without a duplicate id 0ms
+   ✓ wide storage defs: the brief's contract and the decided edge rules (8)
+     ✓ declares every storage def with the ids, pins, state and costs the brief gives 1ms
+     ✓ is registered, and every id is one level data can spell 1ms
+     ✓ mux8 selects a or b on sel, combinationally 1ms
+     ✓ delay8 publishes the byte it holds and never its inputs 1ms
+     ✓ reg8 samples d on the edge when load is high, and reset beats load 0ms
+     ✓ counter8 counts on the edge when en is high, wraps to 0, and reset beats en 0ms
+     ✓ ram8 writes the addressed byte on the edge and selects it on the fly 0ms
+     ✓ ram8 keeps all 256 of its bytes, and keeps them per instance 6ms
+   ✓ wide bitwise operators (6)
+     ✓ matches a reference truth table on the boundary vectors 1ms
+     ✓ treats the 8-bit patterns as unsigned, never as negative numbers 0ms
+     ✓ evaluates NOT and its double negation 0ms
+     ✓ is its own inverse under XOR 1ms
+     ✓ relates nand8/nor8/xnor8 to their negations 2ms
+     ✓ reads an unwired input as zero 0ms
+   ✓ add8 (2)
+     ✓ adds with carry-in on the boundary vectors 2ms
+     ✓ reports bit 8 as the carry out and wraps the low eight bits 4ms
+   ✓ neg8 (2)
+     ✓ negates the boundary vectors by two's complement 0ms
+     ✓ equals (256 - a) & 0xff for every byte, and inverts itself 8ms
+   ✓ comparators (3)
+     ✓ compares unsigned patterns 0ms
+     ✓ compares signed patterns across the sign boundary 2ms
+     ✓ reports equality for every pair, and its result is a single bit 3ms
+   ✓ shifts (4)
+     ✓ shifts left, dropping bits above bit 7 0ms
+     ✓ shifts right logically, filling with zeros 0ms
+     ✓ shifts right arithmetically, replicating the sign bit 2ms
+     ✓ gives 0 for an amount of 8 or more, and matches the reference below that 6ms
+   ✓ rotates (3)
+     ✓ rotates around the byte 0ms
+     ✓ treats an amount of 8 or more as amount % 8 11ms
+     ✓ is the inverse of the other direction 1ms
+   ✓ mul8 and div8 (5)
+     ✓ multiplies, keeping the low eight bits 0ms
+     ✓ equals (a * b) & 0xff on a grid 2ms
+     ✓ divides with truncation toward zero 0ms
+     ✓ returns 0xff for division by zero, as decided, and never throws 0ms
+     ✓ divides by a non-zero divisor exactly as floor does 4ms
+   ✓ const8, switch and switch8 (3)
+     ✓ drives a constant with no inputs 1ms
+     ✓ passes a through when on is 1 and forces zero when on is 0 0ms
+     ✓ cascades: switching an already-switched value stays off 0ms
+   ✓ splitter and maker (3)
+     ✓ splits a byte into eight one-bit pins, least significant first 0ms
+     ✓ makes a byte out of eight one-bit pins 0ms
+     ✓ round-trips maker(splitter(x)) === x for every byte 3ms
+   ✓ the width generator (7)
+     ✓ defaults to eight bits 1ms
+     ✓ builds the whole family at a non-default width 1ms
+     ✓ parameterises the suffixed operators too 1ms
+     ✓ clamps a requested width into the range it documents 0ms
+     ✓ clamps before it allocates, so an absurd width cannot ask for gigabytes 0ms
+     ✓ rejects nothing silently: an unknown id is simply absent 0ms
+     ✓ is not re-counted by params.width, which widens every pin instead 3ms
+   ✓ wide defs through the kernel (3)
+     ✓ adds two level inputs and carries out of bit 8 1ms
+     ✓ carries every byte through splitter -> maker at the pin level 9ms
+     ✓ drives an 8-bit operator from 1-bit level inputs 1ms
+ ✓ test/levels/ch1-part2.test.ts (29 tests) 26ms
+ ✓ test/levels/ch1-part1.test.ts (34 tests) 25ms
+ ✓ test/levels/grader.test.ts (40 tests) 38ms
+ ✓ test/core/registry.test.ts (35 tests) 33ms
+ ✓ test/levels/ch2-batch1.test.ts (58 tests) 102ms
+ ✓ test/levels/level-buildability.test.ts (40 tests) 73ms
+ ✓ test/levels/fuzz-custom.test.ts (67 tests) 223ms
+ ✓ test/core/signal.test.ts (16 tests) 13ms
+ ✓ test/core/net.test.ts (55 tests) 484ms
+   ✓ compile (10)
+     ✓ sizes the signal table for the circuit instead of the 65,536 default 321ms
+ ✓ test/core/graph.test.ts (15 tests) 539ms
+   ✓ validateGraph (9)
+     ✓ scans a 50,000-instance cycle without recursing 524ms
+ ✓ test/persist/storage.test.ts (12 tests) 15ms
+ ✓ test/app/commands.test.ts (6 tests) 10ms
+ ✓ test/smoke/sanity.test.ts (1 test) 4ms
+ ✓ test/ui/view.test.ts (6 tests) 6ms
+ ✓ test/app/store.test.ts (11 tests) 8ms
+ ✓ test/levels/ch2-batch2.test.ts (56 tests) 478ms
+ ✓ test/ui/panels.test.ts (22 tests) 48ms
+ ✓ test/levels/ch2-batch3.test.ts (67 tests) 1595ms
+   ✓ reference solutions pass with three stars (5)
+     ✓ ch2-27-logic-engine 402ms
+   ✓ the fuzz levels drive varying, reproducible vectors (1)
+     ✓ draws 256 different vectors on every run, from the level data alone 427ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/defs-wide.test.ts > wide defs: the brief's contract > categorizes every wide part as wide and const8 as a source
+AssertionError: expected [ 'add8', 'and8', 'ashr8', …(28) ] to deeply equal [ 'add8', 'and8', 'ashr8', …(25) ]
+
+- Expected
++ Received
+
+@@ -1,10 +1,13 @@
+  [
+    "add8",
+    "and8",
+    "ashr8",
+    "counter8",
++   "decoder1",
++   "decoder2",
++   "decoder3",
+    "delay8",
+    "div8",
+    "equal8",
+    "less_s",
+    "less_u",
+
+ ❯ test/core/defs-wide.test.ts:224:58
+    222|     // alongside the operators: `memory1` is phase 0's ONE-BIT memory …
+    223|     // (`delay_line`, `mem1`) and there is no `memory8`.
+    224|     expect(r.byCategory('wide').map((d) => d.id).sort()).toEqual(
+       |                                                          ^
+    225|       [...WIDE_OP_IDS, ...STORAGE_IDS].sort(),
+    226|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 20 passed (21)
+      Tests  1 failed | 675 passed (676)
+   Start at  03:03:50
+   Duration  2.39s (transform 37%, tests 33%, import 17%, environment 10%, worker 3%)
+
+  Transform  transforming modules took 4.41s · 37% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+
+[ELIFECYCLE] Test failed. See above for more details.

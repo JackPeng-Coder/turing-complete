@@ -1,0 +1,4 @@
+# pnpm exec tsc --noEmit  (worktree: .worktrees/phase1, branch phase1)
+# exit code: 0
+# empty output below = clean typecheck
+

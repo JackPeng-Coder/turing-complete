@@ -1,0 +1,52 @@
+$ vitest run
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/signal.test.ts (16 tests) 10ms
+ ✓ test/core/registry.test.ts (26 tests) 27ms
+ ✓ test/app/progress.test.ts (18 tests) 13ms
+ ❯ test/levels/ch2-batch2.test.ts (0 test)
+ ✓ test/levels/checks.test.ts (28 tests) 68ms
+ ✓ test/levels/ch1-part1.test.ts (34 tests) 25ms
+ ✓ test/levels/ch1-part2.test.ts (29 tests) 26ms
+ ✓ test/levels/grader.test.ts (40 tests) 35ms
+ ✓ test/levels/fuzz-custom.test.ts (67 tests) 157ms
+ ✓ test/core/defs-wide.test.ts (60 tests) 169ms
+ ✓ test/levels/level-buildability.test.ts (40 tests) 97ms
+ ✓ test/levels/ch2-batch1.test.ts (58 tests) 134ms
+ ✓ test/persist/storage.test.ts (12 tests) 10ms
+ ✓ test/core/net.test.ts (55 tests) 416ms
+ ✓ test/core/graph.test.ts (15 tests) 465ms
+   ✓ validateGraph (9)
+     ✓ scans a 50,000-instance cycle without recursing 451ms
+ ✓ test/app/store.test.ts (11 tests) 8ms
+ ✓ test/smoke/sanity.test.ts (1 test) 3ms
+ ✓ test/ui/view.test.ts (6 tests) 4ms
+ ✓ test/app/commands.test.ts (6 tests) 5ms
+ ✓ test/ui/panels.test.ts (22 tests) 44ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/ch2-batch2.test.ts [ test/levels/ch2-batch2.test.ts ]
+Error: Cannot find module '../../src/levels/content/ch2/batch2' imported from D:/Documents/turing-complete/.worktrees/phase1/test/levels/ch2-batch2.test.ts
+ ❯ test/levels/ch2-batch2.test.ts:16:1
+     14| import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
+     15| import { CH2_BATCH1 } from '../../src/levels/content/ch2/batch1';
+     16| import { CH2_BATCH2 } from '../../src/levels/content/ch2/batch2';
+       | ^
+     17| import { grade } from '../../src/levels/grader';
+     18| import type {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 19 passed (20)
+      Tests  544 passed (544)
+   Start at  02:38:22
+   Duration  1.67s (transform 43%, tests 21%, import 18%, environment 14%, worker 4%)
+
+  Transform  transforming modules took 3.49s · 43% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+
+[ELIFECYCLE] Test failed. See above for more details.

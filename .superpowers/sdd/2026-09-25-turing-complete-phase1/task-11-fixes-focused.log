@@ -1,0 +1,14 @@
+$ vitest run "test/levels/ch2-batch2.test.ts" "test/levels/ch2-batch3.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/levels/ch2-batch2.test.ts (59 tests) 302ms
+ ✓ test/levels/ch2-batch3.test.ts (69 tests) 1345ms
+   ✓ the fuzz levels drive varying, reproducible vectors (1)
+     ✓ draws 256 different vectors on every run, from the level data alone 399ms
+
+ Test Files  2 passed (2)
+      Tests  128 passed (128)
+   Start at  03:44:12
+   Duration  1.75s (tests 75%, transform 18%, import 5%, worker 1%)
+

@@ -1,0 +1,46 @@
+feat(defs): register the full_adder that level 20 rewards
+
+`full_adder` existed nowhere in `src/`: level 20 rewards the id and lists
+it in its own palette, and both were silently dropped -- `paletteDefsFor`
+intersects with the unlocked set and `ui/palette.ts` filters the result
+through `registry.has`, so a part with no def simply never appears. The
+previous task's report flagged it as a known hole rather than a bug,
+because the def belongs to `src/core/defs/`.
+
+The def is `a:1 b:1 cin:1 -> sum:1 cout:1`, `category: 'logic1'` (a 1-bit
+gate-level part like `and3`/`or3`, not an eight-bit operator), `cost: 1`
+(the delay unit), `sequential: false`, `stateBytes: 0`. `sum` is the XOR
+of the three inputs, `cout` their majority -- the standard 1-bit full
+adder, and the cell level 22 cascades eight of.
+
+`gateCost` is 9 and is REUSED, not restated: `FULL_ADDER` in `wide.ts` --
+the constant `add8` is priced with (8 x 9 = 72) -- is now exported, and
+this def imports it. Two independent literals for one construction is how
+the gate metric drifts. The 9-NAND cell (two four-NAND XORs, plus the
+carry that reuses `x1`/`s2` instead of rebuilding them) was re-verified
+against all eight input combinations before the number was reused, and the
+construction is written out at the def in the file's usual style.
+
+`DEF_IDS` gains a `POST_PHASE0_DEF_IDS` tuple rather than adding
+`full_adder` to `PHASE0_DEF_IDS`, whose name and order describe phase 0's
+shipped set. Order is not load-bearing: `DEF_IDS` is only spread into
+`DefId` and read by two test files -- the palette order comes from
+`BASE_DEFS`, where the new def sits with the other gates, after `or3`.
+
+Tests (written first; RED recorded with 4 failures, one of them naming
+`ch2-20-half-adder rewards full_adder`):
+
+* a truth table over all 8 input combinations, for both outputs, written
+  out rather than computed from the def;
+* registration: id present in `DEF_IDS`, `logic1`, `cost` 1, `gateCost` 9
+  plus the identity `add8.gateCost === 8 * full_adder.gateCost`, exact pin
+  ids/widths, non-sequential, no state;
+* a guard for the defect class: every `rewards.components` id in every
+  shipped level resolves in the registry, and -- the same silence, the
+  other list -- so does every `allowedComponents` id. The walk names the
+  unjoined `CH2_BATCH2` explicitly, because level 20 lives there and a walk
+  over `LEVELS` + `CH2_LEVELS` alone would have passed while the hole stood.
+
+No level data is touched: level 20's reward and palette are unchanged (its
+palette entry now resolves), and `full_adder` is not added to any other
+level's `allowedComponents`.

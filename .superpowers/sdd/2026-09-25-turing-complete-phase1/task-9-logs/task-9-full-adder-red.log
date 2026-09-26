@@ -1,0 +1,108 @@
+$ vitest run "test/core/registry.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/core/registry.test.ts (29 tests | 4 failed) 20ms
+   ✓ registry (4)
+     ✓ registers every base def and can look them up 2ms
+     ✓ throws on unknown component ids 1ms
+     ✓ rejects duplicate ids 0ms
+     ✓ filters by category 1ms
+   ❯ base defs (14)
+     ✓ marks exactly the storage elements as sequential 1ms
+     ✓ hides the level IO plumbing from the palette but keeps it registered 0ms
+     ✓ gives every def at least one output and no duplicate pin ids 1ms
+     ✓ marks sources as zero cost and gates as one 0ms
+     × prices every 1-bit gate on the NAND-equivalent basis, explicitly 3ms
+     × registers full_adder as a 1-bit gate on the same 9-NAND cell as add8 2ms
+     ✓ leaves gateCost to the `?? cost` fallback only where both metrics are zero 0ms
+     ✓ evaluates NAND 0ms
+     ✓ evaluates the 3-input gates 0ms
+     × evaluates the full adder over all eight input combinations 0ms
+     ✓ evaluates XOR and XNOR 0ms
+     ✓ propagates undefined inputs as zero 0ms
+     ✓ delay_line holds its value: evaluate publishes state and ignores its input 0ms
+     ✓ mem1 publishes its latched bit and ignores its inputs 0ms
+   ✓ base defs: extra coverage (5)
+     ✓ declares 1-bit pins on every def outside the wide family 0ms
+     ✓ gives every def a publisher, and sizes storage honestly 1ms
+     ✓ matches an independently written truth table for every gate 1ms
+     ✓ drives the constants and mirrors level IO 0ms
+     ✓ keeps a stored bit through a no-write edge and samples a zero 0ms
+   ✓ fields (5)
+     ✓ packs bit arrays low-bit-first 0ms
+     ✓ unpacks to bit arrays 0ms
+     ✓ extracts and inserts fields 0ms
+     ✓ rejects out-of-range inserts 0ms
+     ✓ round-trips fields in the high bits without sign leakage 0ms
+   ❯ shipped level rewards (1)
+     × names only registered defs in rewards.components 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/core/registry.test.ts > base defs > prices every 1-bit gate on the NAND-equivalent basis, explicitly
+Error: unknown component: full_adder
+ ❯ Object.get src/core/registry.ts:122:23
+    120|     get(id: string): ComponentDef {
+    121|       const def = map.get(id);
+    122|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    123|       return def;
+    124|     },
+ ❯ test/core/registry.test.ts:107:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  test/core/registry.test.ts > base defs > registers full_adder as a 1-bit gate on the same 9-NAND cell as add8
+AssertionError: expected [ 'const_on', 'const_off', …(42) ] to include 'full_adder'
+ ❯ test/core/registry.test.ts:119:26
+    117|     // Level 20 rewards `full_adder` by name, so the id has to be spel…
+    118|     // exactly as the level data spells it.
+    119|     expect([...DEF_IDS]).toContain('full_adder');
+       |                          ^
+    120|     const def = r.get('full_adder');
+    121|     // A 1-bit gate-level part, like `and3` / `or3` -- not an eight-bi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  test/core/registry.test.ts > base defs > evaluates the full adder over all eight input combinations
+Error: unknown component: full_adder
+ ❯ Object.get src/core/registry.ts:122:23
+    120|     get(id: string): ComponentDef {
+    121|       const def = map.get(id);
+    122|       if (!def) throw new Error(`unknown component: ${id}`);
+       |                       ^
+    123|       return def;
+    124|     },
+ ❯ test/core/registry.test.ts:183:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  test/core/registry.test.ts > shipped level rewards > names only registered defs in rewards.components
+AssertionError: rewards that name no def: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "ch2-20-half-adder rewards full_adder",
++ ]
+
+ ❯ test/core/registry.test.ts:454:49
+    452|     // Every offender at once, not just the first: a batch of new rewa…
+    453|     // cheaper to fix from one list than from one failure per run.
+    454|     expect(missing, 'rewards that name no def').toEqual([]);
+       |                                                 ^
+    455|     // NON-VACUITY. An empty walk passes the assertion above no matter…
+    456|     // level data says, so the walk proves it reached the levels: `ful…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 25 passed (29)
+   Start at  02:50:51
+   Duration  368ms (transform 69%, import 18%, tests 9%, worker 4%)
+
+[ELIFECYCLE] Test failed. See above for more details.

@@ -1,0 +1,36 @@
+fix(core): resolve pin widths per instance, not per definition
+
+compile() read every pin width straight off the component def, so an
+instance-level override (spec 3.3, `params.width`) could not exist: every
+`level_input` was 1 bit wide no matter what the level declared. Combined
+with `bindLevelIo`, which writes and reads `spec.io`'s width, an 8-bit level
+input wrote across its neighbours' slots -- the same silent corruption Task 1
+removed for wires, one layer up.
+
+- compile() resolves each pin as `params.width ?? def.pin.width` through the
+  single `effectiveWidth` helper, and every width-dependent step uses the
+  resolved value: slot allocation, the drive map, the region-materialising
+  loop, the per-bit gather, the output write-back and capacityFor's
+  reservation. A pin allocated at one width and read at another was the
+  defect; leaving any one of those sites on the def width reintroduces it.
+- Netlist gains inputWidth/outputWidth, the widths the slots and regions were
+  actually built at, so a range-reading caller cannot size a read from the
+  def.
+- bindLevelIo binds at the COMPILED width and reports a pin whose width
+  disagrees with spec.io in `LevelIo.mismatch`; runChecks turns that into a
+  `missing-io` failure instead of writing across a pin boundary. A pin whose
+  instance is absent keeps its phase-0 behaviour (reads 0).
+- The binding is the id AND the width, so both producers of it set the width:
+  `levelIoPlacement` returns `{ id, width }` and `place()` writes it to
+  `params.width`; test/fixtures/build.ts takes a `width` on a level-IO node
+  and does the same. Without those, the game's own board would trip the new
+  guard.
+- validateGraph rejects a `params.width` that is not a positive integer as
+  `invalid-params`, so a malformed override surfaces as a catchable
+  CircuitValidationError rather than a RangeError out of `table.alloc`.
+- Regression: an instance with no params is allocated, sized and reported
+  exactly as phase 0 did (the existing slotCount assertions of 24 and 34 are
+  unchanged and still pin that).
+
+A `params.width` covers every pin of its instance: a ComponentDef declares
+exactly one width per PinDef, and no per-pin-name syntax is needed yet.

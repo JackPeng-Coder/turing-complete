@@ -1,0 +1,49 @@
+fix(levels): correct the full_adder and decoder availability notes
+
+Two content reviews of chapter-2 levels 13-27 approved the substance and found
+the notes disagreeing with the commit that landed the defs. Six corrections, no
+`threeStar` value moved:
+
+* Batch 2's module note said NO DEF OF `full_adder` WAS REGISTERED and handed a
+  later task two open decisions; `523a7b9` had already registered it (9 NAND
+  equivalents, the shared `FULL_ADDER` basis `wide.ts` prices `add8` with) and
+  both decisions are now taken. The note, level 20's comment and the batch
+  test's header carry the history plus the live facts, and a test asserts the
+  reward id resolves.
+* The amended ruling offers `full_adder` at level 20 AND level 22, withholding
+  it at 21. Level 22's palette gains the part -- one 1-bit instance cannot
+  answer an 8-bit adder, while eight of them and the carry chain between them
+  ARE the cascade the level teaches -- and its comment records the drop-in's
+  measurement rather than a promise: 72 gates and 8 delay against the
+  hand-wired reference's 120 and 17, three stars either way, so the target is
+  the reference's own measurement and the comment says outright that it does
+  not separate the two constructions. Level 21's comment is rewritten as the
+  settled decision (one drop-in is that level's exact I/O, measured at 9 gates
+  and 1 delay against the 15-and-3 target), and the clause the reviewer read
+  literally -- "the gate target is what denies three stars to a player who
+  spends a sixth gate" -- is gone: 5 is a component count, 15 is a
+  NAND-equivalent count, and six cheap parts are inside 15 and pass.
+* Level 22's palette also gains the seven byte operators levels 18 and 19
+  unlocked, so the file's own rule ("everything else on the wide shelf is
+  offered") describes the palette the code builds; the rule itself is restated
+  in its three real categories, including the shelf that is curated rather than
+  "everything the player holds".
+* Level 26 had level 25's unrecorded seam: `decoder3` is its own reward AND one
+  drop-in answers it -- measured at 27 gates, 1 delay, three stars against the
+  27-and-3 target, the registered part's `gateCost` being the very minterm tree
+  the level teaches. The batch header now names both levels, level 26's comment
+  carries the measurement and the reason the part is kept rather than withdrawn
+  (no other level offers `decoder3`, so withdrawal would be dead content), and
+  the batch-3 test grades the drop-in and compares it with the target.
+* `wide.ts`: the decoder section note recommends `2 ** sel` rather than the
+  `1 << sel` its own generator rejects, and the width-5 rationale names the
+  32-bit port carrier instead of a false `number`-exactness ceiling; a third
+  instance of that same claim at `toUint` is corrected too.
+* Level 26's SOURCED clause no longer claims the generator as the source's --
+  it moves to AUTHORED, while the catalog's `2-Bit Decoder` sourcing stays in
+  level 25 (whose own SOURCED/AUTHORED blur is corrected the same way).
+
+Tests: 913 pass across 23 files -- batch 2 at 59 (registry check plus the
+level-21 and level-22 drop-in measurements) and batch 3 at 69 (the level-26
+measurement); every `threeStar` still equals its reference's measured metrics
+and every counterexample still fails. `tsc --noEmit` and `pnpm build` clean.

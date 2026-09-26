@@ -1,0 +1,39 @@
+Task 5+6 (fuzz + custom checkers) — commands actually run, from
+D:\Documents\turing-complete\.worktrees\phase1
+
+$node = "C:\Users\ME\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
+$pnpm = "C:\Users\ME\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs"
+
+# RED 1: the complete test file, before any implementation exists.
+# -> Failed Suites 1: Cannot find module '../../src/levels/custom/index'
+& $node $pnpm test test/levels/fuzz-custom.test.ts
+  -> task-5-6-red-1-load.txt
+
+# RED 2: after the type union, the (empty) registry and the two exported
+# round constants exist, but runChecks still has no fuzz/custom branch.
+# -> 44 tests | 43 failed, every one of them "TypeError: check.steps is not
+#    iterable": the dispatch fell through to the script branch and threw out
+#    of runChecks (and therefore out of grade(), on every board edit).
+& $node $pnpm test test/levels/fuzz-custom.test.ts
+  -> task-5-6-red-2-behaviour.txt
+
+# GREEN focused (47 tests), full suite, typecheck, build.
+& $node $pnpm test test/levels/fuzz-custom.test.ts     -> task-5-6-green-focused.txt
+& $node $pnpm test                                    -> task-5-6-green-full.txt   (17 files, 422 tests)
+& $node $pnpm exec tsc --noEmit                       -> task-5-6-tsc.txt          (no output, exit 0)
+& $node $pnpm build                                   -> task-5-6-build.txt        (vite build ok)
+
+# Per-test timings, for the rounds cap: 64 rounds ~1ms, 4096 rounds 26ms.
+& $node $pnpm test test/levels/fuzz-custom.test.ts --reporter=verbose
+  -> task-5-6-green-focused-verbose.txt
+
+# Six mutations, each applied to src/levels/checks.ts, run, then reverted
+# byte-for-byte (SHA256 checked before/after). Every one is caught by a named
+# test:
+#   A-seed0         remove the xorshift32 zero-seed remap        -> 1 failure
+#   B-rounds0       let `rounds <= 0` through                    -> 2 failures
+#   C-malformed     skip the custom outcome validation           -> 13 failures
+#   D-rethrow       rethrow instead of absorbing a checker throw  -> 4 failures
+#   E-missing-check let an unregistered custom id pass           -> 1 failure
+#   F-round-dropped drop the round from a fuzz mismatch record   -> 1 failure
+  -> task-5-6-mutation-{A-seed0,B-rounds0,C-malformed,D-rethrow,E-missing-check,F-round-dropped}.txt

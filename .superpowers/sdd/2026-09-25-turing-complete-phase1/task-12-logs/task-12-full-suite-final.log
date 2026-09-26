@@ -1,0 +1,49 @@
+### pnpm test (vitest run) -- shared worktree, HEAD 
+8666ed2
+$ vitest run
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/levels/checks.test.ts (28 tests) 56ms
+ ✓ test/core/defs-wide.test.ts (60 tests) 114ms
+ ✓ test/levels/fuzz-custom.test.ts (67 tests) 128ms
+ ✓ test/levels/ch1-part2.test.ts (29 tests) 25ms
+ ✓ test/levels/unlock-chain.test.ts (35 tests) 28ms
+ ✓ test/core/registry.test.ts (35 tests) 33ms
+ ✓ test/levels/ch2-batch1.test.ts (58 tests) 122ms
+ ✓ test/core/net.test.ts (55 tests) 466ms
+ ✓ test/core/graph.test.ts (15 tests) 553ms
+   ✓ validateGraph (9)
+     ✓ scans a 50,000-instance cycle without recursing 539ms
+ ✓ test/levels/ch2-batch4.test.ts (126 tests) 364ms
+ ✓ test/levels/ch1-part1.test.ts (34 tests) 28ms
+ ✓ test/core/signal.test.ts (16 tests) 14ms
+ ✓ test/app/commands.test.ts (6 tests) 8ms
+ ✓ test/app/progress.test.ts (18 tests) 13ms
+ ✓ test/persist/storage.test.ts (12 tests) 11ms
+ ✓ test/app/store.test.ts (11 tests) 9ms
+ ✓ test/ui/view.test.ts (6 tests) 6ms
+ ✓ test/levels/ch2-batch2.test.ts (59 tests) 640ms
+ ✓ test/smoke/sanity.test.ts (1 test) 2ms
+ ✓ test/levels/level-buildability.test.ts (85 tests) 699ms
+   ✓ every shipped level can build its own reference solution (40)
+     ✓ grades every filed reference against the level it is filed under 658ms
+ ✓ test/levels/grader.test.ts (66 tests) 712ms
+   ✓ every shipped level: its reference solution meets its own three-star bounds (39)
+     ✓ ch2-27-logic-engine meets every bound its level declares 463ms
+ ✓ test/ui/panels.test.ts (22 tests) 67ms
+ ✓ test/levels/ch2-batch3.test.ts (69 tests) 1793ms
+   ✓ reference solutions pass with three stars (5)
+     ✓ ch2-27-logic-engine 472ms
+   ✓ the fuzz levels drive varying, reproducible vectors (1)
+     ✓ draws 256 different vectors on every run, from the level data alone 439ms
+
+ Test Files  23 passed (23)
+      Tests  913 passed (913)
+   Start at  03:45:01
+   Duration  2.63s (tests 40%, transform 33%, import 15%, environment 10%, worker 3%)
+
+  Transform  transforming modules took 4.93s · 33% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+

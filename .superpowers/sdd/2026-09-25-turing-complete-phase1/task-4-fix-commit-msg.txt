@@ -1,0 +1,30 @@
+fix(core): pin the publish pre-seed, align the compile guard, keep storage free
+
+Fix round 1 for task 4. No shipped def's behaviour changes, and the storage
+family's ids, pins, widths, edge rules and 0 cost are untouched.
+
+* The publish pass is now TESTED instead of inert. `#publishState` is a
+  pre-seed -- the settle that follows every `reset()`/`tick()` republishes
+  through `evaluate` anyway -- so nothing in the suite noticed it. Two kernel
+  tests now observe it from inside the settle, through a def that records what
+  it reads on each sweep: the first sweep after an edge, and the first sweep of
+  `reset()`, must already see the published value. Reverting the pass to the old
+  `state[p]` -> pin `p` body, or deleting it, fails exactly those two tests and
+  nothing else; before this round both left the suite green.
+* `compile`'s guard on a storage def throws `CircuitValidationError` with an
+  issue naming the def, instead of a plain `Error` that `levels/checks.ts`
+  re-threw. A def-authoring mistake now becomes a failed `'invalid'` check like
+  every other compile refusal. `invalid-params` is the closest code in
+  `graph.ts`'s taxonomy, which this task does not own, so the issue's message
+  carries the diagnosis.
+* `delay_line` and `mem1` are pinned back to exactly one state byte each, by def
+  id, so the inequality loosened for `ram8`'s 256 bytes does not cost phase 0
+  its exactness.
+* Storage's 0 gate cost is stated as a RULING where the defs are declared: the
+  gate metric measures what the player BUILT, not what the platform PROVIDES, so
+  built-in storage is a primitive and a player who wants storage to cost gates
+  builds the latch from `mem1`. Dropping in the unlocked part is meant to score
+  better than rebuilding it; pricing `ram8` at its expansion would dwarf a
+  level's gate budget. `gateCost` stays absent on all four defs.
+* The registry contract's carve-out for `ram8.addr` is restated as exactly one
+  input that only SELECTS among bytes already in `state`, and nothing else.

@@ -1,0 +1,73 @@
+feat(defs): register the decoder1/decoder2/decoder3 family
+
+`decoder1` and `decoder3` existed nowhere in `src/`: levels 25 and 26 reward
+both ids and list them in their own `allowedComponents`, and both were silently
+dropped -- `paletteDefsFor` intersects the palette with the unlocked set and
+`ui/palette.ts` filters the result through `registry.has`, so a part with no def
+simply never appears. Nothing that grades a level could notice: both decoder
+levels' reference solutions are wired from gates (measured at 1 and 27 NAND
+equivalents), and the batch-3 test file asserts that neither reference
+instantiates a decoder.
+
+The family is `sel:w -> out:2 ** w`, ONE-HOT: the value published is bit `sel`
+high and every other bit low, i.e. `2 ** sel`, which is what the level data
+states (`truthTable(io, { out: ({ sel }) => 1 << (sel ?? 0) })`). Not `sel`
+itself -- a pass-through would agree with the one-hot reading at sel 0 and 1 and
+disagree everywhere above, which is the failure mode level 26's test file
+already measures.
+
+`createDecoderDef(w)` is the generator (a decoder's id is `decoder` + the SELECT
+width) and `DECODER_DEFS` registers widths 1, 2 and 3. 1 and 3 are the widths the
+level names introduce; 2 is the compendium's "2-Bit Decoder", which no level
+name introduces, so it is the same definition one width up rather than a second
+hand-written part. The width is a parameter of the DEF, which is the mechanism
+the module header already established for `splitter`/`maker`: the kernel resolves
+a pin's width as `params.width ?? pin.width` for EVERY pin of an instance, so no
+instance knob can make `sel` three bits and `out` eight. The generator is
+deliberately not part of `createWideDefs`, which builds one width for every pin
+of every def it produces -- a width-8 decoder's `out` would be a 256-bit port.
+Widths above 5 (out wider than the `number` carrier) are refused loudly rather
+than clamped into a different pin shape.
+
+`gateCost` is the shared minterm tree level 26 teaches: `w` inverters, then one
+layer of `2 ** j` AND gates per extra select bit, `2 ** (w + 1) - 4` ANDs in all
+on the file's NAND basis -- decoder1/decoder2/decoder3 are 1 / 10 / 27. The two
+levels were measured against exactly those constructions (level 25's reference is
+one `not` with the `maker` free; level 26's is 3 NOTs + 4 ANDs + 8 ANDs = 27),
+which is the check that the numbers describe the tree the levels were authored
+against and not a drawing invented here. `cost` stays 1 -- one delay unit per
+node whatever the expansion -- and every def states `gateCost` explicitly. All
+three are `wide`, combinational, `stateBytes: 0`, no clock edge.
+
+Tests (written first; RED recorded with 4 failures, two of them naming the
+levels -- `ch2-25-1-bit-decoder rewards decoder1` and `ch2-26-3-bit-decoder
+offers decoder3`):
+
+* a truth table for `decoder1` over both select values and one for `decoder3`
+  over all eight, written out as one-hot vectors rather than computed from the
+  def, plus the invariants that every row has exactly one bit set and that from
+  sel 2 up the output is not `sel` (the pass-through);
+* registration: each id in `DEF_IDS` and in the registry, `wide`, `cost` 1,
+  non-sequential, no state, no `clockEdge`, an explicit `gateCost` (1/10/27),
+  exact pins (`sel:1`/`out:2`, `sel:2`/`out:4`, `sel:3`/`out:8`) and exact names;
+* the generator itself: `DECODER_WIDTHS` / `DECODER_DEF_IDS` / `DECODER_DEFS`
+  agree, every width it builds (1..5, registered or not) decodes `sel` to
+  `2 ** sel`, out-of-range widths throw, and `createWideDefs(8)` grows no
+  decoder;
+* the reward/palette guards in `test/core/registry.test.ts` now SEE batch 3: the
+  walk gains `...CH2_BATCH3`, the same explicit-import treatment `CH2_BATCH2`
+  already had (the batch is not joined into `CH2_LEVELS` yet), and the
+  non-vacuity anchors gain `decoder1`/`decoder3`, so the walk cannot pass while
+  the hole stands.
+
+No level data is touched, and no guard is weakened: the two def-enumeration
+loops in `registry.test.ts` (the `?? cost` fallback rule and the 1-bit-pin rule)
+gain `...DECODER_DEF_IDS` because the decoders are wide-pinned parts, and the
+new decoder tests pin that surface themselves.
+
+Known and reported rather than fixed, because it is outside this task's declared
+file scope: `test/core/defs-wide.test.ts` asserts the exact membership of
+`byCategory('wide')` against a hard-coded list (line 224), so three new
+wide-category ids fail it. The fix is one line -- spread `DECODER_DEF_IDS` into
+that expected list -- and it is a strengthening edit, not a skip; it is described
+in the task report for the controller to apply or authorise.

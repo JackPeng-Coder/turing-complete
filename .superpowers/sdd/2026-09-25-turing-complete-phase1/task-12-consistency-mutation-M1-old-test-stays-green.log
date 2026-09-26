@@ -1,0 +1,11 @@
+$ vitest run "test/levels/zz-old-unlock.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/levels/zz-old-unlock.test.ts (35 tests) 19ms
+
+ Test Files  1 passed (1)
+      Tests  35 passed (35)
+   Start at  04:03:35
+   Duration  381ms (transform 70%, import 19%, tests 7%, worker 3%)
+

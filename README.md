@@ -1,10 +1,20 @@
 # Turing Complete Replica (图灵完备 · 复刻版)
 
 **This project is not affiliated with, endorsed by, or produced by LevelHead, and it is not an
-official product.** It contains and distributes none of the original game's art, audio, text, or
-fonts: every graphic is drawn procedurally and every line of copy is original. It is an independent
-implementation for study and personal use, not for commercial distribution. The mechanics and the
-teaching progression are a homage to LevelHead's *Turing Complete* — please support the original.
+official product.** None of the original game's art, audio, or fonts is included: every graphic is
+drawn procedurally and every line of in-game copy is original. It is an independent implementation
+for study and personal use, not for commercial distribution. The mechanics and the teaching
+progression are a homage to LevelHead's *Turing Complete* — please support the original.
+
+**One exception, and it is deliberate.** The repository also carries the user-supplied research
+compendium (`图灵完备_Turing_Complete_游戏资料全集.md`) that this replica was built from, plus the
+structure extract derived from it under `.superpowers/research/`. That compendium is a third-party
+document about the game and **does reproduce passages of the original's text**, including some
+dialogue. It is committed as research provenance, not as content the game ships: nothing under
+`src/` reads it, and the shipped game's own text remains entirely original. If you are looking for
+what the *game* contains, see [chapter-2 level provenance](docs/research/chapter-2-level-provenance.md),
+which records per level exactly which facts came from the source and which are this replica's own
+design.
 
 ## What this is
 
@@ -86,7 +96,16 @@ Phases 0–1 cover chapters 1–2 (38 of the plan's 82 levels). The full plan �
 CPU and assembly challenges — is in [`docs/superpowers/plans/`](docs/superpowers/plans/); the design
 spec it follows is in [`docs/superpowers/specs/`](docs/superpowers/specs/).
 
+The record of how it was built is committed too: each phase's ledger under
+[`.superpowers/sdd/`](.superpowers/sdd/) carries every task's brief, its implementer's report, its
+review verdicts, and each ruling the agent made on the owner's behalf, together with the test
+evidence behind them. The session transcripts — the full conversation, including 68 subagent
+traces — are archived in [`docs/session-archive/`](docs/session-archive/).
+
 ## License
 
-MIT — see [LICENSE](LICENSE). Not affiliated with LevelHead; no original art, audio, fonts, or text
-are included. If you enjoy this, buy *Turing Complete* and support the original.
+MIT — see [LICENSE](LICENSE). Not affiliated with LevelHead; no original art, audio, or fonts are
+included, and every line of the game's own copy is original. The research compendium committed at
+the repository root is a separate third-party document and is not covered by that statement or by
+this project's MIT license — see the note above. If you enjoy this, buy *Turing Complete* and
+support the original.

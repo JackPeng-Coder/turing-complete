@@ -1,0 +1,100 @@
+COMMAND: mutation -- gateCost() sums def.cost again (the pre-fix conflation), then: node pnpm.mjs test test/core/defs-wide.test.ts test/levels/grader.test.ts
+$ vitest run "test/core/defs-wide.test.ts" "test/levels/grader.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/core/defs-wide.test.ts (51 tests) 55ms
+ ❯ test/levels/grader.test.ts (39 tests | 2 failed) 32ms
+   ❯ gateCost (4)
+     ✓ counts gates and ignores sources and level connectors 2ms
+     ✓ is zero for an empty circuit 0ms
+     × reads gateCost when a def states it and cost when it does not 7ms
+     × separates the gate metric from the delay metric on a wide part 2ms
+   ✓ scoreOf (1)
+     ✓ weights delay and ticks above gate count 0ms
+   ✓ starsOf (5)
+     ✓ is 0 when the level is not passed 0ms
+     ✓ is 1 when passed but targets are missed 0ms
+     ✓ is 3 when every target is met 0ms
+     ✓ is 3 when every target is beaten 0ms
+     ✓ is 1 when the level declares no targets 0ms
+   ✓ grade (4)
+     ✓ reports passed + metrics + 3 stars for the reference solution 3ms
+     ✓ never throws on an empty circuit and reports 0 stars 0ms
+     ✓ never throws on an unstable circuit and marks it as a failure 2ms
+     ✓ reports graph issues alongside the grade 1ms
+   ✓ phase-0 regression: the chapter-1 reference scores do not move (25)
+     ✓ covers all twelve chapter-1 levels, with the same ids 1ms
+     ✓ ch1-01-crude-awakening grades to its frozen metrics and score 1ms
+     ✓ ch1-01-crude-awakening still meets every three-star target 1ms
+     ✓ ch1-02-nand-gate grades to its frozen metrics and score 1ms
+     ✓ ch1-02-nand-gate still meets every three-star target 0ms
+     ✓ ch1-03-not-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-03-not-gate still meets every three-star target 0ms
+     ✓ ch1-04-and-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-04-and-gate still meets every three-star target 0ms
+     ✓ ch1-05-or-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-05-or-gate still meets every three-star target 0ms
+     ✓ ch1-06-nor-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-06-nor-gate still meets every three-star target 0ms
+     ✓ ch1-07-always-on grades to its frozen metrics and score 0ms
+     ✓ ch1-07-always-on still meets every three-star target 0ms
+     ✓ ch1-08-second-tick grades to its frozen metrics and score 1ms
+     ✓ ch1-08-second-tick still meets every three-star target 0ms
+     ✓ ch1-09-xor-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-09-xor-gate still meets every three-star target 0ms
+     ✓ ch1-10-bigger-or-gate grades to its frozen metrics and score 1ms
+     ✓ ch1-10-bigger-or-gate still meets every three-star target 1ms
+     ✓ ch1-11-bigger-and-gate grades to its frozen metrics and score 0ms
+     ✓ ch1-11-bigger-and-gate still meets every three-star target 0ms
+     ✓ ch1-12-binary-racer grades to its frozen metrics and score 1ms
+     ✓ ch1-12-binary-racer still meets every three-star target 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/grader.test.ts > gateCost > reads gateCost when a def states it and cost when it does not
+AssertionError: expected 2 to be 5 // Object.is equality
+
+- Expected
++ Received
+
+- 5
++ 2
+
+ ❯ test/levels/grader.test.ts:98:28
+     96|     addInstance(g, 'one-nand-part', 0, 0);
+     97|     addInstance(g, 'mux-part', 0, 40);
+     98|     expect(gateCost(g, r)).toBe(5);
+       |                            ^
+     99|   });
+    100|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/levels/grader.test.ts > gateCost > separates the gate metric from the delay metric on a wide part
+AssertionError: expected 1 to be 16 // Object.is equality
+
+- Expected
++ Received
+
+- 16
++ 1
+
+ ❯ test/levels/grader.test.ts:118:35
+    116|     expect(def.gateCost).toBe(16);
+    117|     expect(delayOf(g, registry)).toBe(1);
+    118|     expect(gateCost(g, registry)).toBe(def.gateCost);
+       |                                   ^
+    119|     expect(gateCost(g, registry)).toBe(16);
+    120|     expect(gateCost(g, registry)).toBeGreaterThan(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 88 passed (90)
+   Start at  00:46:25
+   Duration  352ms (transform 55%, tests 21%, import 20%, worker 4%)
+
+[ELIFECYCLE] Test failed. See above for more details.
+EXIT=1

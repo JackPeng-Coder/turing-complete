@@ -1,0 +1,32 @@
+✓ Lockfile passes supply-chain policies (verified 6h ago)
+Lockfile is up to date, resolution step is skipped
+Already up to date
+
+Done in 578ms using pnpm v11.7.0
+$ vitest run "test/levels/ch2-batch1.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ❯ test/levels/ch2-batch1.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/levels/ch2-batch1.test.ts [ test/levels/ch2-batch1.test.ts ]
+Error: Cannot find module '../../src/levels/content/ch2/batch1' imported from D:/Documents/turing-complete/.worktrees/phase1/test/levels/ch2-batch1.test.ts
+ ❯ test/levels/ch2-batch1.test.ts:7:1
+      5| import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
+      6| import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
+      7| import { CH2_BATCH1 } from '../../src/levels/content/ch2/batch1';
+       | ^
+      8| import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
+      9| import { grade } from '../../src/levels/grader';
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  02:23:59
+   Duration  306ms (worker 98%, environment 2%)
+
+[ELIFECYCLE] Test failed. See above for more details.

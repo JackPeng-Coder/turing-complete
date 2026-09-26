@@ -1,0 +1,11 @@
+$ vitest run "test/levels/zz-scratch-semantics.test.ts"
+
+ RUN  v5.0.2 D:/Documents/turing-complete/.worktrees/phase1
+
+ ✓ test/levels/zz-scratch-semantics.test.ts (5 tests) 32ms
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Start at  03:20:11
+   Duration  315ms (transform 62%, tests 17%, import 17%, worker 5%)
+

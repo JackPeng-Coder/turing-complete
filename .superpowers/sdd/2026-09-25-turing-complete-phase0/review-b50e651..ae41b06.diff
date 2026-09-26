@@ -1,0 +1,694 @@
+# Review package: b50e651..ae41b06
+
+## Commits
+ae41b06 feat(levels): add chapter 1 levels 7-12 with reference solutions
+453b5bc docs: seed the always-available set with the constant sources
+
+## Files changed
+ .../plans/2026-09-25-turing-complete-phase0.md     |  35 +++-
+ src/levels/content/ch1/part2.ts                    | 230 +++++++++++++++++++++
+ src/levels/content/index.ts                        |   3 +-
+ test/levels/ch1-part1.test.ts                      |  11 +-
+ test/levels/ch1-part2.test.ts                      | 217 +++++++++++++++++++
+ 5 files changed, 484 insertions(+), 12 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/plans/2026-09-25-turing-complete-phase0.md b/docs/superpowers/plans/2026-09-25-turing-complete-phase0.md
+index 3a1dd89..93e3507 100644
+--- a/docs/superpowers/plans/2026-09-25-turing-complete-phase0.md
++++ b/docs/superpowers/plans/2026-09-25-turing-complete-phase0.md
+@@ -4029,21 +4029,21 @@ git commit -m "feat(levels): add chapter 1 levels 7-12 with reference solutions"
+ ## Task 10: 应用状态、撤销栈与进度（app/）
+ 
+ **Files:**
+ - Create: `src/app/store.ts`, `src/app/commands.ts`, `src/app/progress.ts`, `src/persist/storage.ts`
+ - Test: `test/app/progress.test.ts`, `test/persist/storage.test.ts`
+ 
+ **Interfaces:**
+ - Consumes: `Graph`、`LevelSpec`、`GradeResult`
+ - Produces:
+   - `src/app/commands.ts`：`interface Command { readonly label: string; do(g: Graph): void; undo(g: Graph): void }`、`class CommandStack { push(c: Command, g: Graph): void; undo(g: Graph): boolean; redo(g: Graph): boolean; canUndo(): boolean; canRedo(): boolean; clear(): void; readonly depth: number }`
+-  - `src/app/progress.ts`：`interface LevelRecord { passed: boolean; best: Metrics | null; stars: 0 | 1 | 3 }`、`interface Progress { version: 1; levels: Record<string, LevelRecord> }`、`const PLUMBING = ['level_input', 'level_output'] as const`、`const SCORE_WEIGHTS = { delay: 4, tick: 8 } as const`、`function emptyProgress(): Progress`、`function isUnlocked(p: Progress, levelId: string, order: readonly string[]): boolean`、`function resumePointOf(p: Progress, order: readonly string[]): string`、`function unlockedComponents(p: Progress, levels: readonly LevelSpec[]): Set<string>`、`function paletteDefsFor(p: Progress, levels: readonly LevelSpec[], level: LevelSpec): string[]`、`function applyGrade(p: Progress, level: LevelSpec, result: GradeResult): Progress`（纯函数，返回新对象）
++  - `src/app/progress.ts`：`interface LevelRecord { passed: boolean; best: Metrics | null; stars: 0 | 1 | 3 }`、`interface Progress { version: 1; levels: Record<string, LevelRecord> }`、`const STARTER_COMPONENTS = ['level_input', 'level_output'] as const`、`const SCORE_WEIGHTS = { delay: 4, tick: 8 } as const`、`function emptyProgress(): Progress`、`function isUnlocked(p: Progress, levelId: string, order: readonly string[]): boolean`、`function resumePointOf(p: Progress, order: readonly string[]): string`、`function unlockedComponents(p: Progress, levels: readonly LevelSpec[]): Set<string>`、`function paletteDefsFor(p: Progress, levels: readonly LevelSpec[], level: LevelSpec): string[]`、`function applyGrade(p: Progress, level: LevelSpec, result: GradeResult): Progress`（纯函数，返回新对象）
+   - `src/persist/storage.ts`：`const STORAGE_KEY = 'tc.progress.v1'`、`function loadProgress(initialComponents: readonly string[]): Progress`、`function saveProgress(p: Progress): void`、`function exportProgress(p: Progress): string`、`function importProgress(json: string): Progress`、`function migrate(raw: unknown): Progress`
+ 
+ - [ ] **Step 1: 写失败测试 `test/app/progress.test.ts`**
+ 
+ ```ts
+ import { describe, expect, it } from 'vitest';
+ import {
+   applyGrade,
+   emptyProgress,
+   isUnlocked,
+@@ -4119,21 +4119,21 @@ describe('resumePointOf', () => {
+ 
+   it('stays at the newest level when everything is passed', () => {
+     const p1 = applyGrade(emptyProgress(), { ...level, id: 'a' }, pass);
+     const p2 = applyGrade(p1, { ...level, id: 'b' }, pass);
+     const p3 = applyGrade(p2, { ...level, id: 'c' }, pass);
+     expect(resumePointOf(p3, order)).toBe('c');
+   });
+ });
+ 
+ describe('unlockedComponents', () => {
+-  it('always offers the level IO plumbing so a level is never unbuildable', () => {
++  it('always offers the starter components so a level is never unbuildable', () => {
+     const unlocked = unlockedComponents(emptyProgress(), levels);
+     expect(unlocked.has('level_input')).toBe(true);
+     expect(unlocked.has('level_output')).toBe(true);
+     expect(unlocked.has('nand')).toBe(false);
+   });
+ 
+   it('adds a reward only after its level is passed', () => {
+     const p = applyGrade(emptyProgress(), level, pass);
+     expect(unlockedComponents(p, levels).has('not')).toBe(true);
+   });
+@@ -4190,22 +4190,39 @@ export interface LevelRecord {
+   passed: boolean;
+   best: Metrics | null;
+   stars: 0 | 1 | 3;
+ }
+ 
+ export interface Progress {
+   version: 1;
+   levels: Record<string, LevelRecord>;
+ }
+ 
+-/** Components that exist to route level I/O, always offered in the palette. */
+-export const PLUMBING = ['level_input', 'level_output'] as const;
++/**
++ * Always available, whatever the player has unlocked.
++ *
++ * This is NOT just the level I/O STARTER_COMPONENTS. Level 1 offers `const_on` and its
++ * reference solution IS `const_on -> level_output`, so the constants have to be
++ * available from the very first level -- they cannot come from an earlier
++ * reward, because there is no earlier level. Keeping them out of this set makes
++ * level 1's palette empty of anything that can drive an output, which is the
++ * "level 1 is unplayable" defect this derivation exists to prevent.
++ *
++ * Task 8's chapter-1 gating test seeds its own walk with the same set; keep the
++ * two in sync.
++ */
++export const STARTER_COMPONENTS = [
++  'level_input',
++  'level_output',
++  'const_on',
++  'const_off',
++] as const;
+ 
+ /** Must match SCORE_WEIGHTS in levels/grader.ts. */
+ const SCORE_WEIGHTS = { delay: 4, tick: 8 } as const;
+ 
+ export function emptyProgress(): Progress {
+   return { version: 1, levels: {} };
+ }
+ 
+ export function isUnlocked(
+   progress: Progress,
+@@ -4222,28 +4239,28 @@ export function isUnlocked(
+ /** First reachable level that has not been passed; the last level if all are. */
+ export function resumePointOf(progress: Progress, order: readonly string[]): string {
+   for (const id of order) {
+     if (isUnlocked(progress, id, order) && progress.levels[id]?.passed !== true) return id;
+   }
+   return order[order.length - 1]!;
+ }
+ 
+ /**
+  * The unlocked component set is *derived*, not stored: every reward from a
+- * passed level, plus the level-IO plumbing. Storing it as well would let the
++ * passed level, plus the starter components (level IO and the constants). Storing them
+  * two drift apart after an import from an older save.
+  */
+ export function unlockedComponents(
+   progress: Progress,
+   levels: readonly LevelSpec[],
+ ): Set<string> {
+-  const unlocked = new Set<string>(PLUMBING);
++  const unlocked = new Set<string>(STARTER_COMPONENTS);
+   for (const level of levels) {
+     if (progress.levels[level.id]?.passed !== true) continue;
+     for (const component of level.rewards?.components ?? []) unlocked.add(component);
+   }
+   return unlocked;
+ }
+ 
+ /** Parts offered by this level that the player has actually unlocked. */
+ export function paletteDefsFor(
+   progress: Progress,
+@@ -5488,21 +5505,21 @@ function makeStore(levelId: string) {
+     progress: emptyProgress(),
+     camera: { x: 0, y: 0, zoom: 1 },
+     selected: [],
+     dragging: null,
+     lastGrade: null,
+     status: null,
+   });
+ }
+ 
+ describe('palette panel', () => {
+-  it('offers nothing but the level plumbing while nothing is unlocked', () => {
++  it('offers nothing but the starter components while nothing is unlocked', () => {
+     // level 2 needs a NAND, which only level 1's reward unlocks
+     const store = makeStore('ch1-02-nand-gate');
+     const root = document.createElement('div');
+     mountPalette(root, store, () => {});
+     const labels = [...root.querySelectorAll('button')].map((b) => b.textContent);
+     expect(labels).toEqual(['关卡输入', '关卡输出']);
+   });
+ 
+   it('offers a part once its unlocking level is passed', () => {
+     const store = makeStore('ch1-02-nand-gate');
+@@ -6044,22 +6061,22 @@ git commit -m "feat(ui): add chapter map, original narrative shell and playwrigh
+ | §7 UI 设计 | Task 11、12 | 画板/调色板/真值表/地图/叙事外壳落地；蓝图编辑器、IDE、沙盒在后续阶段 |
+ | §8 持久化 | Task 10 | localStorage + 迁移 + 导入导出 |
+ | §10 测试策略 | 全任务 | 内核单测、判定力测试、存档往返、UI 冒烟全部覆盖 |
+ 
+ **已修正的自身问题（第一遍写出后逐条修掉的）**：
+ 
+ 1. **`delayOf` 会指数爆炸**：初版是路径枚举，在菱形电路上路径数随层数指数增长，而 CPU 关卡全是这种形状。已改为 Kahn 拓扑排序 + 单次松弛的线性 DAG 最长路径。
+ 2. **关卡 I/O 绑定方式根本行不通**：初版写「引脚同名即绑定」，但引脚名由组件定义固定，改 `def` 字段不可能改名。已改为显式的 `level_input` / `level_output` 元件 + `IN_<引脚名>` / `OUT_<引脚名>` 实例 id 约定，并配套一个真实的 `andSolution()` 测试。
+ 3. **`truth-table` 检查器会静默放过一切**：初版在 `rows` 缺省时生成「空 outputs」的行，比较循环什么都不比，于是任何电路都算通过。现已定为硬错误（`reason: 'missing-rows'`），并加了 `truthTable()` 生成器：缺某个输出引脚的期望值时它直接抛错。有专门测试锁死。
+ 4. **Task 2 的信号表扩容会静默破坏索引**：重分配 `Uint8Array` 会让此前发出的所有 `base` 失效，而 `net.ts` 的 `drive` 数组正建立在那些索引上。已改为固定容量 + 越界抛错，容量 65536（规格预算 20000 实例，余量充足）。
+-5. **`unlockedComponents` 存两份必然漂移**：进度里既存已解锁集合、又有关卡奖励，导入旧档后两者会不一致，表现为「关卡要求 NAND 但进度里没有」。已改为纯派生函数：奖励来自已通过关卡，`level_input` / `level_output` 作为永远可用的 plumbing。
+-6. **第 1 关在初版里根本没法玩**：`emptyProgress([])` 下所有元件都是锁的，玩家放不下任何东西。派生式解锁一并解决了它，并有测试断言 plumbing 永远可用。
++5. **`unlockedComponents` 存两份必然漂移**：进度里既存已解锁集合、又有关卡奖励，导入旧档后两者会不一致，表现为「关卡要求 NAND 但进度里没有」。已改为纯派生函数：奖励来自已通过关卡，`level_input` / `level_output` 作为永远可用的 STARTER_COMPONENTS。
++6. **第 1 关在初版里根本没法玩**：`emptyProgress([])` 下所有元件都是锁的，玩家放不下任何东西。派生式解锁一并解决了它，并有测试断言 STARTER_COMPONENTS 永远可用。
+ 7. **参考解里有一处电路写错了**：初版的 NOR 参考解是 `NOT(NAND)`，那其实是 AND。已改为 `or` + `not`（NOR 关卡本来就已解锁 OR），并补上「两串 NAND 冒充 NOR」作为反例。
+ 8. **第 12 关撞上两个硬约束**：4 位直通需要 `maker`（阶段 1 才有），而四条线也不能驱动同一个输入引脚。已改为四个 1 位输出 + 16 行真值表生成，教学目的（位权）不变。
+ 9. **每个测试行都要重新编译整个电路**：初版 `runChecks` 为真值表每一行新建一次 `Simulation`（含 `validateGraph` 与信号表分配）。已改为每个 check 只编译一次、每行只 `reset()`。
+ 10. **渲染循环 60fps 空转**：初版用 `requestAnimationFrame` 无限重绘静态画板，与 spec §7「静止时不重绘」直接冲突。已改为订阅 store 变化 + resize 时重绘；平移缩放本身也走 `store.set`，拖动手感不受影响。
+ 11. **画板用负 `z-index` 铺底**：初版把画板绝对定位到 UI 之下，DOM 盒子与可绘制区域容易错位，指针坐标换算就不可信。已改为正常流内的 flex 子项。
+ 12. **`resumePoint` 会选错关卡**：初版的 `[...order].reverse().find(isUnlocked)` 会跳到「最后一个已解锁的关卡」。已改为「第一个已解锁但未通过的关卡」，并加了单元测试。
+ 13. **重复与占位**：清理了 `build()` 半成品、Task 3 里的 `throw new Error('placeholder')`、Task 5 的探测器式断言（`expect(slotOf).toBeDefined()`），以及两处整段重复的关卡定义。
+ 14. **规格里写过的 15 项成就在本计划中不存在** —— 其引导最优解的作用由 `threeStar` 门槛承担，与 spec §5.4 的说明一致。
+ 
+ **与 spec 的已知偏差（spec 需要同步修订）**：
+diff --git a/src/levels/content/ch1/part2.ts b/src/levels/content/ch1/part2.ts
+new file mode 100644
+index 0000000..2653f37
+--- /dev/null
++++ b/src/levels/content/ch1/part2.ts
+@@ -0,0 +1,230 @@
++import { truthTable } from '../../tables';
++import type { LevelSpec } from '../../spec';
++
++/**
++ * Chapter 1, levels 7-12.
++ *
++ * Level 7 is the only level in the chapter that hands out a memory part: level 8's
++ * puzzle cannot be built without `delay_line`, and a level may only offer parts an
++ * earlier level has already rewarded, so the unlock has to happen here.
++ *
++ * All text is original.
++ */
++const IO_CONST = { inputs: [], outputs: [{ id: 'out', width: 1 }] };
++const IO_AB = {
++  inputs: [
++    { id: 'a', width: 1 },
++    { id: 'b', width: 1 },
++  ],
++  outputs: [{ id: 'out', width: 1 }],
++};
++const IO_ABC = {
++  inputs: [
++    { id: 'a', width: 1 },
++    { id: 'b', width: 1 },
++    { id: 'c', width: 1 },
++  ],
++  outputs: [{ id: 'out', width: 1 }],
++};
++const IO_NIBBLE = {
++  inputs: [
++    { id: 'b3', width: 1 },
++    { id: 'b2', width: 1 },
++    { id: 'b1', width: 1 },
++    { id: 'b0', width: 1 },
++  ],
++  outputs: [
++    { id: 'out3', width: 1 },
++    { id: 'out2', width: 1 },
++    { id: 'out1', width: 1 },
++    { id: 'out0', width: 1 },
++  ],
++};
++
++export const CH1_PART2: readonly LevelSpec[] = [
++  {
++    id: 'ch1-07-always-on',
++    chapter: 1,
++    index: 7,
++    name: { zh: '高电平', en: 'Always On' },
++    brief: {
++      zh: '永远为高。听起来简单——但这是你和电源之间的第一次握手。',
++      en: 'Always high. Trivial, except it is your first handshake with the power rail.',
++    },
++    hint: { zh: '一个「高电平」元件就够了。', en: 'One Constant On part is enough.' },
++    allowedComponents: ['const_on', 'level_input', 'level_output'],
++    io: IO_CONST,
++    checks: [truthTable(IO_CONST, { out: () => 1 })],
++    threeStar: { gate: 0, delay: 0, tick: 0 },
++    // `delay_line` is level 8's whole lesson and this is level 8's only
++    // predecessor, so the unlock has to be handed out here -- a level may not
++    // offer a part that no earlier level rewarded.
++    rewards: { components: ['delay_line', 'xor'] },
++  },
++  {
++    id: 'ch1-08-second-tick',
++    chapter: 1,
++    index: 8,
++    name: { zh: '第二刻', en: 'Second Tick' },
++    brief: {
++      zh: '输出必须在第 0 拍为低，第 1 拍为低，从第 2 拍起为高。信号需要时间。',
++      en: 'The output must read low at ticks 0 and 1, and high from tick 2 onward.',
++    },
++    hint: {
++      zh: '延迟线在时钟沿把输入存下来再输出。串两条延迟线就是两拍。',
++      en: 'A Delay Line latches its input on the clock edge. Two in series is two ticks.',
++    },
++    allowedComponents: ['const_on', 'delay_line', 'level_input', 'level_output'],
++    io: IO_CONST,
++    checks: [
++      {
++        kind: 'script',
++        steps: [
++          { tick: 0, expect: { out: 0 } },
++          { tick: 1, expect: { out: 0 } },
++          { tick: 2, expect: { out: 1 } },
++          { tick: 3, expect: { out: 1 } },
++        ],
++      },
++    ],
++    // `tick` is the highest tick the check drives, not the circuit's latency:
++    // the last step asserts the output is still high at tick 3, so every graded
++    // circuit reports tick 3. What pins the two-tick latency is the check
++    // itself -- a single delay line is still low at tick 2 and fails it (see the
++    // wrong-circuit test) -- so the target has to be 3 to stay earnable.
++    threeStar: { gate: 0, delay: 0, tick: 3 },
++    rewards: { components: ['and3'] },
++  },
++  {
++    id: 'ch1-09-xor-gate',
++    chapter: 1,
++    index: 9,
++    name: { zh: '异或门', en: 'XOR Gate' },
++    brief: {
++      zh: '两个输入不同时输出高。四个与非门就够了——监督者显然知道这件事。',
++      en: 'High when the inputs differ. Four NANDs are enough, and the Overseer knows it.',
++    },
++    hint: {
++      zh: 'NAND(a,b) 的结果再分别和 a、b 各与非一次，最后把两个结果与非起来。',
++      en: 'Feed NAND(a,b) into two more NANDs with a and b, then NAND those two results.',
++    },
++    allowedComponents: [
++      'nand',
++      'not',
++      'and',
++      'or',
++      'const_on',
++      'delay_line',
++      'and3',
++      'level_input',
++      'level_output',
++    ],
++    io: IO_AB,
++    // "High when the inputs differ", spelled as the level's own brief puts it.
++    // (The plan wrote this as `a ^ b`, which does not typecheck here: with
++    // `noUncheckedIndexedAccess` an input record lookup is `number | undefined`
++    // and bitwise operators reject it.)
++    checks: [truthTable(IO_AB, { out: ({ a, b }) => (a === b ? 0 : 1) })],
++    threeStar: { gate: 4, delay: 3, tick: 0 },
++    rewards: { components: ['or3'] },
++  },
++  {
++    id: 'ch1-10-bigger-or-gate',
++    chapter: 1,
++    index: 10,
++    name: { zh: '三路或门', en: 'Bigger OR Gate' },
++    brief: {
++      zh: '三个输入里任意一个为高，输出就为高。',
++      en: 'High when any of the three inputs is high.',
++    },
++    hint: {
++      zh: '先用两个输入做一个或，再把结果和第三个或一次。级联是这一关的全部内容。',
++      en: 'OR two of them, then OR the result with the third. Cascading is the whole lesson.',
++    },
++    allowedComponents: [
++      'nand',
++      'not',
++      'and',
++      'or',
++      'const_on',
++      'delay_line',
++      'and3',
++      'xor',
++      'level_input',
++      'level_output',
++    ],
++    io: IO_ABC,
++    checks: [truthTable(IO_ABC, { out: ({ a, b, c }) => (a || b || c ? 1 : 0) })],
++    threeStar: { gate: 6, delay: 4, tick: 0 },
++    rewards: { components: ['xnor'] },
++  },
++  {
++    id: 'ch1-11-bigger-and-gate',
++    chapter: 1,
++    index: 11,
++    name: { zh: '三路与门', en: 'Bigger AND Gate' },
++    brief: {
++      zh: '三个输入都为高，输出才为高。',
++      en: 'High only when all three inputs are high.',
++    },
++    hint: { zh: '与门可以级联，就像或门一样。', en: 'AND cascades exactly like OR does.' },
++    allowedComponents: [
++      'nand',
++      'not',
++      'and',
++      'or',
++      'const_on',
++      'delay_line',
++      'and3',
++      'xor',
++      'or3',
++      'level_input',
++      'level_output',
++    ],
++    io: IO_ABC,
++    checks: [truthTable(IO_ABC, { out: ({ a, b, c }) => (a && b && c ? 1 : 0) })],
++    threeStar: { gate: 4, delay: 2, tick: 0 },
++  },
++  {
++    id: 'ch1-12-binary-racer',
++    chapter: 1,
++    index: 12,
++    name: { zh: '二进制速算', en: 'Binary Racer' },
++    brief: {
++      zh: '四个输入位 b3 b2 b1 b0 组成一个数。一眼读出它——然后原样送到四个输出位。',
++      en: 'Bits b3..b0 form one number. Read it at a glance, then forward it to the four outputs.',
++    },
++    hint: {
++      zh: 'b3 是最高位（权 8），b0 是最低位（权 1）。把每一位直连到同名输出。',
++      en: 'b3 is the most significant bit (weight 8), b0 the least (weight 1). Wire each straight through.',
++    },
++    allowedComponents: [
++      'nand',
++      'not',
++      'and',
++      'or',
++      'const_on',
++      'delay_line',
++      'and3',
++      'xor',
++      'or3',
++      'xnor',
++      'level_input',
++      'level_output',
++    ],
++    io: IO_NIBBLE,
++    checks: [
++      truthTable(IO_NIBBLE, {
++        // `?? 0` is dead weight at runtime -- the enumerator always fills every
++        // declared input -- but a record lookup is `number | undefined` under
++        // `noUncheckedIndexedAccess`, and "an absent bit reads low" is the
++        // honest reading of it.
++        out3: ({ b3 }) => b3 ?? 0,
++        out2: ({ b2 }) => b2 ?? 0,
++        out1: ({ b1 }) => b1 ?? 0,
++        out0: ({ b0 }) => b0 ?? 0,
++      }),
++    ],
++    threeStar: { gate: 0, delay: 0, tick: 0 },
++  },
++];
+diff --git a/src/levels/content/index.ts b/src/levels/content/index.ts
+index e68af67..5bc2825 100644
+--- a/src/levels/content/index.ts
++++ b/src/levels/content/index.ts
+@@ -1,4 +1,5 @@
+ import type { LevelSpec } from '../spec';
+ import { CH1_PART1 } from './ch1/part1';
++import { CH1_PART2 } from './ch1/part2';
+ 
+-export const ALL_LEVELS: readonly LevelSpec[] = [...CH1_PART1];
++export const ALL_LEVELS: readonly LevelSpec[] = [...CH1_PART1, ...CH1_PART2];
+diff --git a/test/levels/ch1-part1.test.ts b/test/levels/ch1-part1.test.ts
+index 8c7bb8c..7941288 100644
+--- a/test/levels/ch1-part1.test.ts
++++ b/test/levels/ch1-part1.test.ts
+@@ -217,24 +217,31 @@ describe('an empty circuit fails every level instead of throwing', () => {
+   for (const level of CH1_PART1) {
+     it(level.id, () => {
+       const result = grade(build([]), registry, level);
+       expect(result.passed).toBe(false);
+       expect(result.stars).toBe(0);
+     });
+   }
+ });
+ 
+ describe('the level registry', () => {
++  // The assembled registry is the whole of chapter 1: this file's levels are its
++  // first half and `ch1-part2.test.ts` appends the rest and owns the
++  // whole-chapter assertions. Scoping these to part 1's own length keeps them
++  // just as strict about order and ids without pinning the chapter's total size,
++  // which is not this file's business.
+   it('orders chapter 1 by level id', () => {
+-    expect(LEVEL_ORDER).toEqual(CH1_PART1.map((l) => l.id));
++    expect(LEVEL_ORDER.slice(0, CH1_PART1.length)).toEqual(CH1_PART1.map((l) => l.id));
+   });
+ 
+   it('resolves a level by id and rejects an unknown one', () => {
+     expect(getLevel('ch1-01-crude-awakening')).toBe(CH1_PART1[0]);
+     expect(() => getLevel('ch1-99-nope')).toThrow(/unknown level: ch1-99-nope/);
+   });
+ 
+   it('lists a chapter by number', () => {
+-    expect(levelsOfChapter(1).map((l) => l.index)).toEqual([1, 2, 3, 4, 5, 6]);
++    expect(levelsOfChapter(1).slice(0, CH1_PART1.length).map((l) => l.index)).toEqual([
++      1, 2, 3, 4, 5, 6,
++    ]);
+     expect(levelsOfChapter(2)).toEqual([]);
+   });
+ });
+diff --git a/test/levels/ch1-part2.test.ts b/test/levels/ch1-part2.test.ts
+new file mode 100644
+index 0000000..5997c28
+--- /dev/null
++++ b/test/levels/ch1-part2.test.ts
+@@ -0,0 +1,217 @@
++import { describe, expect, it } from 'vitest';
++import type { Graph } from '../../src/core/graph';
++import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
++import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
++import { grade } from '../../src/levels/grader';
++import { LEVEL_ORDER, getLevel, levelsOfChapter } from '../../src/levels/index';
++import type { LevelSpec } from '../../src/levels/spec';
++import { build, registry } from '../fixtures/build';
++
++const byId = new Map(CH1_PART2.map((l) => [l.id, l]));
++
++/**
++ * What the game hands the player before the first puzzle. Kept in sync with
++ * `test/levels/ch1-part1.test.ts`, which pins level 1's palette to this set.
++ *
++ * Levels 7-12 cannot be gated on their own rewards alone: level 8's Delay Line
++ * and levels 9-11's gates are handed out by part 1, so the gating walk below
++ * starts from the starter set and walks the WHOLE chapter.
++ */
++const STARTER_COMPONENTS: readonly string[] = [
++  'level_input',
++  'level_output',
++  'const_on',
++  'const_off',
++];
++
++describe('chapter 1 levels 7-12', () => {
++  it('exposes six levels in order', () => {
++    expect(CH1_PART2.map((l) => l.index)).toEqual([7, 8, 9, 10, 11, 12]);
++  });
++
++  it('gates every part behind a component unlocked earlier', () => {
++    const unlocked = new Set<string>(STARTER_COMPONENTS);
++    for (const level of [...CH1_PART1, ...CH1_PART2]) {
++      for (const def of level.allowedComponents) {
++        expect(unlocked.has(def), `${level.id} offers locked component ${def}`).toBe(true);
++      }
++      for (const def of level.rewards?.components ?? []) unlocked.add(def);
++    }
++  });
++
++  it('gives every level a check with something to compare', () => {
++    for (const level of CH1_PART2) {
++      expect(level.checks.length, `${level.id} has no checks`).toBeGreaterThan(0);
++      for (const check of level.checks) {
++        if (check.kind === 'truth-table') {
++          expect(check.rows?.length ?? 0, `${level.id} has an empty truth table`).toBeGreaterThan(0);
++        } else if (check.kind === 'script') {
++          expect(check.steps.length, `${level.id} has an empty script`).toBeGreaterThan(0);
++        }
++      }
++    }
++  });
++});
++
++const solutions: Record<string, () => Graph> = {
++  'ch1-07-always-on': () =>
++    build([
++      { kind: 'part', def: 'const_on', id: 'src', from: [] },
++      { kind: 'output', from: 'src' },
++    ]),
++  'ch1-08-second-tick': () =>
++    build([
++      { kind: 'part', def: 'const_on', id: 'src', from: [] },
++      { kind: 'part', def: 'delay_line', id: 'd1', from: ['src'] },
++      { kind: 'part', def: 'delay_line', id: 'd2', from: ['d1'] },
++      { kind: 'output', from: 'd2' },
++    ]),
++  'ch1-09-xor-gate': () =>
++    build([
++      { kind: 'input', name: 'a' },
++      { kind: 'input', name: 'b' },
++      { kind: 'part', def: 'nand', id: 'n1', from: ['a', 'b'] },
++      { kind: 'part', def: 'nand', id: 'n2', from: ['a', 'n1'] },
++      { kind: 'part', def: 'nand', id: 'n3', from: ['b', 'n1'] },
++      { kind: 'part', def: 'nand', id: 'n4', from: ['n2', 'n3'] },
++      { kind: 'output', from: 'n4' },
++    ]),
++  'ch1-10-bigger-or-gate': () =>
++    build([
++      { kind: 'input', name: 'a' },
++      { kind: 'input', name: 'b' },
++      { kind: 'input', name: 'c' },
++      { kind: 'part', def: 'or', id: 'o1', from: ['a', 'b'] },
++      { kind: 'part', def: 'or', id: 'o2', from: ['o1', 'c'] },
++      { kind: 'output', from: 'o2' },
++    ]),
++  'ch1-11-bigger-and-gate': () =>
++    build([
++      { kind: 'input', name: 'a' },
++      { kind: 'input', name: 'b' },
++      { kind: 'input', name: 'c' },
++      { kind: 'part', def: 'and', id: 'a1', from: ['a', 'b'] },
++      { kind: 'part', def: 'and', id: 'a2', from: ['a1', 'c'] },
++      { kind: 'output', from: 'a2' },
++    ]),
++  'ch1-12-binary-racer': () =>
++    build([
++      { kind: 'input', name: 'b3' },
++      { kind: 'input', name: 'b2' },
++      { kind: 'input', name: 'b1' },
++      { kind: 'input', name: 'b0' },
++      { kind: 'output', name: 'OUT_out3', from: 'b3' },
++      { kind: 'output', name: 'OUT_out2', from: 'b2' },
++      { kind: 'output', name: 'OUT_out1', from: 'b1' },
++      { kind: 'output', name: 'OUT_out0', from: 'b0' },
++    ]),
++};
++
++/** Circuits that a player would plausibly build and that must be rejected. */
++const wrong: Record<string, () => Graph> = {
++  // a constant cannot depend on its inputs
++  'ch1-12-binary-racer': () =>
++    build([
++      { kind: 'part', def: 'const_on', id: 'src', from: [] },
++      { kind: 'output', name: 'OUT_out3', from: 'src' },
++      { kind: 'output', name: 'OUT_out2', from: 'src' },
++      { kind: 'output', name: 'OUT_out1', from: 'src' },
++      { kind: 'output', name: 'OUT_out0', from: 'src' },
++    ]),
++  // one delay line is one tick of latency, not two
++  'ch1-08-second-tick': () =>
++    build([
++      { kind: 'part', def: 'const_on', id: 'src', from: [] },
++      { kind: 'part', def: 'delay_line', id: 'd1', from: ['src'] },
++      { kind: 'output', from: 'd1' },
++    ]),
++  // OR where XOR is required
++  'ch1-09-xor-gate': () =>
++    build([
++      { kind: 'input', name: 'a' },
++      { kind: 'input', name: 'b' },
++      { kind: 'part', def: 'or', id: 'o1', from: ['a', 'b'] },
++      { kind: 'output', from: 'o1' },
++    ]),
++  // AND where 3-input OR is required
++  'ch1-10-bigger-or-gate': () =>
++    build([
++      { kind: 'input', name: 'a' },
++      { kind: 'input', name: 'b' },
++      { kind: 'input', name: 'c' },
++      { kind: 'part', def: 'and', id: 'a1', from: ['a', 'b'] },
++      { kind: 'part', def: 'and', id: 'a2', from: ['a1', 'c'] },
++      { kind: 'output', from: 'a2' },
++    ]),
++  // OR where 3-input AND is required
++  'ch1-11-bigger-and-gate': () =>
++    build([
++      { kind: 'input', name: 'a' },
++      { kind: 'input', name: 'b' },
++      { kind: 'input', name: 'c' },
++      { kind: 'part', def: 'or', id: 'o1', from: ['a', 'b'] },
++      { kind: 'part', def: 'or', id: 'o2', from: ['o1', 'c'] },
++      { kind: 'output', from: 'o2' },
++    ]),
++};
++
++describe('reference solutions pass with three stars', () => {
++  for (const [id, make] of Object.entries(solutions)) {
++    it(id, () => {
++      const level = byId.get(id) as LevelSpec;
++      const result = grade(make(), registry, level);
++      expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
++      expect(result.passed).toBe(true);
++      expect(result.stars, `metrics=${JSON.stringify(result.metrics)}`).toBe(3);
++    });
++  }
++});
++
++describe('reference solutions are buildable from the palette they are graded against', () => {
++  for (const [id, make] of Object.entries(solutions)) {
++    it(id, () => {
++      const level = byId.get(id) as LevelSpec;
++      const offered = new Set(level.allowedComponents);
++      for (const inst of make().instances) {
++        expect(offered.has(inst.def), `${id} uses ${inst.def}, which its palette omits`).toBe(true);
++      }
++    });
++  }
++});
++
++describe('plausible wrong circuits fail', () => {
++  for (const [id, make] of Object.entries(wrong)) {
++    it(id, () => {
++      const level = byId.get(id) as LevelSpec;
++      expect(grade(make(), registry, level).passed).toBe(false);
++    });
++  }
++});
++
++describe('an empty circuit fails every level instead of throwing', () => {
++  for (const level of CH1_PART2) {
++    it(level.id, () => {
++      const result = grade(build([]), registry, level);
++      expect(result.passed).toBe(false);
++      expect(result.stars).toBe(0);
++    });
++  }
++});
++
++describe('the chapter 1 registry', () => {
++  it('orders the whole chapter by level id', () => {
++    expect(LEVEL_ORDER).toEqual([...CH1_PART1, ...CH1_PART2].map((l) => l.id));
++  });
++
++  it('resolves a level from either half of the chapter', () => {
++    expect(getLevel('ch1-07-always-on')).toBe(CH1_PART2[0]);
++    expect(getLevel('ch1-12-binary-racer')).toBe(CH1_PART2[5]);
++  });
++
++  it('lists chapter 1 as all twelve levels', () => {
++    expect(levelsOfChapter(1).map((l) => l.index)).toEqual([
++      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
++    ]);
++    expect(levelsOfChapter(2)).toEqual([]);
++  });
++});

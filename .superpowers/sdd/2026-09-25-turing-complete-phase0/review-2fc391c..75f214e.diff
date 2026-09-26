@@ -1,0 +1,517 @@
+# Review package: 2fc391c..75f214e
+
+## Commits
+75f214e fix(core): publish storage state from evaluate instead of mirroring inputs
+
+## Files changed
+ .../plans/2026-09-25-turing-complete-phase0.md     | 74 ++++++++++++++++++----
+ src/core/defs/index.ts                             | 36 +++++------
+ src/core/registry.ts                               | 27 +++++++-
+ test/core/registry.test.ts                         | 49 +++++++++-----
+ 4 files changed, 136 insertions(+), 50 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/plans/2026-09-25-turing-complete-phase0.md b/docs/superpowers/plans/2026-09-25-turing-complete-phase0.md
+index 0cb1965..11cf849 100644
+--- a/docs/superpowers/plans/2026-09-25-turing-complete-phase0.md
++++ b/docs/superpowers/plans/2026-09-25-turing-complete-phase0.md
+@@ -610,30 +610,38 @@ git commit -m "feat(core): add bit-level signal table and ports"
+ 
+ **Files:**
+ - Create: `src/core/registry.ts`, `src/core/defs/index.ts`, `src/core/fields.ts`
+ - Test: `test/core/registry.test.ts`
+ 
+ **Interfaces:**
+ - Consumes: `src/core/signal.ts` 的 `PortValue`
+ - Produces:
+   - `interface PinDef { readonly id: string; readonly width: number; readonly label?: { zh: string; en: string } }`
+   - `interface EvalContext { readonly tick: number }`
+-  - `interface ComponentDef { readonly id: string; readonly name: { zh: string; en: string }; readonly category: ComponentCategory; readonly inputs: readonly PinDef[]; readonly outputs: readonly PinDef[]; readonly cost: number; readonly sequential: boolean; readonly evaluate?: (i: readonly PortValue[], o: PortValue[], ctx: EvalContext) => void; readonly clockEdge?: (i: readonly PortValue[], o: PortValue[], s: Uint8Array, ctx: EvalContext) => void; readonly stateBytes: number; readonly hidden?: boolean }`
++  - `interface ComponentDef { readonly id: string; readonly name: { zh: string; en: string }; readonly category: ComponentCategory; readonly inputs: readonly PinDef[]; readonly outputs: readonly PinDef[]; readonly cost: number; readonly sequential: boolean; readonly evaluate?: (i: readonly PortValue[], o: PortValue[], state: Uint8Array | undefined, ctx: EvalContext) => void; readonly clockEdge?: (i: readonly PortValue[], o: PortValue[], state: Uint8Array, ctx: EvalContext) => void; readonly stateBytes: number; readonly hidden?: boolean }`
+   - `type ComponentCategory = 'logic1' | 'memory1' | 'wide' | 'io' | 'display' | 'probe' | 'level'`
+   - `interface Registry { get(id: string): ComponentDef; has(id: string): boolean; all(): readonly ComponentDef[]; byCategory(c: ComponentCategory): readonly ComponentDef[]; register(def: ComponentDef): void; readonly size: number }`
+   - `function createRegistry(defs?: readonly ComponentDef[]): Registry`
+   - `function packBits(bits: readonly Bit[]): number` — `bits[0]` 是最低位
+   - `function unpackBits(value: number, count: number): Bit[]`
+   - `function extractField(value: number, offset: number, width: number): number`
+   - `function insertField(value: number, offset: number, width: number, field: number): number`
+   - `const BASE_DEFS: readonly ComponentDef[]`
+ 
++> **`evaluate` 必须接收 `state`**（对初稿的修正，Task 3 实测发现的真实缺陷）。存储元件的输出只能来自它保存的值；若 `evaluate` 拿不到 `state`，它就只能去读当前输入——那样「延迟线」会退化成一根直通的缓冲器。实测证据：`clockEdge` 把 1 存进 state 后，再调 `evaluate([0], …)`，输出立刻变成 0，而真正的延迟线此刻必须仍然输出 1。
++>
++> 因此约定是：**`evaluate` 对存储元件 = 把保持的值发布到输出**；`clockEdge` **只改 state，不写输出**。
++>
++> `state` 声明为**可选参数** `Uint8Array | undefined`，有两个好处：纯组合元件（所有门）忽略它即可，测试里现存的 `def.evaluate!([a, b], out, { tick: 0 })` 调用**一个都不用改**（TS 允许实参少于形参）；而存储元件在类型上被要求处理 `undefined`，不会假装自己拿到了状态。
++>
++> 另一条 Task 3 实测结论：`const_on` / `const_off` 的 `category` 是 `'io'`，不是 `'logic1'`——测试要求 `byCategory('logic1')` 不包含 `const_on`。初稿的代码块写成 `logic1`，与自己的测试矛盾。
++
+ - [ ] **Step 1: 写失败测试 `test/core/registry.test.ts`**
+ 
+ ```ts
+ import { describe, expect, it } from 'vitest';
+ import { createRegistry } from '../../src/core/registry';
+ import { BASE_DEFS, DEF_IDS } from '../../src/core/defs/index';
+ import { extractField, insertField, packBits, unpackBits } from '../../src/core/fields';
+ 
+ describe('registry', () => {
+   it('registers every base def and can look them up', () => {
+@@ -1048,52 +1056,58 @@ export const BASE_DEFS: readonly ComponentDef[] = [
+ 
+   {
+     id: 'delay_line',
+     name: { zh: '延迟线', en: 'Delay Line' },
+     category: 'memory1',
+     inputs: [{ id: 'in', width: 1 }],
+     outputs: [{ id: 'out', width: 1 }],
+     cost: 0,
+     sequential: true,
+     stateBytes: 1,
+-    evaluate: (_i, o, _ctx) => {
+-      // The held value is published by the kernel before settle(); eval keeps
+-      // the output stable by reading what the kernel already wrote.
++    evaluate: (_i, o, state) => {
++      // Publish the held value. NOTE: this must NOT read `i` -- a delay line
++      // that mirrors its input is just a wire.
++      o[0] = state?.[0] === 1 ? 1 : 0;
+     },
+     clockEdge: (i, _o, state) => {
++      // Sample only. The kernel publishes the new state during the settle that
++      // follows the edge, which is what keeps a single tick of latency.
+       state[0] = i[0] === 1 ? 1 : 0;
+     },
+   },
+ 
+   {
+     id: 'mem1',
+     name: { zh: '1 位存储器', en: '1-Bit Memory' },
+     category: 'memory1',
+     inputs: [
+       { id: 'set', width: 1 },
+       { id: 'value', width: 1 },
+     ],
+     outputs: [{ id: 'out', width: 1 }],
+     cost: 0,
+     sequential: true,
+     stateBytes: 1,
+-    evaluate: () => {
+-      // published by the kernel from private state
++    evaluate: (_i, o, state) => {
++      // Hold: publish the stored bit and ignore both inputs.
++      o[0] = state?.[0] === 1 ? 1 : 0;
+     },
+     clockEdge: (i, _o, state) => {
+       if (i[0] === 1) state[0] = i[1] === 1 ? 1 : 0;
+     },
+   },
+ ];
+ ```
+ 
+-> `delay_line` 与 `mem1` 的输出在 `settle()` 期间由内核从 `state` 发布（见 Task 5）。它们的 `evaluate` 是空操作，这是刻意的：输出只由状态决定，不由当前输入组合决定。
++> **存储元件的分工**（初稿在这里写错了，Task 3 实测纠正）：`evaluate` 负责**发布保持的值**，`clockEdge` 负责**采样新值到 state**。初稿把 `evaluate` 写成空操作、让内核在每次 settle 前统一发布 state——那样内核的 `#publishState()` 就与 `evaluate` 争夺写同一个输出槽，而且根本没法表达「输入变了但还没到时钟沿，输出必须不变」。现在内核只在 `reset()` 与 `tick()` 里发布，`settle()` 走通用的 `evaluate` 路径。
++>
++> `state` 是可选参数，所以门的 `evaluate` 可以继续写成 `(i, o) => …`，Task 3 的测试里那些 `def.evaluate!([a, b], out, { tick: 0 })` 调用一个都不用改。
+ 
+ - [ ] **Step 6: 运行测试，确认通过**
+ 
+ Run: `pnpm test test/core/registry.test.ts`
+ Expected: PASS — 14 passed
+ 
+ - [ ] **Step 7: 提交**
+ 
+ ```bash
+ git add src/core/registry.ts src/core/fields.ts src/core/defs/index.ts test/core/registry.test.ts
+@@ -1857,27 +1871,34 @@ export class Simulation {
+     for (let p = 0; p < inst.inputs.length; p += 1) {
+       const base = inst.inputs[p]!;
+       const width = inst.def.inputs[p]!.width;
+       const driven = this.net.drive[base]!;
+       scratch[p] = this.#table.getPort(driven, width);
+     }
+   }
+ 
+   settle(): SettleReport {
+     const scratch: PortValue[] = [];
++    const out: PortValue[] = [];
+     for (let iter = 0; iter < SETTLE_LIMIT; iter += 1) {
+       let changed = false;
+-      for (const inst of this.#instances) {
+-        if (inst.def.sequential || !inst.def.evaluate) continue;
++      // Unlike an earlier draft, this does NOT skip sequential defs. A storage
++      // element's evaluate() republishes the value it is holding (and ignores
++      // its inputs), so evaluating it is a no-op once the kernel has published
++      // its state -- and skipping it would be wrong for any def that publishes
++      // from state on its own schedule.
++      for (let index = 0; index < this.#instances.length; index += 1) {
++        const inst = this.#instances[index]!;
++        if (!inst.def.evaluate) continue;
+         this.#readInputs(inst, scratch);
+-        const out: PortValue[] = [];
+-        inst.def.evaluate(scratch, out, { tick: this.#tickCount });
++        out.length = 0;
++        inst.def.evaluate(scratch, out, this.#state[index], { tick: this.#tickCount });
+         for (let p = 0; p < inst.outputs.length; p += 1) {
+           const base = inst.outputs[p]!;
+           const width = inst.def.outputs[p]!.width;
+           const next = out[p] ?? 0;
+           const prev = this.#table.getPort(base, width);
+           if (!portsEqual(prev, next)) {
+             this.#table.setPort(base, width, next);
+             changed = true;
+           }
+         }
+@@ -2064,36 +2085,67 @@ describe('Simulation', () => {
+     connect(g, { inst: src.id, port: 'out' }, { inst: delay.id, port: 'in' });
+     const net = compile(g, registry);
+     const sim = new Simulation(net, registry);
+     const out = net.outputBase(`${delay.id}.out`);
+     sim.reset();
+     expect(sim.read(out, 1)).toBe(0); // starts empty
+     sim.tick();
+     expect(sim.read(out, 1)).toBe(1); // one edge later the input has arrived
+   });
+ 
++  it('a delay line holds its sampled value when its input changes', () => {
++    // This is the test that pins the storage semantics. The sim's own
++    // level-input slot drives the delay line, so the input can be flipped
++    // between settles without a clock edge.
++    const g = emptyGraph();
++    const feed = addInstance(g, 'level_input', 0, 0);
++    const delay = addInstance(g, 'delay_line', 40, 0);
++    connect(g, { inst: feed.id, port: 'out' }, { inst: delay.id, port: 'in' });
++    const net = compile(g, registry);
++    const sim = new Simulation(net, registry);
++    const feedSlot = net.outputBase(`${feed.id}.out`);
++    const out = net.outputBase(`${delay.id}.out`);
++
++    sim.reset();
++    sim.write(feedSlot, 1, 1); // raise the input
++    sim.settle();
++    expect(sim.read(out, 1)).toBe(0); // still holding the old 0: no edge yet
++
++    sim.tick(); // first edge samples the raised input
++    expect(sim.read(out, 1)).toBe(1);
++
++    sim.write(feedSlot, 1, 0); // drop the input again
++    sim.settle();
++    expect(sim.read(out, 1)).toBe(1); // must STILL read 1 until the next edge
++
++    sim.tick(); // second edge samples the dropped input
++    expect(sim.read(out, 1)).toBe(0);
++  });
++
+   it('reset clears state and the tick counter', () => {
+     const g = emptyGraph();
+     const src = addInstance(g, 'const_on', 0, 0);
+     const delay = addInstance(g, 'delay_line', 40, 0);
+     connect(g, { inst: src.id, port: 'out' }, { inst: delay.id, port: 'in' });
+     const net = compile(g, registry);
+     const sim = new Simulation(net, registry);
+     sim.tick();
+     expect(sim.tickCount).toBe(1);
+     sim.reset();
+     expect(sim.tickCount).toBe(0);
+     expect(sim.read(net.outputBase(`${delay.id}.out`), 1)).toBe(0);
+   });
+ });
+ ```
+ 
++> `a delay line holds its sampled value when its input changes` 是**本计划里最重要的一条时序测试**。初版没有它，`delay_line` 的 `evaluate` 就去读当前输入，于是延迟线退化成了直通缓冲器——而所有测试照样全绿，因为唯一那条 delay 测试只用了恒定的 1 作为输入。这条测试用可翻转的 `level_input` 当作驱动器，把「没有时钟沿就不许改输出」钉死。
++
+ > 修掉上面 `propagates through a chain` 里的注释错误：`nand(1,1)=0`，`not(0)=1`，期望值是 **1**。实现前先把断言改成 `1` 并删掉行尾错误注释。
+ 
+ - [ ] **Step 7: 运行测试，确认通过**
+ 
+ Run: `pnpm test test/core/net.test.ts`
+ Expected: PASS — 8 passed
+ 
+ - [ ] **Step 8: 提交**
+ 
+ ```bash
+diff --git a/src/core/defs/index.ts b/src/core/defs/index.ts
+index 752dba8..4da2f1e 100644
+--- a/src/core/defs/index.ts
++++ b/src/core/defs/index.ts
+@@ -111,63 +111,57 @@ export const BASE_DEFS: readonly ComponentDef[] = [
+     outputs: [{ id: 'mirror', width: 1 }],
+     cost: 0,
+     sequential: false,
+     stateBytes: 0,
+     evaluate: (i, o) => {
+       o[0] = i[0] ?? 0;
+     },
+     hidden: true,
+   },
+ 
+-  // Storage elements. Their output is the value the kernel publishes from the
+-  // instance's private `state` before every settle -- not a function of the
+-  // current inputs. `Simulation.settle()` skips every `sequential` def and
+-  // `Simulation.tick()` calls `clockEdge` with a throwaway output array, so the
+-  // two functions below are unreachable in the simulator; they exist so a def
+-  // still behaves coherently when it is driven directly (as the unit tests do).
++  // Storage elements. `evaluate` publishes the value held in `state` and must
++  // never read its inputs; `clockEdge` samples the inputs into `state` and must
++  // never write outputs. The kernel publishes state at `reset()` / `tick()`,
++  // and every other settle pass goes through the generic `evaluate` path -- so
++  // a delay line holds its value for a full tick instead of becoming a wire.
+   {
+     id: 'delay_line',
+     name: { zh: '延迟线', en: 'Delay Line' },
+     category: 'memory1',
+     inputs: [{ id: 'in', width: 1 }],
+     outputs: [{ id: 'out', width: 1 }],
+     cost: 0,
+     sequential: true,
+     stateBytes: 1,
+-    evaluate: (i, o) => {
+-      // Stand-alone re-publish of the freshly sampled value. The edge below may
+-      // have sampled a different value since the last settle, so this mirrors
+-      // the current input rather than reading `state`, which `evaluate` has no
+-      // access to. Never reached through the kernel.
+-      o[0] = i[0] === 1 ? 1 : 0;
++    evaluate: (_i, o, state) => {
++      // Publish the held value. NOTE: this must NOT read `i` -- a delay line
++      // that mirrors its input is just a wire.
++      o[0] = state?.[0] === 1 ? 1 : 0;
+     },
+     clockEdge: (i, _o, state) => {
+-      // Sample, and nothing else: the output must keep the pre-edge value until
+-      // the kernel publishes the new state.
++      // Sample, and nothing else: the output keeps the pre-edge value until the
++      // state is published.
+       state[0] = i[0] === 1 ? 1 : 0;
+     },
+   },
+ 
+   {
+     id: 'mem1',
+     name: { zh: '1 位存储器', en: '1-Bit Memory' },
+     category: 'memory1',
+     inputs: [
+       { id: 'set', width: 1 },
+       { id: 'value', width: 1 },
+     ],
+     outputs: [{ id: 'out', width: 1 }],
+     cost: 0,
+     sequential: true,
+     stateBytes: 1,
+-    evaluate: () => {
+-      // Hold: the kernel publishes `state[0]` into output slot 0. Never reached
+-      // through the kernel.
++    evaluate: (_i, o, state) => {
++      // Hold: publish the stored bit and ignore both inputs.
++      o[0] = state?.[0] === 1 ? 1 : 0;
+     },
+-    clockEdge: (i, o, state) => {
++    clockEdge: (i, _o, state) => {
+       if (i[0] === 1) state[0] = i[1] === 1 ? 1 : 0;
+-      // Mirror the held value so the def is self-consistent when driven
+-      // stand-alone. The kernel ignores this `o` (it re-publishes `state`).
+-      o[0] = state[0] === 1 ? 1 : 0;
+     },
+   },
+ ];
+diff --git a/src/core/registry.ts b/src/core/registry.ts
+index 97170b8..db1b94e 100644
+--- a/src/core/registry.ts
++++ b/src/core/registry.ts
+@@ -22,23 +22,44 @@ export interface EvalContext {
+ export interface ComponentDef {
+   readonly id: string;
+   readonly name: { zh: string; en: string };
+   readonly category: ComponentCategory;
+   readonly inputs: readonly PinDef[];
+   readonly outputs: readonly PinDef[];
+   /** Gate cost when the circuit is expanded. Sources cost 0, gates cost 1. */
+   readonly cost: number;
+   /** Storage elements sample on the clock edge and do not add combinational delay. */
+   readonly sequential: boolean;
+-  /** Combinational transfer function. Must be pure: reads inputs, writes outputs. */
+-  readonly evaluate?: (inputs: readonly PortValue[], outputs: PortValue[], ctx: EvalContext) => void;
+-  /** Storage update, applied at the clock edge from pre-edge inputs. */
++  /**
++   * Combinational transfer function: reads inputs, writes outputs, must be pure.
++   *
++   * Storage elements use it to PUBLISH the value they are holding: they read
++   * `state` (the third parameter) and must never read `inputs`, otherwise a
++   * delay line degrades into a wire. Combination components ignore `state` and
++   * keep the two-argument `(i, o) => …` shape.
++   *
++   * `state` is typed `Uint8Array | undefined` rather than `Uint8Array` so that
++   * a storage element cannot pretend it always has state. It is a required
++   * parameter, not an optional one -- TypeScript rejects omitting it -- so
++   * combinational call sites pass `undefined` explicitly.
++   */
++  readonly evaluate?: (
++    inputs: readonly PortValue[],
++    outputs: PortValue[],
++    state: Uint8Array | undefined,
++    ctx: EvalContext,
++  ) => void;
++  /**
++   * Storage update, applied at the clock edge from pre-edge inputs.
++   * Samples into `state` only -- it must not write `outputs`, which are
++   * published by `evaluate` (and by the kernel at reset/tick).
++   */
+   readonly clockEdge?: (
+     inputs: readonly PortValue[],
+     outputs: PortValue[],
+     state: Uint8Array,
+     ctx: EvalContext,
+   ) => void;
+   /** Bytes of private state per instance. 0 for pure combinational defs. */
+   readonly stateBytes: number;
+   /** Hidden from the palette (used by level plumbing). */
+   readonly hidden?: boolean;
+diff --git a/test/core/registry.test.ts b/test/core/registry.test.ts
+index 6022b39..1a6aa52 100644
+--- a/test/core/registry.test.ts
++++ b/test/core/registry.test.ts
+@@ -1,15 +1,21 @@
+ import { describe, expect, it } from 'vitest';
+ import { createRegistry } from '../../src/core/registry';
+ import { BASE_DEFS, DEF_IDS } from '../../src/core/defs/index';
+ import { extractField, insertField, packBits, unpackBits } from '../../src/core/fields';
+ 
++// `evaluate(inputs, outputs, state, ctx)`: `state` is the instance's private
++// storage, placed third. Only storage elements read it -- every combinational
++// def ignores it, so its call sites pass `undefined` (the parameter cannot be
++// omitted: `state: Uint8Array | undefined` is required, which is what forces a
++// storage def to say out loud that it has no state to read).
++
+ describe('registry', () => {
+   it('registers every base def and can look them up', () => {
+     const r = createRegistry(BASE_DEFS);
+     expect(r.size).toBe(BASE_DEFS.length);
+     for (const id of DEF_IDS) expect(r.has(id)).toBe(true);
+     expect(r.get('nand').name.zh).toBe('与非门');
+   });
+ 
+   it('throws on unknown component ids', () => {
+     const r = createRegistry(BASE_DEFS);
+@@ -65,98 +71,111 @@ describe('base defs', () => {
+ 
+   it('evaluates NAND', () => {
+     const def = r.get('nand');
+     for (const [a, b, want] of [
+       [0, 0, 1],
+       [0, 1, 1],
+       [1, 0, 1],
+       [1, 1, 0],
+     ] as const) {
+       const out: (number | Uint8Array)[] = [0];
+-      def.evaluate!([a, b], out, { tick: 0 });
++      def.evaluate!([a, b], out, undefined, { tick: 0 });
+       expect(out[0], `nand(${a},${b})`).toBe(want);
+     }
+   });
+ 
+   it('evaluates the 3-input gates', () => {
+     const and3 = r.get('and3');
+     const or3 = r.get('or3');
+     const o1: (number | Uint8Array)[] = [0];
+-    and3.evaluate!([1, 1, 1], o1, { tick: 0 });
++    and3.evaluate!([1, 1, 1], o1, undefined, { tick: 0 });
+     expect(o1[0]).toBe(1);
+-    and3.evaluate!([1, 0, 1], o1, { tick: 0 });
++    and3.evaluate!([1, 0, 1], o1, undefined, { tick: 0 });
+     expect(o1[0]).toBe(0);
+-    or3.evaluate!([0, 0, 1], o1, { tick: 0 });
++    or3.evaluate!([0, 0, 1], o1, undefined, { tick: 0 });
+     expect(o1[0]).toBe(1);
+-    or3.evaluate!([0, 0, 0], o1, { tick: 0 });
++    or3.evaluate!([0, 0, 0], o1, undefined, { tick: 0 });
+     expect(o1[0]).toBe(0);
+   });
+ 
+   it('evaluates XOR and XNOR', () => {
+     const xor = r.get('xor');
+     const xnor = r.get('xnor');
+     for (const [a, b] of [
+       [0, 0],
+       [0, 1],
+       [1, 0],
+       [1, 1],
+     ] as const) {
+       const ox: (number | Uint8Array)[] = [0];
+-      xor.evaluate!([a, b], ox, { tick: 0 });
++      xor.evaluate!([a, b], ox, undefined, { tick: 0 });
+       expect(ox[0], `xor(${a},${b})`).toBe(a ^ b);
+       const on: (number | Uint8Array)[] = [0];
+-      xnor.evaluate!([a, b], on, { tick: 0 });
++      xnor.evaluate!([a, b], on, undefined, { tick: 0 });
+       expect(on[0], `xnor(${a},${b})`).toBe(a ^ b ? 0 : 1);
+     }
+   });
+ 
+   it('propagates undefined inputs as zero', () => {
+     const nand = r.get('nand');
+     const out: (number | Uint8Array)[] = [0];
+-    nand.evaluate!([0, undefined as unknown as number], out, { tick: 0 });
++    nand.evaluate!([0, undefined as unknown as number], out, undefined, { tick: 0 });
+     expect(out[0]).toBe(1);
+   });
+ 
+-  it('delay_line samples its input on the clock edge, starting at 0', () => {
++  // The two tests below pin the storage contract: `evaluate` PUBLISHES the held
++  // value and ignores its inputs; `clockEdge` SAMPLES inputs into state only and
++  // never writes outputs. Every `evaluate` input below is deliberately the
++  // opposite of the held value, so a def that mirrors its input fails them.
++  it('delay_line holds its value: evaluate publishes state and ignores its input', () => {
+     const def = r.get('delay_line');
+     const state = new Uint8Array(def.stateBytes);
+     const out: (number | Uint8Array)[] = [0];
+     out[0] = 0;
+     def.clockEdge!([1], out, state, { tick: 0 });
+     expect(state[0]).toBe(1);
+     expect(out[0]).toBe(0); // output still holds the pre-edge value
+-    def.evaluate!([1], out, { tick: 0 });
++    // The input is 0, the OPPOSITE of the held 1: publishing is all `evaluate`
++    // may do here, so a mirroring implementation would drop the output to 0.
++    def.evaluate!([0], out, state, { tick: 0 });
+     expect(out[0]).toBe(1);
++    // The next edge samples the low input; only then does the output follow.
++    def.clockEdge!([0], out, state, { tick: 1 });
++    expect(state[0]).toBe(0);
++    def.evaluate!([1], out, state, { tick: 1 });
++    expect(out[0]).toBe(0);
+   });
+ 
+-  it('mem1 holds its value until write is asserted on a clock edge', () => {
++  it('mem1 publishes its latched bit and ignores its inputs', () => {
+     const def = r.get('mem1');
+     const state = new Uint8Array(def.stateBytes);
+     const out: (number | Uint8Array)[] = [0];
+     // inputs: [set, value]
+     def.clockEdge!([0, 1], out, state, { tick: 0 });
+-    expect(state[0]).toBe(0);
++    expect(state[0]).toBe(0); // `set` low: nothing is written
+     def.clockEdge!([1, 1], out, state, { tick: 1 });
+-    expect(state[0]).toBe(1);
+-    def.evaluate!([0, 0], out, { tick: 1 });
++    expect(state[0]).toBe(1); // the write is latched into state
++    expect(out[0]).toBe(0); // and `clockEdge` must not touch the outputs
++    // All inputs are zero here: a real memory still publishes the latched 1.
++    def.evaluate!([0, 0], out, state, { tick: 1 });
+     expect(out[0]).toBe(1);
+   });
+ });
+ 
+ // Beyond the brief: guards the task's global constraints (1-bit pins, the cost
+ // rules, `stateBytes` per output) and the truth tables the brief only checks
+ // for cost.
+ describe('base defs: extra coverage', () => {
+   const r = createRegistry(BASE_DEFS);
+   const evalTo = (id: string, inputs: number[]): number | Uint8Array | undefined => {
+     const out: (number | Uint8Array)[] = [0];
+-    r.get(id).evaluate!(inputs, out, { tick: 0 });
++    r.get(id).evaluate!(inputs, out, undefined, { tick: 0 });
+     return out[0];
+   };
+ 
+   it('declares 1-bit pins everywhere', () => {
+     for (const d of r.all()) {
+       for (const p of [...d.inputs, ...d.outputs]) {
+         expect(p.width, `${d.id}.${p.id}`).toBe(1);
+       }
+     }
+   });
