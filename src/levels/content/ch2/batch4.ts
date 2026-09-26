@@ -113,9 +113,10 @@ import { truthTable, type LevelIo } from '../../tables';
  * (`ch2/index.ts`), which `content/index.ts` appends to chapter 1, so these
  * eleven levels ship as levels 28-38 of the game's own `LEVELS`. All four
  * batches are joined, which is what makes chapter 2 the 26 levels at indices
- * 13-38; `test/levels/unlock-chain.test.ts` holds that to a number. Nothing
- * imports a batch directly except that batch's own test, which grades it against
- * its own file.
+ * 13-38; `test/levels/unlock-chain.test.ts` holds that to a number. Each batch
+ * test imports its own batch and every earlier one, and the two cross-cutting
+ * tests -- `level-buildability.test.ts` and `unlock-chain.test.ts` -- reach the
+ * whole chapter through `ch2/index.ts`, the module that joins the four.
  */
 
 /**
@@ -427,8 +428,11 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
    * THE TARGET is the reference's own measured metrics: 8 NAND equivalents, 3
    * delay units, tick 4 (the last tick the script drives). The reference builds
    * the choice out of two `switch` parts and an `or` rather than an AND/NOT/AND
-   * mux because a `switch` is one delay unit where the AND cell is two, and the
-   * path through `set` is what sets this level's delay.
+   * mux: `switch` is the part this level's hint names. It is not a cheaper cell
+   * -- the registered `and` is `cost: 1` / `gateCost: 2`, exactly `switch`'s pair
+   * (`core/defs/index.ts`, `core/defs/wide.ts`), so the AND/NOT/AND mux measures
+   * the same 8/3; only a hand-built AND (a NAND into a NOT) costs two delay
+   * units. The path through `set` is what sets this level's delay.
    *
    * `ram8` is this level's reward and is deliberately not in its palette: every
    * pin here is one bit wide, so an eight-bit part has nothing to attach to
