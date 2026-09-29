@@ -7,7 +7,7 @@ for study and personal use, not for commercial distribution. The mechanics and t
 progression are a homage to LevelHead's *Turing Complete* — please support the original.
 
 **One exception, and it is deliberate.** The repository also carries the user-supplied research
-compendium (`图灵完备_Turing_Complete_游戏资料全集.md`) that this replica was built from, plus the
+compendium (`GAME_REFERENCE.md`) that this replica was built from, plus the
 structure extract derived from it under `.superpowers/research/`. That compendium is a third-party
 document about the game and **does reproduce passages of the original's text**, including some
 dialogue. It is committed as research provenance, not as content the game ships: nothing under

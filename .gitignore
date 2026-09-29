@@ -18,8 +18,9 @@ test-results/
 # here is environment.
 #
 # The research material is tracked too, at the repository owner's request: the
-# user's own compendium and the structure extract derived from it. See
-# README.md for what that means for the project's claim about original text.
+# user's own compendium (`GAME_REFERENCE.md`, renamed from its Chinese title on
+# 2026-09-29) and the structure extract derived from it. See README.md for what
+# that means for the project's claim about original text.
 
 # Isolated worktrees for multi-phase work (superpowers:using-git-worktrees).
 .worktrees/

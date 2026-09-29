@@ -7,7 +7,7 @@ their order, and a one-line teaching concept — and supplies no truth tables, n
 widths, no pass conditions, and no per-level component rewards.**
 
 The compendium is in this repository at the root
-(`图灵完备_Turing_Complete_游戏资料全集.md`), as is the structure extract derived from it
+(`GAME_REFERENCE.md`, renamed from `图灵完备_Turing_Complete_游戏资料全集.md` on 2026-09-29), as is the structure extract derived from it
 (`.superpowers/research/compendium-structure.md`). Both reproduce passages of the original game's
 text; the repository owner chose to publish them. What follows is the derived factual content,
 with a section citation for each source claim so the reading can be checked against the compendium

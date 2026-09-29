@@ -67,8 +67,9 @@ the granularity the ledger only summarises.
   tooling flags them, that is a true positive for the pattern and a false positive for the
   finding: they are inert by construction (`AKIAIOSFODNN7EXAMPLE` is AWS's own documented
   placeholder, and the rest are alphabet runs).
-- **Not included:** the user's research compendium (`图灵完备_Turing_Complete_游戏资料全集.md`)
-  and the derived research report that quotes it. Both reproduce passages of the original game's
-  text, and this project claims to contain none of it. The level names, their order, and their
+- **Not included:** the derived research report that quotes the compendium. It reproduces passages
+  of the original game's text, and this project claims to contain none of it. The compendium itself
+  is tracked in this repository at the root (`GAME_REFERENCE.md`, renamed from
+  `图灵完备_Turing_Complete_游戏资料全集.md` on 2026-09-29). The level names, their order, and their
   source citations — the facts this project actually needed — are recorded in
   [`docs/research/chapter-2-level-provenance.md`](../research/chapter-2-level-provenance.md).

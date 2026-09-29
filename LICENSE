@@ -1,18 +1,3 @@
-# License
-
-This repository is an independent, educational reimplementation inspired by
-LevelHead's *Turing Complete*. It is **not affiliated with, endorsed by, or
-produced by LevelHead**, and it contains none of the original game's art,
-audio, fonts, or text: every graphic is drawn procedurally and every line of
-copy is original. It is intended for study and personal use, and the MIT grant
-below covers only the code in this repository.
-
-The MIT grant does not extend to the *Turing Complete* name, to any material
-owned by LevelHead, or to any third-party content that is not part of this
-repository's source code. No permission from LevelHead is claimed or implied.
-
----
-
 MIT License
 
 Copyright (c) 2026 Turing Complete Replica contributors
