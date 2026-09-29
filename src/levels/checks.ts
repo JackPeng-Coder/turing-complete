@@ -1,3 +1,4 @@
+import { assemble, OVERTURE_ISA } from '../asm/index';
 import { CircuitValidationError, UnstableCircuitError } from '../core/errors';
 import type { Graph } from '../core/graph';
 import { Simulation, compile, type Netlist } from '../core/net';
@@ -15,6 +16,9 @@ import type {
   FuzzVector,
   LevelCheck,
   LevelSpec,
+  ProgramCheck,
+  ProgramStep,
+  ScriptStep,
 } from './spec';
 
 export interface LevelIo {
@@ -921,25 +925,130 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
       if (check.kind === 'script') {
         // script: walk the steps in tick order, driving inputs along the way
         io.reset();
-        ticksUsed = Math.max(ticksUsed, io.sim.tickCount);
-        const steps = [...check.steps].sort((a, b) => a.tick - b.tick);
-        for (const step of steps) {
-          for (const pin of spec.io.inputs) {
-            io.writeInput(pin.id, step.inputs?.[pin.id] ?? 0);
-          }
-          io.sim.settle();
-          while (io.sim.tickCount < step.tick) io.tick();
-          ticksUsed = Math.max(ticksUsed, io.sim.tickCount);
-          if (step.expect) {
-            const actual: Record<string, number> = {};
-            for (const pin of spec.io.outputs) actual[pin.id] = io.readOutput(pin.id);
-            if (compare(step.expect, actual)) {
-              failures.push(
-                failure(check, step.inputs ?? {}, step.expect, actual, step.tick, 'mismatch'),
-              );
-            }
-          }
+        ticksUsed = Math.max(ticksUsed, driveSteps(io, spec, check, check.steps, failures));
+        continue;
+      }
+
+      if (check.kind === 'program') {
+        // program: assemble the authored source, put the bytes into the
+        // circuit's program RAM, then drive the steps through the SAME driver
+        // `script` uses (`driveSteps`: `io.writeInput`, `io.sim.settle`,
+        // `io.tick`, `io.readOutput`, `compare`, `failure`). Only what happens
+        // before the first step differs between the two kinds.
+        //
+        // Vacuity comes first, as it does for every kind: a check that executes
+        // nothing, or executes something and compares nothing, would pass every
+        // circuit ever built -- the `missing-rows` lesson.
+        const steps: readonly ProgramStep[] = Array.isArray(check.steps) ? check.steps : [];
+        const asserting = steps.filter(stepAsserts).length;
+        if (steps.length === 0) {
+          failures.push(
+            failure(
+              check,
+              {},
+              { steps: 1 },
+              { steps: 0 },
+              0,
+              'missing-program',
+              null,
+              'program check declares no steps: nothing would be executed and nothing compared',
+            ),
+          );
+          continue;
         }
+        if (asserting === 0) {
+          failures.push(
+            failure(
+              check,
+              {},
+              { expects: 1 },
+              { expects: 0 },
+              0,
+              'missing-program',
+              null,
+              `program check has ${steps.length} step(s) and not one declares an expectation: every circuit would pass it`,
+            ),
+          );
+          continue;
+        }
+
+        if (typeof check.source !== 'string') {
+          // Level data reaches the kernel untyped, and the assembler is handed
+          // this value directly: refusing it here keeps a `TypeError` out of the
+          // board-edit path rather than out of the kernel's own `catch`.
+          failures.push(
+            failure(
+              check,
+              {},
+              {},
+              {},
+              0,
+              'invalid',
+              null,
+              `program check declares source=${describeValue(check.source)}; expected assembly text`,
+            ),
+          );
+          continue;
+        }
+
+        // The image is loaded after the reset, and that ordering is the whole
+        // point: `reset()` clears every storage byte, and `runChecks` compiled
+        // this circuit before any branch ran, so an image written earlier would
+        // be gone before the first step read it.
+        io.reset();
+        const assembled = assemble(check.source, OVERTURE_ISA);
+        if (assembled.errors.length > 0) {
+          // The assembler never throws; it reports. The first error is the one
+          // to show, with its line, exactly as it located it.
+          const first = assembled.errors[0]!;
+          failures.push(
+            failure(
+              check,
+              {},
+              {},
+              {},
+              0,
+              'invalid',
+              null,
+              `program assembly failed at line ${first.line}: ${first.reason}`,
+            ),
+          );
+          continue;
+        }
+        if (assembled.bytes.length === 0) {
+          // An empty or comment-only source is a legal zero-byte program to the
+          // assembler; loading it would exercise no instruction at all, which is
+          // the same hazard as an empty `steps` array.
+          failures.push(
+            failure(
+              check,
+              {},
+              { bytes: 1 },
+              { bytes: 0 },
+              0,
+              'missing-program',
+              null,
+              'the program source assembles to zero bytes: no instruction would ever execute',
+            ),
+          );
+          continue;
+        }
+
+        const targets = programTargets(check, graph);
+        if ('detail' in targets) {
+          failures.push(failure(check, {}, {}, {}, 0, 'missing-io', null, targets.detail));
+          continue;
+        }
+
+        // An image longer than the instance's state, or a `ram` id this netlist
+        // does not have, is `Simulation.loadImage`'s `RangeError` -- absorbed by
+        // the `catch` below as an `invalid` failure, never thrown out of
+        // `runChecks`. The assembler deliberately does not enforce `ram_prog`'s
+        // capacity, so a 257-byte program reaches the kernel and is refused
+        // there.
+        for (const id of targets.ids) io.sim.loadImage(id, assembled.bytes);
+        io.sim.settle();
+        ticksUsed = Math.max(ticksUsed, driveSteps(io, spec, check, steps, failures));
         continue;
       }
 
@@ -1000,6 +1109,96 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
   }
 
   return { passed: failures.length === 0, failures, ticksUsed };
+}
+
+/**
+ * True when a step carries at least one expectation.
+ *
+ * `expect: {}` compares nothing, so it is not an assertion: a `program` check
+ * whose every step looks like that would pass every circuit ever built, and it
+ * counts here exactly like a step with no `expect` at all. Read defensively,
+ * because level data reaches the kernel untyped and a `null` step must not throw.
+ */
+function stepAsserts(step: unknown): boolean {
+  return isRecord(step) && isRecord(step.expect) && Object.keys(step.expect).length > 0;
+}
+
+/**
+ * The `ram_prog` instances a `program` check must load its image into, or the
+ * sentence explaining why there is nothing to load it into.
+ *
+ * An absent (or empty) `ram` loads EVERY `ram_prog` instance in the circuit: a
+ * level with one program RAM need not name it, and a level with several gets all
+ * of them, which keeps the check independent of the order instances sit in the
+ * document. A named `ram` is used verbatim -- an id the netlist does not have is
+ * `Simulation.loadImage`'s `RangeError`, which `runChecks` reports as `invalid`,
+ * so the check does not second-guess the name here.
+ *
+ * The list is read from the DOCUMENT (`graph.instances`), because that is where
+ * an instance's def id is readable by name; `Simulation.loadImage` resolves each
+ * id through `CompiledInstance.key`, which `compile` sets from the same document
+ * id. Returning an empty list is not an option: a check that has nowhere to put
+ * its program is a `missing-io` failure, not a check that quietly runs nothing.
+ */
+function programTargets(
+  check: ProgramCheck,
+  graph: Graph,
+): { readonly ids: readonly string[] } | { readonly detail: string } {
+  const named = typeof check.ram === 'string' && check.ram !== '' ? check.ram : undefined;
+  if (named !== undefined) return { ids: [named] };
+  const ids = graph.instances
+    .filter((inst) => inst.def === 'ram_prog')
+    .map((inst) => inst.id);
+  if (ids.length === 0) {
+    return {
+      detail:
+        'program check names no "ram" and the circuit has no ram_prog instance to load the program into',
+    };
+  }
+  return { ids };
+}
+
+/**
+ * Drives a tick-ordered step list against an already-reset circuit, appending
+ * one `mismatch` failure per step whose expectations the circuit does not meet,
+ * and returns the tick high-water mark.
+ *
+ * Shared by `script` and `program` on purpose. The two kinds differ only in what
+ * happens before the first step -- a `program` check assembles its source and
+ * loads the bytes into the circuit's program RAM, a `script` check does not --
+ * and every step after that means the same thing to both: write the step's
+ * inputs, settle, tick up to the step's tick, then compare each declared output
+ * with `compare` and record a `failure` when one differs. A second driver for
+ * `program` would be a second set of tick semantics to keep in agreement.
+ *
+ * The caller resets first. `settle` and `tick` never clear state, so a program
+ * image loaded between the reset and this call survives every step.
+ */
+function driveSteps(
+  io: LevelIo,
+  spec: LevelSpec,
+  check: LevelCheck,
+  steps: readonly (ScriptStep | ProgramStep)[],
+  failures: CheckFailure[],
+): number {
+  let ticksUsed = io.sim.tickCount;
+  const ordered = [...steps].sort((a, b) => a.tick - b.tick);
+  for (const step of ordered) {
+    for (const pin of spec.io.inputs) {
+      io.writeInput(pin.id, step.inputs?.[pin.id] ?? 0);
+    }
+    io.sim.settle();
+    while (io.sim.tickCount < step.tick) io.tick();
+    ticksUsed = Math.max(ticksUsed, io.sim.tickCount);
+    if (step.expect) {
+      const actual: Record<string, number> = {};
+      for (const pin of spec.io.outputs) actual[pin.id] = io.readOutput(pin.id);
+      if (compare(step.expect, actual)) {
+        failures.push(failure(check, step.inputs ?? {}, step.expect, actual, step.tick, 'mismatch'));
+      }
+    }
+  }
+  return ticksUsed;
 }
 
 /** Drives one input vector into a fresh reset of an already-compiled circuit. */

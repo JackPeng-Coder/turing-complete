@@ -641,6 +641,46 @@ export class Simulation {
   write(base: number, width: number, v: PortValue): void {
     this.#table.setPort(base, width, v);
   }
+
+  /**
+   * Loads a byte image into an instance's private state, out of band.
+   *
+   * The path a program takes into a circuit. `ram_prog` has no write pin, so its
+   * bytes cannot arrive through a clock edge the way `ram8`'s do; the level
+   * checker assembles the source and calls this instead. It must be called
+   * AFTER `reset()`: `reset` fills every state byte with zero, and `runChecks`
+   * compiles once per check, before any check branch runs, so an image written
+   * at compile time would be erased before the first step could read it. The
+   * method does not publish anything itself -- the caller settles, and the def's
+   * own `evaluate` publishes the new bytes through the same sweep every settled
+   * value goes through.
+   *
+   * `instanceId` is the DOCUMENT id, which is what `CompiledInstance.key` holds
+   * (`compile` sets both `key` and `origin` from `instance.id` today), so a
+   * checker can resolve an instance from `graph.instances` and pass its id
+   * straight through.
+   *
+   * The whole state is zeroed before the copy, not just the bytes being
+   * written, so a shorter image after a longer one cannot leave a tail behind
+   * and a second call is not order-dependent.
+   *
+   * Throws `RangeError` -- not a bare `Error` -- for an id this netlist does not
+   * contain and for an image longer than the instance's state. `runChecks`
+   * absorbs `RangeError` as an `invalid` failure, while anything else escapes
+   * the check loop out of `grade()`, which runs on every board edit.
+   */
+  loadImage(instanceId: string, bytes: Uint8Array | readonly number[]): void {
+    const index = this.#instances.findIndex((inst) => inst.key === instanceId);
+    if (index < 0) throw new RangeError(`this netlist has no instance "${instanceId}"`);
+    const state = this.#state[index]!;
+    if (bytes.length > state.length) {
+      throw new RangeError(
+        `an image of ${bytes.length} bytes does not fit instance "${instanceId}" (${state.length} bytes of state)`,
+      );
+    }
+    state.fill(0);
+    state.set(bytes);
+  }
 }
 
 /**

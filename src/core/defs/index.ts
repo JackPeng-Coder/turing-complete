@@ -1,4 +1,5 @@
 import type { ComponentDef } from '../registry';
+import { CPU_DEFS, CPU_DEF_IDS } from './cpu';
 import {
   DECODER_DEFS,
   DECODER_DEF_IDS,
@@ -197,12 +198,13 @@ const POST_PHASE0_DEF_IDS = ['full_adder'] as const;
 /**
  * Every def id the game ships: phase 0's one-bit parts, the one-bit gate added
  * since, then the wide family -- the operators, the storage parts, and the
- * decoders.
+ * decoders -- and last the CPU family chapter 3 rewards.
  *
  * The wide ids are not repeated here -- `wide.ts` owns them next to the defs
  * they name, and `test/core/defs-wide.test.ts` pins that each list agrees with
  * the defs it registers, so a wide def can never be registered under an id that
- * level data cannot spell.
+ * level data cannot spell. The CPU ids follow the same rule with `cpu.ts` as
+ * their owner, and `test/core/defs-cpu.test.ts` as their pin.
  */
 export const DEF_IDS = [
   ...PHASE0_DEF_IDS,
@@ -210,6 +212,7 @@ export const DEF_IDS = [
   ...WIDE_DEF_IDS,
   ...WIDE_STORAGE_DEF_IDS,
   ...DECODER_DEF_IDS,
+  ...CPU_DEF_IDS,
 ] as const;
 
 export type DefId = (typeof DEF_IDS)[number];
@@ -349,4 +352,16 @@ export const BASE_DEFS: readonly ComponentDef[] = [
   // the generator, the one-hot contract, and the minterm tree that prices them
   // (1 / 10 / 27 NAND equivalents at w = 1 / 2 / 3).
   ...DECODER_DEFS,
+
+  // The CPU family (phase 2, task 2): the six parts chapter 3 rewards and level
+  // 47 builds OVERTURE out of -- `alu8`, `regfile6`, `instr_decoder`, `pc8`,
+  // `ram_prog`, `halt`. Registered from `cpu.ts`'s own literal id list for the
+  // same reason the storage and decoder families are: no width parameter could
+  // generate them, so the list lives next to the defs it names and
+  // `test/core/defs-cpu.test.ts` pins the two against each other. They carry
+  // `category: 'cpu'`, a family of their own -- `logic1`, `wide` and `level` are
+  // each pinned exactly by tests to the family they name, and none of these six
+  // is in it. `cpu.ts`'s header states the price of every one of them, and that
+  // they are PARTS rather than a CPU (Global Constraint 11).
+  ...CPU_DEFS,
 ];

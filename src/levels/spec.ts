@@ -41,6 +41,54 @@ export interface ScriptCheck {
   readonly steps: readonly ScriptStep[];
 }
 
+/**
+ * One step of a `program` check: the same shape as `ScriptStep`.
+ *
+ * A step means exactly the same thing to both kinds, because the checker drives
+ * them with the same code. The two kinds differ in what happens *before* the
+ * first step -- a `program` check assembles its `source` and loads the bytes
+ * into the circuit's program RAM -- and in nothing else.
+ */
+export interface ProgramStep {
+  readonly tick: number;
+  readonly inputs?: Readonly<Record<string, number>>;
+  readonly expect?: Readonly<Record<string, number>>;
+}
+
+/**
+ * Assembles `source` and drives the circuit through a program, offline.
+ *
+ * The image is compiled from the text below by the assembler and from nothing
+ * else: no real time, no network, no `Math.random()`, so the same level always
+ * grades the same way. The checker puts the bytes into the circuit's program RAM
+ * and then drives the steps, and what it compares is the CIRCUIT's output, never
+ * the assembler's.
+ *
+ * Omitting `steps`, declaring it empty, or declaring steps that assert nothing
+ * is a hard `missing-program` failure -- NOT "just run it". A check that compares
+ * no output would pass every circuit ever built, which is the `missing-rows`
+ * lesson one kind over.
+ *
+ * Assembly errors are an `invalid` failure carrying the first error's line.
+ */
+export interface ProgramCheck {
+  readonly kind: 'program';
+  /** Assembly source, compiled inside the checker; never pre-compiled in level data. */
+  readonly source: string;
+  readonly steps: readonly ProgramStep[];
+  /**
+   * Id of the `ram_prog` instance to load.
+   *
+   * Absent (or empty) means "every `ram_prog` instance in the circuit", which is
+   * what a board with one program RAM wants -- and is not "load nowhere". Named
+   * means that one instance, so a level that builds two program RAMs can say
+   * which one this check drives. A circuit with no `ram_prog` instance to load
+   * when the check names none is a `missing-io` failure; a named id the circuit
+   * does not have is the kernel's `invalid`.
+   */
+  readonly ram?: string;
+}
+
 export type ConstraintRule =
   | { readonly kind: 'sum-equals'; readonly inputs: readonly string[]; readonly output: string }
   | {
@@ -121,6 +169,7 @@ export interface CustomCheck {
 export type LevelCheck =
   | TruthTableCheck
   | ScriptCheck
+  | ProgramCheck
   | ConstraintCheck
   | FuzzCheck
   | CustomCheck;
@@ -167,6 +216,13 @@ export const FAILURE_REASONS = [
    * analogue of `missing-rows`.
    */
   'missing-vectors',
+  /**
+   * A `program` check that would execute nothing: no steps, no step that
+   * asserts anything, or a source that assembles to zero bytes. A program image
+   * that does nothing is as vacuous as a table with no rows -- the check would
+   * pass every circuit ever built -- so it is refused rather than run.
+   */
+  'missing-program',
   /** A `custom` check whose id is not in the registry. */
   'missing-check',
 ] as const;

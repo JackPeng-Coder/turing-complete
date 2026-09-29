@@ -4,6 +4,12 @@ export type ComponentCategory =
   | 'logic1'
   | 'memory1'
   | 'wide'
+  // The CPU family (phase 2, task 2): the six parts chapter 3 hands out, defined
+  // in `defs/cpu.ts`. A family of its own rather than `wide` because the
+  // families are pinned by registration tuples and tests -- `logic1` IS the ten
+  // one-bit gates, `wide` IS the wide module's ids, `level` IS the two IO
+  // connectors -- and these six are not any of those.
+  | 'cpu'
   | 'io'
   | 'display'
   | 'probe'

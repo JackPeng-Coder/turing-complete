@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS, DEF_IDS } from '../../src/core/defs/index';
+import { CPU_DEF_IDS } from '../../src/core/defs/cpu';
 import {
   DECODER_DEFS,
   DECODER_DEF_IDS,
@@ -54,15 +55,21 @@ describe('base defs', () => {
 
   it('marks exactly the storage elements as sequential', () => {
     const sequential = r.all().filter((d) => d.sequential).map((d) => d.id);
-    // Phase 0's two one-bit memories plus task 4's eight-bit half; `mux8` is
-    // combinational and is deliberately absent.
+    // Phase 0's two one-bit memories, task 4's eight-bit half, and the CPU
+    // family's three holders (`defs/cpu.ts`: the register file, the program
+    // counter and the program RAM). The combinational members of those families
+    // -- `mux8`, `alu8`, `instr_decoder`, `halt` -- are deliberately absent, so
+    // this stays the exact set rather than "at least these".
     expect(sequential.sort()).toEqual([
       'counter8',
       'delay8',
       'delay_line',
       'mem1',
+      'pc8',
       'ram8',
+      'ram_prog',
       'reg8',
+      'regfile6',
     ]);
   });
 
@@ -154,9 +161,22 @@ describe('base defs', () => {
     // The decoder family joins the operators and the storage parts here because
     // it is a wide part too: one DELAY unit, and a gate count it states itself
     // (1 / 10 / 27), so the `?? cost` fallback would price a 3-bit decoder at 1.
-    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS, ...DECODER_DEF_IDS]);
+    //
+    // The CPU family joins them for the same reason and by its own declaration
+    // (`CPU_DEF_IDS`, next to the defs in `defs/cpu.ts`): `alu8` and
+    // `instr_decoder` are worth more than one NAND and `halt` states an explicit
+    // 0, while the family's three storage defs really do lean on the fallback --
+    // `regfile6`, `pc8` and `ram_prog` are free on both metrics. The set is
+    // still built from the families' registration tuples, so a def in none of
+    // them that states a count or a delay fails below.
+    const statedCounts = new Set<string>([
+      ...WIDE_DEF_IDS,
+      ...WIDE_STORAGE_DEF_IDS,
+      ...DECODER_DEF_IDS,
+      ...CPU_DEF_IDS,
+    ]);
     for (const d of r.all()) {
-      if (wide.has(d.id) || d.category === 'logic1') continue;
+      if (statedCounts.has(d.id) || d.category === 'logic1') continue;
       expect(d.cost, `${d.id} leans on the fallback but is not free`).toBe(0);
       expect(d.gateCost, d.id).toBeUndefined();
     }
@@ -291,7 +311,7 @@ describe('base defs: extra coverage', () => {
     return out[0];
   };
 
-  it('declares 1-bit pins on every def outside the wide family', () => {
+  it('declares 1-bit pins on every def outside the wide and CPU families', () => {
     // Phase 0 shipped only 1-bit parts, and every def it shipped still is one.
     // The wide family -- task 3's operators, task 4's storage parts and task 10's
     // decoders -- is where a pin wider than one bit appears, and
@@ -301,9 +321,23 @@ describe('base defs: extra coverage', () => {
     // "some pins". `decoder1` is the sharpest case: its `out` is 2 bits wide by
     // contract (a 1-to-2 decoder's whole point), so it belongs to that exclusion
     // and is pinned by the decoder tests above.
-    const wide = new Set<string>([...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS, ...DECODER_DEF_IDS]);
+    //
+    // The CPU family is the second such exclusion, declared the same way -- by
+    // its own id tuple in `defs/cpu.ts` -- because five of its six parts carry
+    // wide pins by contract (`alu8`'s and `ram_prog`'s 8-bit pins,
+    // `instr_decoder`'s 2/3/6-bit field pins, `regfile6`'s 3- and 8-bit pins) and
+    // `test/core/defs-cpu.test.ts` pins their exact widths. `halt` is the family's
+    // 1-bit member; it is excluded with the rest so that this loop keeps meaning
+    // "every def in neither of the two described families", not "every def whose
+    // author remembered this test".
+    const wideAndCpu = new Set<string>([
+      ...WIDE_DEF_IDS,
+      ...WIDE_STORAGE_DEF_IDS,
+      ...DECODER_DEF_IDS,
+      ...CPU_DEF_IDS,
+    ]);
     for (const d of r.all()) {
-      if (wide.has(d.id)) continue;
+      if (wideAndCpu.has(d.id)) continue;
       for (const p of [...d.inputs, ...d.outputs]) {
         expect(p.width, `${d.id}.${p.id}`).toBe(1);
       }

@@ -6,7 +6,20 @@ export const registry = createRegistry(BASE_DEFS);
 
 export type Node =
   | { readonly kind: 'input'; readonly name: string; readonly width?: number }
-  | { readonly kind: 'part'; readonly def: string; readonly id: string; readonly from: readonly string[] }
+  | {
+      readonly kind: 'part';
+      readonly def: string;
+      readonly id: string;
+      readonly from: readonly string[];
+      /**
+       * Instance pin width (`params.width`), for parts whose registered width is
+       * not the one this circuit needs -- a `splitter`/`maker` at three bits, a
+       * wide operator at a width other than eight. Every pin of the instance
+       * takes this width, which is why the def's own pin widths cannot be
+       * overridden per pin (spec §3.3).
+       */
+      readonly width?: number;
+    }
   | { readonly kind: 'output'; readonly name?: string; readonly from: string; readonly width?: number };
 
 /**
@@ -49,7 +62,9 @@ export function build(nodes: readonly Node[]): Graph {
       setWidth(inst, node.width);
       inputIds.set(node.name, inst.id);
     } else if (node.kind === 'part') {
-      partIds.set(node.id, addInstance(g, node.def, 120, 0).id);
+      const inst = addInstance(g, node.def, 120, 0);
+      setWidth(inst, node.width);
+      partIds.set(node.id, inst.id);
     } else {
       const name = node.name ?? 'OUT';
       const inst = addInstance(g, 'level_output', 240, 0, name);

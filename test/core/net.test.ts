@@ -663,6 +663,47 @@ describe('wide storage', () => {
     expect(p.out(out)).toBe(0x00);
   });
 
+  it('shifts a value one stage per tick through two delay lines in series', () => {
+    // The chain regression for spec §4.1's snapshot-before-edge rule: the second
+    // stage must sample what the first stage PUBLISHED at the start of the tick,
+    // not the byte the first stage's edge wrote moments earlier. Interleave the
+    // snapshot and the edge loops (or move the snapshot after the edges) and the
+    // pair updates together -- a CPU's `pc8` -> `regfile6` would then move
+    // through both in one tick.
+    //
+    // STATUS ON THE KERNEL AS FOUND: this passes. `tick()` snapshots every
+    // sequential instance before any `clockEdge`, and an edge writes only the
+    // private `#state`, never the table, so no chain shape shifts two stages in
+    // one tick. Kept as the regression that fails if that mechanism is ever
+    // reordered; it is not evidence of a live defect and carries no kernel change.
+    const g = emptyGraph();
+    const feed = addInstance(g, 'level_input', 0, 0, 'IN');
+    feed.params.width = 8;
+    const first = addInstance(g, 'delay8', 120, 0, 'first');
+    const second = addInstance(g, 'delay8', 240, 0, 'second');
+    connect(g, { inst: feed.id, port: 'out' }, { inst: first.id, port: 'a' });
+    connect(g, { inst: first.id, port: 'out' }, { inst: second.id, port: 'a' });
+    const net = compile(g, registry);
+    const sim = new Simulation(net, registry);
+    const p = probe(sim, net);
+    const stage1 = `${first.id}.out`;
+    const stage2 = `${second.id}.out`;
+
+    sim.reset();
+    expect(p.out(stage1)).toBe(0x00);
+    expect(p.out(stage2)).toBe(0x00);
+
+    p.set('IN.out', 0xa5);
+    sim.tick();
+    expect(p.out(stage1), 'stage 1 latched the driven byte').toBe(0xa5);
+    expect(p.out(stage2), 'stage 2 still holds its previous value').toBe(0x00);
+
+    p.set('IN.out', 0x3c);
+    sim.tick();
+    expect(p.out(stage1), 'stage 1 latched the new byte').toBe(0x3c);
+    expect(p.out(stage2), 'the 0xa5 advanced by exactly one stage').toBe(0xa5);
+  });
+
   it('counts one step per tick, holds when en is low, and wraps to 0 at 256', () => {
     const { graph, out, in: pin } = storageFixture('counter8');
     const net = compile(graph, registry);
