@@ -85,7 +85,7 @@ spec §3.4 的蓝图（封装为自定义组件）在阶段 3 与 IDE 同期；�
 | 4 | `src/asm/index.ts` | 导出面 |
 | 5 | `src/levels/spec.ts` | `ProgramCheck` + `ProgramStep` + 失败原因 `missing-program` |
 | 6 | `src/levels/checks.ts` | `program` 检查器的驱动实现 |
-| 7 | `src/core/net.ts` | `params.image` → `ram_prog` 初始状态 |
+| 7 | `src/core/net.ts` | `Simulation.loadImage(id, bytes)` → `ram_prog` 初始状态（**不是** `params.image`，见 Task 1 的更正） |
 | 8 | `src/levels/content/ch3/batch1.ts` | 第 39–41 关 |
 | 9 | `src/levels/content/ch3/batch2.ts` | 第 42–44 关 |
 | 10 | `src/levels/content/ch3/batch3.ts` | 第 45–47 关 |
@@ -93,6 +93,14 @@ spec §3.4 的蓝图（封装为自定义组件）在阶段 3 与 IDE 同期；�
 | 12 | `src/levels/content/index.ts` | 追加第 3 章 |
 
 ## Task 1: recon — 内核参数与初始状态通路
+
+> **本任务未交付书面 recon；三条答案由实现反推确认，记在
+> `.superpowers/sdd/2026-09-29-turing-complete-phase2/progress.md` 的「Open / deferred」一节。**
+> 其中一条**推翻了本计划的假设**：程序镜像**不经** `params.image`、也不在 `compile` 时写入
+> ——它走运行期的 `Simulation.loadImage(instanceId, bytes)`，由 `program` 检查器
+> （`levels/checks.ts`）在 `reset()` **之后**调用。原因是 `reset()` 会清空 state，编译期写
+> 入的镜像会被每次检查前的 `reset()` 抹掉，而 `params.image` 这个键**根本不存在**。
+> 下文 Task 4 里「写入 `params.image` 之后再 `compile`」一句因此是错的，实现没有照它做。
 
 **目标**：把「`ram_prog` 的初始程序镜像怎么进到 `Simulation`」这条路摸清楚并写进
 账本，避免 Task 2 在一个不存在的机制上设计。
@@ -119,7 +127,7 @@ spec §3.4 的蓝图（封装为自定义组件）在阶段 3 与 IDE 同期；�
 | `regfile6` | 六级寄存器堆 / 6-Register File | `addrA:3` `addrB:3` `waddr:3` `data:8` `we:1` | `a:8` `b:8` | 2 读 1 写；`we` 为高时时钟沿写入 `waddr`；`evaluate` 只发布 state，按地址**索引**（与 `ram8.addr` 同一条例外） |
 | `instr_decoder` | 指令解码器 / Instruction Decoder | `instr:8` | `mode:2` `op:3` `dst:3` `src:3` `imm:6` | 组合解码，字段见裁决 5；保留位不校验（保留位的校验是关卡的事） |
 | `pc8` | 程序计数器 / Program Counter | `load:1` `in:8` | `out:8` | 时钟沿：`load` 高则 `state = in`，否则 `state = (state + 1) & 0xff`；发布 state |
-| `ram_prog` | 程序存储器 / Program RAM | `addr:8` | `out:8` | 256 字节，初始镜像来自实例 `params.image`（Task 1 的通路）；读按地址索引 |
+| `ram_prog` | 程序存储器 / Program RAM | `addr:8` | `out:8` | 256 字节，初始镜像由检查器经 `Simulation.loadImage` 在 `reset()` **之后**载入（**不是** `params.image`，见 Task 1 的更正）；读按地址索引 |
 | `halt` | 停机 / Halt | `in:1` | `out:1` | 组合直通（`out = in`），`cost: 0`、`gateCost: 0`；存在意义是给关卡一个可断言的停机点 |
 
 **门成本**（NAND 等价，写死并给出构造注释）：
@@ -163,7 +171,9 @@ export interface ProgramCheck {
 
 - 空 `steps`（或全部没有 `expect`）是硬失败 `missing-program`——`missing-rows` 那一课。
 - 编译失败（`errors` 非空）是 `invalid`，`detail` 带上第一行错误。
-- 编译产物写入 `ram_prog` 实例的 `params.image` 之后再 `compile`；具体通路按 Task 1 的结论。
+- 编译产物由检查器经 `Simulation.loadImage(instanceId, bytes)` 载入 `ram_prog`，且必须在
+  `reset()` **之后**调用（`reset()` 清空 state，编译期写入会被抹掉）；**不是**写入实例的
+  `params.image` 再 `compile`。见 Task 1 的更正。
 - `ticksUsed` 计真（喂给星级），与 `script` 同一口径。
 
 ## Task 5: 第 39–41 关（`ch3/batch1.ts`）
