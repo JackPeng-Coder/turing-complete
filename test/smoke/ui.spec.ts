@@ -15,12 +15,20 @@ import { STORAGE_KEY } from '../../src/persist/storage';
  * `py`. If the part size changes, these offsets have to change with it -- that
  * coupling is the point, because pointer feel is part of the UI contract.
  *
- * CHAPTER 2 IS COVERED BY THE LAST THREE TESTS. Joining a chapter to the level
- * list is not shipping it: a level nobody can open, or one that opens but never
- * grades, is invisible in the earlier tests either way. Those three seed a save
- * with the levels before their target already passed -- the only practical way to
- * reach level 31 in a browser test -- and then walk the real path: open it, read
- * its palette, build its reference, pass it, and watch the next tile unlock.
+ * CHAPTERS 2 AND 3 ARE COVERED BY THE LAST SIX TESTS. Joining a chapter to the
+ * level list is not shipping it: a level nobody can open, or one that opens but
+ * never grades, is invisible in the earlier tests either way. Those tests seed a
+ * save with the levels before their target already passed -- the only practical
+ * way to reach level 31, let alone 47, in a browser test -- and then walk the
+ * real path: open it, read its palette, build its reference, pass it, and watch
+ * the next tile unlock.
+ *
+ * THE CHAPTER-3 TESTS ARE THE ONES THAT WOULD HAVE CAUGHT ITS ACTUAL DEFECT. All
+ * nine of its levels were written, compiled and passed their own batch tests
+ * while `content/index.ts` never named the chapter, so no player could reach any
+ * of them. A batch test imports its batch by path and passes either way; only a
+ * walk that starts from the app's own level list can see the difference, which is
+ * what these do.
  */
 
 /**
@@ -154,9 +162,9 @@ test('chapter 2 is reachable: level 13 opens once chapter 1 is passed', async ({
   await expect(page.locator('.truth-table')).toBeVisible();
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  // All 38 tiles -- chapter 2's 26 levels are on the map, which is the player's
-  // only view of them.
-  await expect(page.locator('.map-tile')).toHaveCount(38);
+  // All 47 tiles -- chapter 2's 26 and chapter 3's nine are on the map, which is
+  // the player's only view of them.
+  await expect(page.locator('.map-tile')).toHaveCount(47);
   await expect(page.locator('.map-tile').nth(12)).toContainText('13. 奇数个信号');
   await expect(page.locator('.map-tile').nth(12)).toBeEnabled();
   // Unlocking stays strictly linear across the join: level 14 waits for 13.
@@ -218,7 +226,7 @@ test('the last chapter-2 level opens: level 38 is reachable', async ({ page }) =
   await expect(page.locator('.shell-bar')).toContainText('计数器');
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  await expect(page.locator('.map-tile')).toHaveCount(38);
+  await expect(page.locator('.map-tile')).toHaveCount(47);
   await expect(page.locator('.map-tile').nth(37)).toContainText('38. 计数器');
   await expect(page.locator('.map-tile').nth(37)).toBeEnabled();
 
@@ -230,4 +238,59 @@ test('the last chapter-2 level opens: level 38 is reachable', async ({ page }) =
   await expect(page.getByRole('button', { name: '8 位寄存器' })).toBeEnabled();
   await expect(page.locator('.truth-table')).toBeVisible();
   await page.screenshot({ path: 'test-results/smoke-ch2-level38-open.png' });
+});
+
+test('chapter 3 is reachable: level 39 opens once chapter 2 is passed', async ({ page }) => {
+  // 38 passed -- the whole of chapters 1 and 2 -- so the resume point is the
+  // first chapter-3 level. Before the chapter was appended to the level list this
+  // test failed at the resume point itself, which is the point of it.
+  await seedProgress(page, 38);
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('算数引擎');
+
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await expect(page.locator('.map-tile')).toHaveCount(47);
+  await expect(page.locator('.map-tile').nth(38)).toContainText('39. 算数引擎');
+  await expect(page.locator('.map-tile').nth(38)).toBeEnabled();
+  // Unlocking stays strictly linear across the second join too: 40 waits for 39.
+  await expect(page.locator('.map-tile').nth(39)).toBeDisabled();
+
+  // A real level, not an empty screen: its palette offers the eight-bit wiring
+  // the level is built from and its checker is mounted.
+  await page.locator('.map-tile').nth(38).click();
+  await expect(page.locator('.screen-board')).toBeVisible();
+  await expect(page.locator('.shell-bar')).toContainText('算数引擎');
+  await expect(page.locator('.truth-table')).toBeVisible();
+  await page.screenshot({ path: 'test-results/smoke-ch3-level39-open.png' });
+});
+
+test('the last level opens and mounts its program check: level 47', async ({ page }) => {
+  // 46 passed: the resume point is the phase's acceptance level -- the one whose
+  // check runs a real OVERTURE program against the machine the player built,
+  // rather than a truth table. Reaching it proves the join reaches the end of
+  // chapter 3, and that the `program` check kind (level data + `checks.ts`) is
+  // wired into the app rather than only into the unit tests.
+  await seedProgress(page, 46);
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('图灵完备');
+
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await expect(page.locator('.map-tile')).toHaveCount(47);
+  await expect(page.locator('.map-tile').nth(46)).toContainText('47. 图灵完备');
+  await expect(page.locator('.map-tile').nth(46)).toBeEnabled();
+
+  await page.locator('.map-tile').nth(46).click();
+  await expect(page.locator('.screen-board')).toBeVisible();
+  await expect(page.locator('.shell-bar')).toContainText('图灵完备');
+  // The palette is everything earned through level 46, so the six machine parts
+  // are all on offer -- the claim `level-buildability.test.ts` walks, checked
+  // here against the palette the app actually renders.
+  await expect(page.getByRole('button', { name: '8 位运算器' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '程序存储器' })).toBeEnabled();
+  // And the program check is mounted: an empty board must grade as a failure
+  // rather than as nothing at all, which is what `missing-program` means.
+  await expect(page.locator('.truth-table')).toBeVisible();
+  await page.screenshot({ path: 'test-results/smoke-ch3-level47-open.png' });
 });

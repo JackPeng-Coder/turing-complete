@@ -11,6 +11,7 @@ import { STARTER_COMPONENTS } from '../../src/app/progress';
 import { DECODER_DEF_IDS } from '../../src/core/defs/wide';
 import type { PortValue } from '../../src/core/signal';
 import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
+import { CH3_LEVELS } from '../../src/levels/content/ch3/index';
 import { LEVELS, LEVEL_ORDER, levelsOfChapter } from '../../src/levels/index';
 import type { LevelSpec } from '../../src/levels/spec';
 import { registry } from '../fixtures/build';
@@ -125,6 +126,18 @@ const CH1_ROW = specRow('Ch1');
  */
 const CH2_ROW = specRow('Ch2');
 
+/**
+ * §3.3's chapter-3 row: the six parts the OVERTURE machine is built from.
+ *
+ * Unlike the two rows above it, this one needed no ruling before it could be
+ * asserted: each of its six parts is introduced by a chapter-3 level, in row
+ * order, against a level whose brief is the part itself. Chapters 1 and 2 both
+ * had to settle a name that had moved (`mem1` into chapter 1's capstone,
+ * `switch`/`switch8` ten levels ahead of the source, `ram8` named only late),
+ * which is why their blocks below carry rulings and this one carries none.
+ */
+const CH3_ROW = specRow('Ch3');
+
 /** The starters, as a `Set<string>` so `has` takes a plain string. */
 const STARTERS = new Set<string>(STARTER_COMPONENTS);
 
@@ -181,8 +194,8 @@ describe("spec §3.3's rows and the level data agree", () => {
     for (const label of ['Ch1', 'Ch2', 'Ch3', 'Ch4', 'Ch5', 'Ch6', 'Ch7', '沙盒专用']) {
       expect(UNLOCK_ROWS.has(label), `spec §3.3 has no row for ${label}`).toBe(true);
     }
-    // Chapters 3-7 and the sandbox row are read but not compared against data:
-    // this build ships chapters 1 and 2 (38 levels), so the later rows have no
+    // Chapters 4-7 and the sandbox row are read but not compared against data:
+    // this build ships chapters 1-3 (47 levels), so the later rows have no
     // rewards to be checked against until their chapters exist.
   });
 
@@ -233,6 +246,44 @@ describe("spec §3.3's rows and the level data agree", () => {
       }
     }
     expect(problems, "parts spec §3.3's chapter-1 row names that chapter 1 does not hand out").toEqual(
+      [],
+    );
+  });
+
+  it('agrees with the chapter-3 row in both directions', () => {
+    // Both directions in one test, deliberately: chapter 3's six parts are all
+    // introduced by the six levels whose brief is that part, so the spec->data
+    // and data->spec walks are two views of a single claim -- the machine is
+    // handed out one piece per level, in order, with nothing left over. Splitting
+    // them would let a part be dropped from the row and from the levels at once
+    // and still read as two passes.
+    const rewarded = new Set<string>();
+    for (const level of levelsOfChapter(3)) for (const def of rewardsOf(level)) rewarded.add(def);
+    // Non-vacuity: the walk reached the chapter's rewards at all. Six is the
+    // whole row, and `ch3-45`..`ch3-47` reward nothing (chapter 3 ends on the
+    // integration levels rather than on a part), so this is also the check that
+    // the last three levels did not quietly grow a reward of their own.
+    expect(rewarded.size).toBe(6);
+    expect(
+      [...rewarded].filter((def) => !CH3_ROW.includes(def)),
+      "chapter-3 rewards spec §3.3's chapter-3 row does not name",
+    ).toEqual([]);
+
+    // The other direction: a name in the row that no chapter-3 level hands out
+    // (or that two of them do) is a row promising a part the player never gets.
+    // The level check is what stops a chapter-3 part being satisfied by, say, a
+    // chapter-2 reward that happens to carry the same id.
+    const problems: string[] = [];
+    for (const def of CH3_ROW) {
+      const unlockers = unlockersOf(def);
+      if (unlockers.length !== 1) {
+        const who = unlockers.map((level) => level.id).join(', ') || 'no level';
+        problems.push(`${def} is unlocked by ${unlockers.length} levels: ${who}`);
+      } else if (unlockers[0]!.chapter !== 3) {
+        problems.push(`${def} is unlocked by ${unlockers[0]!.id}, which is chapter ${unlockers[0]!.chapter}`);
+      }
+    }
+    expect(problems, "parts spec §3.3's chapter-3 row names that chapter 3 does not hand out").toEqual(
       [],
     );
   });
@@ -418,13 +469,87 @@ describe('chapter 2 is exactly 26 levels, at indices 13-38', () => {
   });
 
   it('is the chapter join point, in the same order, with nothing in front of it', () => {
-    // `CH2_LEVELS` (`content/ch2/index.ts`) is what `content/index.ts` appends to
-    // chapter 1, so this ties the chapter's own export to the game's order.
+    // `CH2_LEVELS` (`content/ch2/index.ts`) is what `content/index.ts` appends
+    // after chapter 1, so this ties the chapter's own export to the game's order.
+    // The slice is bounded at BOTH ends: it used to run to the end of the order,
+    // which silently became "chapter 2 plus everything appended after it" the
+    // moment chapter 3 landed. The chapter's own span is 13..38, so that is what
+    // it is compared against.
     expect(levelsOfChapter(2).map((level) => level.id)).toEqual(
       CH2_LEVELS.map((level) => level.id),
     );
-    expect(LEVEL_ORDER.slice(12)).toEqual(CH2_LEVELS.map((level) => level.id));
+    expect(LEVEL_ORDER.slice(12, 38)).toEqual(CH2_LEVELS.map((level) => level.id));
     expect(levelsOfChapter(1)).toHaveLength(12);
-    expect(LEVELS).toHaveLength(38);
+    expect(LEVELS).toHaveLength(47);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Rule 4 for chapter 3: nine levels, indices 39-47, and the machine in order
+// ---------------------------------------------------------------------------
+
+describe('chapter 3 is exactly 9 levels, at indices 39-47', () => {
+  it('has 9 levels, one per index from 39 to 47', () => {
+    const chapter3 = levelsOfChapter(3);
+    expect(chapter3).toHaveLength(9);
+    expect(chapter3.map((level) => level.index)).toEqual(
+      Array.from({ length: 9 }, (_, offset) => 39 + offset),
+    );
+    expect(new Set(chapter3.map((level) => level.index)).size).toBe(9);
+    expect(new Set(chapter3.map((level) => level.id)).size).toBe(9);
+  });
+
+  it('is the chapter join point, in the same order, at the end of the game', () => {
+    // Chapter 3 is the LAST chapter this build ships, so `slice(38)` runs to the
+    // end of the order -- the exact shape that made chapter 2's equivalent
+    // assertion wrong the moment a later chapter appeared. That is safe here only
+    // because there is no chapter 4 yet; the bounded form is used regardless, so
+    // the day chapter 4 lands this fails loudly instead of silently widening.
+    expect(levelsOfChapter(3).map((level) => level.id)).toEqual(
+      CH3_LEVELS.map((level) => level.id),
+    );
+    expect(LEVEL_ORDER.slice(38, 47)).toEqual(CH3_LEVELS.map((level) => level.id));
+    // And nothing beyond it: 47 is the last index the game has.
+    expect(LEVEL_ORDER).toHaveLength(47);
+  });
+
+  it('hands the six machine parts out one per level, in the order they are built', () => {
+    // The chain the plan asks to be pinned, as a chain rather than as six
+    // independent facts. `test/levels/ch3-batch*.test.ts` already assert each
+    // level's OWN reward, and the row test above asserts each part is unlocked by
+    // exactly one chapter-3 level; neither says WHICH one. This is the claim that
+    // makes the chapter teach a machine instead of six unrelated parts: the ALU
+    // arrives before the level that does arithmetic with it, the register file
+    // before the level that decodes into it, `ram_prog` before the three levels
+    // whose programs are assembled into it, and `halt` before level 47 needs a
+    // place to stop.
+    //
+    // Written as an explicit table, not derived from the level data: a table
+    // derived from the thing it checks cannot disagree with it, and reordering
+    // two levels is exactly the regression this is here to catch.
+    const expected: ReadonlyArray<readonly [string, string]> = [
+      ['ch3-39-arithmetic-engine', 'alu8'],
+      ['ch3-40-registers', 'regfile6'],
+      ['ch3-41-component-factory', 'instr_decoder'],
+      ['ch3-42-instruction-decoder', 'pc8'],
+      ['ch3-43-calculations', 'ram_prog'],
+      ['ch3-44-conditions', 'halt'],
+    ];
+    for (const [levelId, def] of expected) {
+      expect(unlockersOf(def).map((level) => level.id), def).toEqual([levelId]);
+    }
+    // And each part is first OFFERED at or after the level that unlocks it --
+    // "unlocks at level N" is only half the claim; the other half is that no
+    // level before N already assumed the player had it.
+    for (const [levelId, def] of expected) {
+      const unlockAt = LEVEL_ORDER.indexOf(levelId);
+      const firstOffered = firstListingOf(def);
+      expect(unlockAt, `${def} is unlocked after it is first offered`).toBeGreaterThanOrEqual(0);
+      expect(firstOffered, `${def} is never offered by any level`).toBeGreaterThanOrEqual(0);
+      expect(
+        firstOffered,
+        `${def} is offered at ${LEVEL_ORDER[firstOffered]}, before ${levelId} unlocks it`,
+      ).toBeGreaterThanOrEqual(unlockAt);
+    }
   });
 });

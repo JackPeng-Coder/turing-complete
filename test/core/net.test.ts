@@ -1453,3 +1453,165 @@ describe('delayOf', () => {
     expect(delayOf(g, registry)).toBe(1);
   });
 });
+
+/**
+ * A combinational pass-through that RECORDS the raw value it was handed.
+ *
+ * Unlike a `mux8` -- whose `sel` is read through `bit()`, so 1 and 3 are the
+ * same selector -- no consumer can hide a widened read: whatever the kernel
+ * gathers onto this def's `in` pin is what lands in `seen`, bit for bit.
+ */
+function oneBitWatcher(seen: number[]): ComponentDef {
+  return {
+    id: 'watch1',
+    name: { zh: '一位观察器', en: '1-Bit Watcher' },
+    category: 'logic1',
+    inputs: [{ id: 'in', width: 1 }],
+    outputs: [{ id: 'out', width: 1 }],
+    cost: 0,
+    sequential: false,
+    stateBytes: 0,
+    evaluate: (i, o) => {
+      const value = toNumber(i[0] ?? 0);
+      seen.push(value);
+      o[0] = value;
+    },
+  };
+}
+
+/**
+ * One 1-bit `level_input` fanning out to several 1-bit consumer pins, which is
+ * the shape a signal-integrity report on chapter 3's ALU named: it had
+ * `mux8.sel`, `add8.cin` -- every consumer of the same source -- reading `3`,
+ * the three selector level-inputs packed as `op0 + 2 * op1`, after a `tick()`.
+ *
+ * WHAT THE KERNEL ACTUALLY DOES, and why a one-bit read CANNOT report 3:
+ * a 1-bit pin owns one slot, `#gather` builds a `width <= 1` value as `1 << 0`
+ * (net.ts), and `getPort` likewise folds single slots with `<< i` for `i < width`
+ * (signal.ts) -- so 0 and 1 are the only values either can return for that pin,
+ * whatever the tick count. Reading `3` requires handing the table a width of
+ * three, i.e. `read(base, 3)`, which sweeps the two slots that physically follow
+ * the source: the *other* selector pins' live bits. This test pins both halves --
+ * each consumer sees its own bit before and after every edge, and the packed 3 is
+ * a three-slot range read rather than a one-bit one -- so a future change that
+ * widens a pin, mis-resolves `drive`, or makes a read tick-dependent fails here.
+ */
+describe('a one-bit fan-out stays one bit wide', () => {
+  /** The minimal graph: three 1-bit sources, three 1-bit consumers of `op0`. */
+  function fanOutFixture(): {
+    graph: Graph;
+    registry: Registry;
+    seen: number[];
+  } {
+    const seen: number[] = [];
+    const reg = createRegistry([...BASE_DEFS, oneBitWatcher(seen)]);
+    const g = emptyGraph();
+    const op0 = addInstance(g, 'level_input', 0, 0, 'IN_op0');
+    // Two more one-bit sources, each one slot wide and allocated right after the
+    // first, so the range read below sweeps three separate pins rather than a
+    // packer's output.
+    addInstance(g, 'level_input', 0, 40, 'IN_op1');
+    addInstance(g, 'level_input', 0, 80, 'IN_op2');
+    const mx = addInstance(g, 'mux8', 120, 0, 'mx');
+    const ad = addInstance(g, 'add8', 120, 60, 'ad');
+    const watch = addInstance(g, 'watch1', 120, 120, 'watch');
+    // The three consumers of the SAME 1-bit source, one pin each.
+    connect(g, { inst: op0.id, port: 'out' }, { inst: mx.id, port: 'sel' });
+    connect(g, { inst: op0.id, port: 'out' }, { inst: ad.id, port: 'cin' });
+    connect(g, { inst: op0.id, port: 'out' }, { inst: watch.id, port: 'in' });
+    return { graph: g, registry: reg, seen };
+  }
+
+  it('reads every one-bit consumer its own source bit, before and after an edge', () => {
+    const { graph, registry: reg, seen } = fanOutFixture();
+    const net = compile(graph, reg);
+    const sim = new Simulation(net, reg);
+    const p = probe(sim, net);
+    const base = net.outputBase('IN_op0.out');
+
+    expect(net.outputWidth('IN_op0.out')).toBe(1);
+    expect(net.inputWidth('mx.sel')).toBe(1);
+    expect(net.inputWidth('ad.cin')).toBe(1);
+    expect(net.inputWidth('watch.in')).toBe(1);
+    // One 1-bit source, so every consumer resolves to that single slot: no read
+    // region (a region is only materialised for a pin wider than its driver).
+    expect(net.inputBase('mx.sel')).toBe(base);
+    expect(net.inputBase('ad.cin')).toBe(base);
+    expect(net.inputBase('watch.in')).toBe(base);
+    // The layout the "packed 3" measurement depends on.
+    expect(net.outputBase('IN_op1.out')).toBe(base + 1);
+    expect(net.outputBase('IN_op2.out')).toBe(base + 2);
+
+    for (const op0 of [1, 0] as const) {
+      sim.reset();
+      // The neighbour slots are driven to the SAME value as the consumer's own
+      // source, which is what makes a widened read visible: three slots swept
+      // from `base` would read 1 + 2 * 1 + 4 * 0 = 3, not 1.
+      p.set('IN_op0.out', op0);
+      p.set('IN_op1.out', op0);
+      p.set('IN_op2.out', 0);
+      for (let ticks = 0; ticks <= 3; ticks += 1) {
+        seen.length = 0;
+        sim.settle();
+        const where = `op0=${op0} after ${ticks} tick(s)`;
+        // What the 1-bit consumer def was actually handed: never the packed 3.
+        expect(seen[0], where).toBe(op0);
+        expect(seen[0], where).toBeLessThan(2);
+        // What the netlist's own read of the pin reports, at the pin's width.
+        expect(toNumber(sim.read(base, 1)), where).toBe(op0);
+        expect(
+          toNumber(sim.read(net.inputBase('mx.sel'), net.inputWidth('mx.sel'))),
+          where,
+        ).toBe(op0);
+        sim.tick();
+      }
+    }
+  });
+
+  it('only packs 3 when the caller reads three slots, not when the pin is 1 bit', () => {
+    const { graph, registry: reg } = fanOutFixture();
+    const net = compile(graph, reg);
+    const sim = new Simulation(net, reg);
+    const p = probe(sim, net);
+    const base = net.outputBase('IN_op0.out');
+
+    // The reported measurement: op0=1, op1=1, op2=0 laid out in slots base+0..+2.
+    // `read(base, 3)` returns their packed value -- 1 + 2 * 1 + 4 * 0 = 3 -- and
+    // that is a THREE-slot range read across three separate 1-bit pins. The same
+    // three bits read one slot at a time are 1, 1 and 0.
+    sim.reset();
+    p.set('IN_op0.out', 1);
+    p.set('IN_op1.out', 1);
+    p.set('IN_op2.out', 0);
+    sim.settle();
+    expect(toNumber(sim.read(base, 3))).toBe(3);
+    expect([0, 1, 2].map((i) => toNumber(sim.read(base + i, 1)))).toEqual([1, 1, 0]);
+    // ... and the 1-bit pin's own read is unchanged by the range read.
+    expect(toNumber(sim.read(net.inputBase('mx.sel'), net.inputWidth('mx.sel')))).toBe(1);
+  });
+
+  it('would report 3 if the pin really were three bits wide', () => {
+    // The positive control for the watcher above: `params.width` widens EVERY pin
+    // of an instance, so a three-bit `level_input` driving a three-bit watcher is
+    // handed 3 and records it. The one-bit case above therefore records 1 because
+    // the kernel resolved the pin as one bit, not because the watcher cannot see 3.
+    const seen: number[] = [];
+    const reg = createRegistry([...BASE_DEFS, oneBitWatcher(seen)]);
+    const g = emptyGraph();
+    const src = addInstance(g, 'level_input', 0, 0, 'IN_op');
+    src.params.width = 3;
+    const watch = addInstance(g, 'watch1', 120, 0, 'watch');
+    watch.params.width = 3;
+    connect(g, { inst: src.id, port: 'out' }, { inst: watch.id, port: 'in' });
+    const net = compile(g, reg);
+    const sim = new Simulation(net, reg);
+
+    expect(net.outputWidth('IN_op.out')).toBe(3);
+    expect(net.inputWidth('watch.in')).toBe(3);
+    sim.reset();
+    probe(sim, net).set('IN_op.out', 3);
+    seen.length = 0;
+    sim.settle();
+    expect(seen[0]).toBe(3);
+  });
+});

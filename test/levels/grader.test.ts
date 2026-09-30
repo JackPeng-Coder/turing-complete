@@ -11,6 +11,7 @@ import type { Metrics } from '../../src/levels/grader';
 import { SCORE_WEIGHTS, gateCost, grade, scoreOf, starsOf } from '../../src/levels/grader';
 import { build } from '../fixtures/build';
 import { CH2_REFERENCES } from '../fixtures/ch2-references';
+import { CH3_REFERENCES } from '../fixtures/ch3-references';
 
 const registry = createRegistry(BASE_DEFS);
 
@@ -398,8 +399,12 @@ describe('phase-0 regression: the chapter-1 reference scores are frozen', () => 
  * they still satisfy the levels they belong to.
  */
 describe('every shipped level: its reference solution meets its own three-star bounds', () => {
-  /** Chapter 1 from this file, chapter 2 from `test/fixtures/ch2-references.ts`. */
-  const shippedReference: Record<string, () => Graph> = { ...ch1Reference, ...CH2_REFERENCES };
+  /** Chapter 1 from this file, chapters 2 and 3 from the shared fixtures. */
+  const shippedReference: Record<string, () => Graph> = {
+    ...ch1Reference,
+    ...CH2_REFERENCES,
+    ...CH3_REFERENCES,
+  };
 
   it('has a reference circuit for every shipped level', () => {
     expect(LEVELS.length).toBeGreaterThan(0);

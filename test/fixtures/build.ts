@@ -49,6 +49,26 @@ function setWidth(inst: Instance, width: number | undefined): void {
  * the width of its level pin, and it is written to the instance as
  * `params.width` so `levels/checks.ts` can bind it at the width the level asks
  * for.
+ *
+ * A PART'S `id` IS A BUILD-TIME NAME, NOT THE INSTANCE ID, and that distinction
+ * cost real debugging time once. `addInstance` is called without a name for
+ * parts, so the graph's instances are `i1`, `i2`, `i3`.. and `partIds` is what
+ * maps a declaration's `id` onto one of those. Two consequences:
+ *
+ *  * `from: ['g0', 'sel.b3']` works and `g0` will NOT appear in
+ *    `graph.instances` -- do not go looking for it there;
+ *  * `net.outputBase('<Node.id>.<pin>')` does NOT address an instance from this
+ *    fixture. A probe that wants to read an internal node should resolve it as
+ *    `graph.instances.filter((i) => i.def === '<def>')[n].id`, or by index. The
+ *    failure mode is a `no such output pin` error, which reads like a typo in a
+ *    pin name rather than like a naming-convention mismatch.
+ *
+ * Level inputs and outputs ARE named, because `checks.ts` binds them by id
+ * (`IN_<pin>` / `OUT` / `OUT_<pin>`), so those two conventions coexist in one
+ * graph by design. `test/core/net.test.ts`'s `storageFixture` relies on the named
+ * form for the level input it drives (`feed`) and names its part under test
+ * explicitly (`unit`); the many bare `addInstance(g, 'nand', 0, 0)` calls in that
+ * file use the generated `iN` ids and address them through the returned object.
  */
 export function build(nodes: readonly Node[]): Graph {
   const g = emptyGraph();

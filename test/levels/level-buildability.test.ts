@@ -9,11 +9,13 @@ import {
 } from '../../src/app/progress';
 import type { Graph } from '../../src/core/graph';
 import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
+import { CH3_LEVELS } from '../../src/levels/content/ch3/index';
 import { grade, type GradeResult } from '../../src/levels/grader';
 import { LEVELS, LEVEL_ORDER } from '../../src/levels/index';
 import type { LevelSpec } from '../../src/levels/spec';
 import { build, registry } from '../fixtures/build';
 import { CH2_REFERENCES } from '../fixtures/ch2-references';
+import { CH3_REFERENCES } from '../fixtures/ch3-references';
 
 /**
  * The whole-set machine check: can the palette the app hands a first-time player
@@ -232,17 +234,25 @@ const REFERENCE_SOLUTIONS: Record<string, () => Graph> = {
     ]),
   // Chapter 2, levels 13-38, from the shared fixture the batch tests also use.
   ...CH2_REFERENCES,
+  // Chapter 3, levels 39-47, likewise -- and here the fixture matters more than
+  // it did for chapter 2. All three chapter-3 levels in a batch share ONE
+  // reference graph (`overtureMachine`, `computeUnitGraph`, ...), parameterised
+  // by `options`; the fixture is what holds those parameter defaults still, so
+  // this walk is checking the palette against the same graph the batch tests
+  // measured their three-star targets from. A copy pasted here instead would be
+  // free to drift from the measured one, and the drift would read as a pass.
+  ...CH3_REFERENCES,
 };
 
-describe('the assembled set is chapter 1 then chapter 2, in order', () => {
-  it('ships 38 levels with no id twice', () => {
+describe('the assembled set is chapter 1, then 2, then 3, in order', () => {
+  it('ships 47 levels with no id twice', () => {
     // The join's arithmetic, and the two halves of it. A duplicate id would not
     // change either length -- `LEVEL_ORDER` is a list of ids, so the game would
     // simply have two levels by that name and one of them unreachable -- which
     // is exactly why uniqueness is asserted rather than implied by the count.
-    expect(LEVELS.length).toBe(38);
-    expect(LEVEL_ORDER.length).toBe(38);
-    expect(new Set(LEVEL_ORDER).size).toBe(38);
+    expect(LEVELS.length).toBe(47);
+    expect(LEVEL_ORDER.length).toBe(47);
+    expect(new Set(LEVEL_ORDER).size).toBe(47);
   });
 
   it('keeps chapter 2 whole, in index order, exactly where its own join put it', () => {
@@ -261,12 +271,38 @@ describe('the assembled set is chapter 1 then chapter 2, in order', () => {
     expect(new Set(inGame.map((level) => level.index)).size).toBe(26);
   });
 
-  it('puts chapter 1 first, and only chapter 1', () => {
-    // The join appends; it does not merge or interleave. This is the half of the
-    // claim that stops a chapter-2 level landing in the middle of chapter 1.
+  it('keeps chapter 3 whole, in index order, exactly where its own join put it', () => {
+    // Chapter 3's version of the claim above, and the one that would have caught
+    // its actual defect: the nine levels were written, compiled and passed their
+    // own three batch tests while `content/index.ts` never named the chapter, so
+    // none of them was reachable. A batch test cannot catch that -- it imports
+    // its batch by path, so it passes either way. This one walks the game.
+    const inGame = LEVELS.filter((level) => level.chapter === 3);
+    expect(inGame.map((level) => level.id)).toEqual(CH3_LEVELS.map((level) => level.id));
+    expect(inGame).toHaveLength(9);
+    // Contiguous AND unique: 39..47 with no gap and no repeat, which is what
+    // `isUnlocked` (the immediate predecessor) assumes when it walks the order.
+    expect(inGame.map((level) => level.index)).toEqual(
+      Array.from({ length: 9 }, (_, offset) => 39 + offset),
+    );
+    expect(new Set(inGame.map((level) => level.index)).size).toBe(9);
+  });
+
+  it('puts chapters 1 and 2 first, and nothing after chapter 3', () => {
+    // "Appends; does not merge or interleave" has two failure directions, and
+    // only one of them was ever asserted before chapter 3 existed: a later
+    // chapter landing inside an earlier one. The other is an earlier chapter
+    // landing after a later one -- which a bare `slice(0, 12)` cannot see -- so
+    // the claim is now stated over the whole order rather than its head.
     expect(LEVELS.filter((level) => level.chapter === 1)).toHaveLength(12);
     expect(LEVEL_ORDER.slice(0, 12)).toEqual(
       LEVELS.filter((level) => level.chapter === 1).map((level) => level.id),
+    );
+    expect(LEVEL_ORDER.slice(12, 38)).toEqual(
+      LEVELS.filter((level) => level.chapter === 2).map((level) => level.id),
+    );
+    expect(LEVEL_ORDER.slice(38)).toEqual(
+      LEVELS.filter((level) => level.chapter === 3).map((level) => level.id),
     );
   });
 });

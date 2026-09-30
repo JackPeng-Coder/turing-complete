@@ -613,6 +613,29 @@ export class Simulation {
    * Inputs are snapshotted for all storage elements before any of them updates,
    * so two of them in series shift a value along by one stage per tick rather
    * than racing through both in a single tick.
+   *
+   * THE CALLER SETTLES BEFORE TICKING. The storage elements are read out of the
+   * signal TABLE, which holds the values from the last completed sweep, so an edge
+   * samples the control lines as they stood at the END of that sweep -- a caller
+   * that writes an input and ticks without settling clocks the PREVIOUS input
+   * vector. Both callers in `levels/checks.ts` do settle first (`driveSteps` calls
+   * `io.sim.settle()` between writing a step's inputs and advancing the clock, and
+   * `runRow` does the same after `writeInput`), and `ch2/batch4.ts` documents the
+   * same contract from the level-data side, so the ordering is the established one
+   * rather than an accident of either caller.
+   *
+   * SETTLING INSIDE `tick()` WAS TRIED AND REVERTED. It would make the method
+   * self-sufficient, and it is not wrong about the values -- the settle at the end
+   * republishes through `evaluate` either way, so the settled result is identical.
+   * What it changes is the NUMBER of sweeps, and two tests in `test/core/net.test.ts`
+   * observe the first sweep directly: `#publishState` is a pre-seed that carries the
+   * held byte into the table before the sweep begins, so the first sweep after an
+   * edge already reads the post-edge value, and both
+   * `pre-seeds the held byte into the table before the settle that follows a tick`
+   * (which asserts `report.iterations` is exactly 2) and
+   * `pre-seeds a storage output whose zeroed state publishes a 1, before reset()
+   * settles` pin that ordering. An extra sweep ahead of the edge moves the pre-seed
+   * behind one, and both fail. The ordering belongs to the caller.
    */
   tick(): SettleReport {
     this.#tickCount += 1;
