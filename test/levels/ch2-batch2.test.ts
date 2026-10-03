@@ -579,13 +579,13 @@ describe('every level carries its sourced-vs-authored data comment', () => {
   it('records the two source achievements the batch has to honour', () => {
     // Level 22's note is "仅用 5 个蓝色元件" and level 27's is "延迟 ≤ 35". Both are
     // achievement notes, not pass conditions, and both are mapped deliberately:
-    // 21 to a measured gate threshold, 22 to nothing at all beyond a recorded
+    // 22 to a measured gate threshold, 27 to nothing at all beyond a recorded
     // reference value. The comments have to say so, and they have to quote the
     // source's own numbers so a reader can see what was and was not adopted.
-    const l21 = comments.get('ch2-22-full-adder') ?? '';
-    expect(l21).toContain('5 个蓝色元件');
-    const l22 = comments.get('ch2-27-adding-bytes') ?? '';
-    expect(l22).toContain('延迟 ≤ 35');
+    const fullAdder = comments.get('ch2-22-full-adder') ?? '';
+    expect(fullAdder).toContain('5 个蓝色元件');
+    const addingBytes = comments.get('ch2-27-adding-bytes') ?? '';
+    expect(addingBytes).toContain('延迟 ≤ 35');
   });
 });
 

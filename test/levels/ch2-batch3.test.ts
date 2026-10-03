@@ -24,8 +24,8 @@ import { build, registry, type Node } from '../fixtures/build';
 import { CH2_BATCH3_REFERENCES, bits } from '../fixtures/ch2-references';
 
 /**
- * Chapter 2's third batch: levels 23-27 -- two's complement, the decoders and
- * the eight-bit logic engine.
+ * Chapter 2's third batch: levels 29-37 -- two's complement and the decoder
+ * family.
  *
  * The source compendium fixes these levels' names, their order and a one-line
  * concept each, and nothing else -- no ports, no widths, no pass conditions, no
@@ -41,8 +41,8 @@ import { CH2_BATCH3_REFERENCES, bits } from '../fixtures/ch2-references';
  *    mini-game in the compendium, so the level data and its comment record the
  *    conversion rather than pretending the source specified a puzzle.
  *
- * This batch used to carry a second one, level 27's authored instruction set (the
- * Logic Engine): 2.x has no such level, so the level, its reference circuit and
+ * This batch used to carry a second one, the authored instruction set of the
+ * Logic Engine: 2.x has no such level, so the level, its reference circuit and
  * the eight-opcode suite that measured it are gone.
  *
  * The `fuzz` levels (29 and 31) follow batch 2's pattern for a wrong
@@ -333,12 +333,13 @@ describe('chapter 2, levels 29-37', () => {
 
   it('builds the decoder tables instead of leaving rows out', () => {
     // An empty `rows` array is a hard `missing-rows` failure, not "enumerate
-    // everything" -- so both decoder levels build their rows with the kernel's
-    // own `truthTable`, and each table is exhaustive over its select pin: two
-    // rows for one select bit, eight for three.
+    // everything" -- so all three decoder levels build their rows with the
+    // kernel's own `truthTable`, and each table is exhaustive over its select
+    // pin: two rows for one select bit, four for two, eight for three.
     expect(rowsOf(L35).length).toBe(2);
+    expect(rowsOf(L36).length).toBe(4);
     expect(rowsOf(L37).length).toBe(8);
-    for (const level of [L35, L37]) {
+    for (const level of [L35, L36, L37]) {
       const rows = rowsOf(level);
       const seen = new Set(rows.map((row) => JSON.stringify(row.inputs)));
       expect(seen.size, `${level.id} repeats or skips input combinations`).toBe(rows.length);
@@ -460,19 +461,19 @@ describe('chapter 2, levels 29-37', () => {
   it('offers each level the parts its own lesson needs', () => {
     // Not a restatement of the palettes but of the claims their comments make.
     for (const def of ['splitter', 'maker', 'add8', 'xor8']) {
-      expect(L29.allowedComponents, `level 23 cannot use ${def}`).toContain(def);
+      expect(L29.allowedComponents, `level 29 cannot use ${def}`).toContain(def);
     }
     for (const def of ['not8', 'add8']) {
-      expect(L31.allowedComponents, `level 24 cannot use ${def}`).toContain(def);
+      expect(L31.allowedComponents, `level 31 cannot use ${def}`).toContain(def);
     }
     expect(L35.allowedComponents).toContain('maker');
     expect(L36.allowedComponents).toContain('maker');
     expect(L37.allowedComponents).toContain('maker');
-    // Level 24 withholds the one drop-in that answers it: `neg8` is not this
+    // Level 31 withholds the one drop-in that answers it: `neg8` is not this
     // level's own reward and has exactly this level's I/O shape, so offering it
     // would let one component tie the level's two-component lesson on gates and
-    // beat it on delay. Batch 2's level 22 states the rule; this is its second
-    // use, and level 23 (where `neg8` does NOT answer the level) offers it.
+    // beat it on delay. Batch 2's level 27 states the rule; this is its second
+    // use, and level 29 (where `neg8` does NOT answer the level) offers it.
     expect(L31.allowedComponents).not.toContain('neg8');
     expect(L29.allowedComponents).toContain('neg8');
   });
@@ -481,12 +482,12 @@ describe('chapter 2, levels 29-37', () => {
 describe('every level carries its sourced-vs-authored data comment', () => {
   /**
    * The compendium fixes a name, an order and a one-line concept per level --
-   * and for level 23 it fixes neither a circuit nor a pass condition, because
+   * and for level 29 it fixes neither a circuit nor a pass condition, because
    * its source form is a timed mini-game. So every port, width, check, target
    * and reward in this file is this replica's design. The data comment on each
    * level has to say which is which, and a reviewer checks the wording by
    * reading; this checks that the marker block exists at all, so a later batch
-   * cannot quietly drop it, plus the three specific notes this batch owes.
+   * cannot quietly drop it, plus the two specific notes this batch owes.
    */
   const source = readFileSync(
     new URL('../../src/levels/content/ch2/batch3.ts', import.meta.url),
@@ -767,9 +768,9 @@ describe('the fuzz levels drive varying, reproducible vectors', () => {
       const twice = captureRound(level, solutions[level.id]!).seen;
       expect(once, `${level.id} reference`).toHaveLength(256);
       expect(twice).toEqual(once);
-      // 256 draws from an 8-bit space repeat a little; from the 24-bit space
-      // level 27 drives they hardly ever do. 100 is a floor only a degenerate
-      // sequence -- the xorshift fixed point, or a constant -- can miss.
+      // 256 draws from an 8-bit space repeat a little. 100 is a floor only a
+      // degenerate sequence -- the xorshift fixed point, or a constant -- can
+      // miss.
       expect(new Set(once.map((v) => JSON.stringify(v))).size).toBeGreaterThan(100);
     }
   });
@@ -787,7 +788,7 @@ describe('the targets separate the constructions they measure', () => {
    *
    * `flipOf(bit)` names the already-built node holding that bit's flipped value
    * and `cin` the carry the ripple starts from, so the same eight-gate skeleton
-   * serves level 24 (`~a + 1`, carry-in high) and level 23 (`(a XOR m) + m`,
+   * serves level 31 (`~a + 1`, carry-in high) and level 29 (`(a XOR m) + m`,
    * carry-in the sign bit). It is the construction a player reaches for after
    * building the half adder: smaller than a byte adder, and one AND deep per bit.
    */

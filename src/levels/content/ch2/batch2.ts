@@ -7,7 +7,7 @@ import { truthTable, type LevelIo } from '../../tables';
 /**
  * Chapter 2, levels 19, 22, 25, 26 and 27: the byte-wide operators and the adders
  * -- the batch where eight-bit arithmetic begins, and where the `fuzz` checker
- * (levels 22, 25 and 26) carries a level.
+ * (levels 25, 26 and 27) carries a level.
  *
  * THE BATCH WAS RENUMBERED AND GAINED A LEVEL. The 2.x realignment moved these
  * levels to their global indices (19, 22, 25, 26 and 27), retired the 8-bit OR
@@ -29,13 +29,13 @@ import { truthTable, type LevelIo } from '../../tables';
  * TWO SOURCE NOTES IN THIS BATCH ARE ACHIEVEMENTS, NOT PASS CONDITIONS, and both
  * are honoured as records rather than adopted as targets:
  *
- *  * level 21's is "仅用 5 个蓝色元件" (only 5 blue components). This replica has
+ *  * level 22's is "仅用 5 个蓝色元件" (only 5 blue components). This replica has
  *    no blue-component system -- "blue" parts are the player's own
  *    custom/blueprint components, which arrive in a later phase -- so the
  *    achievement is mapped to a measured `threeStar.gate` threshold, and the
  *    reference is the five-component circuit the achievement describes. The
  *    mapping is stated in that level's comment and measured in the test file.
- *  * level 22's is "延迟 ≤ 35". 35 is recorded in that level's comment as the
+ *  * level 27's is "延迟 ≤ 35". 35 is recorded in that level's comment as the
  *    source's reference value; `threeStar` is this replica's own measurement of
  *    its reference solution -- the eight-`full_adder` cascade, 72 gates and 8
  *    delay -- and the comment says so.
@@ -45,19 +45,19 @@ import { truthTable, type LevelIo } from '../../tables';
  *
  *  * THE SHELF IT INHERITS -- the named lists below, which are what earlier
  *    levels handed down: `GATES_1BIT`, `BYTE_WIRING`, `WIDE_OPS`, and the byte
- *    operators levels 18 and 19 unlock. A shelf is curated rather than
+ *    operators levels 25 and 26 unlock. A shelf is curated rather than
  *    "everything the player holds": `mem1`, chapter 1's stateful bit part, is
  *    unlocked from level 12 and no level in this batch lists it, because no check
  *    here ever ticks a clock -- while `delay_line` is on the shelf anyway, because
  *    chapter 1's palettes offered it.
- *  * PLUS THE LEVEL'S OWN REWARDS, offered before it is passed. Level 13's
- *    splitter is the case that named the rule, level 18 offers the four byte
- *    operators it hands out, and level 20 offers the `full_adder` it rewards.
+ *  * PLUS THE LEVEL'S OWN REWARDS, offered before it is passed. Level 16's
+ *    splitter is the case that named the rule, level 25 offers the four byte
+ *    operators it hands out, and level 19 offers the `full_adder` it rewards.
  *  * MINUS any part that is not its own reward and would answer the level by
  *    itself. Two levels here use that subtraction and both say so in their own
- *    comments: level 22 withholds `add8` (level 17's reward, exactly this level's
- *    I/O shape, one drop-in), and level 21 withholds `full_adder` (one drop-in is
- *    that level's exact I/O). Level 22 OFFERS `full_adder`, because there one
+ *    comments: level 27 withholds `add8` (level 21's reward, exactly this level's
+ *    I/O shape, one drop-in), and level 22 withholds `full_adder` (one drop-in is
+ *    that level's exact I/O). Level 27 OFFERS `full_adder`, because there one
  *    instance is not an answer -- eight of them and the carry chain between them
  *    are the cascade the level teaches -- which is the same standard the
  *    subtraction is written against.
@@ -65,7 +65,7 @@ import { truthTable, type LevelIo } from '../../tables';
  * `full_adder`: HISTORY, AND THE LIVE FACTS. This note used to say that NO DEF OF
  * THAT ID WAS REGISTERED, which was true when this batch was authored and false
  * from `523a7b9` onwards -- the commit that registered the def. It did not exist
- * then: a reward is data, so level 20 could hand out an id nothing implemented,
+ * then: a reward is data, so level 19 could hand out an id nothing implemented,
  * and the part was invisible rather than illegal (`paletteDefsFor` intersects a
  * palette with the unlocked set, and `ui/palette.ts` drops ids `registry.has`
  * refuses). `523a7b9`, "feat(defs): register the full_adder that level 20
@@ -73,19 +73,19 @@ import { truthTable, type LevelIo } from '../../tables';
  * `a:1 b:1 cin:1 -> sum:1 cout:1`, priced `gateCost: FULL_ADDER` -- 9 NAND
  * equivalents, the exported `wide.ts` constant that also prices `add8` as eight
  * of it -- and `DEF_IDS` carries it. Where it is offered is settled too, and the
- * two levels are the two halves of the rule above: level 20, its own reward, where
+ * two levels are the two halves of the rule above: level 19, its own reward, where
  * tying `cin` low makes it a 9-gate one-star alternative to that level's 6; and
- * level 22, the cascade that consumes it, where eight instances measure 72 gates
+ * level 27, the cascade that consumes it, where eight instances measure 72 gates
  * and 8 delay and are the circuit that level's `threeStar` is now measured from
  * (it used to be the hand-wired chain's 120/17, which is the documented
- * alternative there and scores one star). Level 21 is the one level that withholds
+ * alternative there and scores one star). Level 22 is the one level that withholds
  * it, and its comment states the reason: there one instance is the level's exact
  * I/O and would score the 15-gate target that the source's five-component
  * achievement maps to.
  *
  * WHAT THE TASK THAT REGISTERED THE DEF OWED, and where each answer landed: the
  * two decisions this note used to leave open are both taken, and the second one
- * was taken twice. The part is offered at levels 20 and 22. Level 22's target WAS
+ * was taken twice. The part is offered at levels 19 and 27. Level 22's target WAS
  * re-measured from the cascade in the end: `threeStar` is the reference solution's
  * own measurement, the cascade is the reference now, and the hand-wired chain that
  * used to hold that title is kept as the documented alternative -- correct at
@@ -128,7 +128,7 @@ const GATES_1BIT = [
 /** The level's own plumbing: always in the palette, never unlocked (`defs/index.ts`). */
 const LEVEL_IO = ['level_input', 'level_output'] as const;
 
-/** What batch 1's level 13 unlocked: the two byte packers and the byte constant. */
+/** What batch 1's level 16 unlocked: the two byte packers and the byte constant. */
 const BYTE_WIRING = ['splitter', 'maker', 'const8'] as const;
 
 /** The wide operators batch 1's levels 15-17 unlocked. None of them is byte logic. */
@@ -257,8 +257,8 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
    * cascade it exists for; the module note carries the history and points at the
    * measurement. Offering it HERE cannot loosen the target: a full adder with
    * `cin` tied low is 9 NAND equivalents against this level's 6, so it is the same
-   * kind of one-star alternative batch 1 recorded for `add8(a, a)` on level 17.
-   * Level 21 is the one level that withholds the part, and its comment says why.
+   * kind of one-star alternative batch 1 recorded for `add8(a, a)` on level 21.
+   * Level 22 is the one level that withholds the part, and its comment says why.
    */
   {
     id: 'ch2-19-half-adder',
@@ -317,14 +317,14 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
    *
    * WHY `full_adder` IS NOT OFFERED HERE -- SETTLED, after an earlier ruling that
    * offered it on levels 21 and 22 was amended to drop 21. The clause that never
-   * reached this level was "level 22's lesson is the cascade": level 22's cascade
+   * reached this level was "level 27's lesson is the cascade": level 27's cascade
    * is downstream of this level, not an argument about it. What decides it is this
    * level's own achievement. One instance of the part is EXACTLY this level's I/O
    * (`a:1 b:1 cin:1 -> sum:1 cout:1`), so a drop-in would score the level without
    * the five components it exists to teach, and at the registered 9-NAND cell it
    * measures 9 gates and 1 delay against the 15-and-3 target -- three stars for a
    * part the player never builds, which is what makes the five-component lesson
-   * vacuous rather than merely easier. So the part is offered at level 20, its own
+   * vacuous rather than merely easier. So the part is offered at level 19, its own
    * reward, and at level 22, where eight of them are the cascade the level asks
    * for -- and withheld here, the one place it would answer the puzzle on its own.
    * `neg8` is left out for batch 1's level-14 reason: every pin here is one bit
@@ -394,7 +394,7 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
    * still separates is the correct-but-costlier spelling of the same byte --
    * `nor8(a, a)`, a four-NAND cell, is 32 gates for the same answer, which is the
    * price level 26 records for its own copy of that cell. That is the same trade
-   * this batch's level 22 makes for `full_adder`: a drop-in is offered when it is
+   * this batch's level 27 makes for `full_adder`: a drop-in is offered when it is
    * the level's own reward, and even a tying one does not make the lesson vacuous,
    * because the lesson is the bit-sliced construction the part is short-hand for.
    */
@@ -536,7 +536,7 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
    *
    * THE HAND-WIRED CHAIN THIS LEVEL USED TO REFERENCE IS NOW THE DOCUMENTED
    * ALTERNATIVE. The old reference was eight hand-built full adders -- the
-   * five-component construction level 21 teaches, 8 x (4 + 2 + 4 + 2 + 3) = 120
+   * five-component construction level 22 teaches, 8 x (4 + 2 + 4 + 2 + 3) = 120
    * NAND equivalents on a path 3 + 2 x 7 = 17 -- and `threeStar` used to be that
    * 120/17. Registering `full_adder` (`523a7b9`) and offering it here made the
    * shipped reference DOMINATED by a cheaper legal solution: eight instances of
@@ -554,7 +554,7 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
    * WHY THE PALETTE WITHHOLDS ONE PART AND OFFERS ANOTHER, which is a design
    * decision rather than an oversight:
    *
-   *  * `add8`, unlocked by level 17, has EXACTLY this level's I/O shape, and one
+   *  * `add8`, unlocked by level 21, has EXACTLY this level's I/O shape, and one
    *    instance measures 72 gates and 1 delay. It would answer the level in a
    *    single drop, make the cascade the level teaches pointless, and make the
    *    source's own achievement value vacuous (any one-component circuit is inside
@@ -564,13 +564,13 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
    *    circuit that still beats this reference is one this level's palette does not
    *    offer. It is unavailable here rather than beaten, and this comment is where
    *    that is on the record.
-   *  * `full_adder`, level 20's reward, is OFFERED, because here eight of them and
+   *  * `full_adder`, level 19's reward, is OFFERED, because here eight of them and
    *    the carry chain between them ARE the cascade this level asks for. That is
    *    the withholding rule applied the other way round rather than contradicted:
    *    one instance is a one-bit part that cannot answer an eight-bit adder, so the
    *    cascade is the reference this level's target is measured from, not an
    *    alternative to it. The five-component lesson a drop-in WOULD void is level
-   *    21's, and level 21 withholds the part for precisely that reason.
+   *    21's, and level 22 withholds the part for precisely that reason.
    *
    * Everything else on the player's wide shelf is offered even though no
    * combination of it adds two bytes: the seven byte operators levels 18 and 19

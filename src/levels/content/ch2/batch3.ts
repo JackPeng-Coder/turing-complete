@@ -5,9 +5,9 @@ import type { FuzzVector, LevelSpec } from '../../spec';
 import { truthTable, type LevelIo } from '../../tables';
 
 /**
- * Chapter 2, levels 23-27: two's complement, the decoders and the eight-bit
- * logic engine -- the batch where a byte stops being eight wires and starts
- * being a signed number, and where a level with an instruction set appears.
+ * Chapter 2, levels 29-37: two's complement and the decoder family -- the batch
+ * where a byte stops being eight wires and starts being a signed number, and
+ * where one part comes in widths.
  *
  * WHAT THE SOURCE FIXES, AND WHAT IT DOES NOT. As in batches 1 and 2: the
  * compendium gives each of these levels exactly three things -- its name
@@ -19,38 +19,38 @@ import { truthTable, type LevelIo } from '../../tables';
  * marker is missing. No number in this file may be presented as the source's
  * own.
  *
- * THREE THINGS THIS BATCH OWES A READER, and each says so in its own level
+ * TWO THINGS THIS BATCH OWES A READER, and each says so in its own level
  * comment rather than only here:
  *
- *  * LEVEL 23 CHANGES THE SOURCE LEVEL'S KIND. The source's level of this name
+ *  * LEVEL 29 CHANGES THE SOURCE LEVEL'S KIND. The source's level of this name
  *    is a 限时小游戏 -- a timed mini-game, played against a clock, with no
  *    circuit specification of any sort. This replica is a circuit game and
  *    cannot host a typing game, so the level becomes a two's-complement
  *    arithmetic circuit: the concept the mini-game taught (read a negative
  *    number) is kept, the form is replaced. That is a deliberate change of kind,
  *    not a translation, and it is recorded as such -- batch 1 did the same thing
- *    to level 15 (`Binary Racer`, the other timed mini-game in the chapter).
- *  * LEVEL 25'S DECODER COMES IN WIDTHS, ONE PART PER WIDTH -- and the kernel
+ *    to level 14 (`Binary Racer`, the chapter's other timed mini-game; the
+ *    duplicate popcount level that shared the name was retired by the 2.x
+ *    realignment, so the reader at level 14 is the one that survives).
+ *  * LEVEL 35'S DECODER COMES IN WIDTHS, ONE PART PER WIDTH -- and the kernel
  *    has no per-instance knob that stands in for that. The family is generated
  *    (`decoder1` / `decoder2` / `decoder3`, one `createDecoderDef(w)` each), so
  *    the level's brief names the ids a player drops in rather than a width
  *    parameter; that level's comment records the rejected mechanism and the
  *    resolution, because an earlier revision of this batch shipped the wrong
  *    story (`params.width = 2` giving the catalog's 2-bit decoder).
- *  * LEVEL 27 HAS AN AUTHORED INSTRUCTION SET. The source says only "用或门和非门
- *    构建完整逻辑运算集" -- build the complete set of logical operations -- and
- *    enumerates no opcodes at all. The eight values in that level's comment, and
- *    in its brief for the player, are therefore this plan's design, and the test
- *    file measures all eight one at a time rather than trusting a random
- *    sequence to cover them.
+ * A THIRD NOTE WAS OWED HERE UNTIL THE 2.x REALIGNMENT: the authored instruction
+ * set of the Logic Engine (1.x's level 27). 2.x has no such level, so the level,
+ * its reference circuit, the eight-opcode suite that measured it and this note
+ * are all gone together.
  *
  * THE PALETTE RULE, inherited from batch 2 and used once more here: a level
  * offers the parts its shelf carries and the player has unlocked at or before it,
  * plus its own rewards, MINUS any part that is not its own reward and would
- * answer the level by itself. Level 24 uses that subtraction on `neg8` -- one
+ * answer the level by itself. Level 31 uses that subtraction on `neg8` -- one
  * component with exactly the level's I/O shape, whose documented cell IS the
  * circuit the level teaches -- and says so in its own comment. `full_adder`
- * (level 20's reward, registered, and offered by levels 20 and 22) stays out of
+ * (level 19's reward, registered, and offered by levels 20 and 22) stays out of
  * every palette here, and nothing in this batch needs it: levels 23, 24 and 27
  * are byte-wide, and the two decoder levels select rather than add, so no target
  * in this batch is measured from a part a level would rather have answered with.
@@ -64,13 +64,13 @@ import { truthTable, type LevelIo } from '../../tables';
  * gates, 1 delay, three stars against that level's 27-and-3 target, the same tie
  * and the same reason -- the registered part's minterm tree IS the tree each level
  * teaches). Offering a level its own rewards before it is passed is batch 2's
- * own-reward half of the rule -- level 13's splitter and level 20's `full_adder`
+ * own-reward half of the rule -- level 13's splitter and level 19's `full_adder`
  * are the same case -- rather than an exception to it, so these are recorded prices
  * and not holes: the drop-in is what a player who already owns the part can reach
  * for, and each level still teaches the circuit it hands out. No reward is
  * withdrawn, and `ch2-37`'s comment gives the reason: withdrawing a decoder there
  * would leave a registered part that no level offers at all, which is the
- * dead-content defect level 22's `full_adder` decision exists to avoid.
+ * dead-content defect level 27's `full_adder` decision exists to avoid.
  *
  * THE DECODER REWARDS NAME DEFS THAT NOW EXIST. The three-width family was
  * reward DATA when this batch was written -- a legal state rather than a hole,
@@ -186,7 +186,7 @@ function signedByte(pattern: number): number {
 }
 
 /**
- * Level 23's expectation: how far the byte is from zero.
+ * Level 29's expectation: how far the byte is from zero.
  *
  * `0x01 -> 1`, `0xff -> 1`, `0x80 -> 128`. The one pattern to note is `0x80`:
  * the most negative byte is also the one whose magnitude needs the sign bit's
@@ -196,7 +196,7 @@ function signedByte(pattern: number): number {
 const MAGNITUDE_OF_SIGNED_BYTE = (v: FuzzVector): number => Math.abs(signedByte(v.a ?? 0));
 
 /**
- * Level 24's expectation: the low eight bits of `-a`.
+ * Level 31's expectation: the low eight bits of `-a`.
  *
  * `0x80` negated is `0x80` again -- the one pattern two's complement cannot
  * reflect -- and the mask is what states that as arithmetic rather than as a
@@ -226,7 +226,7 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * The rest is authored too: the `a:8 -> out:8` shape; the function itself
    * (publish the MAGNITUDE of the byte read as two's complement -- a reading of
    * the sign, which is what the level is for, and deliberately not the negation
-   * level 24 asks for); the fuzz check (the brief fixes its kind, its 256 rounds
+   * level 31 asks for); the fuzz check (the brief fixes its kind, its 256 rounds
    * and its fixed-seed rule; the seed, the pin maps and the expectation function
    * are written here); the measured three-star target; and the `div8` reward.
    *
@@ -305,8 +305,8 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * teaches -- NOT the byte (8) plus the byte adder (72) = the same 80 NAND
    * equivalents, on one unit of delay instead of two. Offered, it would tie the
    * reference on gates and beat it on delay in a single drop, and the "invert and
-   * add one" lesson would be pointless. Batch 2's level 22 withheld `add8` for
-   * the same reason; level 23 offers `neg8` because there it does NOT answer the
+   * add one" lesson would be pointless. Batch 2's level 27 withheld `add8` for
+   * the same reason; level 29 offers `neg8` because there it does NOT answer the
    * level (a magnitude is not a negation).
    *
    * THE TARGET IS THE LESSON'S OWN CIRCUIT: `add8(not8(a), 0, 1)` -- 8 + 72 = 80
@@ -417,7 +417,7 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * `decoder1` IS OFFERED HERE, AND THAT IS THE OWN-REWARD RULE RATHER THAN A
    * CONTRADICTION OF THE PARAGRAPH ABOVE. Batch 2's palette rule subtracts only
    * parts that are NOT the level's own reward, and `paletteDefsFor` hands a level
-   * its own rewards before it is passed (level 13's `splitter` and level 20's
+   * its own rewards before it is passed (level 16's `splitter` and level 19's
    * `full_adder` are the same case) -- so a player CAN drop `decoder1` straight
    * in and score the target exactly: measured, `gate: 1, delay: 1, tick: 0`,
    * three stars, the same numbers the NOT-and-Maker reference scores, because a
@@ -426,7 +426,7 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * listed: the level teaches the part it hands out, and the drop-in is what a
    * player who already owns it uses to replay. `decoder2` is a different case --
    * it is not this level's reward at all -- which is the whole of the distinction.
-   * Level 26 is the same case one width up (`decoder3` answers that level in one
+   * Level 37 is the same case one width up (`decoder3` answers that level in one
    * drop for 27 gates and 1 delay, recorded in its own comment and measured in the
    * test file), and the module header names both.
    */
@@ -523,7 +523,7 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * target; and the palette. The palette offers `splitter` and `maker` because
    * this level's pins are wide enough to attach to them -- the 3-bit select has
    * to be split before any gate can read one of its bits, and the eight one-bit
-   * results have to be packed back into the level's 8-bit output. (Level 25 has
+   * results have to be packed back into the level's 8-bit output. (Level 35 has
    * one-bit pins and offers neither.) THE PART'S DEFINITION IS AUTHORED TOO, and
    * it is a mechanism of this replica rather than a fact about the source:
    * `decoder3` is `createDecoderDef(3)`, the same generator as level 25's
@@ -551,7 +551,7 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    *
    * WITHDRAWING THE PART WAS THE ALTERNATIVE AND IS REFUSED DELIBERATELY. A level
    * offering its own reward is batch 2's rule rather than a loophole (level 13's
-   * `splitter` cannot build its own level without it, and level 20 offers the
+   * `splitter` cannot build its own level without it, and level 19 offers the
    * `full_adder` it hands out), so the part stays -- and the cost of withdrawing
    * is worse than the price of keeping it: no other level in this chapter lists
    * `decoder3` either, so removing it here would leave a registered, priced part
@@ -559,7 +559,7 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * `full_adder` decision exists to avoid. What the level still teaches is the
    * tree it hands out; what the drop-in buys is a one-drop replay for a player who
    * can already see the part in their palette, which the reward rule accepts on
-   * every level it applies to and level 25's comment sets out at length.
+   * every level it applies to and level 35's comment sets out at length.
    */
   {
     id: 'ch2-37-3-bit-decoder',
