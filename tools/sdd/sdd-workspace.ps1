@@ -4,9 +4,15 @@
   Resolve and ensure the SDD workspace directory for one plan.
 .DESCRIPTION
   PowerShell port of the superpowers:subagent-driven-development
-  scripts/sdd-workspace helper, with identical semantics: one directory per
-  plan at <repo-root>/.superpowers/sdd/<plan-basename>/, kept out of git by a
-  self-ignoring .gitignore in the parent directory. Prints the absolute path.
+  scripts/sdd-workspace helper: one directory per plan at
+  <repo-root>/.superpowers/sdd/<plan-basename>/. Prints the absolute path.
+
+  Upstream keeps that workspace out of git by writing a one-line `.gitignore`
+  holding `*`. This repository keeps its record instead -- the phase directories
+  are negated back in and committed, which is the decision AGENTS.md records --
+  so the ignore file is created ONLY when it is missing. Overwriting it would
+  silently hide every phase from git, and the negations the current file carries
+  are exactly what a second run used to destroy.
 #>
 [CmdletBinding()]
 param(
@@ -35,5 +41,10 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($root)) {
 $base = Join-Path $root '.superpowers/sdd'
 $dir = Join-Path $base $slug
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
-Set-Content -LiteralPath (Join-Path $base '.gitignore') -Value '*' -NoNewline
+
+$ignore = Join-Path $base '.gitignore'
+if (-not (Test-Path -LiteralPath $ignore)) {
+  Set-Content -LiteralPath $ignore -Value '*' -NoNewline
+}
+
 Write-Output $dir

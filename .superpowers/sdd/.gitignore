@@ -2,9 +2,15 @@
 # reports, the review packages, and the test-evidence logs are the evidence
 # behind each task's verdict and each ruling in the ledgers.
 #
-# This one file stays out of the repository -- it is the rule that would make
-# the rest invisible, so shipping it would be self-defeating. Everything else
-# under this directory is tracked; see the repository root .gitignore.
+# This file IS tracked -- the `!.gitignore` arm below is what lets that happen,
+# and it has to be: it is the rule that makes the record visible, and a rule that
+# lived in one working tree would be lost by the next clone.
+#
+# `*` keeps a NEW phase invisible until someone decides otherwise; each pair of
+# negations below is that decision for one phase, and a phase is added by
+# negating its directory and then its contents, in that order. `tools/sdd/
+# sdd-workspace.ps1` creates this file when it is missing and never rewrites it,
+# because a run that overwrote it would silently hide every phase at once.
 *
 !.gitignore
 !2026-09-25-turing-complete-phase0/

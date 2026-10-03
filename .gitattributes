@@ -1,0 +1,12 @@
+# Line endings, decided by the repository rather than by each clone.
+#
+# `core.autocrlf` is a per-host setting, and this project's tooling cannot rely
+# on it: the worktree had 279 CRLF files next to 104 LF ones, and every commit
+# printed "LF will be replaced by CRLF" warnings, which trains a reader to
+# ignore git's output. The index is LF throughout; this keeps it that way, so a
+# fresh clone on Windows and one on Linux hold identical bytes.
+* text=auto eol=lf
+
+# The one exception, and it is the platform's: the PowerShell helpers under
+# `tools/sdd/` are run by Windows PowerShell, whose own tooling expects CRLF.
+*.ps1 text eol=crlf
