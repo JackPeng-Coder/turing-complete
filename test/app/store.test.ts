@@ -110,7 +110,7 @@ describe('createStore', () => {
  */
 describe('AppState through createStore', () => {
   const appState = (): AppState => ({
-    level: getLevel('ch1-01-crude-awakening'),
+    level: getLevel('ch1-01-humble-beginnings'),
     graph: emptyGraph(),
     registry: createRegistry(BASE_DEFS),
     progress: emptyProgress(),

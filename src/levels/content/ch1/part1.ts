@@ -21,10 +21,10 @@ const IO_1IN = { inputs: [{ id: 'a', width: 1 }], outputs: [{ id: 'out', width: 
 
 export const CH1_PART1: readonly LevelSpec[] = [
   {
-    id: 'ch1-01-crude-awakening',
+    id: 'ch1-01-humble-beginnings',
     chapter: 1,
     index: 1,
-    name: { zh: '原力觉醒', en: 'Crude Awakening' },
+    name: { zh: '从零开始', en: 'Humble Beginnings' },
     brief: {
       zh: '飞船的舱门认电不认人。给输出一个恒定的高电平，门就会开。',
       en: 'The airlock only understands voltage. Hold the output high and it opens.',
@@ -94,9 +94,35 @@ export const CH1_PART1: readonly LevelSpec[] = [
     rewards: { components: ['or'] },
   },
   {
-    id: 'ch1-05-or-gate',
+    id: 'ch1-05-nor-gate',
     chapter: 1,
     index: 5,
+    name: { zh: '或非门', en: 'NOR Gate' },
+    brief: {
+      zh: '两个输入都为低时输出才为高。德摩根定律：a NOR b 就是 (NOT a) AND (NOT b)。',
+      en: 'High only when both inputs are low. De Morgan: a NOR b is exactly (NOT a) AND (NOT b).',
+    },
+    hint: {
+      zh: '先把两个输入各自翻过来，再把两个结果相与。',
+      en: 'Invert each input on its own, then AND the two results.',
+    },
+    allowedComponents: ['nand', 'not', 'and', 'level_input', 'level_output'],
+    io: IO_2,
+    checks: [truthTable(IO_2, { out: ({ a, b }) => (a || b ? 0 : 1) })],
+    // Three-star target = the reference solution's own metrics; the reference scores exactly it.
+    // Gate = 4, not 2: the reference is NOT(a) AND NOT(b), two NOTs (1 each) and an
+    // AND (2) against the NAND basis in `core/defs/index.ts`. Its hint used to read
+    // "put a NOT after the OR" -- the spelling that belonged to this level while it
+    // was chapter 1's sixth; the 2.x realignment put it back at the source's fifth,
+    // where `or` has not been introduced yet and the level is the chapter's De
+    // Morgan lesson. Both spellings measure 4 gates / 2 delay.
+    threeStar: { gate: 4, delay: 2, tick: 0 },
+    rewards: { components: ['const_on', 'const_off'] },
+  },
+  {
+    id: 'ch1-06-or-gate',
+    chapter: 1,
+    index: 6,
     name: { zh: '或门', en: 'OR Gate' },
     brief: {
       zh: '任意一个输入为高，输出就为高。德摩根说：先把两个输入都翻过来，再用与非门。',
@@ -108,24 +134,5 @@ export const CH1_PART1: readonly LevelSpec[] = [
     checks: [truthTable(IO_2, { out: ({ a, b }) => (a || b ? 1 : 0) })],
     threeStar: { gate: 3, delay: 2, tick: 0 },
     rewards: { components: ['nor'] },
-  },
-  {
-    id: 'ch1-06-nor-gate',
-    chapter: 1,
-    index: 6,
-    name: { zh: '或非门', en: 'NOR Gate' },
-    brief: {
-      zh: '或门之后再翻一次。两个输入都为低时输出才为高。',
-      en: 'An OR flipped. High only when both inputs are low.',
-    },
-    hint: { zh: '或门的输出接一个非门。', en: 'Put a NOT after the OR.' },
-    allowedComponents: ['nand', 'not', 'and', 'or', 'level_input', 'level_output'],
-    io: IO_2,
-    checks: [truthTable(IO_2, { out: ({ a, b }) => (a || b ? 0 : 1) })],
-    // Three-star target = the reference solution's own metrics; the reference scores exactly it.
-    // Gate = 4, not 2: the reference is OR + NOT, and OR is 3 NAND equivalents
-    // (see the basis in `core/defs/index.ts`), not one.
-    threeStar: { gate: 4, delay: 2, tick: 0 },
-    rewards: { components: ['const_on', 'const_off'] },
   },
 ];

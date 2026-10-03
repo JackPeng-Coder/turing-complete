@@ -55,33 +55,35 @@ import { truthTable, type LevelIo } from '../../tables';
  * are byte-wide, and the two decoder levels select rather than add, so no target
  * in this batch is measured from a part a level would rather have answered with.
  *
- * TWO LEVELS IN THIS BATCH ARE ANSWERED BY THEIR OWN REWARDS, one width apart,
- * and both say so in their own comments rather than leaving a reader to find it:
- * level 25 offers `decoder1` (one drop-in scores the target exactly -- 1 gate, 1
- * delay, three stars) and level 26 offers `decoder3` (measured at 27 gates, 1
- * delay, three stars against that level's 27-and-3 target: the drop-in ties the
- * gate count and beats the depth, because the registered part's minterm tree IS
- * the tree level 26 teaches). Offering a level its own rewards before it is
- * passed is batch 2's own-reward half of the rule -- level 13's splitter and
- * level 20's `full_adder` are the same case -- rather than an exception to it, so
- * these are recorded prices and not holes: the drop-in is what a player who
- * already owns the part can reach for, and each level still teaches the circuit
- * it hands out. Neither reward is withdrawn, and level 26's comment gives the
- * reason: withdrawing `decoder3` there would leave a registered part that no
- * level offers at all, which is the dead-content defect level 22's `full_adder`
- * decision exists to avoid.
+ * ALL THREE LEVELS IN THIS BATCH ARE ANSWERED BY THEIR OWN REWARDS, one width
+ * apart, and each says so in its own comment rather than leaving a reader to find
+ * it: `ch2-35` offers `decoder1` (one drop-in scores the target exactly -- 1 gate,
+ * 1 delay, three stars), `ch2-36` offers `decoder2` (measured at 10 gates, 1
+ * delay, three stars against that level's 10-and-2 target: the drop-in ties the
+ * gate count and beats the depth) and `ch2-37` offers `decoder3` (measured at 27
+ * gates, 1 delay, three stars against that level's 27-and-3 target, the same tie
+ * and the same reason -- the registered part's minterm tree IS the tree each level
+ * teaches). Offering a level its own rewards before it is passed is batch 2's
+ * own-reward half of the rule -- level 13's splitter and level 20's `full_adder`
+ * are the same case -- rather than an exception to it, so these are recorded prices
+ * and not holes: the drop-in is what a player who already owns the part can reach
+ * for, and each level still teaches the circuit it hands out. No reward is
+ * withdrawn, and `ch2-37`'s comment gives the reason: withdrawing a decoder there
+ * would leave a registered part that no level offers at all, which is the
+ * dead-content defect level 22's `full_adder` decision exists to avoid.
  *
- * THE DECODER REWARDS NAME DEFS THAT NOW EXIST. `decoder1` (level 25) and
- * `decoder3` (level 26) were reward DATA when this batch was written -- a legal
- * state rather than a hole, because a reward is an id, the unlock walk is over
- * ids, and `ui/palette` drops an id `registry.has` refuses. The family has since
- * been registered (`DECODER_DEF_IDS`: `decoder1` / `decoder2` / `decoder3`,
- * generated per width in `src/core/defs/wide.ts`), and no number in this file
- * moved when it landed: every reference in the test file is wired from gates, so
- * the levels do not depend on the parts they hand out. `decoder2` is the 2-to-4
- * form, the family member no level name introduces: it is registered and
- * offered by no level's palette, and level 25's comment records why it is not in
- * that level's.
+ * THE DECODER REWARDS NAME DEFS THAT NOW EXIST. The three-width family was
+ * reward DATA when this batch was written -- a legal state rather than a hole,
+ * because a reward is an id, the unlock walk is over ids, and `ui/palette` drops
+ * an id `registry.has` refuses. It has since been registered (`DECODER_DEF_IDS`:
+ * `decoder1` / `decoder2` / `decoder3`, generated per width in
+ * `src/core/defs/wide.ts`), and no number in this file moved when it landed: every
+ * reference in the test file is wired from gates, so the levels do not depend on
+ * the parts they hand out. All three widths now have a level of their own as well
+ * (`ch2-35` rewards `decoder1`, `ch2-36` -- added by the 2.x realignment -- rewards
+ * `decoder2`, `ch2-37` rewards `decoder3`), so no registered member of the family
+ * is dead content; `ch2-35`'s comment still records why `decoder2` is not in THAT
+ * level's palette, which is a different question from whether it is handed out.
  *
  * EVERY LEVEL HERE IS PURELY COMBINATIONAL, so `tick` is 0 on every three-star
  * target, for the same reason batches 1 and 2 state it: no check in this batch
@@ -133,41 +135,42 @@ const BYTE_OPS = ['and8', 'or8', 'nand8', 'nor8', 'xor8', 'xnor8', 'not8'] as co
 const SWITCHES = ['switch', 'switch8'] as const;
 
 /**
- * The four pin shapes this batch uses, so a level's io is one named constant
- * instead of two lines of literal in the middle of a spec.
+ * The pin shapes this batch uses, so a level's io is one named constant instead
+ * of two lines of literal in the middle of a spec.
+ *
+ * The decoder family spends one line per width, and the widths are ADJACENT and
+ * in order: 1 -> 2, 2 -> 4, 3 -> 8. The output width is `2 ** sel`, so no two of
+ * them can share a constant, which is also why the parts are separate defs
+ * (`createDecoderDef(w)` in `core/defs/wide.ts`) rather than one part with a
+ * width parameter.
  */
 const IO_A8_OUT8: LevelIo = { inputs: [{ id: 'a', width: 8 }], outputs: [{ id: 'out', width: 8 }] };
 const IO_SEL1_OUT2: LevelIo = {
   inputs: [{ id: 'sel', width: 1 }],
   outputs: [{ id: 'out', width: 2 }],
 };
+const IO_SEL2_OUT4: LevelIo = {
+  inputs: [{ id: 'sel', width: 2 }],
+  outputs: [{ id: 'out', width: 4 }],
+};
 const IO_SEL3_OUT8: LevelIo = {
   inputs: [{ id: 'sel', width: 3 }],
   outputs: [{ id: 'out', width: 8 }],
 };
-const IO_A8_B8_OP8_OUT8: LevelIo = {
-  inputs: [
-    { id: 'a', width: 8 },
-    { id: 'b', width: 8 },
-    { id: 'op', width: 8 },
-  ],
-  outputs: [{ id: 'out', width: 8 }],
-};
-
 /**
  * A fuzz seed per level: the level's index in the high byte and the byte width
  * in the low one, exactly as batch 2 seeds its three.
  *
  * Fixed literals, not drawn ones: the same seed produces the same vectors on
  * every run and on every board edit, which is what makes a fuzz level's coverage
- * a fact about the level rather than about the run. Three distinct values, so
- * one level's sequence is never another's -- and level 27's coverage of all
- * eight opcodes is measured in the test file against this literal.
+ * a fact about the level rather than about the run. Distinct values, so one
+ * level's sequence is never another's.
+ *
+ * There used to be a third seed here, for the level the 2.x realignment removed
+ * from this batch; the constants it needed went with it.
  */
 const SEED_23 = 0x2308;
 const SEED_24 = 0x2408;
-const SEED_27 = 0x2708;
-
 /**
  * The signed value of an eight-bit two's-complement pattern.
  *
@@ -201,73 +204,9 @@ const MAGNITUDE_OF_SIGNED_BYTE = (v: FuzzVector): number => Math.abs(signedByte(
  */
 const NEGATED_BYTE = (v: FuzzVector): number => (-signedByte(v.a ?? 0)) & 0xff;
 
-/**
- * Level 27's opcode: the low three bits of `op`, and nothing else.
- *
- * The engine ignores the top five bits, which is a rule the fuzz check has to
- * state because random bytes set them: the test file drives `op = (high << 3) |
- * n` for every `high` against the level's own expectation.
- */
-const ENGINE_OPCODE = (op: number): number => op & 7;
-
-/**
- * `a` shifted arithmetically right by `amount` bits: the sign bit replicates.
- *
- * Written as the kernel's own `shiftRightArithmeticOp` defines it -- sign-extend,
- * shift, mask back to a pattern -- because the reference the target is measured
- * from is the `ashr8` part, and an expectation that disagreed with the part it
- * grades would be a level that grades the wrong thing. `amount` is at most 7
- * here (it is `b`'s low three bits), so the operator's "an amount of `w` or more
- * fills with the sign" edge is out of reach and the plain shift is the whole
- * function.
- */
-function arithmeticRightByte(a: number, amount: number): number {
-  const signed = (a << 24) >> 24;
-  return (signed >> amount) & 0xff;
-}
-
-/**
- * Level 27's expectation: the eight-opcode table, as a pure function.
- *
- * THE SPECIFICATION OF THE LEVEL, not a convenience: the source enumerates no
- * opcodes, so this switch IS the authored instruction set (the level's brief
- * lists the same eight values for the player, and the test file checks the two
- * against each other opcode by opcode). `add` and `sub` keep the low eight bits
- * and discard the carry out, exactly as `add8`/`add8(a, ~b, 1)` do; the shifts
- * read `b`'s LOW THREE BITS, which is what makes `sub`'s second operand and a
- * shift amount two different things in the same byte.
- */
-const LOGIC_ENGINE_OUT = (v: FuzzVector): number => {
-  const a = (v.a ?? 0) & 0xff;
-  const b = (v.b ?? 0) & 0xff;
-  const amount = b & 7;
-  switch (ENGINE_OPCODE(v.op ?? 0)) {
-    case 0:
-      return a & b;
-    case 1:
-      return a | b;
-    case 2:
-      return a ^ b;
-    case 3:
-      return ~a & 0xff;
-    case 4:
-      return (a + b) & 0xff;
-    case 5:
-      return (a - b) & 0xff;
-    case 6:
-      // `b & 7` is at most 7, so the logical shifts' "amount of 8 or more" edge
-      // (`shift_l8`/`shift_r8` publish 0 there) is unreachable on this level.
-      return (a << amount) & 0xff;
-    default:
-      // `op & 7` is 0..7 (`noFallthroughCasesInSwitch` is satisfied by the
-      // returns above), so this is opcode 7 and there is no other case.
-      return arithmeticRightByte(a, amount);
-  }
-};
-
 export const CH2_BATCH3: readonly LevelSpec[] = [
   /**
-   * ch2-23-negative-numbers -- Negative Numbers / 负数
+   * ch2-29-negative-numbers -- Negative Numbers / 负数
    *
    * SOURCED: the name in both languages, its position (the 23rd level), and the
    * concept -- two's-complement representation (二进制补码), i.e. reading a byte
@@ -309,9 +248,9 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * it is more than four times shallower.
    */
   {
-    id: 'ch2-23-negative-numbers',
+    id: 'ch2-29-negative-numbers',
     chapter: 2,
-    index: 23,
+    index: 29,
     name: { zh: '负数', en: 'Negative Numbers' },
     brief: {
       zh: '八位输入 a 是一个二进制补码数：最高位是符号位，a 小于 128 时它就是这个数本身，否则它的值是 a−256（0xFF 就是 −1）。输出这个数到 0 的距离：0x01→1，0xFF→1，0x80→128。',
@@ -348,7 +287,7 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-24-signed-negator -- Signed Negator / 相反数
+   * ch2-31-signed-negator -- Signed Negator / 相反数
    *
    * SOURCED: the name in both languages, its position (24th), and the concept --
    * the two's-complement negation, "invert and add one".
@@ -379,10 +318,10 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * than this circuit and one star for being more than four times deeper.
    */
   {
-    id: 'ch2-24-signed-negator',
+    id: 'ch2-31-signed-negator',
     chapter: 2,
-    index: 24,
-    name: { zh: '相反数', en: 'Signed Negator' },
+    index: 31,
+    name: { zh: '数值反转', en: 'Signed Negator' },
     brief: {
       zh: '八位输入 a。输出它的相反数：按补码的规则取反再加一，也就是 −a 的低八位。0x01 变成 0xFF；0x80 取负之后还是 0x80——−128 的相反数溢出回了它自己。',
       en: "Eight-bit input a. Publish its opposite: invert and add one, the two's-complement rule, which is the low eight bits of −a. 0x01 becomes 0xFF, and 0x80 stays 0x80 -- negating −128 overflows back onto itself.",
@@ -421,13 +360,15 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-25-1-bit-decoder -- 1 Bit Decoder / 1 位解码器
+   * ch2-35-1-bit-decoder -- 1 Bit Decoder / 1 位解码器
    *
    * SOURCED: the name in both languages, its position (25th), and the concept --
    * one-to-two decoding: one select bit, two one-hot outputs. ALSO SOURCED, from
-   * the catalog rather than from a level name: the compendium's component list
-   * for this chapter has `decoder1`, `decoder2` and `decoder3`, while no level
-   * name introduces the catalog's `2-Bit Decoder`.
+   * the catalog rather than from a level name: the compendium's component list for
+   * this chapter has `decoder1`, `decoder2` and `decoder3`. (When this level was
+   * written, no level name introduced the catalog's `2-Bit Decoder`; the 2.x
+   * realignment gave it one -- `ch2-36-2-bit-decoder`, which rewards `decoder2` --
+   * and this sentence is kept current rather than left as it was.)
    *
    * AUTHORED: the `sel:1 -> out:2` shape; the two rows (built by `truthTable`,
    * which refuses to leave a declared output pin uncompared); the measured
@@ -461,16 +402,17 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * pins together; it can never move them apart.
    *
    * WHY `decoder2` IS NOT IN THIS LEVEL'S PALETTE, although the brief mentions
-   * it. Two reasons, either of which would be enough. (1) No level unlocks it: a
-   * palette part is one the chapter has already handed out, and `decoder2` is
-   * the family member no level name introduces -- level 25 rewards `decoder1` and
-   * level 26 `decoder3`, and `test/levels/ch2-batch3.test.ts` walks the unlock
-   * order and refuses a palette entry nothing has unlocked by then. (2) It would
-   * answer this level by itself: `decoder2`'s select pin is two bits and the
+   * it. Two reasons, either of which would be enough. (1) No level has unlocked it
+   * YET: a palette part is one the chapter has already handed out, and `decoder2`
+   * belongs to the NEXT level of this batch (`ch2-36-2-bit-decoder`, added by the
+   * 2.x realignment, which rewards it and is the only palette that offers it) --
+   * `test/levels/ch2-batch3.test.ts` walks the unlock order and refuses a palette
+   * entry nothing has unlocked by then, and at this level it has not been. (2) It
+   * would answer this level by itself: `decoder2`'s select pin is two bits and the
    * level's `sel` is one, so the second select bit is simply unwired (an unwired
    * pin reads 0) and `out`'s low two bits are `1 << sel` -- this level's whole
    * two-row table, from a part the player never builds. The brief names it as the
-   * form available later, not as an answer here.
+   * next level's part, not as an answer here.
    *
    * `decoder1` IS OFFERED HERE, AND THAT IS THE OWN-REWARD RULE RATHER THAN A
    * CONTRADICTION OF THE PARAGRAPH ABOVE. Batch 2's palette rule subtracts only
@@ -489,13 +431,13 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * test file), and the module header names both.
    */
   {
-    id: 'ch2-25-1-bit-decoder',
+    id: 'ch2-35-1-bit-decoder',
     chapter: 2,
-    index: 25,
-    name: { zh: '1 位解码器', en: '1 Bit Decoder' },
+    index: 35,
+    name: { zh: '二进制译码', en: '1 Bit Decoder' },
     brief: {
-      zh: '解码器把一个选择值变成一条为高的输出线，而且是按宽度分档的：一档一颗元件。这一关要做的是 decoder1，也就是 1 位选择、2 路输出的那一颗——sel 为 0 时第 0 位为高（out 读作 1），sel 为 1 时第 1 位为高（out 读作 2）。2 位选择、4 路输出的那一颗是 decoder2，也就是源资料目录里的「2 位解码器」：没有任何关卡为它命名，以后哪一关需要 4 路输出，直接把它放进去就行。',
-      en: 'A decoder turns a select value into one high output line, and it comes in widths: one part per width. This level asks for decoder1, the 1-to-2 form -- sel 0 lights bit 0 (out reads 1) and sel 1 lights bit 1 (out reads 2). The 2-to-4 form is decoder2: two select bits, four output lines, the catalog\'s 2-bit decoder, which no level name introduces and which a later circuit can drop in as it is.',
+      zh: '解码器把一个选择值变成一条为高的输出线，而且是按宽度分档的：一档一颗元件。这一关要做的是 decoder1，也就是 1 位选择、2 路输出的那一颗——sel 为 0 时第 0 位为高（out 读作 1），sel 为 1 时第 1 位为高（out 读作 2）。2 位选择、4 路输出的那一颗是 decoder2，也就是源资料目录里的「2 位解码器」：它是下一关的题目，这一关的 sel 只有一位，还用不上它。',
+      en: 'A decoder turns a select value into one high output line, and it comes in widths: one part per width. This level asks for decoder1, the 1-to-2 form -- sel 0 lights bit 0 (out reads 1) and sel 1 lights bit 1 (out reads 2). The 2-to-4 form is decoder2, the catalog\'s 2-bit decoder: the next level builds it, and this level\'s sel is only one bit wide, so it has no use for the part yet.',
     },
     hint: {
       zh: '两个输出位里，第 0 位就是 sel 取反，第 1 位就是 sel 本身；用位合并器把这两条线拼成 2 位，一个非门就够了。',
@@ -511,7 +453,68 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-26-3-bit-decoder -- 3 Bit Decoder / 3 位解码器
+   * ch2-36-2-bit-decoder -- 2 Bit Decoder / 2-4 译码器
+   *
+   * SOURCED: the name in both languages and its position -- the 36th level,
+   * between the 1-bit and the 3-bit decoder. The dossier gives this level no
+   * concept line at all: the width is the whole of it.
+   *
+   * AUTHORED: the `sel:2 -> out:4` shape and its single packed output; the four
+   * rows; the palette; the measured three-star target; and the `decoder2` reward,
+   * which no level handed out before this one existed. THE OUTPUT SHAPE IS THE
+   * FAMILY'S, chosen rather than inherited: both sibling levels publish one packed
+   * `out` that is `2 ** sel` bits wide and written by a Maker, so this one does the
+   * same instead of publishing four 1-bit pins. Two reasons, and the second is the
+   * deciding one -- three levels that decode into three different output shapes
+   * would be three different puzzles, and `decoder2`, the part this level exists to
+   * hand out, is registered with exactly `sel:2 -> out:4` (`createDecoderDef(2)`,
+   * `src/core/defs/wide.ts`), so the packed shape is what makes the drop-in a
+   * drop-in rather than a rewiring exercise.
+   *
+   * THE REFERENCE IS THE SHARED-MINTERM TREE AT WIDTH 2: one NOT per select bit,
+   * four two-literal ANDs, one Maker -- 2 x 1 + 4 x 2 = 10 NAND equivalents on a
+   * path two components deep, with the splitter, the Maker and the level pins free
+   * on both metrics. It is the 3-bit level's tree one width down, which is what the
+   * family teaches: decode the select value once into minterms, do not rebuild the
+   * literals per output line.
+   *
+   * `decoder2` IS OFFERED HERE, AND IT ANSWERS THE LEVEL IN ONE DROP -- the same
+   * recorded price the two sibling widths pay. One instance scores the gate target
+   * exactly, because the registered part's minterm tree IS the tree this level
+   * teaches: measured, `gate: 10, delay: 1` against this level's 10-and-2 target,
+   * so it ties the gates and beats the depth (the hand-wired tree is two components
+   * deep, the part publishes in one node). Withdrawing it was the alternative and is
+   * refused for the reason the 3-bit level's comment gives one width up: offering a
+   * level its own reward is batch 2's rule, and a registered, priced part that no
+   * level offers at all is the dead-content defect that rule exists on the other
+   * side of.
+   */
+  {
+    id: 'ch2-36-2-bit-decoder',
+    chapter: 2,
+    index: 36,
+    name: { zh: '2-4 译码器', en: '2 Bit Decoder' },
+    brief: {
+      zh: '两位选择输入 sel，四位输出 out。sel 的取值决定 out 的哪一位为高：sel=0 点亮第 0 位（out 读作 1），sel=1 点亮第 1 位（读作 2），sel=2 点亮第 2 位（读作 4），sel=3 点亮第 3 位（读作 8）；其余三位都是 0。',
+      en: 'Two select bits, four output bits. The value of sel decides which bit of out goes high: sel 0 lights bit 0 (out reads 1), sel 1 lights bit 1 (2), sel 2 lights bit 2 (4) and sel 3 lights bit 3 (8). The other three bits stay 0.',
+    },
+    hint: {
+      zh: '把 sel 拆成 b0、b1 两位，各自取反得到四条字面量线，再用四个与门拼出四种组合（每个与门恰好对应一个 sel 取值），最后用位合并器拼成四位。两个非门加四个与门，10 个 NAND 等价门。',
+      en: 'Split sel into b0 and b1 and invert each, giving four literal wires. Four ANDs then produce the four minterms -- one per select value -- and a Maker packs them into four bits. Two NOTs and four ANDs, 10 NAND equivalents in all.',
+    },
+    allowedComponents: [...GATES_1BIT, 'splitter', 'maker', 'decoder2', ...LEVEL_IO],
+    io: IO_SEL2_OUT4,
+    checks: [truthTable(IO_SEL2_OUT4, { out: ({ sel }) => 1 << (sel ?? 0) })],
+    // Measured: 2 NOTs (1 each) + 4 ANDs (2 each) = 10 NAND equivalents on a path
+    // two components deep, with the splitter, the maker and the level pins free on
+    // both metrics. `decoder2`, this level's own reward, ties the gate count and
+    // beats the depth -- the recorded price in the comment above.
+    threeStar: { gate: 10, delay: 2, tick: 0 },
+    rewards: { components: ['decoder2'] },
+  },
+
+  /**
+   * ch2-37-3-bit-decoder -- 3 Bit Decoder / 3 位解码器
    *
    * SOURCED: the name in both languages, its position (26th), and the concept --
    * three-to-eight decoding: three select bits, one of eight output lines high.
@@ -559,10 +562,10 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
    * every level it applies to and level 25's comment sets out at length.
    */
   {
-    id: 'ch2-26-3-bit-decoder',
+    id: 'ch2-37-3-bit-decoder',
     chapter: 2,
-    index: 26,
-    name: { zh: '3 位解码器', en: '3 Bit Decoder' },
+    index: 37,
+    name: { zh: '3-8 译码器', en: '3 Bit Decoder' },
     brief: {
       zh: '三位选择输入 sel，八位输出 out。sel 的取值决定 out 的哪一位为高：sel=0 点亮第 0 位，sel=1 点亮第 1 位，……sel=7 点亮第 7 位；其余七位都是 0。',
       en: 'Three select bits, eight output bits. The value of sel decides which bit of out goes high: sel 0 lights bit 0, sel 1 lights bit 1, and so on to sel 7 lighting bit 7. The other seven bits stay 0.',
@@ -581,111 +584,4 @@ export const CH2_BATCH3: readonly LevelSpec[] = [
     rewards: { components: ['decoder3'] },
   },
 
-  /**
-   * ch2-27-logic-engine -- Logic Engine / 逻辑引擎
-   *
-   * SOURCED: the name in both languages, its position (27th), the concept --
-   * 用或门和非门构建完整逻辑运算集, build the complete set of logical operations
-   * out of OR and NOT gates -- and the source's ACHIEVEMENT note: 'Symmetric ALU
-   * … 仅用「8 位」系列元件通过「逻辑引擎」关卡', pass the Logic Engine level using
-   * only the 8-bit series of components. It ENUMERATES NO OPCODES, no widths and
-   * no pass condition, so the instruction set below is this replica's design and
-   * not the source's.
-   *
-   * HOW THAT ACHIEVEMENT IS RECORDED, AND WHAT IT IS NOT. As on levels 21, 22 and
-   * 38, the source's note is an achievement rather than a pass condition, and spec
-   * 5.4 puts achievements out of this phase's scope: nothing in this file grades a
-   * circuit on the 8-bit-family restriction, and no check here can see which
-   * components a solution used. It is recorded because it is a sourced fact about
-   * this level -- and because it is the one note in the source that CONSTRAINS a
-   * solution, which is worth knowing before a later phase briefs an achievement
-   * system from these comments. What the reference and the hint below do is a
-   * separate question from what the achievement requires: the reference is built
-   * from the 8-bit operators (`and8`, `or8`, `xor8`, `not8`, `add8`, `shift_l8`,
-   * `ashr8`) and its 56-mux select tree, and the hint steers the player to those
-   * same wide parts -- so neither is evidence about the achievement either way, and
-   * neither was chosen to satisfy it.
-   *
-   * AUTHORED, AND THE ONE THING THAT HAS TO BE AUTHORED HERE IS THE TABLE. `op`'s
-   * low three bits select the operation -- 0=and, 1=or, 2=xor, 3=not a, 4=add,
-   * 5=sub, 6=shift_l(a, b's low three bits), 7=ashr(a, b's low three bits) --
-   * with `out` the eight-bit result and `add`/`sub` discarding the carry beyond
-   * bit 8. The top five bits of `op` change nothing. The level's brief lists all
-   * eight values for the player (it is the only place they exist for a player),
-   * the expectation function in this file is the same table as a pure function,
-   * and the test file proves all eight are exercised: it measures which opcodes
-   * the level's own fixed seed drives, and then breaks the reference one opcode
-   * at a time to show that a circuit wrong on opcode k fails on a round of
-   * opcode k.
-   *
-   * Also authored: the `a:8 b:8 op:8 -> out:8` shape; the fuzz check (seed, 256
-   * rounds, the expectation); the measured three-star target; the three rewards;
-   * and the palette. Note that `rot_l8` and `rot_r8` are handed out here without
-   * an opcode that selects them -- the brief's table is the brief's, and the two
-   * rotate parts are the chapter's next arithmetic to learn rather than this
-   * level's answer.
-   *
-   * THE REFERENCE THE TARGET IS MEASURED FROM computes all eight results at once
-   * and selects between them per bit: `and8`, `or8`, `xor8`, `not8`, `add8`,
-   * `add8(a, ~b, 1)`, `shift_l8` and `ashr8` (497 NAND equivalents together, the
-   * shift amount being `b`'s low three bits for free -- a splitter and a maker
-   * are wiring), then a three-level tree of 2:1 muxes per output bit driven by
-   * op0, op1 and op2, which is 56 muxes x 3 NANDs plus the three inverters of
-   * the opcode bits = 171. The measured total is 668 equivalents, eight gates
-   * deep. The other obvious shape -- a one-hot decoder of the three opcode bits
-   * (27), eight conditional passes of the results (`switch8`, 8 x 16 = 128) and
-   * an OR tree to merge them (7 x 24 = 168) -- comes to 323 for its select logic
-   * alone, which is arithmetic on the defs' own documented counts rather than a
-   * measurement taken here; no target above is measured from a construction this
-   * level's palette would make second best.
-   */
-  {
-    id: 'ch2-27-logic-engine',
-    chapter: 2,
-    index: 27,
-    name: { zh: '逻辑引擎', en: 'Logic Engine' },
-    brief: {
-      zh: '一个八位逻辑引擎：a 和 b 是两个操作数，op 的低 3 位选择运算，结果放在 out 上。0=and（a 与 b）、1=or（a 或 b）、2=xor（a 异或 b）、3=not a（a 取反）、4=add（a+b，只保留低八位，进位丢弃）、5=sub（a−b，同样只保留低八位）、6=shift_l（a 左移 b 的低 3 位）、7=ashr（a 算术右移 b 的低 3 位，符号位跟着移）。op 的高 5 位不影响结果。',
-      en: "An eight-bit logic engine: a and b are the operands, op's low three bits select the operation, and the result goes on out. 0=and, 1=or, 2=xor, 3=not a, 4=add (a+b, keeping only the low eight bits and discarding the carry), 5=sub (a−b, likewise), 6=shift_l (a shifted left by b's low three bits) and 7=ashr (a shifted arithmetically right by b's low three bits, the sign bit following). The top five bits of op change nothing.",
-    },
-    hint: {
-      zh: '把 op 的低 3 位拆出来，先把 8 种运算的结果全部算好（宽位元件都是现成的），再按 op0→op1→op2 的顺序用二选一多路选择器逐层选出一个字节的每一位：每一位 7 个选择器、每个 3 个与非门。移位量取 b 的低 3 位，用位拆分器取 b0..b2 再合并回去就有了，不花门。',
-      en: "Split op's low three bits out, compute all eight results first (the wide parts are all there), then select one bit at a time with a tree of 2:1 multiplexers driven by op0, then op1, then op2 -- seven muxes per bit, three NANDs each. The shift amount is b's low three bits, which a Splitter and a Maker hand you for no gates at all.",
-    },
-    allowedComponents: [
-      ...GATES_1BIT,
-      ...BYTE_WIRING,
-      ...WIDE_OPS,
-      ...BYTE_OPS,
-      'neg8',
-      ...SWITCHES,
-      'div8',
-      'less_s',
-      'shift_l8',
-      'shift_r8',
-      'ashr8',
-      'rot_l8',
-      'rot_r8',
-      ...LEVEL_IO,
-    ],
-    io: IO_A8_B8_OP8_OUT8,
-    checks: [
-      {
-        kind: 'fuzz',
-        seed: SEED_27,
-        rounds: 256,
-        inputs: {
-          a: (sample) => sample.a ?? 0,
-          b: (sample) => sample.b ?? 0,
-          op: (sample) => sample.op ?? 0,
-        },
-        outputs: { out: LOGIC_ENGINE_OUT },
-      },
-    ],
-    // Measured: the eight results (16 + 24 + 32 + 8 + 72 + 8 + 72 + 125 + 140 =
-    // 497) plus the 56-mux tree and its three inverters (171) = 668 NAND
-    // equivalents, eight gates deep -- see the construction paragraph above.
-    threeStar: { gate: 668, delay: 8, tick: 0 },
-    rewards: { components: ['ashr8', 'rot_l8', 'rot_r8'] },
-  },
 ];

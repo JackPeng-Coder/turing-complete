@@ -79,15 +79,17 @@ docs/         the design spec, the phase plans, level provenance
 
 Two third-party research documents sit at the repository root, and they describe **different versions
 of the game**: `GAME_REFERENCE.md` is the 1.x compendium, `GAME_RESEARCH_2026-10-03.md` is a sourced
-2.x dossier (93 levels, Symphony in place of LEG, 2-64-bit widths). The shipped campaign follows the
-**1.x** structure. `RESEARCH.md` indexes both, lists every place they contradict each other, and
-names which one this project follows for what.
+2.x dossier (93 levels, Symphony in place of LEG, 2-64-bit widths). `RESEARCH.md` indexes both, lists
+every place they contradict each other, and names which one this project follows for what.
 
-Read `RESEARCH.md` before planning chapter 4 or later: the two baselines leave different amounts of
-work (1.x has 35 levels left, 2.x has 44), so the baseline decides what gets built next. No image of
-the original's art may be committed, in any case — that is a hard constraint in the design spec
-(§1.4), and it is why the `imgs/` folder that came with the 2.x dossier is not in the tree. The 1.x
-compendium contains no images at all.
+The shipped campaign follows the **2.x** structure as of 2026-10-04. `src/levels/campaign.ts` is the
+table that fixes its shape and `test/levels/campaign-shape.test.ts` holds every level to it, so change
+that table — not a level object — when the campaign's shape has to change. Chapters 1-3 (49 levels)
+are built; chapters 4-7 (44 levels) are listed in the dossier's §5 and their phase is not decided yet.
+
+Read `RESEARCH.md` before planning chapter 4. No image of the original's art may be committed, in any
+case — that is a hard constraint in the design spec (§1.4), and it is why the `imgs/` folder that came
+with the 2.x dossier is not in the tree. The 1.x compendium contains no images at all.
 
 ## Where the record lives
 

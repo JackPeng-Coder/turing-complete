@@ -23,7 +23,7 @@ import { CH3_REFERENCES } from '../fixtures/ch3-references';
  * level offer only parts it has earned?
  *
  * WHY THIS FILE EXISTS. Both defects it catches were found by reading, not by a
- * test. Level 13's reference needs `splitter`, and `splitter` is level 13's own
+ * test. Level 16's reference needs `splitter`, and `splitter` is level 16's own
  * reward: `paletteDefsFor` offered the rewards of PASSED levels only, so a
  * first-time palette could not build the level at all. `mem1` is the 1-bit
  * memory chapter 2's latch level builds from, and it was rewarded by no level
@@ -38,18 +38,18 @@ import { CH3_REFERENCES } from '../fixtures/ch3-references';
  * `allowedComponents` here would let this check and the app drift apart, which
  * is the failure mode it exists to catch.
  *
- * BOTH CHAPTERS ARE JOINED NOW, so the shipped set is `LEVELS` -- all 38 ids, no
+ * BOTH CHAPTERS ARE JOINED NOW, so the shipped set is `LEVELS` -- all 49 ids, no
  * filter and no sibling list. This file used to carry a `NOT_JOINED_YET` slice
  * (`CH2_LEVELS` filtered against `LEVEL_ORDER`) that covered chapter 2's
  * written-but-unreachable levels; `content/index.ts` now appends that same
  * array, the filter matched nothing, and it is gone. The join is asserted rather
- * than assumed, by the `the assembled set` block below: 38 levels, chapter-2
- * indices 13-38 contiguous and unique, and no id twice.
+ * than assumed, by the `the assembled set` block below: 49 levels, chapter-2
+ * indices 14-39 contiguous and unique, and no id twice.
  *
  * THE REFERENCE SOLUTIONS COME FROM TWO PLACES, and the asymmetry is scope
  * rather than taste. Chapter 2's 26 graphs moved to
  * `test/fixtures/ch2-references.ts`, which the four batch tests now share (that
- * file's header explains the move); chapter 1's twelve are still written out
+ * file's header explains the move); chapter 1's thirteen are still written out
  * below, because this task may not edit the chapter-1 test files that own them.
  * Either way the copies cannot rot quietly: the tests below grade every filed
  * reference against the level it is filed under, and the walk fails loudly if
@@ -128,7 +128,7 @@ function paletteAt(index: number): Set<string> {
 /**
  * Every shipped level's reference solution.
  *
- * Chapter 1's twelve are copied from the test files that own them (see this
+ * Chapter 1's thirteen are copied from the test files that own them (see this
  * file's header for why the copy exists and what keeps it honest) and are the
  * graphs each level's three-star target was measured from, which is what makes
  * "the palette can build the reference" the right thing to assert: the reference
@@ -137,7 +137,7 @@ function paletteAt(index: number): Set<string> {
  * per level in index order.
  */
 const REFERENCE_SOLUTIONS: Record<string, () => Graph> = {
-  'ch1-01-crude-awakening': () =>
+  'ch1-01-humble-beginnings': () =>
     build([
       { kind: 'part', def: 'const_on', id: 'src', from: [] },
       { kind: 'output', from: 'src' },
@@ -163,7 +163,7 @@ const REFERENCE_SOLUTIONS: Record<string, () => Graph> = {
       { kind: 'part', def: 'not', id: 'g2', from: ['g1'] },
       { kind: 'output', from: 'g2' },
     ]),
-  'ch1-05-or-gate': () =>
+  'ch1-06-or-gate': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
@@ -172,20 +172,24 @@ const REFERENCE_SOLUTIONS: Record<string, () => Graph> = {
       { kind: 'part', def: 'nand', id: 'g', from: ['n1', 'n2'] },
       { kind: 'output', from: 'g' },
     ]),
-  'ch1-06-nor-gate': () =>
+  // De Morgan, not OR + NOT: OR is level 6's part in the 2.x chapter and NOR is
+  // level 5's, so the reference is the spelling the levels before it unlock --
+  // NOT(a) AND NOT(b), the same function at the same 4 gates on a path two deep.
+  'ch1-05-nor-gate': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
-      { kind: 'part', def: 'or', id: 'o1', from: ['a', 'b'] },
-      { kind: 'part', def: 'not', id: 'n1', from: ['o1'] },
-      { kind: 'output', from: 'n1' },
+      { kind: 'part', def: 'not', id: 'n1', from: ['a'] },
+      { kind: 'part', def: 'not', id: 'n2', from: ['b'] },
+      { kind: 'part', def: 'and', id: 'g', from: ['n1', 'n2'] },
+      { kind: 'output', from: 'g' },
     ]),
   'ch1-07-always-on': () =>
     build([
       { kind: 'part', def: 'const_on', id: 'src', from: [] },
       { kind: 'output', from: 'src' },
     ]),
-  'ch1-08-second-tick': () =>
+  'ch1-08-second-cycle': () =>
     build([
       { kind: 'part', def: 'const_on', id: 'src', from: [] },
       { kind: 'part', def: 'delay_line', id: 'd1', from: ['src'] },
@@ -220,21 +224,35 @@ const REFERENCE_SOLUTIONS: Record<string, () => Graph> = {
       { kind: 'part', def: 'and', id: 'a2', from: ['a1', 'c'] },
       { kind: 'output', from: 'a2' },
     ]),
-  // Straight wires: the capstone's reference uses no part at all.
-  'ch1-12-binary-racer': () =>
+  // Chapter 1's penultimate level: XOR into a NOT. `xor` is level 9's reward and
+  // `not` level 2's, so the palette can build it long before this level.
+  'ch1-12-xnor-gate': () =>
     build([
-      { kind: 'input', name: 'b3' },
-      { kind: 'input', name: 'b2' },
-      { kind: 'input', name: 'b1' },
-      { kind: 'input', name: 'b0' },
-      { kind: 'output', name: 'OUT_out3', from: 'b3' },
-      { kind: 'output', name: 'OUT_out2', from: 'b2' },
-      { kind: 'output', name: 'OUT_out1', from: 'b1' },
-      { kind: 'output', name: 'OUT_out0', from: 'b0' },
+      { kind: 'input', name: 'a' },
+      { kind: 'input', name: 'b' },
+      { kind: 'part', def: 'xor', id: 'x1', from: ['a', 'b'] },
+      { kind: 'part', def: 'not', id: 'n1', from: ['x1'] },
+      { kind: 'output', from: 'n1' },
     ]),
-  // Chapter 2, levels 13-38, from the shared fixture the batch tests also use.
+  // Chapter 1's capstone: the three pairwise ANDs into one 3-input OR. Both parts
+  // are chapter-1 rewards (`and` at level 4, `or3` at level 10).
+  'ch1-13-logic-exam': () =>
+    build([
+      { kind: 'input', name: 'a' },
+      { kind: 'input', name: 'b' },
+      { kind: 'input', name: 'c' },
+      { kind: 'part', def: 'and', id: 'ab', from: ['a', 'b'] },
+      { kind: 'part', def: 'and', id: 'ac', from: ['a', 'c'] },
+      { kind: 'part', def: 'and', id: 'bc', from: ['b', 'c'] },
+      { kind: 'part', def: 'or3', id: 'any2', from: ['ab', 'ac', 'bc'] },
+      { kind: 'output', from: 'any2' },
+    ]),
+  // Straight wires: chapter 2's opener, which the 2.x realignment moved out of
+  // chapter 1. Its reference is the shared fixture's, like the rest of the
+  // chapter's -- writing a second copy here would be free to drift from it.
+  // Chapter 2, levels 14-39, from the shared fixture the batch tests also use.
   ...CH2_REFERENCES,
-  // Chapter 3, levels 39-47, likewise -- and here the fixture matters more than
+  // Chapter 3, levels 40-49, likewise -- and here the fixture matters more than
   // it did for chapter 2. All three chapter-3 levels in a batch share ONE
   // reference graph (`overtureMachine`, `computeUnitGraph`, ...), parameterised
   // by `options`; the fixture is what holds those parameter defaults still, so
@@ -245,14 +263,14 @@ const REFERENCE_SOLUTIONS: Record<string, () => Graph> = {
 };
 
 describe('the assembled set is chapter 1, then 2, then 3, in order', () => {
-  it('ships 47 levels with no id twice', () => {
+  it('ships 49 levels with no id twice', () => {
     // The join's arithmetic, and the two halves of it. A duplicate id would not
     // change either length -- `LEVEL_ORDER` is a list of ids, so the game would
     // simply have two levels by that name and one of them unreachable -- which
     // is exactly why uniqueness is asserted rather than implied by the count.
-    expect(LEVELS.length).toBe(47);
-    expect(LEVEL_ORDER.length).toBe(47);
-    expect(new Set(LEVEL_ORDER).size).toBe(47);
+    expect(LEVELS.length).toBe(49);
+    expect(LEVEL_ORDER.length).toBe(49);
+    expect(new Set(LEVEL_ORDER).size).toBe(49);
   });
 
   it('keeps chapter 2 whole, in index order, exactly where its own join put it', () => {
@@ -261,12 +279,21 @@ describe('the assembled set is chapter 1, then 2, then 3, in order', () => {
     // exports, in the order it says it, is what the game's order contains --
     // nothing lost, nothing reordered, nothing doubled.
     const inGame = LEVELS.filter((level) => level.chapter === 2);
-    expect(inGame.map((level) => level.id)).toEqual(CH2_LEVELS.map((level) => level.id));
+    // The chapter's export is compared as a SET of ids rather than as a sequence,
+    // which is the 2.x shape rather than a relaxation: the four batches hold
+    // scattered slices of the chapter's numbering (batch 1 is 14, 15, 16, 18, 21)
+    // and `content/index.ts` sorts the joined set by index, so the game plays the
+    // chapter in the campaign's order while `CH2_LEVELS` stays in the authors'
+    // batch order. The index walk below is what pins the order; this pins that
+    // nothing was lost or doubled on the way in.
+    expect([...inGame].map((level) => level.id).sort()).toEqual(
+      [...CH2_LEVELS].map((level) => level.id).sort(),
+    );
     expect(inGame).toHaveLength(26);
-    // Contiguous AND unique: 13..38 with no gap and no repeat, which is what
+    // Contiguous AND unique: 14..39 with no gap and no repeat, which is what
     // `isUnlocked` (the immediate predecessor) assumes when it walks the order.
     expect(inGame.map((level) => level.index)).toEqual(
-      Array.from({ length: 26 }, (_, offset) => 13 + offset),
+      Array.from({ length: 26 }, (_, offset) => 14 + offset),
     );
     expect(new Set(inGame.map((level) => level.index)).size).toBe(26);
   });
@@ -279,13 +306,13 @@ describe('the assembled set is chapter 1, then 2, then 3, in order', () => {
     // its batch by path, so it passes either way. This one walks the game.
     const inGame = LEVELS.filter((level) => level.chapter === 3);
     expect(inGame.map((level) => level.id)).toEqual(CH3_LEVELS.map((level) => level.id));
-    expect(inGame).toHaveLength(9);
-    // Contiguous AND unique: 39..47 with no gap and no repeat, which is what
+    expect(inGame).toHaveLength(10);
+    // Contiguous AND unique: 40..49 with no gap and no repeat, which is what
     // `isUnlocked` (the immediate predecessor) assumes when it walks the order.
     expect(inGame.map((level) => level.index)).toEqual(
-      Array.from({ length: 9 }, (_, offset) => 39 + offset),
+      Array.from({ length: 10 }, (_, offset) => 40 + offset),
     );
-    expect(new Set(inGame.map((level) => level.index)).size).toBe(9);
+    expect(new Set(inGame.map((level) => level.index)).size).toBe(10);
   });
 
   it('puts chapters 1 and 2 first, and nothing after chapter 3', () => {
@@ -294,14 +321,14 @@ describe('the assembled set is chapter 1, then 2, then 3, in order', () => {
     // chapter landing inside an earlier one. The other is an earlier chapter
     // landing after a later one -- which a bare `slice(0, 12)` cannot see -- so
     // the claim is now stated over the whole order rather than its head.
-    expect(LEVELS.filter((level) => level.chapter === 1)).toHaveLength(12);
-    expect(LEVEL_ORDER.slice(0, 12)).toEqual(
+    expect(LEVELS.filter((level) => level.chapter === 1)).toHaveLength(13);
+    expect(LEVEL_ORDER.slice(0, 13)).toEqual(
       LEVELS.filter((level) => level.chapter === 1).map((level) => level.id),
     );
-    expect(LEVEL_ORDER.slice(12, 38)).toEqual(
+    expect(LEVEL_ORDER.slice(13, 39)).toEqual(
       LEVELS.filter((level) => level.chapter === 2).map((level) => level.id),
     );
-    expect(LEVEL_ORDER.slice(38)).toEqual(
+    expect(LEVEL_ORDER.slice(39)).toEqual(
       LEVELS.filter((level) => level.chapter === 3).map((level) => level.id),
     );
   });
@@ -342,7 +369,7 @@ describe('no shipped level offers a part it has not earned', () => {
   for (const [index, level] of SHIPPED.entries()) {
     it(level.id, () => {
       // "Earned" is at-or-before, not strictly before: a level may offer the
-      // parts its own rewards hand out -- level 13's parity puzzle needs the
+      // parts its own rewards hand out -- level 16's parity puzzle needs the
       // splitter it rewards -- while still offering nothing from a later level.
       const earned = new Set<string>(STARTER_COMPONENTS);
       for (const atOrBefore of SHIPPED.slice(0, index + 1)) {
@@ -358,7 +385,7 @@ describe('no shipped level offers a part it has not earned', () => {
       // The other half of the same rule, on the same walk: the palette is what
       // the level offers intersected with what is unlocked, so a part the level
       // does not offer cannot reach the player however thoroughly the rest of
-      // the game has unlocked it. Level 12 is the witness -- it rewards `mem1`
+      // the game has unlocked it. Level 13 is the witness -- it rewards `mem1`
       // and does not list it, and its palette is unchanged by that.
       const palette = paletteAt(index);
       for (const def of palette) {
@@ -423,9 +450,9 @@ describe('the latch part chapter 2 builds from is reachable', () => {
     // The asymmetry on real data: chapter 1's capstone rewards `mem1` without
     // listing it, so its own palette is exactly what it was and the player meets
     // the part on the first level that asks for it -- not before.
-    const index = SHIPPED.findIndex((level) => level.id === 'ch1-12-binary-racer');
-    expect(index, 'ch1-12-binary-racer is not shipped').toBeGreaterThanOrEqual(0);
-    const level = specOf('ch1-12-binary-racer');
+    const index = SHIPPED.findIndex((level) => level.id === 'ch1-13-logic-exam');
+    expect(index, 'ch1-13-logic-exam is not shipped').toBeGreaterThanOrEqual(0);
+    const level = specOf('ch1-13-logic-exam');
     expect(level.rewards?.components ?? []).toContain('mem1');
     expect(paletteAt(index).has('mem1')).toBe(false);
   });

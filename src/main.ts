@@ -281,7 +281,7 @@ if (app) {
    * read, and light up that case's column so the reader's eye follows the board.
    *
    * PAST `TEST_DEMO_LIMIT` THE RUN HURRIES, and the panel's note says so. A
-   * level may declare hundreds of cases (513 on `ch2-37-little-box`), and at the
+   * level may declare hundreds of cases (513 on `ch2-38-little-box`), and at the
    * pace a fifteen-row table wants that is minutes of watching a counter count.
    * The cases still ALL run -- only the painting stops, and only where there is
    * nothing left to see: past the thirty-second case no column on screen changes

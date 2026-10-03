@@ -238,7 +238,7 @@ const STEPS_44: readonly ScriptStep[] = [
 
 export const CH3_BATCH2: readonly LevelSpec[] = [
   /**
-   * ch3-42-instruction-decoder -- Instruction Decoder / 指令解码器
+   * ch3-44-instruction-decoder -- Instruction Decoder / 指令解码器
    *
    * SOURCED: the name in both languages, its position (the 42nd level, and the
    * fourth of chapter 3), and the source's one-line concept -- parse the
@@ -274,10 +274,10 @@ export const CH3_BATCH2: readonly LevelSpec[] = [
    * `delay`, and that is 0 too.
    */
   {
-    id: 'ch3-42-instruction-decoder',
+    id: 'ch3-44-instruction-decoder',
     chapter: 3,
-    index: 42,
-    name: { zh: '指令解码器', en: 'Instruction Decoder' },
+    index: 44,
+    name: { zh: '指令译码器', en: 'Instruction Decoder' },
     brief: {
       zh: '一条指令是一个字节：高 2 位是模式，低 6 位是这一模式的参数。把 instr 拆成四个字段输出——mode = instr[7:6]、op = instr[5:3]、dst = instr[2:0]、imm = instr[5:0]。256 种输入组合全部都要对。',
       en: 'An instruction is one byte: the top two bits are the mode and the low six are that mode\u2019s argument. Publish four slices of instr -- mode = instr[7:6], op = instr[5:3], dst = instr[2:0], imm = instr[5:0]. All 256 input combinations have to be right.',
@@ -298,7 +298,90 @@ export const CH3_BATCH2: readonly LevelSpec[] = [
   },
 
   /**
-   * ch3-43-calculations -- Calculations / 计算单元
+   * ch3-45-conditions -- Conditions / 条件判断
+   *
+   * SOURCED: the name in both languages, its position (44th), the source's
+   * one-line concept -- decide whether a value is below, equal to or above zero
+   * -- and §6.4's jump table, which is what the level evaluates: `j` is taken,
+   * `jz` is taken when the compared value is zero, `jnz` when it is not, and the
+   * compared value comes from a register the machine holds. The compendium also
+   * records an achievement for this level, "only 10 blue components"; per spec
+   * §5.4 achievements are RECORDED and never used as the three-star target, so it
+   * appears in this comment and nowhere else.
+   *
+   * AUTHORED, AND THE ONE REDUCTION THIS LEVEL MAKES. This level's machine has a
+   * single register: `loadi` writes its 6-bit immediate into it and a jump reads
+   * it back as the condition value. In the full OVERTURE those are two registers
+   * -- REG0 holds the target, REG3 holds the value compared -- and levels 45-47
+   * build them; here the level is about the condition logic alone, so the brief
+   * says the reduction in both languages and the walk drives `loadi` to set the
+   * value. Everything else is the ISA's: the mode field decides whether the
+   * instruction is a jump at all, and the condition field's three defined codes
+   * select between always-taken, taken-on-zero and taken-on-nonzero, with every
+   * other code publishing 0.
+   *
+   * AUTHORED (the rest): the pin shape; the twelve-part condition unit (decode,
+   * the one register, `equal8` against zero, a `decoder3` for the condition
+   * field, and the AND/OR/NOT glue); the fifteen-step walk; the palette; the
+   * `halt` reward; and the measured target.
+   *
+   * THE WALK IS BUILT SO THAT THE TWO PLAUSIBLE-WRONG UNITS FAIL IT, and the
+   * batch test builds both. A unit that reads the condition field without
+   * checking the mode calls a `move|s0|d1` a `j` (its `[5:3]` field is 000) and
+   * a `sub` a `jz` (001), and the walk drives both while the held value is
+   * nonzero, where the level demands 0. A unit that never loads the held value
+   * has it stuck at zero, so `jnz` against 5 publishes 0 where the walk demands
+   * 1. The condition code 3 step then fails a unit that ORs the condition bits
+   * together instead of decoding them.
+   */
+  {
+    id: 'ch3-45-conditions',
+    chapter: 3,
+    index: 45,
+    name: { zh: '条件判断', en: 'Conditions' },
+    brief: {
+      zh: '条件判断：跳转指令从寄存器里读条件值（完整机器里是 REG3）。本关的机器只有一个寄存器——loadi 把 6 位立即数写进去，跳转指令读它。skip 在分支成立时为 1：j（条件 000）永远成立；jz（001）在值为 0 时成立；jnz（010）在值不为 0 时成立；其它条件码不是分支，skip 为 0，而 move 或 calc 这类不是跳转的指令，skip 也必须是 0。',
+      en: 'Conditions: a jump reads its condition value from a register (REG3 in the full machine). This level\u2019s machine has exactly one register -- loadi writes the 6-bit immediate into it, and a jump reads it back. skip is 1 when the branch is taken: j (condition 000) always, jz (001) when the value is zero, jnz (010) when it is not. Any other condition code is not a branch and publishes 0, and an instruction that is not a jump -- a move or a calc -- must publish 0 as well.',
+    },
+    hint: {
+      zh: '先用 instr_decoder 拆出 mode 与条件字段：mode 等于 11 才是跳转。条件字段（3 位）送进 3 位译码器，得到「条件 0 / 1 / 2」三根线；寄存器的值用 equal8 与 0 比较得到「是否为零」。jz 与「是零」相与、jnz 与「不是零」相与，再和 j 或起来，最后与「这是跳转」相与。寄存器由 loadi（mode 00）写入，数据就是 imm 字段。',
+      en: 'Decode mode and the condition field first: only mode 11 is a jump. Feed the 3-bit condition field to a 3-Bit Decoder for the "condition 0 / 1 / 2" lines, and compare the register against zero with an Equal part. AND jz with "is zero", AND jnz with "is not zero", OR those with j, and finally AND the result with "this is a jump". The register is written by loadi (mode 00) from the imm field.',
+    },
+    allowedComponents: [
+      ...BYTE_WIRING,
+      ...CPU_PARTS,
+      'reg8',
+      'equal8',
+      'decoder3',
+      'const_on',
+      'const_off',
+      'not',
+      'and',
+      'or',
+      'nor',
+      'nand',
+      'xor',
+      'and3',
+      'or3',
+      'switch',
+      'switch8',
+      'mux8',
+      ...LEVEL_IO,
+    ],
+    io: IO_CONDITIONS,
+    checks: [{ kind: 'script', steps: STEPS_44 }],
+    // Measured: the reference above -- `equal8` (54 NAND equivalents) and
+    // `decoder3` (27) dominate the gate metric, and the AND/OR glue adds the
+    // rest; the longest combinational path runs from the held register through
+    // the zero test, the jnz gate and the two ANDs to `skip`. The source's "10
+    // blue components" achievement is recorded in the comment and is
+    // deliberately NOT this target: spec §5.4.
+    threeStar: { gate: 100, delay: 5, tick: 14 },
+    rewards: { components: ['halt'] },
+  },
+
+  /**
+   * ch3-46-alu -- Calculations / 计算单元
    *
    * SOURCED: the name in both languages, its position (43rd), and the source's
    * one-line concept -- integrate the ALU with the registers and implement the
@@ -348,10 +431,10 @@ export const CH3_BATCH2: readonly LevelSpec[] = [
    * test builds all three of those machines and asserts they fail.
    */
   {
-    id: 'ch3-43-calculations',
+    id: 'ch3-46-alu',
     chapter: 3,
-    index: 43,
-    name: { zh: '计算单元', en: 'Calculations' },
+    index: 46,
+    name: { zh: '计算核心', en: 'ALU' },
     brief: {
       zh: '计算单元：一个时钟沿执行一条指令。程序存放在 ram_prog 里，instr 引脚给出要取哪一条指令（地址）。loadi 把 6 位立即数写进 REG0；calc 按 op 计算 REG1 与 REG2，结果写进 REG3；move 把源字段指定的寄存器（源为 6 时是 inp）复制到目标字段指定的寄存器，目标为 out 时寄存器堆不写入。写使能在跳转模式（11）下为低。res 始终输出 REG3。',
       en: 'The calculation unit: one instruction per clock edge. The program lives in the ram_prog and the instr pin carries the ADDRESS of the instruction to fetch. loadi writes its 6-bit immediate into REG0; calc computes REG1 op REG2 into REG3; move copies the register its source field names (inp when the source is 6) into the register its destination field names, and a destination of out writes no register. The write enable is low in jump mode (11). res always publishes REG3.',
@@ -399,88 +482,5 @@ export const CH3_BATCH2: readonly LevelSpec[] = [
     // ALU (264) are what the 510 is made of.
     threeStar: { gate: 510, delay: 4, tick: 10 },
     rewards: { components: ['ram_prog'] },
-  },
-
-  /**
-   * ch3-44-conditions -- Conditions / 条件判断
-   *
-   * SOURCED: the name in both languages, its position (44th), the source's
-   * one-line concept -- decide whether a value is below, equal to or above zero
-   * -- and §6.4's jump table, which is what the level evaluates: `j` is taken,
-   * `jz` is taken when the compared value is zero, `jnz` when it is not, and the
-   * compared value comes from a register the machine holds. The compendium also
-   * records an achievement for this level, "only 10 blue components"; per spec
-   * §5.4 achievements are RECORDED and never used as the three-star target, so it
-   * appears in this comment and nowhere else.
-   *
-   * AUTHORED, AND THE ONE REDUCTION THIS LEVEL MAKES. This level's machine has a
-   * single register: `loadi` writes its 6-bit immediate into it and a jump reads
-   * it back as the condition value. In the full OVERTURE those are two registers
-   * -- REG0 holds the target, REG3 holds the value compared -- and levels 45-47
-   * build them; here the level is about the condition logic alone, so the brief
-   * says the reduction in both languages and the walk drives `loadi` to set the
-   * value. Everything else is the ISA's: the mode field decides whether the
-   * instruction is a jump at all, and the condition field's three defined codes
-   * select between always-taken, taken-on-zero and taken-on-nonzero, with every
-   * other code publishing 0.
-   *
-   * AUTHORED (the rest): the pin shape; the twelve-part condition unit (decode,
-   * the one register, `equal8` against zero, a `decoder3` for the condition
-   * field, and the AND/OR/NOT glue); the fifteen-step walk; the palette; the
-   * `halt` reward; and the measured target.
-   *
-   * THE WALK IS BUILT SO THAT THE TWO PLAUSIBLE-WRONG UNITS FAIL IT, and the
-   * batch test builds both. A unit that reads the condition field without
-   * checking the mode calls a `move|s0|d1` a `j` (its `[5:3]` field is 000) and
-   * a `sub` a `jz` (001), and the walk drives both while the held value is
-   * nonzero, where the level demands 0. A unit that never loads the held value
-   * has it stuck at zero, so `jnz` against 5 publishes 0 where the walk demands
-   * 1. The condition code 3 step then fails a unit that ORs the condition bits
-   * together instead of decoding them.
-   */
-  {
-    id: 'ch3-44-conditions',
-    chapter: 3,
-    index: 44,
-    name: { zh: '条件判断', en: 'Conditions' },
-    brief: {
-      zh: '条件判断：跳转指令从寄存器里读条件值（完整机器里是 REG3）。本关的机器只有一个寄存器——loadi 把 6 位立即数写进去，跳转指令读它。skip 在分支成立时为 1：j（条件 000）永远成立；jz（001）在值为 0 时成立；jnz（010）在值不为 0 时成立；其它条件码不是分支，skip 为 0，而 move 或 calc 这类不是跳转的指令，skip 也必须是 0。',
-      en: 'Conditions: a jump reads its condition value from a register (REG3 in the full machine). This level\u2019s machine has exactly one register -- loadi writes the 6-bit immediate into it, and a jump reads it back. skip is 1 when the branch is taken: j (condition 000) always, jz (001) when the value is zero, jnz (010) when it is not. Any other condition code is not a branch and publishes 0, and an instruction that is not a jump -- a move or a calc -- must publish 0 as well.',
-    },
-    hint: {
-      zh: '先用 instr_decoder 拆出 mode 与条件字段：mode 等于 11 才是跳转。条件字段（3 位）送进 3 位译码器，得到「条件 0 / 1 / 2」三根线；寄存器的值用 equal8 与 0 比较得到「是否为零」。jz 与「是零」相与、jnz 与「不是零」相与，再和 j 或起来，最后与「这是跳转」相与。寄存器由 loadi（mode 00）写入，数据就是 imm 字段。',
-      en: 'Decode mode and the condition field first: only mode 11 is a jump. Feed the 3-bit condition field to a 3-Bit Decoder for the "condition 0 / 1 / 2" lines, and compare the register against zero with an Equal part. AND jz with "is zero", AND jnz with "is not zero", OR those with j, and finally AND the result with "this is a jump". The register is written by loadi (mode 00) from the imm field.',
-    },
-    allowedComponents: [
-      ...BYTE_WIRING,
-      ...CPU_PARTS,
-      'reg8',
-      'equal8',
-      'decoder3',
-      'const_on',
-      'const_off',
-      'not',
-      'and',
-      'or',
-      'nor',
-      'nand',
-      'xor',
-      'and3',
-      'or3',
-      'switch',
-      'switch8',
-      'mux8',
-      ...LEVEL_IO,
-    ],
-    io: IO_CONDITIONS,
-    checks: [{ kind: 'script', steps: STEPS_44 }],
-    // Measured: the reference above -- `equal8` (54 NAND equivalents) and
-    // `decoder3` (27) dominate the gate metric, and the AND/OR glue adds the
-    // rest; the longest combinational path runs from the held register through
-    // the zero test, the jnz gate and the two ANDs to `skip`. The source's "10
-    // blue components" achievement is recorded in the comment and is
-    // deliberately NOT this target: spec §5.4.
-    threeStar: { gate: 100, delay: 5, tick: 14 },
-    rewards: { components: ['halt'] },
   },
 ];

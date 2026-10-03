@@ -5,9 +5,17 @@ import type { FuzzVector, LevelSpec } from '../../spec';
 import { truthTable, type LevelIo } from '../../tables';
 
 /**
- * Chapter 2, levels 18-22: the byte-wide operators and the adders -- the batch
- * where eight-bit arithmetic begins, and where the `fuzz` checker (levels 18, 19
- * and 22) first carries a level.
+ * Chapter 2, levels 19, 22, 25, 26 and 27: the byte-wide operators and the adders
+ * -- the batch where eight-bit arithmetic begins, and where the `fuzz` checker
+ * (levels 22, 25 and 26) carries a level.
+ *
+ * THE BATCH WAS RENUMBERED AND GAINED A LEVEL. The 2.x realignment moved these
+ * levels to their global indices (19, 22, 25, 26 and 27), retired the 8-bit OR
+ * level that used to open the batch, and added `ch2-25-byte-nand` at the head of
+ * it. That new level is not a new puzzle so much as an old reward's new home: the
+ * four byte operators `and8` / `or8` / `nand8` / `nor8` were the retired level's
+ * hand-out, and a part no level rewards can never reach a palette, so the family
+ * moved to the byte NAND level and is offered by every level below that needs it.
  *
  * WHAT THE SOURCE FIXES, AND WHAT IT DOES NOT. As in batch 1: the compendium
  * gives each of these levels exactly three things -- its name (English and
@@ -126,7 +134,17 @@ const BYTE_WIRING = ['splitter', 'maker', 'const8'] as const;
 /** The wide operators batch 1's levels 15-17 unlocked. None of them is byte logic. */
 const WIDE_OPS = ['less_u', 'equal8', 'add8', 'mul8'] as const;
 
-/** The four byte operators level 18 teaches, offered by levels 18, 19 and 22 alike. */
+/**
+ * The four byte operators the batch teaches at its head, offered by levels 25, 26
+ * and 27 alike.
+ *
+ * They were `ch2-18-byte-or`'s reward until the 2.x realignment retired that
+ * level. A reward is data, so the family could simply have been deleted with it --
+ * and that is exactly what must not happen: `and8`, `or8`, `nand8` and `nor8` are
+ * registered, priced, and named by the design spec's chapter-2 unlock row, and a
+ * part no level hands out can never appear in a palette. `ch2-25-byte-nand` is
+ * where they are handed out now.
+ */
 const BYTE_AND_OR = ['and8', 'or8', 'nand8', 'nor8'] as const;
 
 /**
@@ -183,12 +201,21 @@ const IO_A8_B8_CIN1_OUT8_COUT1: LevelIo = {
  *
  * Fixed literals, not drawn ones: the same seed produces the same vectors on
  * every run and on every board edit, which is what makes a fuzz level's coverage
- * a fact about the level rather than about the run. Three distinct values, so
- * one level's sequence is never another's.
+ * a fact about the level rather than about the run. Distinct values, so one
+ * level's sequence is never another's.
+ *
+ * `SEED_25` is the new level's, and it is the convention read literally: level 25,
+ * eight-bit pins. The other two kept the values they were authored with when the
+ * realignment renumbered their levels (`ch2-26-byte-not` still draws 0x1908 and
+ * `ch2-27-adding-bytes` 0x2208), which is deliberate rather than an oversight: a
+ * seed is a sequence, not a label, so re-deriving one from a new index would
+ * silently change which vectors the level covers. The retired 8-bit OR level's
+ * `SEED_18` is gone with the level -- an unused literal is a build error here
+ * (`noUnusedLocals`), which is the compiler doing this cleanup's job for it.
  */
-const SEED_18 = 0x1808;
 const SEED_19 = 0x1908;
 const SEED_22 = 0x2208;
+const SEED_25 = 0x2508;
 
 /**
  * The level-22 expectations, named because both pins are computed from the same
@@ -206,138 +233,7 @@ const SUM_CARRY_OUT = (v: FuzzVector): number => ((v.a ?? 0) + (v.b ?? 0) + (v.c
 
 export const CH2_BATCH2: readonly LevelSpec[] = [
   /**
-   * ch2-18-byte-or -- Byte OR / 8 位或
-   *
-   * SOURCED: the name in both languages, its position (18th, and the first level
-   * of the chapter to work on a whole byte), and the concept -- the byte-wide OR,
-   * the one-bit OR of chapter 1 applied to every bit at once.
-   *
-   * AUTHORED (this replica's design): the `a:8 b:8 -> out:8` shape; the fuzz
-   * check (the brief fixes its kind, its 256 rounds and its fixed-seed rule; the
-   * seed, the pin maps and the expectation function are written here); the
-   * measured three-star target; and the four rewards. The brief's own table is
-   * what makes this the first level in the game to use `fuzz`: 2^16 input pairs
-   * cannot be written out as rows, and a byte operator is exactly the kind of
-   * circuit a single mis-wired bit costs you half the vectors on.
-   *
-   * THE REFERENCE IS WIRED, NOT DROPPED IN, AND IT COSTS THE SAME EITHER WAY:
-   * eight one-bit ORs behind two splitters and one maker measure 8 x 3 = 24 NAND
-   * equivalents at depth 1, and the `or8` this level hands out measures 24 and 1
-   * on the very same basis. So the target below is the floor for both
-   * constructions, this level's palette can offer the part it teaches without
-   * weakening anything, and the test file grades both and asserts they tie --
-   * which is stronger than picking one and calling it the reference.
-   */
-  {
-    id: 'ch2-18-byte-or',
-    chapter: 2,
-    index: 18,
-    name: { zh: '8 位或', en: 'Byte OR' },
-    brief: {
-      zh: '两个八位输入 a 和 b。把它们逐位相或：只要某一位在两个输入里至少有一个是 1，输出的这一位就是 1。',
-      en: 'Two eight-bit inputs, a and b. OR them bit by bit: an output bit is 1 when at least one of the two inputs has a 1 in that position.',
-    },
-    hint: {
-      zh: '位拆分器把 a、b 各拆成 b0..b7，同一个位号的两条线接进一个一位或门，八个结果再由位合并器拼回一个字节。',
-      en: 'Split a and b into b0..b7 each. Feed the two wires of one bit position into one one-bit OR, then pack the eight results back into a byte with a Maker.',
-    },
-    allowedComponents: [
-      ...GATES_1BIT,
-      ...BYTE_WIRING,
-      ...WIDE_OPS,
-      ...BYTE_AND_OR,
-      ...LEVEL_IO,
-    ],
-    io: IO_A8_B8_OUT8,
-    checks: [
-      {
-        kind: 'fuzz',
-        seed: SEED_18,
-        rounds: 256,
-        inputs: { a: (sample) => sample.a ?? 0, b: (sample) => sample.b ?? 0 },
-        // `a | b` cannot leave 0..255, so this expectation needs no mask: it is
-        // the one operator here whose result is always inside the pin already.
-        outputs: { out: (v) => (v.a ?? 0) | (v.b ?? 0) },
-      },
-    ],
-    // Measured: the splitter and the maker are free on both metrics, so the
-    // target is the eight ORs -- 8 x 3 = 24 NAND equivalents -- on a path one
-    // gate deep. `or8` measures exactly the same pair (see the comment above).
-    threeStar: { gate: 24, delay: 1, tick: 0 },
-    rewards: { components: ['and8', 'or8', 'nand8', 'nor8'] },
-  },
-
-  /**
-   * ch2-19-byte-not -- Byte NOT / 8 位非
-   *
-   * SOURCED: the name in both languages, its position (19th), and the concept --
-   * inverting every bit of a byte.
-   *
-   * AUTHORED: the `a:8 -> out:8` shape; the fuzz check (seed, 256 rounds, and the
-   * MASKED expectation -- load-bearing here rather than decorative, because `~a`
-   * is a negative int32 and the kernel refuses an expectation that does not fit
-   * its pin instead of masking it, so the author's own `& 0xff` is what makes
-   * this check runnable at all); the measured three-star target; and the three
-   * rewards.
-   *
-   * THE TARGET SEPARATES SOME CORRECT ANSWERS AND NOT OTHERS, and this comment
-   * says which. Eight NOTs measure 8 NAND equivalents at depth 1, and so
-   * does the `not8` this level hands out, and so does `nand8(a, a)` -- level
-   * 18's reward, and the answer a player who has just met the wide family is
-   * most likely to reach for, because a NAND cell is one NAND per bit on the
-   * same documented basis. The three spellings are the same circuit on this
-   * metric, so the target ties all three at three stars; what it does NOT admit
-   * is the same function built from a four-NAND cell -- `nor8(a, a)` is
-   * `~(a | a)`, a correct byte NOT for 32 gates, and one star. Both halves are
-   * asserted in the test file, because a target that every correct answer met
-   * would not be measuring the lesson.
-   */
-  {
-    id: 'ch2-19-byte-not',
-    chapter: 2,
-    index: 19,
-    name: { zh: '8 位非', en: 'Byte NOT' },
-    brief: {
-      zh: '一个八位输入 a。把它的每一位取反：0 变 1，1 变 0，八位一起翻过来。',
-      en: 'One eight-bit input a. Invert every bit: 0 becomes 1 and 1 becomes 0, all eight at once.',
-    },
-    hint: {
-      zh: '位拆分器拆开后，每一位各接一个非门，再合并回一个字节。也可以让每一位与 1 异或——两条路都要记得第 7 位。',
-      en: 'Split it, invert each bit with its own NOT, then pack the eight results back. XORing each bit with 1 does the same job; either way, do not lose bit 7.',
-    },
-    allowedComponents: [
-      ...GATES_1BIT,
-      ...BYTE_WIRING,
-      ...WIDE_OPS,
-      ...BYTE_AND_OR,
-      'xor8',
-      'xnor8',
-      'not8',
-      ...LEVEL_IO,
-    ],
-    io: IO_A8_OUT8,
-    checks: [
-      {
-        kind: 'fuzz',
-        seed: SEED_19,
-        rounds: 256,
-        inputs: { a: (sample) => sample.a ?? 0 },
-        // `~a` alone is -1 for a = 0, which does not fit an 8-bit pin, so the
-        // mask is the expectation's definition rather than a convenience.
-        outputs: { out: (v) => ~(v.a ?? 0) & 0xff },
-      },
-    ],
-    // Measured: one NOT per bit -- 8 x 1 = 8 NAND equivalents -- behind a free
-    // splitter and maker, one gate deep. `not8` ties it, and so does
-    // `nand8(a, a)` (a NAND cell is one NAND per bit on the documented basis, so
-    // the three spellings are the same circuit on this metric); the paragraph
-    // above and the test file say what the target does and does not separate.
-    threeStar: { gate: 8, delay: 1, tick: 0 },
-    rewards: { components: ['xor8', 'xnor8', 'not8'] },
-  },
-
-  /**
-   * ch2-20-half-adder -- Half Adder / 半加器
+   * ch2-19-half-adder -- Half Adder / 半加器
    *
    * SOURCED: the name in both languages, its position (20th), and the concept --
    * sum and carry, the two signals that adding two one-bit values produces.
@@ -365,9 +261,9 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
    * Level 21 is the one level that withholds the part, and its comment says why.
    */
   {
-    id: 'ch2-20-half-adder',
+    id: 'ch2-19-half-adder',
     chapter: 2,
-    index: 20,
+    index: 19,
     name: { zh: '半加器', en: 'Half Adder' },
     brief: {
       zh: '两个一位输入 a 和 b。把它们相加：和放在 sum 上，进位放在 carry 上——两个 1 相加得 0，并向高位进 1。',
@@ -393,7 +289,7 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-21-full-adder -- Full Adder / 全加器
+   * ch2-22-full-adder -- Full Adder / 全加器
    *
    * SOURCED: the name in both languages, its position (21st), the concept (a
    * one-bit adder that takes the carry in), and -- the only numeric note the
@@ -435,9 +331,9 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
    * wide, so an eight-bit part has nothing to attach to.
    */
   {
-    id: 'ch2-21-full-adder',
+    id: 'ch2-22-full-adder',
     chapter: 2,
-    index: 21,
+    index: 22,
     name: { zh: '全加器', en: 'Full Adder' },
     brief: {
       zh: '三个一位输入 a、b、cin。先把 a 和 b 相加，再把 cin 加进来：和放 sum，向高位的进位放 cout。',
@@ -468,7 +364,150 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-22-adding-bytes -- Adding Bytes / 8 位加法器
+   * ch2-25-byte-nand -- Byte NAND / 单字节与非
+   *
+   * SOURCED: the name in both languages, its position (the 25th level, the twelfth
+   * of chapter 2), and the dossier's one-line concept -- 8 位位运算, the bitwise
+   * operators at byte width. As everywhere in this batch: no ports, no widths, no
+   * pass condition and no reward come from the source.
+   *
+   * AUTHORED: the `a:8 b:8 -> out:8` shape; the fuzz check (seed, 256 rounds, and
+   * the masked expectation); the palette; the measured three-star target; and the
+   * four rewards, which are the retired `ch2-18-byte-or`'s -- see the module note
+   * above and the `BYTE_AND_OR` helper for why the family moved here rather than
+   * disappearing with its level.
+   *
+   * THE FUNCTION IS ONE NAND PER BIT, which is why this is the family's head rather
+   * than one of its members: `and8` / `or8` / `nand8` / `nor8` are four spellings
+   * of the same bit-sliced idea, and NAND is the gate the whole game's cost basis
+   * is denominated in. The reference is a splitter per operand, eight `nand`s and a
+   * maker: 8 NAND equivalents on a path one component deep, with the packers and
+   * the level pins free on both metrics.
+   *
+   * THE FOUR BYTE OPERATORS ARE OFFERED, AND THAT IS THE OWN-REWARD RULE RATHER
+   * THAN AN ACCIDENT. `paletteDefsFor` hands a level its own rewards before it is
+   * passed, so a player can drop `nand8` straight in -- and it ties the reference
+   * exactly, because one byte-wide NAND cell is one NAND per bit on the documented
+   * basis: measured, `gate: 8, delay: 1`, the same numbers the eight-gate circuit
+   * scores. Offering the other three costs the level nothing (none of them computes
+   * a NAND alone, and the shelf is offered as it was earned), and what the target
+   * still separates is the correct-but-costlier spelling of the same byte --
+   * `nor8(a, a)`, a four-NAND cell, is 32 gates for the same answer, which is the
+   * price level 26 records for its own copy of that cell. That is the same trade
+   * this batch's level 22 makes for `full_adder`: a drop-in is offered when it is
+   * the level's own reward, and even a tying one does not make the lesson vacuous,
+   * because the lesson is the bit-sliced construction the part is short-hand for.
+   */
+  {
+    id: 'ch2-25-byte-nand',
+    chapter: 2,
+    index: 25,
+    name: { zh: '单字节与非', en: 'Byte NAND' },
+    brief: {
+      zh: '两个八位输入 a、b，一个八位输出 out。把两个字节逐位与非：只有当某一位上 a 和 b 同时为 1 时，out 的该位才是 0，其余各位都是 1。',
+      en: 'Two eight-bit inputs a and b, one eight-bit output. NAND them bit by bit: a bit of out is 0 only where both a and b are 1 at that position, and 1 everywhere else.',
+    },
+    hint: {
+      zh: '用位拆分器把 a 和 b 各拆成八位，每一位配一个与非门，八个结果再用位合并器拼回一个字节。也可以直接用这一关发给你的 nand8：一颗就是那八个与非门。',
+      en: 'Split both bytes with a Splitter, NAND each pair of bits, and pack the eight results back with a Maker. Or drop in the nand8 this level hands out: one instance is exactly those eight NANDs.',
+    },
+    allowedComponents: [...GATES_1BIT, ...BYTE_WIRING, ...WIDE_OPS, ...BYTE_AND_OR, ...LEVEL_IO],
+    io: IO_A8_B8_OUT8,
+    checks: [
+      {
+        kind: 'fuzz',
+        seed: SEED_25,
+        rounds: 256,
+        inputs: {
+          a: (sample) => sample.a ?? 0,
+          b: (sample) => sample.b ?? 0,
+        },
+        // `~(a & b)` alone is a negative int32, and the kernel refuses an
+        // expectation that does not fit its pin rather than reducing it, so the
+        // author's own `& 0xff` is what makes this check runnable at all -- the
+        // same load-bearing mask level 26 carries in front of `~a`.
+        outputs: { out: (v) => ~((v.a ?? 0) & (v.b ?? 0)) & 0xff },
+      },
+    ],
+    // Measured: one NAND per bit -- 8 x 1 = 8 NAND equivalents -- behind a free
+    // splitter per operand and a free maker, one gate deep. `nand8`, this level's
+    // own reward, ties it exactly; the four-NAND-cell spellings are the ones the
+    // target separates, and the comment above says which.
+    threeStar: { gate: 8, delay: 1, tick: 0 },
+    rewards: { components: ['and8', 'or8', 'nand8', 'nor8'] },
+  },
+
+  /**
+   * ch2-26-byte-not -- Byte NOT / 8 位非
+   *
+   * SOURCED: the name in both languages, its position (19th), and the concept --
+   * inverting every bit of a byte.
+   *
+   * AUTHORED: the `a:8 -> out:8` shape; the fuzz check (seed, 256 rounds, and the
+   * MASKED expectation -- load-bearing here rather than decorative, because `~a`
+   * is a negative int32 and the kernel refuses an expectation that does not fit
+   * its pin instead of masking it, so the author's own `& 0xff` is what makes
+   * this check runnable at all); the measured three-star target; and the three
+   * rewards.
+   *
+   * THE TARGET SEPARATES SOME CORRECT ANSWERS AND NOT OTHERS, and this comment
+   * says which. Eight NOTs measure 8 NAND equivalents at depth 1, and so
+   * does the `not8` this level hands out, and so does `nand8(a, a)` -- level
+   * 18's reward, and the answer a player who has just met the wide family is
+   * most likely to reach for, because a NAND cell is one NAND per bit on the
+   * same documented basis. The three spellings are the same circuit on this
+   * metric, so the target ties all three at three stars; what it does NOT admit
+   * is the same function built from a four-NAND cell -- `nor8(a, a)` is
+   * `~(a | a)`, a correct byte NOT for 32 gates, and one star. Both halves are
+   * asserted in the test file, because a target that every correct answer met
+   * would not be measuring the lesson.
+   */
+  {
+    id: 'ch2-26-byte-not',
+    chapter: 2,
+    index: 26,
+    name: { zh: '单字节非门', en: 'Byte NOT' },
+    brief: {
+      zh: '一个八位输入 a。把它的每一位取反：0 变 1，1 变 0，八位一起翻过来。',
+      en: 'One eight-bit input a. Invert every bit: 0 becomes 1 and 1 becomes 0, all eight at once.',
+    },
+    hint: {
+      zh: '位拆分器拆开后，每一位各接一个非门，再合并回一个字节。也可以让每一位与 1 异或——两条路都要记得第 7 位。',
+      en: 'Split it, invert each bit with its own NOT, then pack the eight results back. XORing each bit with 1 does the same job; either way, do not lose bit 7.',
+    },
+    allowedComponents: [
+      ...GATES_1BIT,
+      ...BYTE_WIRING,
+      ...WIDE_OPS,
+      ...BYTE_AND_OR,
+      'xor8',
+      'xnor8',
+      'not8',
+      ...LEVEL_IO,
+    ],
+    io: IO_A8_OUT8,
+    checks: [
+      {
+        kind: 'fuzz',
+        seed: SEED_19,
+        rounds: 256,
+        inputs: { a: (sample) => sample.a ?? 0 },
+        // `~a` alone is -1 for a = 0, which does not fit an 8-bit pin, so the
+        // mask is the expectation's definition rather than a convenience.
+        outputs: { out: (v) => ~(v.a ?? 0) & 0xff },
+      },
+    ],
+    // Measured: one NOT per bit -- 8 x 1 = 8 NAND equivalents -- behind a free
+    // splitter and maker, one gate deep. `not8` ties it, and so does
+    // `nand8(a, a)` (a NAND cell is one NAND per bit on the documented basis, so
+    // the three spellings are the same circuit on this metric); the paragraph
+    // above and the test file say what the target does and does not separate.
+    threeStar: { gate: 8, delay: 1, tick: 0 },
+    rewards: { components: ['xor8', 'xnor8', 'not8'] },
+  },
+
+  /**
+   * ch2-27-adding-bytes -- Adding Bytes / 8 位加法器
    *
    * SOURCED: the name in both languages, its position (22nd), the concept
    * (cascading one-bit adders into a byte adder), and its ACHIEVEMENT note --
@@ -543,10 +582,10 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
    * it was earned.
    */
   {
-    id: 'ch2-22-adding-bytes',
+    id: 'ch2-27-adding-bytes',
     chapter: 2,
-    index: 22,
-    name: { zh: '8 位加法器', en: 'Adding Bytes' },
+    index: 27,
+    name: { zh: '单字节加法', en: 'Adding Bytes' },
     brief: {
       zh: '两个八位输入 a、b 和一个一位输入 cin。把三者全部相加：结果的低八位放在 out 上，第九位（也就是进位）放在 cout 上。',
       en: 'Two eight-bit inputs a and b, plus a one-bit cin. Add all three: the low eight bits of the result go on out, and the ninth bit -- the carry -- goes on cout.',
@@ -594,6 +633,6 @@ export const CH2_BATCH2: readonly LevelSpec[] = [
     // alternative: correct, inside the pass condition, and one star, because the
     // target is 72/8.
     threeStar: { gate: 72, delay: 8, tick: 0 },
-    rewards: { components: ['switch', 'switch8'] },
+    rewards: { components: ['switch8'] },
   },
 ];

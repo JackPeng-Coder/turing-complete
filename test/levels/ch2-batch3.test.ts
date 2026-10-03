@@ -10,11 +10,8 @@ import { describe, expect, it } from 'vitest';
 import { STARTER_COMPONENTS } from '../../src/app/progress';
 import type { Graph } from '../../src/core/graph';
 import { DEFAULT_FUZZ_ROUNDS } from '../../src/levels/checks';
-import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
-import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
-import { CH2_BATCH1 } from '../../src/levels/content/ch2/batch1';
-import { CH2_BATCH2 } from '../../src/levels/content/ch2/batch2';
 import { CH2_BATCH3 } from '../../src/levels/content/ch2/batch3';
+import { LEVELS } from '../../src/levels/index';
 import { grade } from '../../src/levels/grader';
 import type {
   CheckFailure,
@@ -24,7 +21,7 @@ import type {
   TruthRow,
 } from '../../src/levels/spec';
 import { build, registry, type Node } from '../fixtures/build';
-import { CH2_BATCH3_REFERENCES, bits, logicEngine } from '../fixtures/ch2-references';
+import { CH2_BATCH3_REFERENCES, bits } from '../fixtures/ch2-references';
 
 /**
  * Chapter 2's third batch: levels 23-27 -- two's complement, the decoders and
@@ -34,23 +31,21 @@ import { CH2_BATCH3_REFERENCES, bits, logicEngine } from '../fixtures/ch2-refere
  * concept each, and nothing else -- no ports, no widths, no pass conditions, no
  * targets and no rewards. Every other number in the level data is this replica's
  * design, which is why each level carries a data comment saying which is which;
- * the marker block below checks that the comments exist and that the three
- * notes this batch owes a reader are in them (level 23's change of KIND, level
- * 25's per-width decoder family, and level 27's authored opcode table).
+ * the marker block below checks that the comments exist and that the notes this
+ * batch owes a reader are in them (level 29's change of KIND and the per-width
+ * decoder family, whose third member 2.x added).
  *
- * TWO THINGS THIS FILE CARRIES THAT THE EARLIER BATCHES' DO NOT:
+ * ONE THING THIS FILE CARRIES THAT THE EARLIER BATCHES' DO NOT:
  *
- *  * a level whose SOURCE FORM IS NOT A CIRCUIT AT ALL -- level 23 is a timed
+ *  * a level whose SOURCE FORM IS NOT A CIRCUIT AT ALL -- level 29 is a timed
  *    mini-game in the compendium, so the level data and its comment record the
- *    conversion rather than pretending the source specified a puzzle;
- *  * a level with an AUTHORED INSTRUCTION SET -- level 27's eight opcodes are
- *    not enumerated anywhere in the source, so `the eight opcodes are all
- *    exercised` below is not decoration: it measures which opcodes the level's
- *    own fixed-seed sequence actually drives, proves the expectation function
- *    defines all eight, and breaks the reference one opcode at a time to show
- *    that a circuit wrong on opcode k fails on a round of opcode k.
+ *    conversion rather than pretending the source specified a puzzle.
  *
- * The `fuzz` levels (23, 24 and 27) follow batch 2's pattern for a wrong
+ * This batch used to carry a second one, level 27's authored instruction set (the
+ * Logic Engine): 2.x has no such level, so the level, its reference circuit and
+ * the eight-opcode suite that measured it are gone.
+ *
+ * The `fuzz` levels (29 and 31) follow batch 2's pattern for a wrong
  * circuit: the failure record is checked against the level's own expectation
  * functions and the round and vector in it are asserted to be the FIRST ones
  * that actually disagree, so a check that failed "somewhere" could not pass for
@@ -74,14 +69,37 @@ function specOf(id: string): LevelSpec {
   return level;
 }
 
-const L23 = levelAt(23);
-const L24 = levelAt(24);
-const L25 = levelAt(25);
-const L26 = levelAt(26);
-const L27 = levelAt(27);
+const L29 = levelAt(29);
+const L31 = levelAt(31);
+const L35 = levelAt(35);
+const L36 = levelAt(36);
+const L37 = levelAt(37);
 
-/** The batch's three fuzz levels, in order. */
-const FUZZ_LEVELS: readonly LevelSpec[] = [L23, L24, L27];
+/** The last global index this batch covers (37: the 3-bit decoder). */
+const LAST_INDEX = Math.max(...CH2_BATCH3.map((spec) => spec.index));
+
+/**
+ * The campaign up to and including this batch, in play order.
+ *
+ * THE BATCHES ARE NO LONGER A RUNNING ORDER, which is what the two gating walks
+ * below used to assume: `switch` is handed out by `ch2-17-circular-dependency`
+ * (which lives in `ch2/batch4.ts`), `mux8` by level 30 in that same file, and
+ * `delay8` by level 20 -- all of them before this batch in play order and none of
+ * them in the batches this file imports. `LEVELS` is sorted by index, so slicing
+ * it is the campaign's own order.
+ */
+const UP_TO_THIS_BATCH: readonly LevelSpec[] = LEVELS.filter(
+  (level) => level.index <= LAST_INDEX,
+);
+
+/**
+ * The batch's fuzz levels, in index order.
+ *
+ * It used to hold three: the two signed-byte levels and the Logic Engine the 2.x
+ * realignment removed. The 2-bit decoder added in its place is a truth table, so
+ * the fuzz set is the two that remain.
+ */
+const FUZZ_LEVELS: readonly LevelSpec[] = [L29, L31];
 
 /** `id:width` per pin, the shape the task brief fixes for each level. */
 function pinsOf(level: LevelSpec): { inputs: string[]; outputs: string[] } {
@@ -212,28 +230,28 @@ function vacuityProblems(level: LevelSpec): string[] {
   return problems;
 }
 
-describe('chapter 2, levels 23-27', () => {
+describe('chapter 2, levels 29-37', () => {
   it('exposes five chapter-2 levels with the briefed indices', () => {
-    expect(CH2_BATCH3.map((level) => level.index)).toEqual([23, 24, 25, 26, 27]);
+    expect(CH2_BATCH3.map((level) => level.index)).toEqual([29, 31, 35, 36, 37]);
     expect(CH2_BATCH3.map((level) => level.chapter)).toEqual([2, 2, 2, 2, 2]);
   });
 
   it('uses the ch2-<index>-<slug> id convention', () => {
     expect(CH2_BATCH3.map((level) => level.id)).toEqual([
-      'ch2-23-negative-numbers',
-      'ch2-24-signed-negator',
-      'ch2-25-1-bit-decoder',
-      'ch2-26-3-bit-decoder',
-      'ch2-27-logic-engine',
+      'ch2-29-negative-numbers',
+      'ch2-31-signed-negator',
+      'ch2-35-1-bit-decoder',
+      'ch2-36-2-bit-decoder',
+      'ch2-37-3-bit-decoder',
     ]);
   });
 
   it('shapes every level exactly as the brief fixes it', () => {
-    expect(pinsOf(L23)).toEqual({ inputs: ['a:8'], outputs: ['out:8'] });
-    expect(pinsOf(L24)).toEqual({ inputs: ['a:8'], outputs: ['out:8'] });
-    expect(pinsOf(L25)).toEqual({ inputs: ['sel:1'], outputs: ['out:2'] });
-    expect(pinsOf(L26)).toEqual({ inputs: ['sel:3'], outputs: ['out:8'] });
-    expect(pinsOf(L27)).toEqual({ inputs: ['a:8', 'b:8', 'op:8'], outputs: ['out:8'] });
+    expect(pinsOf(L29)).toEqual({ inputs: ['a:8'], outputs: ['out:8'] });
+    expect(pinsOf(L31)).toEqual({ inputs: ['a:8'], outputs: ['out:8'] });
+    expect(pinsOf(L35)).toEqual({ inputs: ['sel:1'], outputs: ['out:2'] });
+    expect(pinsOf(L36)).toEqual({ inputs: ['sel:2'], outputs: ['out:4'] });
+    expect(pinsOf(L37)).toEqual({ inputs: ['sel:3'], outputs: ['out:8'] });
   });
 
   it('names each level in both languages', () => {
@@ -241,15 +259,15 @@ describe('chapter 2, levels 23-27', () => {
       'Negative Numbers',
       'Signed Negator',
       '1 Bit Decoder',
+      '2 Bit Decoder',
       '3 Bit Decoder',
-      'Logic Engine',
     ]);
     expect(CH2_BATCH3.map((level) => level.name.zh)).toEqual([
       '负数',
-      '相反数',
-      '1 位解码器',
-      '3 位解码器',
-      '逻辑引擎',
+      '数值反转',
+      '二进制译码',
+      '2-4 译码器',
+      '3-8 译码器',
     ]);
     for (const level of CH2_BATCH3) {
       expect(level.brief.zh.length, `${level.id} has an empty zh brief`).toBeGreaterThan(0);
@@ -267,7 +285,7 @@ describe('chapter 2, levels 23-27', () => {
     // 21, `switch8` at 22, and the splitter and maker this batch wires bytes
     // with arrive at 13.
     const unlocked = new Set<string>(STARTER_COMPONENTS);
-    for (const level of [...CH1_PART1, ...CH1_PART2, ...CH2_BATCH1, ...CH2_BATCH2, ...CH2_BATCH3]) {
+    for (const level of UP_TO_THIS_BATCH) {
       for (const def of level.rewards?.components ?? []) unlocked.add(def);
       for (const def of level.allowedComponents) {
         expect(unlocked.has(def), `${level.id} offers locked component ${def}`).toBe(true);
@@ -281,7 +299,7 @@ describe('chapter 2, levels 23-27', () => {
     // the batches after it hand out (the storage family: the byte mux, delay,
     // register, counter and RAM).
     const owned = new Set<string>(STARTER_COMPONENTS);
-    for (const level of [...CH1_PART1, ...CH1_PART2, ...CH2_BATCH1, ...CH2_BATCH2, ...CH2_BATCH3]) {
+    for (const level of UP_TO_THIS_BATCH) {
       for (const def of level.rewards?.components ?? []) owned.add(def);
       for (const def of level.allowedComponents) {
         expect(owned.has(def), `${level.id} offers ${def}, which no level unlocks by then`).toBe(
@@ -289,8 +307,20 @@ describe('chapter 2, levels 23-27', () => {
         );
       }
     }
-    for (const later of ['mux8', 'delay8', 'reg8', 'counter8', 'ram8']) {
-      expect(owned.has(later), `${later} is unlocked inside this batch`).toBe(false);
+    // Derived rather than listed: the 2.x realignment moved `delay8` (level 20)
+    // from after this batch to before it, and `mux8` (level 30) into it.
+    const later = new Set<string>(
+      LEVELS.filter((level) => level.index > LAST_INDEX).flatMap(
+        (level) => level.rewards?.components ?? [],
+      ),
+    );
+    for (const level of CH2_BATCH3) {
+      for (const def of level.allowedComponents) {
+        expect(
+          later.has(def),
+          `${level.id} offers ${def}, which only a later level hands out`,
+        ).toBe(false);
+      }
     }
   });
 
@@ -306,9 +336,9 @@ describe('chapter 2, levels 23-27', () => {
     // everything" -- so both decoder levels build their rows with the kernel's
     // own `truthTable`, and each table is exhaustive over its select pin: two
     // rows for one select bit, eight for three.
-    expect(rowsOf(L25).length).toBe(2);
-    expect(rowsOf(L26).length).toBe(8);
-    for (const level of [L25, L26]) {
+    expect(rowsOf(L35).length).toBe(2);
+    expect(rowsOf(L37).length).toBe(8);
+    for (const level of [L35, L37]) {
       const rows = rowsOf(level);
       const seen = new Set(rows.map((row) => JSON.stringify(row.inputs)));
       expect(seen.size, `${level.id} repeats or skips input combinations`).toBe(rows.length);
@@ -316,19 +346,26 @@ describe('chapter 2, levels 23-27', () => {
   });
 
   it('states the one-bit decoder as a two-line one-hot table', () => {
-    const rows = rowsOf(L25);
+    const rows = rowsOf(L35);
     expect(rowFor(rows, { sel: 0 })?.outputs).toEqual({ out: 1 });
     expect(rowFor(rows, { sel: 1 })?.outputs).toEqual({ out: 2 });
   });
 
+  it('states the two-bit decoder as a four-line one-hot table', () => {
+    const rows = rowsOf(L36);
+    for (let sel = 0; sel < 4; sel += 1) {
+      expect(rowFor(rows, { sel })?.outputs, `sel=${sel}`).toEqual({ out: 1 << sel });
+    }
+  });
+
   it('states the three-bit decoder as an eight-line one-hot table', () => {
-    const rows = rowsOf(L26);
+    const rows = rowsOf(L37);
     for (let sel = 0; sel < 8; sel += 1) {
       expect(rowFor(rows, { sel })?.outputs, `sel=${sel}`).toEqual({ out: 1 << sel });
     }
   });
 
-  it('states the three fuzz levels with a fixed seed and 256 rounds', () => {
+  it('states the two fuzz levels with a fixed seed and 256 rounds', () => {
     // The brief fixes the checker kind, the seed discipline (a literal, never a
     // drawn one, never 0 -- the xorshift fixed point) and the round count; the
     // expectation functions are this batch's.
@@ -361,7 +398,7 @@ describe('chapter 2, levels 23-27', () => {
     // that computes something else is a level that grades the wrong thing, and
     // it would still be "not vacuous". These are the defining values, taken from
     // both sides of the sign bit.
-    const abs = expectation(L23, 'out');
+    const abs = expectation(L29, 'out');
     expect(abs(vector({ a: 0x00 }))).toBe(0x00);
     expect(abs(vector({ a: 0x01 }))).toBe(0x01);
     expect(abs(vector({ a: 0x7f }))).toBe(0x7f);
@@ -371,7 +408,7 @@ describe('chapter 2, levels 23-27', () => {
     expect(abs(vector({ a: 0xff }))).toBe(0x01);
     expect(abs(vector({ a: 0xfe }))).toBe(0x02);
 
-    const negate = expectation(L24, 'out');
+    const negate = expectation(L31, 'out');
     expect(negate(vector({ a: 0x00 }))).toBe(0x00);
     expect(negate(vector({ a: 0x01 }))).toBe(0xff);
     expect(negate(vector({ a: 0x02 }))).toBe(0xfe);
@@ -380,49 +417,6 @@ describe('chapter 2, levels 23-27', () => {
     // not fit a signed byte -- the low eight bits are 0x80.
     expect(negate(vector({ a: 0x80 }))).toBe(0x80);
     expect(negate(vector({ a: 0xff }))).toBe(0x01);
-  });
-
-  it('expects the eight opcodes the logic engine states, in the brief', () => {
-    // The opcode table is this replica's design (the source says only "build the
-    // complete set of logical operations"), so the level's own expectation
-    // function IS the specification of what each opcode computes -- and the
-    // BRIEF has to state all eight to the player. One hand-picked vector per
-    // opcode, plus the three ways an eight-bit op can surprise a reader: the
-    // discarded carry, the shift amount read from b's LOW THREE BITS, and the
-    // arithmetic shift's sign fill.
-    const out = expectation(L27, 'out');
-    expect(out(vector({ a: 0xf0, b: 0x3c, op: 0 }))).toBe(0x30); // and
-    expect(out(vector({ a: 0xf0, b: 0x3c, op: 1 }))).toBe(0xfc); // or
-    expect(out(vector({ a: 0xf0, b: 0x3c, op: 2 }))).toBe(0xcc); // xor
-    expect(out(vector({ a: 0xf0, b: 0x3c, op: 3 }))).toBe(0x0f); // not a
-    expect(out(vector({ a: 0xf0, b: 0x3c, op: 4 }))).toBe(0x2c); // add: 0x12c -> 0x2c
-    expect(out(vector({ a: 0x3c, b: 0xf0, op: 5 }))).toBe(0x4c); // sub: -0xb4 -> 0x4c
-    expect(out(vector({ a: 0x81, b: 0x03, op: 6 }))).toBe(0x08); // shift_l by 3
-    expect(out(vector({ a: 0x81, b: 0x03, op: 7 }))).toBe(0xf0); // ashr by 3: sign fills
-    // b's low three bits are the amount, so 0x0b is a shift by 3 and not by 11.
-    expect(out(vector({ a: 0x81, b: 0x0b, op: 6 }))).toBe(0x08);
-    expect(out(vector({ a: 0x81, b: 0x0b, op: 7 }))).toBe(0xf0);
-    // 0xff shifted arithmetically right by 7 is -1, not 1.
-    expect(out(vector({ a: 0xff, b: 0x07, op: 7 }))).toBe(0xff);
-    expect(out(vector({ a: 0xff, b: 0x07, op: 6 }))).toBe(0x80);
-    // The top five bits of op change nothing: op is masked to its low three.
-    for (let high = 0; high < 32; high += 1) {
-      expect(out(vector({ a: 0x81, b: 0x03, op: (high << 3) | 7 }))).toBe(0xf0);
-      expect(out(vector({ a: 0x81, b: 0x03, op: (high << 3) | 6 }))).toBe(0x08);
-    }
-  });
-
-  it('lists every opcode in the brief, in both languages', () => {
-    // The brief is the only place a player learns the instruction set, so all
-    // eight numbered mnemonics have to be in it -- in both languages, as
-    // identifiers with localized prose around them. The paired form (`0=and`)
-    // rather than the bare mnemonic, because `or` alone is a substring of half
-    // the English language and would prove nothing.
-    const opcodes = ['0=and', '1=or', '2=xor', '3=not a', '4=add', '5=sub', '6=shift_l', '7=ashr'];
-    for (const opcode of opcodes) {
-      expect(L27.brief.en, `the en brief omits ${opcode}`).toContain(opcode);
-      expect(L27.brief.zh, `the zh brief omits ${opcode}`).toContain(opcode);
-    }
   });
 
   it('tells the player the decoder comes in widths, and names the parts', () => {
@@ -434,55 +428,53 @@ describe('chapter 2, levels 23-27', () => {
     // `w` bits, `out` is `2 ** w`). So the brief has to do what the engine does:
     // name the parts. `decoder1` is the 1-to-2 form this level asks for, and
     // `decoder2` is the 2-to-4 form a later circuit drops in.
-    for (const brief of [L25.brief.en, L25.brief.zh]) {
+    for (const brief of [L35.brief.en, L35.brief.zh]) {
       expect(brief).toContain('decoder1');
       expect(brief).toContain('decoder2');
     }
     // Each form is stated as the width it decodes, in both languages, and the
     // catalog's own name for the wider one is kept -- it is the name the source
     // gives the part no level introduces.
-    expect(L25.brief.en).toContain('1-to-2');
-    expect(L25.brief.en).toContain('2-to-4');
-    expect(L25.brief.en).toContain('2-bit decoder');
-    expect(L25.brief.zh).toContain('2 路输出');
-    expect(L25.brief.zh).toContain('4 路输出');
-    expect(L25.brief.zh).toContain('2 位解码器');
+    expect(L35.brief.en).toContain('1-to-2');
+    expect(L35.brief.en).toContain('2-to-4');
+    expect(L35.brief.en).toContain('2-bit decoder');
+    expect(L35.brief.zh).toContain('2 路输出');
+    expect(L35.brief.zh).toContain('4 路输出');
+    expect(L35.brief.zh).toContain('2 位解码器');
     // And the mechanism the engine cannot honour is GONE from the brief, not
     // merely joined by the right one: a level that offered `params.width = 2` as
     // a way to a 4-output decoder would be teaching a knob this kernel does not
     // have. This is the assertion that fails if the old wording comes back.
-    expect(L25.brief.en).not.toContain('params.width');
-    expect(L25.brief.zh).not.toContain('params.width');
+    expect(L35.brief.en).not.toContain('params.width');
+    expect(L35.brief.zh).not.toContain('params.width');
   });
 
   it('hands out the parts the brief assigns to each level', () => {
-    expect(L23.rewards?.components).toEqual(['div8']);
-    expect(L24.rewards?.components).toEqual(['less_s', 'shift_l8', 'shift_r8']);
-    expect(L25.rewards?.components).toEqual(['decoder1']);
-    expect(L26.rewards?.components).toEqual(['decoder3']);
-    expect(L27.rewards?.components).toEqual(['ashr8', 'rot_l8', 'rot_r8']);
+    expect(L29.rewards?.components).toEqual(['div8']);
+    expect(L31.rewards?.components).toEqual(['less_s', 'shift_l8', 'shift_r8']);
+    expect(L35.rewards?.components).toEqual(['decoder1']);
+    expect(L36.rewards?.components).toEqual(['decoder2']);
+    expect(L37.rewards?.components).toEqual(['decoder3']);
   });
 
   it('offers each level the parts its own lesson needs', () => {
     // Not a restatement of the palettes but of the claims their comments make.
     for (const def of ['splitter', 'maker', 'add8', 'xor8']) {
-      expect(L23.allowedComponents, `level 23 cannot use ${def}`).toContain(def);
+      expect(L29.allowedComponents, `level 23 cannot use ${def}`).toContain(def);
     }
     for (const def of ['not8', 'add8']) {
-      expect(L24.allowedComponents, `level 24 cannot use ${def}`).toContain(def);
+      expect(L31.allowedComponents, `level 24 cannot use ${def}`).toContain(def);
     }
-    expect(L25.allowedComponents).toContain('maker');
-    expect(L26.allowedComponents).toContain('maker');
-    for (const def of ['shift_l8', 'ashr8', 'and8', 'or8', 'nand', 'not']) {
-      expect(L27.allowedComponents, `level 27 cannot use ${def}`).toContain(def);
-    }
+    expect(L35.allowedComponents).toContain('maker');
+    expect(L36.allowedComponents).toContain('maker');
+    expect(L37.allowedComponents).toContain('maker');
     // Level 24 withholds the one drop-in that answers it: `neg8` is not this
     // level's own reward and has exactly this level's I/O shape, so offering it
     // would let one component tie the level's two-component lesson on gates and
     // beat it on delay. Batch 2's level 22 states the rule; this is its second
     // use, and level 23 (where `neg8` does NOT answer the level) offers it.
-    expect(L24.allowedComponents).not.toContain('neg8');
-    expect(L23.allowedComponents).toContain('neg8');
+    expect(L31.allowedComponents).not.toContain('neg8');
+    expect(L29.allowedComponents).toContain('neg8');
   });
 });
 
@@ -517,13 +509,13 @@ describe('every level carries its sourced-vs-authored data comment', () => {
     });
   }
 
-  it("records that level 23 changes the source level's kind", () => {
+  it("records that level 29 changes the source level's kind", () => {
     // The source's level of this name is a timed mini-game with no circuit spec
     // at all, so this level's KIND changes: a mini-game becomes a two's-
     // complement arithmetic circuit. The comment has to say so, quote the
     // source's own label for what it was, and say that it is a conversion rather
     // than the source's puzzle.
-    const l23 = comments.get('ch2-23-negative-numbers') ?? '';
+    const l23 = comments.get('ch2-29-negative-numbers') ?? '';
     expect(l23).toContain('限时小游戏');
     expect(l23).toContain('补码');
     expect(l23).toContain('kind');
@@ -536,22 +528,10 @@ describe('every level carries its sourced-vs-authored data comment', () => {
     // instance, which is what makes the rejected mechanism impossible rather
     // than merely unfashionable. It also has to name the resolution: the
     // registered family, and `decoder2` as the catalog's 2-Bit Decoder.
-    const l25 = comments.get('ch2-25-1-bit-decoder') ?? '';
+    const l25 = comments.get('ch2-35-1-bit-decoder') ?? '';
     expect(l25).toContain('params.width');
     expect(l25).toContain('decoder2');
     expect(l25).toContain('2-Bit Decoder');
-  });
-
-  it("records that level 27's opcode table is this replica's own", () => {
-    // The source gives this level one line -- build the complete set of logical
-    // operations -- and enumerates no opcodes, so the table is authored. The
-    // comment has to say that, and has to list the eight values, because the
-    // brief teaches the player from them.
-    const l27 = comments.get('ch2-27-logic-engine') ?? '';
-    expect(l27).toContain('用或门和非门构建完整逻辑运算集');
-    for (const opcode of ['and', 'or', 'xor', 'add', 'sub', 'shift_l', 'ashr']) {
-      expect(l27, `the comment omits ${opcode}`).toContain(opcode);
-    }
   });
 });
 
@@ -644,13 +624,10 @@ function decoderPassThrough(): Graph {
 
 /** Circuits a player would plausibly build and that must be rejected. */
 const wrong: Record<string, () => Graph> = {
-  'ch2-23-negative-numbers': alwaysNegate,
-  'ch2-24-signed-negator': invertOnly,
-  'ch2-25-1-bit-decoder': swappedDecoderBits,
-  'ch2-26-3-bit-decoder': decoderPassThrough,
-  // The engine with a logical right shift where the spec asks for an arithmetic
-  // one: correct on every opcode but the seventh.
-  'ch2-27-logic-engine': () => logicEngine({ op7: 'logical' }),
+  'ch2-29-negative-numbers': alwaysNegate,
+  'ch2-31-signed-negator': invertOnly,
+  'ch2-35-1-bit-decoder': swappedDecoderBits,
+  'ch2-37-3-bit-decoder': decoderPassThrough,
 };
 
 describe('plausible wrong circuits fail', () => {
@@ -666,7 +643,7 @@ describe('plausible wrong circuits fail', () => {
   }
 
   it('fails the anti-decoder on the row the swap changes', () => {
-    const result = grade(wrong['ch2-25-1-bit-decoder']!(), registry, specOf('ch2-25-1-bit-decoder'));
+    const result = grade(wrong['ch2-35-1-bit-decoder']!(), registry, specOf('ch2-35-1-bit-decoder'));
     expect(result.failures[0]?.inputs).toEqual({ sel: 0 });
     expect(result.failures[0]?.expected).toEqual({ out: 1 });
     expect(result.failures[0]?.actual).toEqual({ out: 2 });
@@ -677,7 +654,7 @@ describe('plausible wrong circuits fail', () => {
     // combination is `sel = 0`: its one-hot form is 1 and the pass-through
     // drives 0. A decoder that published its input as a binary value would be
     // right on no row at all except the trivial one.
-    const result = grade(wrong['ch2-26-3-bit-decoder']!(), registry, specOf('ch2-26-3-bit-decoder'));
+    const result = grade(wrong['ch2-37-3-bit-decoder']!(), registry, specOf('ch2-37-3-bit-decoder'));
     expect(result.failures[0]?.inputs).toEqual({ sel: 0 });
     expect(result.failures[0]?.expected).toEqual({ out: 1 });
     expect(result.failures[0]?.actual).toEqual({ out: 0 });
@@ -745,11 +722,9 @@ describe('the fuzz levels name the round and the vector that failed', () => {
    */
   const behaviour: Record<string, (v: FuzzVector) => Record<string, number>> = {
     // Always negate: `-a` for every byte, sign or no sign.
-    'ch2-23-negative-numbers': (v) => ({ out: (0x100 - (v.a ?? 0)) & 0xff }),
+    'ch2-29-negative-numbers': (v) => ({ out: (0x100 - (v.a ?? 0)) & 0xff }),
     // Invert only: `~a`, which is `-a - 1`.
-    'ch2-24-signed-negator': (v) => ({ out: ~(v.a ?? 0) & 0xff }),
-    // The engine with the logical right shift in opcode 7's slot.
-    'ch2-27-logic-engine': (v) => ({ out: engineValue(v, { op7: 'logical' }) }),
+    'ch2-31-signed-negator': (v) => ({ out: ~(v.a ?? 0) & 0xff }),
   };
 
   for (const [id, actual] of Object.entries(behaviour)) {
@@ -800,140 +775,6 @@ describe('the fuzz levels drive varying, reproducible vectors', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Level 27's eight opcodes, one at a time
-// ---------------------------------------------------------------------------
-
-/**
- * What the engine computes for one vector, as the level's spec states it.
- *
- * The TARGET of this modelling, never its source: the level's own expectation
- * function is what grades, and `expects the eight opcodes...` above compares the
- * two on hand-picked vectors. What this copy is for is predicting what a BROKEN
- * engine drives, which the level data cannot answer.
- */
-function engineValue(
-  v: FuzzVector,
-  options: { readonly amount?: 'low3' | 'byte'; readonly op7?: 'ashr' | 'logical' } = {},
-): number {
-  const a = (v.a ?? 0) & 0xff;
-  const b = (v.b ?? 0) & 0xff;
-  const op = (v.op ?? 0) & 7;
-  const amount = options.amount === 'byte' ? b : b & 7;
-  switch (op) {
-    case 0:
-      return a & b;
-    case 1:
-      return a | b;
-    case 2:
-      return a ^ b;
-    case 3:
-      return ~a & 0xff;
-    case 4:
-      return (a + b) & 0xff;
-    case 5:
-      return (a - b) & 0xff;
-    case 6:
-      // The logical shifts give 0 for an amount of eight or more.
-      return amount >= 8 ? 0 : (a << amount) & 0xff;
-    case 7:
-      if (options.op7 === 'logical') return amount >= 8 ? 0 : (a >>> amount) & 0xff;
-      return arithmeticRight(a, amount);
-    default:
-      return 0;
-  }
-}
-
-/** `a` shifted arithmetically right: the sign fills, and an amount of 8+ is all sign. */
-function arithmeticRight(a: number, amount: number): number {
-  const signed = (a << 24) >> 24;
-  if (amount >= 8) return signed < 0 ? 0xff : 0x00;
-  return (signed >> amount) & 0xff;
-}
-
-describe("level 27's eight opcodes are all exercised", () => {
-  it('drives every opcode at least once in the level\'s own 256-round sequence', () => {
-    // The proof this block exists for. A fuzz check that happened to draw only
-    // opcodes 0-3 would leave half the instruction set ungraded while still
-    // "passing a correct circuit", so coverage is measured against the level's
-    // own fixed seed rather than asserted. The seed is a literal in the level
-    // data, so this is a fact about the level and not about the run.
-    const seen = captureRound(L27, solutions['ch2-27-logic-engine']!).seen;
-    expect(seen).toHaveLength(256);
-    const counts = new Map<number, number>();
-    for (const v of seen) {
-      const op = (v.op ?? 0) & 7;
-      counts.set(op, (counts.get(op) ?? 0) + 1);
-    }
-    expect([...counts.keys()].sort((x, y) => x - y)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
-    // Not a bare "at least once" that one lucky draw could satisfy: every opcode
-    // is drawn many times over, and the counts are printed by a failure here.
-    for (const op of [0, 1, 2, 3, 4, 5, 6, 7]) {
-      expect(counts.get(op) ?? 0, `opcode ${op} appears ${counts.get(op) ?? 0} times`).toBeGreaterThan(
-        3,
-      );
-    }
-  });
-
-  it('grades every opcode against a circuit broken on exactly that opcode', () => {
-    // Coverage is necessary but not sufficient: an opcode that appears in the
-    // sequence and is never COMPARED would still be ungraded. Each of the eight
-    // variants wires one opcode's mux input to its neighbour's result, so it is
-    // wrong on exactly one opcode and right on the other seven -- and the round
-    // it fails on has to be a round of that opcode.
-    for (let op = 0; op < 8; op += 1) {
-      const { failures, seen } = captureRound(L27, () => logicEngine({ breakOp: op }));
-      expect(failures, `opcode ${op} was never graded`).toHaveLength(1);
-      const failure = failures[0]!;
-      const round = failure.round ?? -1;
-      const failing = seen[round];
-      expect(failing, `opcode ${op}: no vector recorded for round ${round}`).toBeDefined();
-      expect(
-        (failing!.op ?? 0) & 7,
-        `opcode ${op} failed on a round of opcode ${(failing!.op ?? 0) & 7}`,
-      ).toBe(op);
-      // And the disagreement is the one this variant introduces, not an
-      // expectation the level got wrong: `results[op]` was wired to
-      // `results[(op + 1) % 8]`, so the circuit drove the neighbouring opcode's
-      // value while the level expected this one's.
-      const expected = engineValue(failing!);
-      const neighbour = engineValue({ ...failing!, op: (op + 1) % 8 });
-      expect(failure.expected).toEqual({ out: expected });
-      expect(failure.actual).toEqual({ out: neighbour });
-      // Sanity: the two opcodes really do differ on this vector, so this is a
-      // round the break could be seen in at all.
-      expect(neighbour, `opcodes ${op} and ${(op + 1) % 8} agree on this vector`).not.toBe(
-        expected,
-      );
-    }
-  });
-
-  it('grades the shift amount as the low three bits of b', () => {
-    // The other authored rule in the opcode table: `shift_l`/`ashr` read b's low
-    // three bits, so the engine that feeds a whole byte to the barrel shifter is
-    // wrong on exactly the shift opcodes -- and on a round whose b is eight or
-    // more, which is what makes the round it fails on a meaningful one.
-    const { failures, seen } = captureRound(L27, () => logicEngine({ amount: 'byte' }));
-    expect(failures).toHaveLength(1);
-    const failing = seen[failures[0]!.round ?? -1]!;
-    expect([6, 7]).toContain((failing.op ?? 0) & 7);
-    expect((failing.b ?? 0) & 0xf8, 'the failing vector shifts by less than eight').not.toBe(0);
-  });
-
-  it('separates the eight opcodes on vectors a player would try by hand', () => {
-    // The same eight cases the level's own expectation function is checked on,
-    // stated here as arithmetic rather than as level data: this is the table the
-    // brief teaches, and the counterexample above is only meaningful against it.
-    expect(engineValue(vector({ a: 0xf0, b: 0x3c, op: 0 }))).toBe(0x30);
-    expect(engineValue(vector({ a: 0xf0, b: 0x3c, op: 1 }))).toBe(0xfc);
-    expect(engineValue(vector({ a: 0xf0, b: 0x3c, op: 2 }))).toBe(0xcc);
-    expect(engineValue(vector({ a: 0xf0, b: 0x3c, op: 3 }))).toBe(0x0f);
-    expect(engineValue(vector({ a: 0xf0, b: 0x3c, op: 4 }))).toBe(0x2c);
-    expect(engineValue(vector({ a: 0x3c, b: 0xf0, op: 5 }))).toBe(0x4c);
-    expect(engineValue(vector({ a: 0x81, b: 0x03, op: 6 }))).toBe(0x08);
-    expect(engineValue(vector({ a: 0x81, b: 0x03, op: 7 }))).toBe(0xf0);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // What the targets separate
@@ -973,7 +814,7 @@ describe('the targets separate the constructions they measure', () => {
     return build(nodes);
   }
 
-  it('level 24: the bit-serial incrementer is smaller and much deeper, and one star', () => {
+  it('level 31: the bit-serial incrementer is smaller and much deeper, and one star', () => {
     // `~a + 1` without the byte adder: eight NOTs, then a carry ripple of seven
     // ANDs and eight XORs. Measured rather than described, because the level's
     // comment claims the target DENIES three stars to a 54-gate circuit -- which
@@ -993,14 +834,14 @@ describe('the targets separate the constructions they measure', () => {
         })),
       ],
     );
-    const level = specOf('ch2-24-signed-negator');
+    const level = specOf('ch2-31-signed-negator');
     const result = grade(graph, registry, level);
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
     expect(result.metrics).toEqual({ gate: 54, delay: 9, tick: 0 });
     expect(result.stars, 'the reference is two gates deep and this is nine').toBe(1);
   });
 
-  it('level 23: the bit-serial magnitude is smaller and much deeper, and one star', () => {
+  it('level 29: the bit-serial magnitude is smaller and much deeper, and one star', () => {
     // The same skeleton with the sign bit as the carry-in: eight XORs spread the
     // sign over the byte, then the ripple adds it. 78 gates against the
     // reference's 104, nine gates deep against its two.
@@ -1014,14 +855,14 @@ describe('the targets separate the constructions they measure', () => {
         from: [`sa.b${bit}`, 'sa.b7'],
       })),
     );
-    const level = specOf('ch2-23-negative-numbers');
+    const level = specOf('ch2-29-negative-numbers');
     const result = grade(graph, registry, level);
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
     expect(result.metrics).toEqual({ gate: 78, delay: 9, tick: 0 });
     expect(result.stars, 'the reference is two gates deep and this is nine').toBe(1);
   });
 
-  it('level 26: the flat eight-AND3 decode is correct and one star', () => {
+  it('level 37: the flat eight-AND3 decode is correct and one star', () => {
     // The level's data comment names this alternative, so it is measured rather
     // than described: eight 3-input ANDs, one per output, each taking all three
     // literals directly. It is the same function on a path one gate shallower
@@ -1045,14 +886,14 @@ describe('the targets separate the constructions they measure', () => {
     nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: bits('o') });
     nodes.push({ kind: 'output', from: 'mk', width: 8 });
 
-    const level = specOf('ch2-26-3-bit-decoder');
+    const level = specOf('ch2-37-3-bit-decoder');
     const result = grade(build(nodes), registry, level);
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
     expect(result.metrics).toEqual({ gate: 35, delay: 2, tick: 0 });
     expect(result.stars, 'the tree is cheaper in gates, so the flat decode is one star').toBe(1);
   });
 
-  it('level 23: the textbook (a XOR m) - m is correct and one star', () => {
+  it('level 29: the textbook (a XOR m) - m is correct and one star', () => {
     // The level's data comment names this form too: `(a XOR m) - m`, spelled as
     // "NOT the mask, add it, carry-in high" instead of the level's "add the
     // mask's own low bit as the carry-in". For a non-negative byte the mask is 0
@@ -1075,14 +916,14 @@ describe('the targets separate the constructions they measure', () => {
       { kind: 'part', def: 'add8', id: 'plus', from: ['flip', 'nmask', 'one'] },
       { kind: 'output', from: 'plus', width: 8 },
     ]);
-    const level = specOf('ch2-23-negative-numbers');
+    const level = specOf('ch2-29-negative-numbers');
     const result = grade(graph, registry, level);
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
     expect(result.metrics).toEqual({ gate: 112, delay: 2, tick: 0 });
     expect(result.stars).toBe(1);
   });
 
-  it('level 24: inverting with a byte XOR is correct and one star', () => {
+  it('level 31: inverting with a byte XOR is correct and one star', () => {
     // The same one's complement, spelled `xor8(a, 0xff)` -- the `const8` the
     // palette offers is all ones, so this is the other way a player might invert
     // a byte. 32 gates where the `not8` costs 8, for the same function and the
@@ -1096,7 +937,7 @@ describe('the targets separate the constructions they measure', () => {
       { kind: 'part', def: 'add8', id: 'plus', from: ['flip', 'z', 'one'] },
       { kind: 'output', from: 'plus', width: 8 },
     ]);
-    const level = specOf('ch2-24-signed-negator');
+    const level = specOf('ch2-31-signed-negator');
     const result = grade(graph, registry, level);
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
     expect(result.metrics).toEqual({ gate: 104, delay: 2, tick: 0 });
@@ -1105,14 +946,15 @@ describe('the targets separate the constructions they measure', () => {
 });
 
 describe('the decoder rewards are generated per width, and no reference drops one in', () => {
-  it('wires both decoder levels from gates, not from a decoder drop-in', () => {
-    // `decoder1` and `decoder3` are the ids levels 25 and 26 hand out, and the
-    // family they belong to is registered now (`DECODER_DEF_IDS`, one part per
-    // width, generated in `src/core/defs/wide.ts`). What this asserts is what
-    // the data comments describe, and it is a fact about this batch rather than
-    // about the registry: neither decoder level's reference solution depends on
-    // the drop-in -- both are wired from gates -- so no target here was measured
-    // from a part a player would have to own before the level that hands it out.
+  it('wires every decoder level from gates, not from a decoder drop-in', () => {
+    // `decoder1`, `decoder2` and `decoder3` are the ids levels 35, 36 and 37 hand
+    // out, and the family they belong to is registered (`DECODER_DEF_IDS`, one
+    // part per width, generated in `src/core/defs/wide.ts`). What this asserts is
+    // what the data comments describe, and it is a fact about this batch rather
+    // than about the registry: no decoder level's reference solution depends on
+    // the drop-in -- all three are wired from gates -- so no target here was
+    // measured from a part a player would have to own before the level that hands
+    // it out.
     for (const id of ['decoder1', 'decoder2', 'decoder3']) {
       for (const [levelId, make] of Object.entries(solutions)) {
         const uses = make().instances.filter((inst) => inst.def === id);
@@ -1120,44 +962,78 @@ describe('the decoder rewards are generated per width, and no reference drops on
       }
     }
     // And they stay out of the palettes that have no pins for them.
-    for (const level of [L23, L24, L27]) {
+    for (const level of [L29, L31]) {
       expect(level.allowedComponents, `${level.id} offers a decoder`).not.toContain('decoder1');
       expect(level.allowedComponents).not.toContain('decoder3');
     }
-    // Level 25 names `decoder2` to the player and deliberately does not offer
-    // it: no level unlocks it, and wired to this level's one-bit select it would
-    // answer the level's own two-row table by itself (the level's data comment
-    // records both reasons). Pinned here so the decision has to be made again
-    // rather than drifted out of.
-    expect(L25.brief.en).toContain('decoder2');
-    expect(L25.allowedComponents).not.toContain('decoder2');
+    // Level 35 names `decoder2` to the player and deliberately does not offer it.
+    // The reason it used to give -- that no level unlocked the part at all -- is
+    // gone: 2.x added the 2-bit decoder at level 36 and that level hands it out.
+    // The surviving reason is the level's own: wired to this level's one-bit
+    // select, `decoder2` would answer the two-row table by itself. Pinned here so
+    // the decision has to be made again rather than drifted out of.
+    expect(L35.brief.en).toContain('decoder2');
+    expect(L35.allowedComponents).not.toContain('decoder2');
   });
 
-  it("lets level 25's own reward score the target, which is the own-reward rule", () => {
+  it("lets level 35's own reward score the target, which is the own-reward rule", () => {
     // The level's comment states this measurement, so it is taken here rather
     // than described. `decoder1` is the level's OWN reward and `paletteDefsFor`
     // offers a level its own rewards before it is passed (batch 2's rule, the
-    // same case as level 13's `splitter` and level 20's `full_adder`), so a
+    // same case as level 16's `splitter` and level 19's `full_adder`), so a
     // player can drop the part in and score exactly what the NOT-and-Maker
     // reference scores: one NAND equivalent, one unit of delay, three stars.
     // That is why the reward is listed and `decoder2` -- not this level's reward
     // at all -- is not; the distinction is the rule's, not an inconsistency.
-    expect(L25.rewards?.components).toContain('decoder1');
-    expect(L25.allowedComponents).toContain('decoder1');
+    expect(L35.rewards?.components).toContain('decoder1');
+    expect(L35.allowedComponents).toContain('decoder1');
     const graph = build([
       { kind: 'input', name: 'sel' },
       { kind: 'part', def: 'decoder1', id: 'dec', from: ['sel'] },
       { kind: 'output', from: 'dec', width: 2 },
     ]);
-    const result = grade(graph, registry, L25);
+    const result = grade(graph, registry, L35);
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
-    expect(result.metrics).toEqual(L25.threeStar);
+    expect(result.metrics).toEqual(L35.threeStar);
     expect(result.stars).toBe(3);
   });
 
-  it("lets level 26's own reward score the target, and it beats the target's depth", () => {
+  it("lets level 36's own reward score the target, and it beats the target's depth", () => {
+    // The same rule one width down from the 3-bit level, and the level the 2.x
+    // realignment added: `decoder2` is level 36's OWN reward, so `paletteDefsFor`
+    // offers it before the level is passed, and one instance wired straight from
+    // `sel` to the level's output answers the whole four-row table. The level's
+    // comment states the numbers measured here: 10 gate equivalents -- the same
+    // 10 the reference's shared minterm tree costs, since the registered part's
+    // `gateCost` IS that tree -- on a path ONE node deep, against the level's
+    // 10-and-2 target. It therefore ties the gate count and beats the depth, and
+    // scores three stars: the price of the own-reward rule, recorded in the
+    // comment rather than withdrawn from the palette.
+    expect(L36.rewards?.components).toContain('decoder2');
+    expect(L36.allowedComponents).toContain('decoder2');
+    expect(L36.threeStar).toEqual({ gate: 10, delay: 2, tick: 0 });
+
+    const graph = build([
+      { kind: 'input', name: 'sel', width: 2 },
+      { kind: 'part', def: 'decoder2', id: 'dec', from: ['sel'] },
+      { kind: 'output', from: 'dec', width: 4 },
+    ]);
+    const result = grade(graph, registry, L36);
+    expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
+    expect(result.metrics).toEqual({ gate: 10, delay: 1, tick: 0 });
+    expect(result.stars).toBe(3);
+
+    // And the reference is still what the target measures: the drop-in ties it
+    // on gates and is shallower, which is what the comment says.
+    const built = grade(solutions['ch2-36-2-bit-decoder']!(), registry, L36);
+    expect(L36.threeStar).toEqual(built.metrics);
+    expect(result.metrics.gate).toBe(built.metrics.gate);
+    expect(result.metrics.delay).toBeLessThan(built.metrics.delay);
+  });
+
+  it("lets level 37's own reward score the target, and it beats the target's depth", () => {
     // The second case of the same rule, one width up, and the one the module
-    // header used to miss: `decoder3` is level 26's OWN reward, so
+    // header used to miss: `decoder3` is level 37's OWN reward, so
     // `paletteDefsFor` offers it before the level is passed, and one instance
     // wired straight from `sel` to the level's output answers the whole
     // three-to-eight table. Measured rather than described, because the level's
@@ -1167,24 +1043,24 @@ describe('the decoder rewards are generated per width, and no reference drops on
     // 27-and-3 target. It therefore ties the gate count and beats the depth, and
     // scores three stars: the price of the own-reward rule, recorded in the
     // comment rather than withdrawn from the palette.
-    expect(L26.rewards?.components).toContain('decoder3');
-    expect(L26.allowedComponents).toContain('decoder3');
-    expect(L26.threeStar).toEqual({ gate: 27, delay: 3, tick: 0 });
+    expect(L37.rewards?.components).toContain('decoder3');
+    expect(L37.allowedComponents).toContain('decoder3');
+    expect(L37.threeStar).toEqual({ gate: 27, delay: 3, tick: 0 });
 
     const graph = build([
       { kind: 'input', name: 'sel', width: 3 },
       { kind: 'part', def: 'decoder3', id: 'dec', from: ['sel'] },
       { kind: 'output', from: 'dec', width: 8 },
     ]);
-    const result = grade(graph, registry, L26);
+    const result = grade(graph, registry, L37);
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
     expect(result.metrics).toEqual({ gate: 27, delay: 1, tick: 0 });
     expect(result.stars).toBe(3);
 
     // And the reference is still the thing the target measures: the drop-in
     // ties it on gates and is shallower, which is what the comment says.
-    const built = grade(solutions['ch2-26-3-bit-decoder']!(), registry, L26);
-    expect(L26.threeStar).toEqual(built.metrics);
+    const built = grade(solutions['ch2-37-3-bit-decoder']!(), registry, L37);
+    expect(L37.threeStar).toEqual(built.metrics);
     expect(result.metrics.gate).toBe(built.metrics.gate);
     expect(result.metrics.delay).toBeLessThan(built.metrics.delay);
   });

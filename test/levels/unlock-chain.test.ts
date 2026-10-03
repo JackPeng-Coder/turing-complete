@@ -42,28 +42,32 @@ import { registry } from '../fixtures/build';
  *
  *  * spec -> data: every part §3.3's chapter-2 row names is unlocked by exactly
  *    one chapter-2 level (the `describe` below titled "every part in spec §3.3's
- *    chapter-2 list ..."), `decoder2` being the one ruled exception, which has a
- *    test of its own rather than an exemption that silences the rule.
+ *    chapter-2 list ..."). There is no exemption left: `decoder2` had one until
+ *    the 2.x shape gave it a level, and the test that recorded the hole now
+ *    records the level that filled it.
  *  * data -> spec: every part a chapter-2 level hands out is named by that row
  *    ("spec §3.3's rows and the level data agree", above it). That is the
  *    direction the old copy could not see, and the one `ram8` would have failed.
  *
  * THE PHASE-END RULINGS, all settled, all of them now visible in §3.3 itself:
  *
- *  * `mem1` is a CHAPTER-1 part. Chapter 1's capstone (level 12) hands it out so
- *    chapter 2's latch level has a storage element to build its loop from; §3.3's
- *    chapter-1 row names it and the chapter-2 row no longer does.
- *  * `switch`/`switch8` unlock at level 22 in this replica. §3.3 says so and
- *    records the cost: the source's own level 32 is where it teaches the part, so
- *    level 32 is a re-teach here. The level number differs from the source
- *    deliberately -- that is the ruling, not an open disagreement.
- *  * `ram8` is in §3.3's chapter-2 row: level 28 rewards it and level 37's little
+ *  * `mem1` is a CHAPTER-1 part. Chapter 1's capstone (level 13, the Logic Exam)
+ *    hands it out so chapter 2's latch level has a storage element to build its
+ *    loop from; §3.3's chapter-1 row names it and the chapter-2 row no longer
+ *    does.
+ *  * `switch` unlocks at level 17 and `switch8` at level 27 in this replica --
+ *    the two are no longer one hand-out. The latch level's reference is built
+ *    from two `switch`es, so the 1-bit part lands there; the 8-bit version
+ *    arrives with the byte adder. §3.3's chapter-2 row names both. The source
+ *    teaches the 1-bit part at its own Bit Switch level, which is level 24 here,
+ *    so that level is a re-teach rather than a first meeting.
+ *  * `ram8` is in §3.3's chapter-2 row: level 17 rewards it and level 38's little
  *    box is built from it.
- *  * `decoder2` is named by §3.3 and introduced by NO level. No chapter-2 level
- *    name introduces the 2-bit decoder: the chapter teaches `decoder1` (level 25)
- *    and `decoder3` (level 26), and `decoder2` is the same generator one width up
- *    (`createDecoderDef(2)`, `src/core/defs/wide.ts`). It is registered and
- *    usable; it just never becomes a palette entry.
+ *  * `decoder2` used to be the counter-example this block recorded: §3.3 named
+ *    it, no level rewarded it, and rule 2 carried an exemption for it. The 2.x
+ *    shape gives it a level (`ch2-36-2-bit-decoder`), so the three widths are now
+ *    introduced one per level -- `decoder1` at 35, `decoder2` at 36, `decoder3`
+ *    at 37 -- and nothing is exempt from the rule.
  *
  * Anything ELSE unlocked by zero or two levels is a real defect -- a part no
  * player can ever hold, or a level whose reward is already in the player's hands
@@ -117,24 +121,27 @@ function specRow(label: string): readonly string[] {
   return ids;
 }
 
-/** §3.3's chapter-1 row: level 12's `mem1` puts a memory part in this row. */
+/** §3.3's chapter-1 row: level 13's `mem1` puts a memory part in this row. */
 const CH1_ROW = specRow('Ch1');
 
 /**
- * §3.3's chapter-2 row: the 32 parts the chapter's levels hand out, plus
- * `decoder2`, which the row names and no level introduces (see the ruling above).
+ * §3.3's chapter-2 row: the 30 parts the chapter's levels hand out. `decoder2`
+ * is in it like every other name: `ch2-36-2-bit-decoder` is where it arrives
+ * (see the ruling above).
  */
 const CH2_ROW = specRow('Ch2');
 
 /**
- * §3.3's chapter-3 row: the six parts the OVERTURE machine is built from.
+ * §3.3's chapter-3 row: the ten parts the chapter hands out -- the six the
+ * OVERTURE machine is built from, plus `alu2` and the shift/rotate family the
+ * retired Logic Engine used to carry, which `ch3-42-alu-2` hands out now.
  *
- * Unlike the two rows above it, this one needed no ruling before it could be
- * asserted: each of its six parts is introduced by a chapter-3 level, in row
- * order, against a level whose brief is the part itself. Chapters 1 and 2 both
- * had to settle a name that had moved (`mem1` into chapter 1's capstone,
- * `switch`/`switch8` ten levels ahead of the source, `ram8` named only late),
- * which is why their blocks below carry rulings and this one carries none.
+ * The six machine parts needed no ruling before they could be asserted: each is
+ * introduced by a chapter-3 level, in row order, against a level whose brief is
+ * the part itself. Chapters 1 and 2 both had to settle a name that had moved
+ * (`mem1` into chapter 1's capstone, `switch` off the source's own level, `ram8`
+ * named only late), which is why their blocks below carry rulings and this one
+ * carries none.
  */
 const CH3_ROW = specRow('Ch3');
 
@@ -259,11 +266,14 @@ describe("spec §3.3's rows and the level data agree", () => {
     // and still read as two passes.
     const rewarded = new Set<string>();
     for (const level of levelsOfChapter(3)) for (const def of rewardsOf(level)) rewarded.add(def);
-    // Non-vacuity: the walk reached the chapter's rewards at all. Six is the
-    // whole row, and `ch3-45`..`ch3-47` reward nothing (chapter 3 ends on the
-    // integration levels rather than on a part), so this is also the check that
-    // the last three levels did not quietly grow a reward of their own.
-    expect(rewarded.size).toBe(6);
+    // Non-vacuity: the walk reached every part the row names. The bound is the
+    // ROW's own length rather than a literal, so the parts the retired Logic
+    // Engine used to carry do not have to be restated here -- what this says is
+    // that chapter 3 hands out exactly its row and nothing beside it. `ch3-47`
+    // ..`ch3-49` reward nothing (chapter 3 ends on the integration levels rather
+    // than on a part), so this is also the check that the last three levels did
+    // not quietly grow a reward of their own.
+    expect(rewarded.size).toBe(CH3_ROW.length);
     expect(
       [...rewarded].filter((def) => !CH3_ROW.includes(def)),
       "chapter-3 rewards spec §3.3's chapter-3 row does not name",
@@ -305,12 +315,10 @@ describe("every part in spec §3.3's chapter-2 list is unlocked by exactly one l
     expect(new Set(CH2_ROW).size).toBe(CH2_ROW.length);
   });
 
-  it('hands out every listed part at exactly one chapter-2 level, bar the ruling', () => {
+  it('hands out every listed part at exactly one chapter-2 level', () => {
     const errors: string[] = [];
 
     for (const def of CH2_ROW) {
-      // The one ruled deviation, pinned by its own test below.
-      if (def === 'decoder2') continue;
       const unlockers = unlockersOf(def);
       if (unlockers.length !== 1) {
         const who = unlockers.map((level) => level.id).join(', ') || 'no level';
@@ -330,43 +338,42 @@ describe("every part in spec §3.3's chapter-2 list is unlocked by exactly one l
     expect(errors, 'components not unlocked by exactly one chapter-2 level').toEqual([]);
   });
 
-  it('hands ram8 out at level 28, ahead of the level that builds from it', () => {
+  it('hands ram8 out at level 17, ahead of the level that builds from it', () => {
     // SETTLED, and §3.3 now names `ram8` in its chapter-2 row -- the row test
     // above fails if it stops. What is left to pin here is the part the spec
     // does not carry: WHICH level hands it out, and that the reward precedes the
-    // first level that offers it. Load-bearing: level 37 lists `ram8`, so if
-    // level 28 stopped rewarding it, level 37 would offer a part no level
+    // first level that offers it. Load-bearing: level 38 lists `ram8`, so if
+    // level 17 stopped rewarding it, level 38 would offer a part no level
     // unlocks and the buildability walk would fail.
     const unlockers = unlockersOf('ram8');
-    expect(unlockers.map((level) => level.id)).toEqual(['ch2-28-circular-dependency']);
-    expect(LEVEL_ORDER.indexOf('ch2-28-circular-dependency')).toBeLessThan(
-      LEVEL_ORDER.indexOf('ch2-37-little-box'),
+    expect(unlockers.map((level) => level.id)).toEqual(['ch2-17-circular-dependency']);
+    expect(LEVEL_ORDER.indexOf('ch2-17-circular-dependency')).toBeLessThan(
+      LEVEL_ORDER.indexOf('ch2-38-little-box'),
     );
   });
 
-  it('unlocks switch and switch8 at level 22, ten levels before the source teaches them', () => {
-    // SETTLED, not a live disagreement. §3.3's note on `switch` says it is
-    // deferred to chapter 2 and unlocks at level 22 together with `switch8`,
-    // where the 8-bit adder's carry chain needs a conditional pass (level 28's
-    // reference uses `switch` too). The level number deliberately differs from
-    // the source's: the source's own level 32 is where it teaches the part, so
-    // level 32 is a re-teach in this replica. Rule 2 covers "exactly one level
-    // unlocks each"; what is pinned here is WHERE, so a later move of either
-    // reward is visible.
-    expect(unlockersOf('switch').map((level) => level.id)).toEqual(['ch2-22-adding-bytes']);
-    expect(unlockersOf('switch8').map((level) => level.id)).toEqual(['ch2-22-adding-bytes']);
+  it('unlocks switch at level 17 and switch8 at level 27, where each is needed', () => {
+    // SETTLED, and §3.3's chapter-2 row names both. What is pinned here is WHERE,
+    // which rule 2 cannot see: the 1-bit part lands on the latch level, whose
+    // reference is built from two `switch`es (`test/fixtures/ch2-references.ts`
+    // `circularDependencyReference`), and the 8-bit version arrives with the byte
+    // adder. The source teaches the 1-bit part at its own Bit Switch level --
+    // level 24 here, seven levels after the player already holds it -- which is
+    // the recorded cost of teaching the part where a puzzle needs it.
+    expect(unlockersOf('switch').map((level) => level.id)).toEqual(['ch2-17-circular-dependency']);
+    expect(unlockersOf('switch8').map((level) => level.id)).toEqual(['ch2-27-adding-bytes']);
   });
 
-  it('unlocks mem1 at chapter 1 level 12, the row the spec puts it in', () => {
+  it('unlocks mem1 at chapter 1 level 13, the row the spec puts it in', () => {
     // The ruling: chapter 2's latch level builds from `mem1`, and the part is
     // handed out by chapter 1's capstone so it exists before chapter 2 opens.
     // Both halves are asserted, because "unlocked by chapter 1" is only half the
     // ruling -- it is one specific level, and it is the last one of chapter 1.
     const unlockers = unlockersOf('mem1');
-    expect(unlockers.map((level) => level.id)).toEqual(['ch1-12-binary-racer']);
+    expect(unlockers.map((level) => level.id)).toEqual(['ch1-13-logic-exam']);
     const capstone = unlockers[0]!;
     expect(capstone.chapter).toBe(1);
-    expect(capstone.index).toBe(12);
+    expect(capstone.index).toBe(13);
     // And §3.3 says the same thing: `mem1` is in the chapter-1 row and not in
     // the chapter-2 row. Rule 2's chapter check would also catch a `mem1`
     // reappearing in the chapter-2 row; this states it directly, where the
@@ -376,18 +383,16 @@ describe("every part in spec §3.3's chapter-2 list is unlocked by exactly one l
     expect(levelsOfChapter(2).filter((level) => rewardsOf(level).includes('mem1'))).toEqual([]);
   });
 
-  it('registers decoder2 and records that no level unlocks it -- the second ruling', () => {
-    // Ruled: no chapter-2 level name introduces the 2-bit decoder. The chapter
-    // teaches `decoder1` (level 25) and `decoder3` (level 26) and `decoder2` is
-    // the same generated family one width up, so it is registered and usable
-    // without ever becoming a palette entry. Zero unlockers is the ruling, stated
-    // as an assertion so it cannot drift into a silent "somebody rewards it now".
-    //
-    // §3.3 keeps naming it anyway, and that is asserted too: it is the reason
-    // rule 2 carries an exemption at all, and an exemption for a name the spec
-    // had quietly dropped would be the same silent hole in a new place.
+  it('hands decoder2 out at the level the campaign table gives it', () => {
+    // The hole this test used to record is closed. `decoder2` was registered,
+    // named by §3.3, and rewarded by no level, so it could never reach a palette
+    // and rule 2 had to carry an exemption for it. `ch2-36-2-bit-decoder` is that
+    // level now, and the exemption is gone: the assertion below is the same shape
+    // as every other row name's, plus the direction that would catch the hole
+    // reopening (the row naming a part no level hands out is rule 2's business,
+    // and it now fails rather than being skipped).
     expect(CH2_ROW).toContain('decoder2');
-    expect(unlockersOf('decoder2').map((level) => level.id)).toEqual([]);
+    expect(unlockersOf('decoder2').map((level) => level.id)).toEqual(['ch2-36-2-bit-decoder']);
 
     // Registered...
     expect(registry.has('decoder2')).toBe(true);
@@ -405,11 +410,12 @@ describe("every part in spec §3.3's chapter-2 list is unlocked by exactly one l
       expect(out[0], `decoder2(${sel})`).toBe(2 ** sel);
     }
 
-    // The family's other two widths ARE unlocked, by exactly one level each:
-    // this is what makes "no level introduces decoder2" a statement about the
-    // name and not about the family being unreachable.
-    expect(unlockersOf('decoder1').map((level) => level.id)).toEqual(['ch2-25-1-bit-decoder']);
-    expect(unlockersOf('decoder3').map((level) => level.id)).toEqual(['ch2-26-3-bit-decoder']);
+    // The family's other two widths are unlocked by exactly one level each, and
+    // in order: 35 introduces `decoder1`, this level is 36, and 37 introduces
+    // `decoder3`. Together with the assertion above that is the whole claim --
+    // one width per level, and no width without a level.
+    expect(unlockersOf('decoder1').map((level) => level.id)).toEqual(['ch2-35-1-bit-decoder']);
+    expect(unlockersOf('decoder3').map((level) => level.id)).toEqual(['ch2-37-3-bit-decoder']);
   });
 });
 
@@ -454,53 +460,61 @@ describe('every component is unlocked at or before the first level that lists it
 // Rule 4: the chapter is 26 levels, indices 13-38, contiguous and unique
 // ---------------------------------------------------------------------------
 
-describe('chapter 2 is exactly 26 levels, at indices 13-38', () => {
-  it('has 26 levels, one per index from 13 to 38', () => {
+describe('chapter 2 is exactly 26 levels, at indices 14-39', () => {
+  it('has 26 levels, one per index from 14 to 39', () => {
     const chapter2 = levelsOfChapter(2);
     expect(chapter2).toHaveLength(26);
     expect(chapter2.map((level) => level.index)).toEqual(
-      Array.from({ length: 26 }, (_, offset) => 13 + offset),
+      Array.from({ length: 26 }, (_, offset) => 14 + offset),
     );
     // Contiguous AND unique. Both, because the two are different claims: 26
-    // distinct indices could still be 13..37 plus 40, and 13..38 with a repeat
+    // distinct indices could still be 14..38 plus 40, and 14..39 with a repeat
     // would be 26 entries over 25 indices.
     expect(new Set(chapter2.map((level) => level.index)).size).toBe(26);
     expect(new Set(chapter2.map((level) => level.id)).size).toBe(26);
   });
 
-  it('is the chapter join point, in the same order, with nothing in front of it', () => {
+  it('is the chapter join point, whole, with nothing in front of it', () => {
     // `CH2_LEVELS` (`content/ch2/index.ts`) is what `content/index.ts` appends
     // after chapter 1, so this ties the chapter's own export to the game's order.
     // The slice is bounded at BOTH ends: it used to run to the end of the order,
     // which silently became "chapter 2 plus everything appended after it" the
-    // moment chapter 3 landed. The chapter's own span is 13..38, so that is what
+    // moment chapter 3 landed. The chapter's own span is 14..39, so that is what
     // it is compared against.
-    expect(levelsOfChapter(2).map((level) => level.id)).toEqual(
-      CH2_LEVELS.map((level) => level.id),
+    //
+    // The chapter's export is compared to the game as a SET rather than as a
+    // sequence, and that is the 2.x shape rather than a relaxation: the four
+    // batches hold scattered slices of the chapter's numbering (batch 1 is 14,
+    // 15, 16, 18, 21), so `content/index.ts` sorts the joined set by index and
+    // `LEVEL_ORDER` is the campaign's order, not the batches'. The sibling test
+    // above is what pins that order; this one pins that the game's chapter-2
+    // span is exactly chapter 2, with nothing lost and nothing doubled.
+    expect(LEVEL_ORDER.slice(13, 39)).toEqual(levelsOfChapter(2).map((level) => level.id));
+    expect([...levelsOfChapter(2)].map((level) => level.id).sort()).toEqual(
+      [...CH2_LEVELS].map((level) => level.id).sort(),
     );
-    expect(LEVEL_ORDER.slice(12, 38)).toEqual(CH2_LEVELS.map((level) => level.id));
-    expect(levelsOfChapter(1)).toHaveLength(12);
-    expect(LEVELS).toHaveLength(47);
+    expect(levelsOfChapter(1)).toHaveLength(13);
+    expect(LEVELS).toHaveLength(49);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Rule 4 for chapter 3: nine levels, indices 39-47, and the machine in order
+// Rule 4 for chapter 3: ten levels, indices 40-49, and the machine in order
 // ---------------------------------------------------------------------------
 
-describe('chapter 3 is exactly 9 levels, at indices 39-47', () => {
-  it('has 9 levels, one per index from 39 to 47', () => {
+describe('chapter 3 is exactly 10 levels, at indices 40-49', () => {
+  it('has 10 levels, one per index from 40 to 49', () => {
     const chapter3 = levelsOfChapter(3);
-    expect(chapter3).toHaveLength(9);
+    expect(chapter3).toHaveLength(10);
     expect(chapter3.map((level) => level.index)).toEqual(
-      Array.from({ length: 9 }, (_, offset) => 39 + offset),
+      Array.from({ length: 10 }, (_, offset) => 40 + offset),
     );
-    expect(new Set(chapter3.map((level) => level.index)).size).toBe(9);
-    expect(new Set(chapter3.map((level) => level.id)).size).toBe(9);
+    expect(new Set(chapter3.map((level) => level.index)).size).toBe(10);
+    expect(new Set(chapter3.map((level) => level.id)).size).toBe(10);
   });
 
   it('is the chapter join point, in the same order, at the end of the game', () => {
-    // Chapter 3 is the LAST chapter this build ships, so `slice(38)` runs to the
+    // Chapter 3 is the LAST chapter this build ships, so `slice(39)` runs to the
     // end of the order -- the exact shape that made chapter 2's equivalent
     // assertion wrong the moment a later chapter appeared. That is safe here only
     // because there is no chapter 4 yet; the bounded form is used regardless, so
@@ -508,9 +522,9 @@ describe('chapter 3 is exactly 9 levels, at indices 39-47', () => {
     expect(levelsOfChapter(3).map((level) => level.id)).toEqual(
       CH3_LEVELS.map((level) => level.id),
     );
-    expect(LEVEL_ORDER.slice(38, 47)).toEqual(CH3_LEVELS.map((level) => level.id));
-    // And nothing beyond it: 47 is the last index the game has.
-    expect(LEVEL_ORDER).toHaveLength(47);
+    expect(LEVEL_ORDER.slice(39, 49)).toEqual(CH3_LEVELS.map((level) => level.id));
+    // And nothing beyond it: 49 is the last index the game has.
+    expect(LEVEL_ORDER).toHaveLength(49);
   });
 
   it('hands the six machine parts out one per level, in the order they are built', () => {
@@ -521,19 +535,19 @@ describe('chapter 3 is exactly 9 levels, at indices 39-47', () => {
     // makes the chapter teach a machine instead of six unrelated parts: the ALU
     // arrives before the level that does arithmetic with it, the register file
     // before the level that decodes into it, `ram_prog` before the three levels
-    // whose programs are assembled into it, and `halt` before level 47 needs a
+    // whose programs are assembled into it, and `halt` before level 49 needs a
     // place to stop.
     //
     // Written as an explicit table, not derived from the level data: a table
     // derived from the thing it checks cannot disagree with it, and reordering
     // two levels is exactly the regression this is here to catch.
     const expected: ReadonlyArray<readonly [string, string]> = [
-      ['ch3-39-arithmetic-engine', 'alu8'],
-      ['ch3-40-registers', 'regfile6'],
-      ['ch3-41-component-factory', 'instr_decoder'],
-      ['ch3-42-instruction-decoder', 'pc8'],
-      ['ch3-43-calculations', 'ram_prog'],
-      ['ch3-44-conditions', 'halt'],
+      ['ch3-40-alu-1', 'alu8'],
+      ['ch3-41-registers', 'regfile6'],
+      ['ch3-43-the-foundry', 'instr_decoder'],
+      ['ch3-44-instruction-decoder', 'pc8'],
+      ['ch3-46-alu', 'ram_prog'],
+      ['ch3-45-conditions', 'halt'],
     ];
     for (const [levelId, def] of expected) {
       expect(unlockersOf(def).map((level) => level.id), def).toEqual([levelId]);

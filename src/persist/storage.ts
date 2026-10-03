@@ -1,5 +1,6 @@
 import { emptyProgress } from '../app/progress';
-import type { Progress } from '../app/progress';
+import type { LevelRecord, Progress } from '../app/progress';
+import { currentIdOf } from '../levels/id-map';
 
 /**
  * Persistence for the progress record.
@@ -23,6 +24,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * an older build may carry fields that no longer have meaning (the stored
  * `unlockedComponents` set, now derived from level rewards), and copying it
  * through would resurrect them.
+ *
+ * Level keys are translated through `levels/id-map.ts`. The 2.x realignment
+ * changed the id of 37 levels and removed three, and a save is keyed by id -- so
+ * without this the player's stars would silently belong to levels that no longer
+ * exist. A key that is already current passes through untouched, and one that
+ * names a retired level is dropped: there is no level left for it to describe.
  */
 export function migrate(raw: unknown): Progress {
   if (!isRecord(raw)) {
@@ -31,10 +38,14 @@ export function migrate(raw: unknown): Progress {
   if (raw.version !== 1) {
     throw new Error(`unsupported progress version: ${String(raw.version)}`);
   }
-  return {
-    version: 1,
-    levels: isRecord(raw.levels) ? (raw.levels as Progress['levels']) : {},
-  };
+  const levels: Record<string, LevelRecord> = {};
+  if (isRecord(raw.levels)) {
+    for (const [id, record] of Object.entries(raw.levels)) {
+      const current = currentIdOf(id);
+      if (current !== null) levels[current] = record as LevelRecord;
+    }
+  }
+  return { version: 1, levels };
 }
 
 /** Best-effort load; an absent or corrupt store reads as a fresh save. */

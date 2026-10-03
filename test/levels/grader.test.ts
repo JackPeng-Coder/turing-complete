@@ -208,7 +208,7 @@ describe('grade', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Phase-0 regression: the twelve chapter-1 reference solutions, frozen.
+// Phase-0 regression: the thirteen chapter-1 reference solutions, frozen.
 // ---------------------------------------------------------------------------
 
 /**
@@ -220,7 +220,7 @@ describe('grade', () => {
  * change's scope that can hold them.
  */
 const ch1Reference: Record<string, () => Graph> = {
-  'ch1-01-crude-awakening': () =>
+  'ch1-01-humble-beginnings': () =>
     build([
       { kind: 'part', def: 'const_on', id: 'src', from: [] },
       { kind: 'output', from: 'src' },
@@ -246,7 +246,7 @@ const ch1Reference: Record<string, () => Graph> = {
       { kind: 'part', def: 'not', id: 'g2', from: ['g1'] },
       { kind: 'output', from: 'g2' },
     ]),
-  'ch1-05-or-gate': () =>
+  'ch1-06-or-gate': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
@@ -255,20 +255,24 @@ const ch1Reference: Record<string, () => Graph> = {
       { kind: 'part', def: 'nand', id: 'g', from: ['n1', 'n2'] },
       { kind: 'output', from: 'g' },
     ]),
-  'ch1-06-nor-gate': () =>
+  // De Morgan, not OR + NOT: OR is level 6's part in the 2.x chapter and NOR is
+  // level 5's, so the reference is the spelling the levels before it unlock --
+  // NOT(a) AND NOT(b), the same function at the same 4 gates on a path two deep.
+  'ch1-05-nor-gate': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
-      { kind: 'part', def: 'or', id: 'o1', from: ['a', 'b'] },
-      { kind: 'part', def: 'not', id: 'n1', from: ['o1'] },
-      { kind: 'output', from: 'n1' },
+      { kind: 'part', def: 'not', id: 'n1', from: ['a'] },
+      { kind: 'part', def: 'not', id: 'n2', from: ['b'] },
+      { kind: 'part', def: 'and', id: 'g', from: ['n1', 'n2'] },
+      { kind: 'output', from: 'g' },
     ]),
   'ch1-07-always-on': () =>
     build([
       { kind: 'part', def: 'const_on', id: 'src', from: [] },
       { kind: 'output', from: 'src' },
     ]),
-  'ch1-08-second-tick': () =>
+  'ch1-08-second-cycle': () =>
     build([
       { kind: 'part', def: 'const_on', id: 'src', from: [] },
       { kind: 'part', def: 'delay_line', id: 'd1', from: ['src'] },
@@ -303,16 +307,27 @@ const ch1Reference: Record<string, () => Graph> = {
       { kind: 'part', def: 'and', id: 'a2', from: ['a1', 'c'] },
       { kind: 'output', from: 'a2' },
     ]),
-  'ch1-12-binary-racer': () =>
+  // The 2.x chapter ends with the gate the old level 10 handed out without ever
+  // teaching it, and a capstone that composes what the chapter built: the XNOR
+  // level is XOR into a NOT, the exam is three pairwise ANDs into one 3-input OR.
+  'ch1-12-xnor-gate': () =>
     build([
-      { kind: 'input', name: 'b3' },
-      { kind: 'input', name: 'b2' },
-      { kind: 'input', name: 'b1' },
-      { kind: 'input', name: 'b0' },
-      { kind: 'output', name: 'OUT_out3', from: 'b3' },
-      { kind: 'output', name: 'OUT_out2', from: 'b2' },
-      { kind: 'output', name: 'OUT_out1', from: 'b1' },
-      { kind: 'output', name: 'OUT_out0', from: 'b0' },
+      { kind: 'input', name: 'a' },
+      { kind: 'input', name: 'b' },
+      { kind: 'part', def: 'xor', id: 'x1', from: ['a', 'b'] },
+      { kind: 'part', def: 'not', id: 'n1', from: ['x1'] },
+      { kind: 'output', from: 'n1' },
+    ]),
+  'ch1-13-logic-exam': () =>
+    build([
+      { kind: 'input', name: 'a' },
+      { kind: 'input', name: 'b' },
+      { kind: 'input', name: 'c' },
+      { kind: 'part', def: 'and', id: 'ab', from: ['a', 'b'] },
+      { kind: 'part', def: 'and', id: 'ac', from: ['a', 'c'] },
+      { kind: 'part', def: 'and', id: 'bc', from: ['b', 'c'] },
+      { kind: 'part', def: 'or3', id: 'any2', from: ['ab', 'ac', 'bc'] },
+      { kind: 'output', from: 'any2' },
     ]),
 };
 
@@ -336,28 +351,33 @@ const ch1Reference: Record<string, () => Graph> = {
  * `a57908a`, and the gate column moves only when the NAND basis itself changes.
  */
 const CH1_REFERENCE: Record<string, { readonly metrics: Metrics; readonly score: number }> = {
-  'ch1-01-crude-awakening': { metrics: { gate: 0, delay: 0, tick: 0 }, score: 0 },
+  'ch1-01-humble-beginnings': { metrics: { gate: 0, delay: 0, tick: 0 }, score: 0 },
   'ch1-02-nand-gate': { metrics: { gate: 1, delay: 1, tick: 0 }, score: 5 },
   'ch1-03-not-gate': { metrics: { gate: 1, delay: 1, tick: 0 }, score: 5 },
   'ch1-04-and-gate': { metrics: { gate: 2, delay: 2, tick: 0 }, score: 10 },
-  'ch1-05-or-gate': { metrics: { gate: 3, delay: 2, tick: 0 }, score: 11 },
-  'ch1-06-nor-gate': { metrics: { gate: 4, delay: 2, tick: 0 }, score: 12 },
+  'ch1-06-or-gate': { metrics: { gate: 3, delay: 2, tick: 0 }, score: 11 },
+  'ch1-05-nor-gate': { metrics: { gate: 4, delay: 2, tick: 0 }, score: 12 },
   'ch1-07-always-on': { metrics: { gate: 0, delay: 0, tick: 0 }, score: 0 },
   // Sequential-only: no combinational depth at all, and the two delay lines
   // show up as ticks instead.
-  'ch1-08-second-tick': { metrics: { gate: 0, delay: 0, tick: 3 }, score: 24 },
+  'ch1-08-second-cycle': { metrics: { gate: 0, delay: 0, tick: 3 }, score: 24 },
   'ch1-09-xor-gate': { metrics: { gate: 4, delay: 3, tick: 0 }, score: 16 },
   'ch1-10-bigger-or-gate': { metrics: { gate: 6, delay: 2, tick: 0 }, score: 14 },
   'ch1-11-bigger-and-gate': { metrics: { gate: 4, delay: 2, tick: 0 }, score: 12 },
-  'ch1-12-binary-racer': { metrics: { gate: 0, delay: 0, tick: 0 }, score: 0 },
+  // The two levels 2.x added to this chapter, and therefore the two entries with
+  // no `a57908a` value behind them: measured from the references above, which are
+  // the constructions their own data comments name (XOR + NOT is 4 + 1 gates on a
+  // path two deep; three ANDs into one `or3` is 6 + 6 on a path two deep).
+  'ch1-12-xnor-gate': { metrics: { gate: 5, delay: 2, tick: 0 }, score: 13 },
+  'ch1-13-logic-exam': { metrics: { gate: 12, delay: 2, tick: 0 }, score: 20 },
 };
 
 describe('phase-0 regression: the chapter-1 reference scores are frozen', () => {
   const levels = [...CH1_PART1, ...CH1_PART2];
   const byId = new Map(levels.map((l) => [l.id, l]));
 
-  it('covers all twelve chapter-1 levels, with the same ids', () => {
-    expect(levels).toHaveLength(12);
+  it('covers all thirteen chapter-1 levels, with the same ids', () => {
+    expect(levels).toHaveLength(13);
     expect(Object.keys(ch1Reference).sort()).toEqual(levels.map((l) => l.id).sort());
     expect(Object.keys(CH1_REFERENCE).sort()).toEqual(levels.map((l) => l.id).sort());
   });
@@ -386,11 +406,11 @@ describe('phase-0 regression: the chapter-1 reference scores are frozen', () => 
  *
  * It walks the SHIPPED level set (`LEVELS`, assembled by `src/levels/index.ts`),
  * not this file's table, so a level that ships later without a reference circuit
- * here fails the coverage case instead of being silently skipped. Chapter 2 is
- * joined now, so the circuits come from two places -- this file's chapter-1 map
- * and the shared chapter-2 fixture -- and the walk covers all 38 ids. It covered
- * twelve before the join, which is the walk working as designed rather than a
- * gap: it can only check the levels that ship.
+ * here fails the coverage case instead of being silently skipped. Every chapter
+ * is joined now, so the circuits come from three places -- this file's
+ * chapter-1 map plus the shared chapter-2 and chapter-3 fixtures -- and the walk
+ * covers all 49 ids. It covered twelve before the join, which is the walk
+ * working as designed rather than a gap: it can only check the levels that ship.
  *
  * This is what fix round 2 turned on: pricing the built-in `and`/`or` on the NAND
  * basis moved `ch1-06` (2 -> 4), `ch1-10` (2 -> 6) and `ch1-11` (2 -> 4) past

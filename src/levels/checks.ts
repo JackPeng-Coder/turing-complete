@@ -1341,7 +1341,7 @@ export interface TestCase {
    *
    * THE ONE THING THAT MAKES A CASE LIST PLAYABLE, and it is per case rather than
    * per level because a level may declare checks of both shapes --
-   * `ch2-30-odd-ticks` declares two scripts, and a level with a table and a
+   * `ch2-23-odd-cycles` declares two scripts, and a level with a table and a
    * script would declare one of each. A truth table, a constraint and a fuzz
    * check each drive one vector into a freshly reset circuit, so every one of
    * their cases says `true`. A script's steps are one run -- step 3 reads a
@@ -1443,7 +1443,7 @@ export function testCases(spec: LevelSpec): TestPlan {
             tick: step.tick,
             // Only a script's FIRST step starts from a cleared circuit:
             // `runChecks` resets once per check and then walks the steps. A
-            // level that declares two scripts (`ch2-30-odd-ticks`) resets twice,
+            // level that declares two scripts (`ch2-23-odd-cycles`) resets twice,
             // once at each script's front.
             reset: index === 0,
           });

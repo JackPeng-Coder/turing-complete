@@ -78,7 +78,7 @@ const COLUMN_LIMIT = 20;
 /**
  * How many cases the run demonstrates one at a time before it hurries.
  *
- * `ch2-37-little-box` declares 513 cases and `ch2-38-counter` 265: at the pace a
+ * `ch2-38-little-box` declares 513 cases and `ch2-39-counter` 265: at the pace a
  * fifteen-row truth table wants, those are four minutes of watching a counter
  * count, and no one learns anything after the first few seconds. The run is
  * therefore a demonstration with a limit -- the first `TEST_DEMO_LIMIT` cases are

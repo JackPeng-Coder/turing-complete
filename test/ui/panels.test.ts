@@ -58,7 +58,7 @@ describe('palette panel', () => {
 
   it('offers a part once its unlocking level is passed', () => {
     const store = makeStore('ch1-02-nand-gate');
-    const passed = applyGrade(emptyProgress(), getLevel('ch1-01-crude-awakening'), {
+    const passed = applyGrade(emptyProgress(), getLevel('ch1-01-humble-beginnings'), {
       passed: true,
       metrics: { gate: 0, delay: 0, tick: 0 },
       score: 0,
@@ -74,7 +74,7 @@ describe('palette panel', () => {
   });
 
   it('reports the picked part id, not its label', () => {
-    const store = makeStore('ch1-01-crude-awakening');
+    const store = makeStore('ch1-01-humble-beginnings');
     const root = document.createElement('div');
     const picked: (string | null)[] = [];
     mountPalette(root, store, (defId) => picked.push(defId));
@@ -92,7 +92,7 @@ describe('palette panel', () => {
    * knowing that Esc is the key.
    */
   it('lights the armed slot and offers a way out of it', () => {
-    const store = makeStore('ch1-01-crude-awakening');
+    const store = makeStore('ch1-01-humble-beginnings');
     const root = document.createElement('div');
     const picked: (string | null)[] = [];
     mountPalette(root, store, (defId) => picked.push(defId));
@@ -146,7 +146,7 @@ describe('truth table panel', () => {
   });
 
   it('reports a pass with the level’s own heading', () => {
-    const store = makeStore('ch1-01-crude-awakening');
+    const store = makeStore('ch1-01-humble-beginnings');
     store.set({
       lastGrade: {
         passed: true,
@@ -309,7 +309,7 @@ describe('truth table panel', () => {
     // A `program` level's vectors only mean anything with the assembled image
     // loaded into the circuit's RAM. Rendering a made-up column would be showing
     // the player a test the level never runs.
-    const store = makeStore('ch3-47-turing-complete');
+    const store = makeStore('ch3-49-turing-complete');
     const root = document.createElement('div');
     mountTruthTable(root, store);
     expect(root.textContent).toContain('无法逐列演示');
@@ -317,7 +317,7 @@ describe('truth table panel', () => {
   });
 
   it('shows the reason and detail when a failure drove no vector at all', () => {
-    // The `unstable` reason (levels 28 and 30) is raised by `settle`, before any
+    // The `unstable` reason (levels 17 and 23) is raised by `settle`, before any
     // vector is driven, so all three maps are empty. Rendering those pins as 0
     // would show the player a test vector that was never driven -- the row has to
     // carry the reason and the detail instead.
@@ -408,7 +408,7 @@ describe('shell bar', () => {
  */
 describe('level io placement', () => {
   it('names the single level output OUT', () => {
-    const level = getLevel('ch1-01-crude-awakening');
+    const level = getLevel('ch1-01-humble-beginnings');
     expect(levelIoPlacement(level, emptyGraph(level.id), 'level_output')?.id).toBe('OUT');
   });
 
@@ -424,7 +424,7 @@ describe('level io placement', () => {
   });
 
   it('names the four outputs of the binary racer in pin order', () => {
-    const level = getLevel('ch1-12-binary-racer');
+    const level = getLevel('ch2-14-binary-racer');
     const g = emptyGraph(level.id);
     const ids: string[] = [];
     for (let i = 0; i < 4; i += 1) {
@@ -442,7 +442,7 @@ describe('level io placement', () => {
   });
 
   it('makes level 1 pass with two palette placements and one wire', () => {
-    const level = getLevel('ch1-01-crude-awakening');
+    const level = getLevel('ch1-01-humble-beginnings');
     const g = emptyGraph(level.id);
     const source = addInstance(g, 'const_on', 0, 0);
     const placement = levelIoPlacement(level, g, 'level_output');
@@ -768,7 +768,7 @@ describe('chapter map', () => {
   const passedLevel1: Progress = {
     version: 1,
     levels: {
-      'ch1-01-crude-awakening': {
+      'ch1-01-humble-beginnings': {
         passed: true,
         best: { gate: 0, delay: 0, tick: 0 },
         stars: 3,
@@ -778,7 +778,7 @@ describe('chapter map', () => {
 
   it('shows one tile per level and disables the ones still locked', () => {
     const root = document.createElement('div');
-    mountMap(root, mapStore('ch1-01-crude-awakening'), () => {});
+    mountMap(root, mapStore('ch1-01-humble-beginnings'), () => {});
     const tiles = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
     expect(tiles).toHaveLength(LEVELS.length);
     expect(tiles[0]!.disabled).toBe(false);
@@ -795,7 +795,7 @@ describe('chapter map', () => {
 
   it('shows the stars of a passed level and unlocks its successor', () => {
     const root = document.createElement('div');
-    mountMap(root, mapStore('ch1-01-crude-awakening', passedLevel1), () => {});
+    mountMap(root, mapStore('ch1-01-humble-beginnings', passedLevel1), () => {});
     const tiles = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
     expect(tiles[0]!.textContent).toContain('★');
     expect(tiles[0]!.style.color).toBe(rgbOf(THEME.success));
@@ -808,7 +808,7 @@ describe('chapter map', () => {
   it('reports the selected level id and ignores clicks on locked tiles', () => {
     const root = document.createElement('div');
     const picked: string[] = [];
-    mountMap(root, mapStore('ch1-01-crude-awakening', passedLevel1), (id) => picked.push(id));
+    mountMap(root, mapStore('ch1-01-humble-beginnings', passedLevel1), (id) => picked.push(id));
     const tiles = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
     tiles[1]!.click();
     tiles[2]!.click(); // still locked: a disabled button fires nothing
@@ -816,7 +816,7 @@ describe('chapter map', () => {
   });
 
   it('re-renders when progress changes', () => {
-    const store = mapStore('ch1-01-crude-awakening');
+    const store = mapStore('ch1-01-humble-beginnings');
     const root = document.createElement('div');
     mountMap(root, store, () => {});
     const before = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];

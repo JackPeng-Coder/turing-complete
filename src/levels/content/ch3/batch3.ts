@@ -276,7 +276,52 @@ const STEPS_47: readonly ProgramStep[] = [
 
 export const CH3_BATCH3: readonly LevelSpec[] = [
   /**
-   * ch3-45-program -- Program / 程序
+   * ch3-47-immediate-values -- Immediate Values / 立即数
+   *
+   * SOURCED: the name in both languages, its position (46th), the source's
+   * one-line concept -- support values encoded directly in the instruction -- and
+   * §6.3's field: immediate mode is `00` followed by a six-bit value, so the
+   * range is 0-63 and §6.5 lists "cannot encode a value above 63" as one of
+   * OVERTURE's stated limits. §6.6's label rule ("a label is the index of the
+   * instruction after it") is what `loadi|finish` uses.
+   *
+   * AUTHORED: the pin shape; the six-instruction program; the four-step walk;
+   * the palette; and the measured target, which is the same machine as level
+   * 45's and therefore the same numbers. No new reward.
+   *
+   * THE PROGRAM IS BUILT TO FAIL THE TWO NEAR-MISSES, and the batch test builds
+   * both from the machine's options. `loadi|63` sits at the top of the six-bit
+   * field, so a machine whose immediate reaches the register file through five
+   * bits publishes 25 (31 - 6) rather than 57; `loadi|finish` is a label, so a
+   * machine that somehow passed the opcode through instead of the field would
+   * have to answer with the wrong address. And a machine whose `loadi` write path
+   * is not wired at all publishes 250 (0 - 6), which is why the walk's value is a
+   * subtraction rather than another sum: the two failures land on different
+   * bytes.
+   */
+  {
+    id: 'ch3-47-immediate-values',
+    chapter: 3,
+    index: 47,
+    name: { zh: '立即数', en: 'Immediate Values' },
+    brief: {
+      zh: '还是上一关那台机器，换一段程序：这一段专门走立即数通路。loadi|N 把 0 到 63 的常数写进 REG0；loadi|标签 写进去的是标签所指的那条指令的序号（本关的标签在程序末尾）。程序会用到字段的上限 63，减法之后把结果留在 out 上，写 out 之后的值同样要保持。',
+      en: 'The same machine as the last level with a different program: this one walks the immediate path. loadi|N writes a constant from 0 to 63 into REG0, and loadi|<label> writes the index of the instruction the label names (this level\u2019s label sits at the end of the program). The program uses 63, the top of the field, subtracts, and leaves the result on out -- and the byte on out has to stay there just as before.',
+    },
+    hint: {
+      zh: '立即数通路只有一处：指令解码器的 imm 是 6 位，而寄存器堆的数据是 8 位，高位补 0 即可——把 imm 直接接到写数据选择器的立即数一侧，选择信号用「模式为 00」。务必接满 6 位：少接最高位会让 63 变成 31。标签由汇编器解析成指令序号，写进 imm 字段，所以标签这一路和常数走的是同一根线。',
+      en: 'There is exactly one place the immediate can go wrong: the decoder\u2019s imm pin is six bits while the register file takes eight, so the top two bits are zeroes -- wire imm into the immediate side of the write-data mux with "mode is 00" as the select. Wire all six bits: dropping the top one turns 63 into 31. A label is resolved by the assembler into an instruction index and written into that same imm field, so it travels the same wire as a number.',
+    },
+    allowedComponents: [...UNLOCKED_BY_45],
+    io: IO_PROGRAM,
+    checks: [{ kind: 'program', source: PROGRAM_46, steps: STEPS_46 }],
+    // Measured: the same machine as level 45, so the same pair; the tick is this
+    // walk's last step.
+    threeStar: { gate: 643, delay: 6, tick: 9 },
+  },
+
+  /**
+   * ch3-48-program -- Program / 程序
    *
    * SOURCED: the name in both languages, its position (45th), and the source's
    * one-line concept -- store the program in RAM and use the counter as the
@@ -306,9 +351,9 @@ export const CH3_BATCH3: readonly LevelSpec[] = [
    * check.
    */
   {
-    id: 'ch3-45-program',
+    id: 'ch3-48-program',
     chapter: 3,
-    index: 45,
+    index: 48,
     name: { zh: '程序', en: 'Program' },
     brief: {
       zh: '整台机器：程序放在 ram_prog 里，pc8 依次给出地址，取出的字节经指令解码器驱动寄存器堆与运算器。一个时钟沿执行一条指令。本关的程序是一条直路：loadi 把数值写进 REG0，move|s0|dN 把它转进别的寄存器，calc 用 REG1 与 REG2 算出 REG3，最后 move|s3|out 把 REG3 写到 out。写 out 之后机器不再前进（或者你自己把结果锁住），out 上的值要一直保持。',
@@ -328,52 +373,7 @@ export const CH3_BATCH3: readonly LevelSpec[] = [
   },
 
   /**
-   * ch3-46-immediate-values -- Immediate Values / 立即数
-   *
-   * SOURCED: the name in both languages, its position (46th), the source's
-   * one-line concept -- support values encoded directly in the instruction -- and
-   * §6.3's field: immediate mode is `00` followed by a six-bit value, so the
-   * range is 0-63 and §6.5 lists "cannot encode a value above 63" as one of
-   * OVERTURE's stated limits. §6.6's label rule ("a label is the index of the
-   * instruction after it") is what `loadi|finish` uses.
-   *
-   * AUTHORED: the pin shape; the six-instruction program; the four-step walk;
-   * the palette; and the measured target, which is the same machine as level
-   * 45's and therefore the same numbers. No new reward.
-   *
-   * THE PROGRAM IS BUILT TO FAIL THE TWO NEAR-MISSES, and the batch test builds
-   * both from the machine's options. `loadi|63` sits at the top of the six-bit
-   * field, so a machine whose immediate reaches the register file through five
-   * bits publishes 25 (31 - 6) rather than 57; `loadi|finish` is a label, so a
-   * machine that somehow passed the opcode through instead of the field would
-   * have to answer with the wrong address. And a machine whose `loadi` write path
-   * is not wired at all publishes 250 (0 - 6), which is why the walk's value is a
-   * subtraction rather than another sum: the two failures land on different
-   * bytes.
-   */
-  {
-    id: 'ch3-46-immediate-values',
-    chapter: 3,
-    index: 46,
-    name: { zh: '立即数', en: 'Immediate Values' },
-    brief: {
-      zh: '还是上一关那台机器，换一段程序：这一段专门走立即数通路。loadi|N 把 0 到 63 的常数写进 REG0；loadi|标签 写进去的是标签所指的那条指令的序号（本关的标签在程序末尾）。程序会用到字段的上限 63，减法之后把结果留在 out 上，写 out 之后的值同样要保持。',
-      en: 'The same machine as the last level with a different program: this one walks the immediate path. loadi|N writes a constant from 0 to 63 into REG0, and loadi|<label> writes the index of the instruction the label names (this level\u2019s label sits at the end of the program). The program uses 63, the top of the field, subtracts, and leaves the result on out -- and the byte on out has to stay there just as before.',
-    },
-    hint: {
-      zh: '立即数通路只有一处：指令解码器的 imm 是 6 位，而寄存器堆的数据是 8 位，高位补 0 即可——把 imm 直接接到写数据选择器的立即数一侧，选择信号用「模式为 00」。务必接满 6 位：少接最高位会让 63 变成 31。标签由汇编器解析成指令序号，写进 imm 字段，所以标签这一路和常数走的是同一根线。',
-      en: 'There is exactly one place the immediate can go wrong: the decoder\u2019s imm pin is six bits while the register file takes eight, so the top two bits are zeroes -- wire imm into the immediate side of the write-data mux with "mode is 00" as the select. Wire all six bits: dropping the top one turns 63 into 31. A label is resolved by the assembler into an instruction index and written into that same imm field, so it travels the same wire as a number.',
-    },
-    allowedComponents: [...UNLOCKED_BY_45],
-    io: IO_PROGRAM,
-    checks: [{ kind: 'program', source: PROGRAM_46, steps: STEPS_46 }],
-    // Measured: the same machine as level 45, so the same pair; the tick is this
-    // walk's last step.
-    threeStar: { gate: 643, delay: 6, tick: 9 },
-  },
-
-  /**
-   * ch3-47-turing-complete -- Turing Complete / 图灵完备
+   * ch3-49-turing-complete -- Turing Complete / 图灵完备
    *
    * SOURCED: the name in both languages, its position (47th, and the last level
    * of the chapter), the source's one-line concept -- integrate the conditional
@@ -405,9 +405,9 @@ export const CH3_BATCH3: readonly LevelSpec[] = [
    * one of those five assertions catches it.
    */
   {
-    id: 'ch3-47-turing-complete',
+    id: 'ch3-49-turing-complete',
     chapter: 3,
-    index: 47,
+    index: 49,
     name: { zh: '图灵完备', en: 'Turing Complete' },
     brief: {
       zh: '验收关：把条件跳转接上，这台机器就能循环。跳转指令从 REG0 取目标地址、从 REG3 取条件值：j（条件 000）永远跳，jz（001）在 REG3 为 0 时跳，jnz（010）在 REG3 不为 0 时跳，其它条件码不跳。本关的程序是一个 do-while 循环：从 6 开始倒数，每一步把当前的数累加起来，数到 0 就跳出循环，把累加和写到 out。循环期间 out 必须还是 0。',

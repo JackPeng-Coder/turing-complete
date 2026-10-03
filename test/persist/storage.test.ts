@@ -9,6 +9,8 @@ import {
   saveProgress,
 } from '../../src/persist/storage';
 import type { GradeResult } from '../../src/levels/grader';
+import { LEGACY_LEVEL_IDS, RETIRED_LEVEL_IDS } from '../../src/levels/id-map';
+import { LEVEL_ORDER } from '../../src/levels/index';
 import type { LevelSpec } from '../../src/levels/spec';
 
 const level: LevelSpec = {
@@ -138,5 +140,55 @@ describe('loadProgress / saveProgress', () => {
     const p = applyGrade(emptyProgress(), level, pass);
     expect(() => saveProgress(p)).not.toThrow();
     expect(loadProgress()).toEqual(emptyProgress());
+  });
+});
+
+/**
+ * The 2.x realignment renamed 37 level ids and removed three. A save is keyed by
+ * id, so without the translation in `migrate` a player's stars would end up
+ * attached to levels that no longer exist -- silently, because every lookup
+ * would simply miss.
+ */
+describe('carrying a save across the level-id realignment', () => {
+  const record = { passed: true, stars: 3, best: { gate: 4, delay: 2, tick: 0 } };
+
+  it('moves a record from its legacy id to the current one', () => {
+    const migrated = migrate({
+      version: 1,
+      levels: { 'ch2-13-odd-number-of-signals': record },
+    });
+    expect(Object.keys(migrated.levels)).toEqual(['ch2-16-odd-number-of-signals']);
+    expect(migrated.levels['ch2-16-odd-number-of-signals']).toEqual(record);
+  });
+
+  it('keeps the records of levels that did not move, and drops retired ones', () => {
+    const migrated = migrate({
+      version: 1,
+      levels: {
+        'ch2-27-logic-engine': record,
+        'ch1-02-nand-gate': record,
+      },
+    });
+    expect(Object.keys(migrated.levels)).toEqual(['ch1-02-nand-gate']);
+  });
+
+  it('is idempotent: running it on an already-migrated save changes nothing', () => {
+    const payload = {
+      version: 1,
+      levels: {
+        'ch1-01-humble-beginnings': record,
+        'ch2-16-odd-number-of-signals': record,
+      },
+    };
+    const once = migrate(payload);
+    expect(once.levels).toEqual(payload.levels);
+    expect(migrate(once).levels).toEqual(payload.levels);
+  });
+
+  it('never maps an id that is already a current one', () => {
+    const current = new Set(LEVEL_ORDER);
+    expect(Object.keys(LEGACY_LEVEL_IDS).filter((id) => current.has(id))).toEqual([]);
+    expect(Object.values(LEGACY_LEVEL_IDS).filter((id) => !current.has(id))).toEqual([]);
+    expect(RETIRED_LEVEL_IDS.filter((id) => current.has(id))).toEqual([]);
   });
 });

@@ -35,7 +35,7 @@ import {
 } from '../fixtures/ch2-references';
 
 /**
- * Chapter 2's fourth batch: levels 28-38 -- the storage and timing half of the
+ * Chapter 2's fourth batch: levels 17-39 -- the storage and timing half of the
  * chapter, and the first chapter-2 levels the `script` checker carries.
  *
  * WHAT THE SOURCE FIXES, AND WHAT IT DOES NOT. As in batches 1-3: the compendium
@@ -45,8 +45,8 @@ import {
  * else in the level data is this replica's design, which is why each level
  * carries a data comment split into `SOURCED` and `AUTHORED`; the marker block
  * below checks that those comments exist and that the four notes this batch owes
- * a reader are in them (level 30's periodicity, level 34's change of kind under
- * spec 3.1, level 37's definition of "full", and level 38's achievement).
+ * a reader are in them (level 23's periodicity, level 32's change of kind under
+ * spec 3.1, level 38's definition of "full", and level 39's achievement).
  *
  * WHAT THIS FILE HAS TO PROVE THAT THE EARLIER BATCHES DID NOT:
  *
@@ -64,20 +64,20 @@ import {
  *         delay line therefore looks exactly like a wire when the input changes
  *         at every step, and the only way a script can show that a value is
  *         HELD is a second step at the SAME tick (no edge, new inputs, old
- *         value) -- which is what levels 28, 29, 35 and 36 do, and what a wire
+ *         value) -- which is what levels 17, 20, 33 and 34 do, and what a wire
  *         or an adder chain fails.
- *  * STABILITY IS AN ASSERTION, NOT AN ABSENCE OF ONE. Level 28's reference
+ *  * STABILITY IS AN ASSERTION, NOT AN ABSENCE OF ONE. Level 17's reference
  *    really does contain a feedback loop (`validateGraph` reports it as a
  *    warning), it really does settle, and the counterexamples are rings that
  *    really do throw `UnstableCircuitError` -- measured directly against
  *    `Simulation.settle`, not inferred from "the level passed".
- *  * PERIODICITY IS ASSERTED ACROSS MANY TICKS, not at one tick. Level 30's
+ *  * PERIODICITY IS ASSERTED ACROSS MANY TICKS, not at one tick. Level 23's
  *    check walks sixteen consecutive ticks that must alternate and four more
  *    that must hold, and this file measures that shape out of the check data
  *    and grades three circuits against it: one that oscillates only while
  *    enabled (passes), one that never oscillates (fails), one that never stops
  *    (fails).
- *  * "FULL" IS ASSERTED OVER THE WHOLE ADDRESS RANGE. Level 37's check writes
+ *  * "FULL" IS ASSERTED OVER THE WHOLE ADDRESS RANGE. Level 38's check writes
  *    all 256 addresses and then reads all 256 back with a different byte on `d`
  *    and `load` low, so the level cannot be passed by a register that ignores
  *    `addr` or by a wire from `d`.
@@ -100,20 +100,20 @@ function specOf(id: string): LevelSpec {
   return level;
 }
 
+const L17 = levelAt(17);
+const L20 = levelAt(20);
+const L23 = levelAt(23);
+const L24 = levelAt(24);
 const L28 = levelAt(28);
-const L29 = levelAt(29);
 const L30 = levelAt(30);
-const L31 = levelAt(31);
 const L32 = levelAt(32);
 const L33 = levelAt(33);
 const L34 = levelAt(34);
-const L35 = levelAt(35);
-const L36 = levelAt(36);
-const L37 = levelAt(37);
 const L38 = levelAt(38);
+const L39 = levelAt(39);
 
 /** The batch's four script levels that step a value through storage, in order. */
-const STORAGE_SCRIPT_LEVELS: readonly LevelSpec[] = [L28, L29, L35, L36];
+const STORAGE_SCRIPT_LEVELS: readonly LevelSpec[] = [L17, L20, L33, L34];
 
 /** `id:width` per pin, the shape the task brief fixes for each level. */
 function pinsOf(level: LevelSpec): { inputs: string[]; outputs: string[] } {
@@ -265,10 +265,10 @@ function failuresOf(make: () => Graph, level: LevelSpec): readonly CheckFailure[
   return result.failures;
 }
 
-describe('chapter 2, levels 28-38', () => {
+describe('chapter 2, levels 17-39', () => {
   it('exposes eleven chapter-2 levels with the briefed indices', () => {
     expect(CH2_BATCH4.map((level) => level.index)).toEqual([
-      28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38,
+      17, 20, 23, 24, 28, 30, 32, 33, 34, 38, 39,
     ]);
     expect(CH2_BATCH4.map((level) => level.chapter)).toEqual([
       2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
@@ -277,58 +277,58 @@ describe('chapter 2, levels 28-38', () => {
 
   it('uses the ch2-<index>-<slug> id convention', () => {
     expect(CH2_BATCH4.map((level) => level.id)).toEqual([
-      'ch2-28-circular-dependency',
-      'ch2-29-delayed-lines',
-      'ch2-30-odd-ticks',
-      'ch2-31-bit-inverter',
-      'ch2-32-bit-switch',
-      'ch2-33-input-selector',
-      'ch2-34-the-bus',
-      'ch2-35-saving-gracefully',
-      'ch2-36-saving-bytes',
-      'ch2-37-little-box',
-      'ch2-38-counter',
+      'ch2-17-circular-dependency',
+      'ch2-20-delayed-lines',
+      'ch2-23-odd-cycles',
+      'ch2-24-bit-switch',
+      'ch2-28-bit-inverter',
+      'ch2-30-multiplexer',
+      'ch2-32-the-bus',
+      'ch2-33-saving-gracefully',
+      'ch2-34-saving-bytes',
+      'ch2-38-little-box',
+      'ch2-39-counter',
     ]);
   });
 
   it('shapes every level exactly as the brief fixes it', () => {
-    expect(pinsOf(L28)).toEqual({ inputs: ['set:1', 'value:1'], outputs: ['out:1'] });
-    expect(pinsOf(L29)).toEqual({ inputs: ['a:8'], outputs: ['out:8'] });
-    expect(pinsOf(L30)).toEqual({ inputs: ['enable:1'], outputs: ['out:1'] });
-    expect(pinsOf(L31)).toEqual({ inputs: ['a:1', 'inv:1'], outputs: ['out:1'] });
-    expect(pinsOf(L32)).toEqual({ inputs: ['a:1', 'on:1'], outputs: ['out:1'] });
-    expect(pinsOf(L33)).toEqual({ inputs: ['a:8', 'b:8', 'sel:1'], outputs: ['out:8'] });
-    expect(pinsOf(L34)).toEqual({ inputs: ['a:8', 'b:8', 'sel:1'], outputs: ['out:8'] });
-    expect(pinsOf(L35)).toEqual({ inputs: ['d:1', 'load:1'], outputs: ['out:1'] });
-    expect(pinsOf(L36)).toEqual({ inputs: ['d:8', 'load:1'], outputs: ['out:8'] });
-    expect(pinsOf(L37)).toEqual({ inputs: ['d:8', 'addr:8', 'load:1'], outputs: ['out:8'] });
-    expect(pinsOf(L38)).toEqual({ inputs: ['en:1', 'reset:1'], outputs: ['out:8'] });
+    expect(pinsOf(L17)).toEqual({ inputs: ['set:1', 'value:1'], outputs: ['out:1'] });
+    expect(pinsOf(L20)).toEqual({ inputs: ['a:8'], outputs: ['out:8'] });
+    expect(pinsOf(L23)).toEqual({ inputs: ['enable:1'], outputs: ['out:1'] });
+    expect(pinsOf(L28)).toEqual({ inputs: ['a:1', 'inv:1'], outputs: ['out:1'] });
+    expect(pinsOf(L24)).toEqual({ inputs: ['a:1', 'on:1'], outputs: ['out:1'] });
+    expect(pinsOf(L30)).toEqual({ inputs: ['a:8', 'b:8', 'sel:1'], outputs: ['out:8'] });
+    expect(pinsOf(L32)).toEqual({ inputs: ['a:8', 'b:8', 'sel:1'], outputs: ['out:8'] });
+    expect(pinsOf(L33)).toEqual({ inputs: ['d:1', 'load:1'], outputs: ['out:1'] });
+    expect(pinsOf(L34)).toEqual({ inputs: ['d:8', 'load:1'], outputs: ['out:8'] });
+    expect(pinsOf(L38)).toEqual({ inputs: ['d:8', 'addr:8', 'load:1'], outputs: ['out:8'] });
+    expect(pinsOf(L39)).toEqual({ inputs: ['en:1', 'reset:1'], outputs: ['out:8'] });
   });
 
   it('uses the checker kind the brief fixes for each level', () => {
     // The brief's table is the decision: two truth-table levels with four rows
-    // each, one fuzz level, and eight levels carried by scripts (level 28 and
-    // level 30 add their stability and periodicity assertions on top of the
-    // script, and level 30 has a second script for the held-low case).
-    expect(L31.checks.map((check) => check.kind)).toEqual(['truth-table']);
+    // each, one fuzz level, and eight levels carried by scripts (level 17 and
+    // level 23 add their stability and periodicity assertions on top of the
+    // script, and level 23 has a second script for the held-low case).
+    expect(L28.checks.map((check) => check.kind)).toEqual(['truth-table']);
+    expect(L24.checks.map((check) => check.kind)).toEqual(['truth-table']);
     expect(L32.checks.map((check) => check.kind)).toEqual(['truth-table']);
-    expect(L34.checks.map((check) => check.kind)).toEqual(['truth-table']);
-    expect(L33.checks.map((check) => check.kind)).toEqual(['fuzz']);
-    for (const level of [L28, L29, L35, L36, L37, L38]) {
+    expect(L30.checks.map((check) => check.kind)).toEqual(['fuzz']);
+    for (const level of [L17, L20, L33, L34, L38, L39]) {
       expect(level.checks.map((check) => check.kind), level.id).toEqual(['script']);
     }
-    expect(L30.checks.map((check) => check.kind)).toEqual(['script', 'script']);
+    expect(L23.checks.map((check) => check.kind)).toEqual(['script', 'script']);
   });
 
   it('names each level in both languages', () => {
     expect(CH2_BATCH4.map((level) => level.name.en)).toEqual([
       'Circular Dependency',
       'Delayed Lines',
-      'Odd Ticks',
-      'Bit Inverter',
+      'Odd Cycles',
       'Bit Switch',
-      'Input Selector',
-      'The bus',
+      'Bit Inverter',
+      'Multiplexer',
+      'The Bus',
       'Saving Gracefully',
       'Saving Bytes',
       'Little Box',
@@ -336,15 +336,15 @@ describe('chapter 2, levels 28-38', () => {
     ]);
     expect(CH2_BATCH4.map((level) => level.name.zh)).toEqual([
       '循环依赖',
-      '延迟线',
+      '晚点到站',
       '奇变偶不变',
-      '1 位取反器',
-      '1 位开关',
+      '二进制开关',
+      '可控反相器',
       '数据选择器',
       '总线',
       '优雅存储',
-      '存储一字节',
-      '小盒子',
+      '整存整取',
+      '方寸之间',
       '计数器',
     ]);
     for (const level of CH2_BATCH4) {
@@ -365,8 +365,15 @@ describe('chapter 2, levels 28-38', () => {
 
   it('gates every part behind a component unlocked at or before it', () => {
     // "At or before": a level may offer the parts its own rewards hand out (level
-    // 29 offers the `delay8` and `reg8` it teaches), so the walk adds a level's
+    // 20 offers the `delay8` and `reg8` it teaches), so the walk adds a level's
     // rewards before testing its own palette and the next level's after it.
+    //
+    // The walk is in CAMPAIGN order, not batch order: the 2.x realignment left
+    // the four batches holding scattered slices of the chapter's numbering (this
+    // one is 17, 20, 23, 24, 28, 30, 32, 33, 34, 38, 39), so concatenating the
+    // files is no longer the order a player meets them in. The join's own order
+    // is asserted against the campaign table by `campaign-shape.test.ts` and
+    // `test/levels/unlock-chain.test.ts`; what is checked here is the gating.
     const unlocked = new Set<string>(STARTER_COMPONENTS);
     for (const level of [
       ...CH1_PART1,
@@ -375,7 +382,7 @@ describe('chapter 2, levels 28-38', () => {
       ...CH2_BATCH2,
       ...CH2_BATCH3,
       ...CH2_BATCH4,
-    ]) {
+    ].sort((a, b) => a.index - b.index)) {
       for (const def of level.rewards?.components ?? []) unlocked.add(def);
       for (const def of level.allowedComponents) {
         expect(unlocked.has(def), `${level.id} offers locked component ${def}`).toBe(true);
@@ -384,10 +391,11 @@ describe('chapter 2, levels 28-38', () => {
   });
 
   it('offers nothing from a later level', () => {
-    // The same rule from the other side: what this batch offers is built from
-    // chapter 1's rewards, batches 1-3's, its own, and the starter set. The
-    // parts the chapter hands out after this batch (the CPU chapter's own
-    // components) are named here so the walk cannot pass on an empty palette.
+    // The same rule from the other side, over the same campaign order: what a
+    // level offers is built from chapter 1's rewards, the earlier chapter-2
+    // levels', its own, and the starter set. The parts the chapter hands out
+    // after this batch (the CPU chapter's own components) are named here so the
+    // walk cannot pass on an empty palette.
     const owned = new Set<string>(STARTER_COMPONENTS);
     for (const level of [
       ...CH1_PART1,
@@ -396,7 +404,7 @@ describe('chapter 2, levels 28-38', () => {
       ...CH2_BATCH2,
       ...CH2_BATCH3,
       ...CH2_BATCH4,
-    ]) {
+    ].sort((a, b) => a.index - b.index)) {
       for (const def of level.rewards?.components ?? []) owned.add(def);
       for (const def of level.allowedComponents) {
         expect(owned.has(def), `${level.id} offers ${def}, which no level unlocks by then`).toBe(
@@ -414,53 +422,53 @@ describe('chapter 2, levels 28-38', () => {
   });
 
   it('hands out the parts the brief assigns to each level', () => {
-    expect(L28.rewards?.components).toEqual(['ram8']);
-    expect(L29.rewards?.components).toEqual(['reg8', 'delay8']);
-    expect(L30.rewards?.components ?? []).toEqual([]);
-    expect(L31.rewards?.components ?? []).toEqual([]);
+    expect(L17.rewards?.components).toEqual(['ram8', 'switch']);
+    expect(L20.rewards?.components).toEqual(['reg8', 'delay8']);
+    expect(L23.rewards?.components ?? []).toEqual([]);
+    expect(L28.rewards?.components ?? []).toEqual([]);
+    expect(L24.rewards?.components ?? []).toEqual([]);
+    expect(L30.rewards?.components).toEqual(['mux8']);
     expect(L32.rewards?.components ?? []).toEqual([]);
-    expect(L33.rewards?.components).toEqual(['mux8']);
-    expect(L34.rewards?.components ?? []).toEqual([]);
-    expect(L35.rewards?.components ?? []).toEqual([]);
-    expect(L36.rewards?.components).toEqual(['counter8']);
-    expect(L37.rewards?.components ?? []).toEqual([]);
+    expect(L33.rewards?.components ?? []).toEqual([]);
+    expect(L34.rewards?.components).toEqual(['counter8']);
     expect(L38.rewards?.components ?? []).toEqual([]);
+    expect(L39.rewards?.components ?? []).toEqual([]);
   });
 
   it('holds its own rewards back where an eight-bit part cannot attach', () => {
-    // Level 28's reward is `ram8`, and every pin on that level is one bit wide:
+    // Level 17's reward is `ram8`, and every pin on that level is one bit wide:
     // an eight-bit part has nothing to attach to (batch 1's level-14 reason). A
     // reward is data and the unlock walk still hands it out; the level's palette
     // is what stays one bit wide, exactly as chapter 1's capstone rewards `mem1`
     // without listing it.
-    expect(L28.allowedComponents).not.toContain('ram8');
-    expect(L28.allowedComponents).not.toContain('mem1');
+    expect(L17.allowedComponents).not.toContain('ram8');
+    expect(L17.allowedComponents).not.toContain('mem1');
     // The two one-bit levels that are answered by, or teach, the packaged
-    // conditional write list it: level 28 is where the loop is BUILT (see its
-    // comment), level 35 is where the part is USED.
-    expect(L35.allowedComponents).toContain('mem1');
-    expect(L30.allowedComponents).toContain('mem1');
+    // conditional write list it: level 17 is where the loop is BUILT (see its
+    // comment), level 33 is where the part is USED.
+    expect(L33.allowedComponents).toContain('mem1');
+    expect(L23.allowedComponents).toContain('mem1');
   });
 
   it('offers the parts its own lesson needs', () => {
     // Not a restatement of the palettes but of the claims their comments make.
     for (const def of ['delay_line', 'switch', 'not', 'or']) {
-      expect(L28.allowedComponents, `level 28 cannot use ${def}`).toContain(def);
+      expect(L17.allowedComponents, `level 17 cannot use ${def}`).toContain(def);
     }
     for (const def of ['delay8', 'reg8', 'splitter', 'maker']) {
-      expect(L29.allowedComponents, `level 29 cannot use ${def}`).toContain(def);
+      expect(L20.allowedComponents, `level 20 cannot use ${def}`).toContain(def);
     }
     for (const def of ['mem1', 'xor']) {
-      expect(L30.allowedComponents, `level 30 cannot use ${def}`).toContain(def);
+      expect(L23.allowedComponents, `level 23 cannot use ${def}`).toContain(def);
     }
     for (const def of ['mux8', 'splitter', 'maker', 'nand', 'not']) {
-      expect(L33.allowedComponents, `level 33 cannot use ${def}`).toContain(def);
+      expect(L30.allowedComponents, `level 30 cannot use ${def}`).toContain(def);
     }
     for (const def of ['ram8', 'reg8', 'mem1']) {
-      expect(L37.allowedComponents, `level 37 cannot use ${def}`).toContain(def);
+      expect(L38.allowedComponents, `level 38 cannot use ${def}`).toContain(def);
     }
     for (const def of ['reg8', 'splitter', 'maker', 'xor', 'and', 'add8']) {
-      expect(L38.allowedComponents, `level 38 cannot use ${def}`).toContain(def);
+      expect(L39.allowedComponents, `level 39 cannot use ${def}`).toContain(def);
     }
   });
 
@@ -468,34 +476,34 @@ describe('chapter 2, levels 28-38', () => {
     // Four rows is the brief's shape for both levels, and both are EXHAUSTIVE
     // over their one-bit inputs: two one-bit pins is four combinations, so the
     // tables are complete rather than sampled.
-    for (const level of [L31, L32]) {
+    for (const level of [L28, L24]) {
       const rows = rowsOf(level);
       expect(rows.length, `${level.id} does not have four rows`).toBe(4);
       expect(new Set(rows.map((row) => JSON.stringify(row.inputs))).size, level.id).toBe(4);
     }
   });
 
-  it('states level 31 as a conditional inversion', () => {
-    const rows = rowsOf(L31);
+  it('states level 28 as a conditional inversion', () => {
+    const rows = rowsOf(L28);
     expect(rowFor(rows, { a: 0, inv: 0 })?.outputs).toEqual({ out: 0 });
     expect(rowFor(rows, { a: 0, inv: 1 })?.outputs).toEqual({ out: 1 });
     expect(rowFor(rows, { a: 1, inv: 0 })?.outputs).toEqual({ out: 1 });
     expect(rowFor(rows, { a: 1, inv: 1 })?.outputs).toEqual({ out: 0 });
   });
 
-  it('states level 32 as a conditional pass', () => {
-    const rows = rowsOf(L32);
+  it('states level 24 as a conditional pass', () => {
+    const rows = rowsOf(L24);
     expect(rowFor(rows, { a: 0, on: 0 })?.outputs).toEqual({ out: 0 });
     expect(rowFor(rows, { a: 0, on: 1 })?.outputs).toEqual({ out: 0 });
     expect(rowFor(rows, { a: 1, on: 0 })?.outputs).toEqual({ out: 0 });
     expect(rowFor(rows, { a: 1, on: 1 })?.outputs).toEqual({ out: 1 });
   });
 
-  it('states level 34 as a four-row table over whole bytes', () => {
+  it('states level 32 as a four-row table over whole bytes', () => {
     // Four rows out of 2^17 possible vectors, which is the brief's shape: this
     // level is the "exactly one driver is active" rule stated as a small table,
-    // not an exhaustive byte table (that is what level 33's fuzz check covers).
-    const rows = rowsOf(L34);
+    // not an exhaustive byte table (that is what level 30's fuzz check covers).
+    const rows = rowsOf(L32);
     expect(rows.length).toBe(4);
     // Both select values are exercised, on the same pair of operands, so the
     // table separates "selected" from "always a" and "always b".
@@ -514,7 +522,7 @@ describe('chapter 2, levels 28-38', () => {
   });
 
   it('states the selector as a fixed seed and 256 rounds', () => {
-    const check = fuzzOf(L33);
+    const check = fuzzOf(L30);
     expect(Number.isInteger(check.seed), 'the fuzz seed is not an integer').toBe(true);
     expect(check.seed, 'the fuzz seed is the xorshift fixed point').not.toBe(0);
     expect(check.rounds).toBe(256);
@@ -522,34 +530,34 @@ describe('chapter 2, levels 28-38', () => {
     expect(Object.keys(check.outputs).sort()).toEqual(['out']);
   });
 
-  it('tells the player level 34 is a selector because the engine forbids a bus', () => {
+  it('tells the player level 32 is a selector because the engine forbids a bus', () => {
     // Spec 3.1: no bus protocol, no multi-driver arbitration -- one input pin is
     // driven by exactly one wire (`validateGraph`'s `multiple-drivers` error).
     // A literal tri-state bus therefore cannot be built here, and the level says
     // so in BOTH languages rather than pretending the source's concept is
     // computable as written.
-    expect(L34.brief.zh).toContain('多驱动');
-    expect(L34.brief.zh).toContain('仲裁');
-    expect(L34.brief.en).toContain('multi-driver');
-    expect(L34.brief.en).toContain('arbitration');
-    expect(L34.brief.zh).toContain('没有总线协议');
-    expect(L34.brief.en).toContain('no bus protocol');
+    expect(L32.brief.zh).toContain('多驱动');
+    expect(L32.brief.zh).toContain('仲裁');
+    expect(L32.brief.en).toContain('multi-driver');
+    expect(L32.brief.en).toContain('arbitration');
+    expect(L32.brief.zh).toContain('没有总线协议');
+    expect(L32.brief.en).toContain('no bus protocol');
   });
 
-  it('tells the player level 37 means all 256 bytes, and says how', () => {
+  it('tells the player level 38 means all 256 bytes, and says how', () => {
     // The source gives this level one line ("刚好装满存储空间的电路设计") and
     // defines neither the capacity nor what "full" means, so this replica's
     // definition is the level's contract and the player has to be told it.
-    expect(L37.brief.zh).toContain('256');
-    expect(L37.brief.zh).toContain('装满');
-    expect(L37.brief.zh).toContain('addr');
-    expect(L37.brief.en).toContain('256');
-    expect(L37.brief.en).toContain('full');
-    expect(L37.brief.en).toContain('addr');
+    expect(L38.brief.zh).toContain('256');
+    expect(L38.brief.zh).toContain('装满');
+    expect(L38.brief.zh).toContain('addr');
+    expect(L38.brief.en).toContain('256');
+    expect(L38.brief.en).toContain('full');
+    expect(L38.brief.en).toContain('addr');
   });
 
-  it('gives level 38 a script that walks a whole byte and wraps', () => {
-    const steps = scriptOf(L38).steps;
+  it('gives level 39 a script that walks a whole byte and wraps', () => {
+    const steps = scriptOf(L39).steps;
     // One step per tick, plus the final no-edge step that re-reads tick 263: a
     // circuit that counted combinationally would move there.
     expect(steps.length).toBe(265);
@@ -596,14 +604,14 @@ describe('chapter 2, levels 28-38', () => {
     expect(expectedOut(steps[264]!)).toBe(1);
   });
 
-  it('withholds the one drop-in that would answer level 38 in a single part', () => {
-    // `counter8` is unlocked by level 36, is not this level's own reward, and has
+  it('withholds the one drop-in that would answer level 39 in a single part', () => {
+    // `counter8` is unlocked by level 34, is not this level's own reward, and has
     // exactly this level's pins (`en` / `reset` -> `out`) -- batch 2's palette
-    // rule (level 22's `add8`, level 24's `neg8`). The level is the third use of
+    // rule (level 27's `add8`, level 31's `neg8`). The level is the third use of
     // that subtraction, and its data comment says so.
-    expect(L36.rewards?.components).toContain('counter8');
-    expect(L38.allowedComponents).not.toContain('counter8');
-    expect(L38.allowedComponents).toContain('add8');
+    expect(L34.rewards?.components).toContain('counter8');
+    expect(L39.allowedComponents).not.toContain('counter8');
+    expect(L39.allowedComponents).toContain('add8');
   });
 });
 
@@ -638,7 +646,7 @@ describe('the script levels hold a value across edges, not just within one', () 
   }
 
   it('gives each of those levels a run of consecutive ticks, not one sampled tick', () => {
-    // The same "many ticks" requirement level 30 is held to, one level down: a
+    // The same "many ticks" requirement level 23 is held to, one level down: a
     // storage level that sampled a single tick would not test holding either.
     for (const level of STORAGE_SCRIPT_LEVELS) {
       const ticks = scriptOf(level).steps.map((step) => step.tick);
@@ -651,8 +659,8 @@ describe('the script levels hold a value across edges, not just within one', () 
   });
 });
 
-describe("level 30's periodicity is asserted across many ticks", () => {
-  const steps = scriptOf(L30).steps;
+describe("level 23's periodicity is asserted across many ticks", () => {
+  const steps = scriptOf(L23).steps;
   /** Ticks 0-15: the osculating run. */
   const oscillating = steps.filter((step) => step.tick <= 15);
   /** Ticks 16-19: `enable` drops and the output must stay where it was. */
@@ -704,11 +712,11 @@ describe("level 30's periodicity is asserted across many ticks", () => {
     expect(resumed.map((step) => expectedOut(step))).toEqual([0, 1, 0, 1]);
   });
 
-  it("keeps level 30's second script held low for its whole run", () => {
+  it("keeps level 23's second script held low for its whole run", () => {
     // The other half of "the enable gates the clock": a circuit that oscillated
     // whatever `enable` said would fail this one at tick 1.
-    const second = scriptsOf(L30)[1];
-    expect(second, 'level 30 has no second script').toBeDefined();
+    const second = scriptsOf(L23)[1];
+    expect(second, 'level 23 has no second script').toBeDefined();
     expect(second!.steps.map((step) => step.tick)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
     for (const step of second!.steps) {
       expect(driven(step, 'enable')).toBe(0);
@@ -717,8 +725,8 @@ describe("level 30's periodicity is asserted across many ticks", () => {
   });
 });
 
-describe("level 37's check covers the whole address range", () => {
-  const steps = scriptOf(L37).steps;
+describe("level 38's check covers the whole address range", () => {
+  const steps = scriptOf(L38).steps;
   const write = steps.slice(1, 257);
   const read = steps.slice(257);
 
@@ -797,49 +805,49 @@ describe('every level carries its sourced-vs-authored data comment', () => {
     });
   }
 
-  it('records that level 30 asserts periodicity, and why one tick would not', () => {
-    const l30 = comments.get('ch2-30-odd-ticks') ?? '';
-    expect(l30).toContain('构建振荡电路（时钟信号发生器）');
-    expect(l30).toContain('周期');
-    expect(l30).toContain('periodicity');
+  it('records that level 23 asserts periodicity, and why one tick would not', () => {
+    const l23 = comments.get('ch2-23-odd-cycles') ?? '';
+    expect(l23).toContain('构建振荡电路（时钟信号发生器）');
+    expect(l23).toContain('周期');
+    expect(l23).toContain('periodicity');
     // The source gives no period, no duty cycle and no gating rule; the comment
     // has to say that the period and the hold are this replica's design.
-    expect(l30).toContain('AUTHORED');
+    expect(l23).toContain('AUTHORED');
   });
 
-  it("records that level 34 changes the source level's kind, and why", () => {
+  it("records that level 32 changes the source level's kind, and why", () => {
     // Spec 3.1 forbids a bus protocol (multi-driver arbitration), so the
     // source's concept is NOT computable as written: the comment has to say
     // that, name the spec section, quote the source's own words for the
     // concept, and state what the level teaches instead.
-    const l34 = comments.get('ch2-34-the-bus') ?? '';
-    expect(l34).toContain('共享数据传输线路的概念');
-    expect(l34).toContain('多驱动仲裁');
-    expect(l34).toContain('3.1');
-    expect(l34).toContain('kind');
-    expect(l34).toContain('driver selection');
+    const l32 = comments.get('ch2-32-the-bus') ?? '';
+    expect(l32).toContain('共享数据传输线路的概念');
+    expect(l32).toContain('多驱动仲裁');
+    expect(l32).toContain('3.1');
+    expect(l32).toContain('kind');
+    expect(l32).toContain('driver selection');
   });
 
-  it("records level 37's definition of 装满, because the source has none", () => {
-    const l37 = comments.get('ch2-37-little-box') ?? '';
-    expect(l37).toContain('刚好装满存储空间的电路设计');
-    expect(l37).toContain('256');
-    expect(l37).toContain('addressable');
+  it("records level 38's definition of 装满, because the source has none", () => {
+    const l38 = comments.get('ch2-38-little-box') ?? '';
+    expect(l38).toContain('刚好装满存储空间的电路设计');
+    expect(l38).toContain('256');
+    expect(l38).toContain('addressable');
     // The definition has to be this replica's and be presented as such.
-    expect(l37).toContain('AUTHORED');
-    expect(l37).toContain('defines');
+    expect(l38).toContain('AUTHORED');
+    expect(l38).toContain('defines');
   });
 
-  it("records level 38's achievement without turning it into a pass condition", () => {
+  it("records level 39's achievement without turning it into a pass condition", () => {
     // The source's note is 成就：≤ 65 个门 -- a count of basic logic gates, in the
     // source's own metric. This replica's `gate` is NAND equivalents, so the
     // comment records the source's number and says what it is NOT, exactly as
-    // batch 2 recorded level 21's five components and level 22's delay of 35.
-    const l38 = comments.get('ch2-38-counter') ?? '';
-    expect(l38).toContain('成就：≤ 65 个门');
-    expect(l38).toContain('achievement, not a pass condition');
-    expect(l38).toContain('NAND');
-    expect(l38).toContain('threeStar.gate');
+    // batch 2 recorded level 22's five components and level 27's delay of 35.
+    const l39 = comments.get('ch2-39-counter') ?? '';
+    expect(l39).toContain('成就：≤ 65 个门');
+    expect(l39).toContain('achievement, not a pass condition');
+    expect(l39).toContain('NAND');
+    expect(l39).toContain('threeStar.gate');
   });
 
   it('records the script tick semantics that decide how these levels are authored', () => {
@@ -952,7 +960,7 @@ function gateBuiltSelector(): Graph {
 }
 
 /**
- * Level 35's hand-built alternative: the same loop level 28's reference builds,
+ * Level 33's hand-built alternative: the same loop level 17's reference builds,
  * wired to this level's pin names (`d` / `load`).
  *
  * Correct, and one star: this level offers the packaged 1-Bit Memory, whose own
@@ -1000,7 +1008,7 @@ function adderCounter(): Graph {
   ]);
 }
 
-/** The packaged counter, which level 38's palette withholds (measured, not offered). */
+/** The packaged counter, which level 39's palette withholds (measured, not offered). */
 function counterPart(): Graph {
   return build([
     { kind: 'input', name: 'en' },
@@ -1059,7 +1067,7 @@ describe('reference solutions are buildable from the palette they are graded aga
 });
 
 // ---------------------------------------------------------------------------
-// Stability: level 28
+// Stability: level 17
 // ---------------------------------------------------------------------------
 
 /** The textbook latch with no storage element in it: a purely combinational ring. */
@@ -1097,7 +1105,7 @@ function doubleNotRing(): Graph {
   ]);
 }
 
-describe('level 28 asserts both sides of the loop', () => {
+describe('level 17 asserts both sides of the loop', () => {
   it('settles its reference, which really does contain a feedback loop', () => {
     // The settling side. The reference is not a packaged part sitting outside
     // the loop: `validateGraph` sees the cycle, and `reset()` -- which runs the
@@ -1113,7 +1121,7 @@ describe('level 28 asserts both sides of the loop', () => {
     const sim = new Simulation(compile(graph, registry), registry);
     expect(() => sim.reset()).not.toThrow();
     expect(() => sim.settle()).not.toThrow();
-    expect(grade(graph, registry, specOf('ch2-28-circular-dependency')).passed).toBe(true);
+    expect(grade(graph, registry, specOf('ch2-17-circular-dependency')).passed).toBe(true);
   });
 
   for (const [name, make] of [
@@ -1132,7 +1140,7 @@ describe('level 28 asserts both sides of the loop', () => {
 
       // And the level records it as a failed check with the `unstable` reason,
       // rather than letting the throw escape the grading path.
-      const failures = failuresOf(make, specOf('ch2-28-circular-dependency'));
+      const failures = failuresOf(make, specOf('ch2-17-circular-dependency'));
       expect(failures.some((failure) => failure.reason === 'unstable')).toBe(true);
     });
   }
@@ -1140,18 +1148,18 @@ describe('level 28 asserts both sides of the loop', () => {
   it('accepts the packaged latch the palette withholds, and says it is cheaper', () => {
     // `mem1`'s pins ARE this level's pins, so it passes -- measured here rather
     // than left as a claim, and the level's palette does not list it (see the
-    // level's comment): this board is where the loop is built, level 35 is where
+    // level's comment): this board is where the loop is built, level 33 is where
     // the part is used.
-    const result = grade(mem1Latch(), registry, specOf('ch2-28-circular-dependency'));
+    const result = grade(mem1Latch(), registry, specOf('ch2-17-circular-dependency'));
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
     expect(result.stars).toBe(3);
     expect(result.metrics).toEqual({ gate: 0, delay: 0, tick: 4 });
-    expect(specOf('ch2-28-circular-dependency').allowedComponents).not.toContain('mem1');
+    expect(specOf('ch2-17-circular-dependency').allowedComponents).not.toContain('mem1');
   });
 });
 
 // ---------------------------------------------------------------------------
-// The fuzz level: level 33
+// The fuzz level: level 30
 // ---------------------------------------------------------------------------
 
 /**
@@ -1185,10 +1193,10 @@ function captureRound(
   return { failures: result.failures, seen };
 }
 
-describe("level 33's 256 rounds exercise both select values", () => {
+describe("level 30's 256 rounds exercise both select values", () => {
   it('draws both sel values many times over, in the same sequence every run', () => {
-    const once = captureRound(L33, solutions['ch2-33-input-selector']!).seen;
-    const twice = captureRound(L33, solutions['ch2-33-input-selector']!).seen;
+    const once = captureRound(L30, solutions['ch2-30-multiplexer']!).seen;
+    const twice = captureRound(L30, solutions['ch2-30-multiplexer']!).seen;
     expect(once).toHaveLength(256);
     expect(twice).toEqual(once);
     const lows = once.filter((v) => (v.sel ?? 0) === 0).length;
@@ -1202,7 +1210,7 @@ describe("level 33's 256 rounds exercise both select values", () => {
   });
 
   it('grades the expectation function the brief states, on hand-picked vectors', () => {
-    const out = expectation(L33, 'out');
+    const out = expectation(L30, 'out');
     expect(out(vector({ a: 0x12, b: 0x34, sel: 0 }))).toBe(0x12);
     expect(out(vector({ a: 0x12, b: 0x34, sel: 1 }))).toBe(0x34);
     // Nothing is OR-ed or AND-ed together: the unselected line does not leak a
@@ -1220,7 +1228,7 @@ describe("level 33's 256 rounds exercise both select values", () => {
         { kind: 'input', name: 'sel' },
         { kind: 'output', width: 8, from: 'a' },
       ]);
-    const { failures, seen } = captureRound(L33, alwaysA);
+    const { failures, seen } = captureRound(L30, alwaysA);
     expect(failures).toHaveLength(1);
     const failure = failures[0]!;
     const firstBad = seen.findIndex((v) => (v.sel ?? 0) === 1);
@@ -1358,23 +1366,23 @@ function counterWithoutReset(): Graph {
 /** Circuits a player would plausibly build and that must be rejected. */
 const wrong: Record<string, () => Graph> = {
   // A ring with no storage in it: the engine cannot settle it at all.
-  'ch2-28-circular-dependency': crossCoupledNorLatch,
-  'ch2-29-delayed-lines': twoTicksOfDelay,
-  'ch2-30-odd-ticks': freeRunningOscillator,
-  'ch2-31-bit-inverter': orInsteadOfXor,
-  'ch2-32-bit-switch': orInsteadOfAnd,
-  'ch2-33-input-selector': () =>
+  'ch2-17-circular-dependency': crossCoupledNorLatch,
+  'ch2-20-delayed-lines': twoTicksOfDelay,
+  'ch2-23-odd-cycles': freeRunningOscillator,
+  'ch2-28-bit-inverter': orInsteadOfXor,
+  'ch2-24-bit-switch': orInsteadOfAnd,
+  'ch2-30-multiplexer': () =>
     build([
       { kind: 'input', name: 'a', width: 8 },
       { kind: 'input', name: 'b', width: 8 },
       { kind: 'input', name: 'sel' },
       { kind: 'output', width: 8, from: 'a' },
     ]),
-  'ch2-34-the-bus': alwaysB,
-  'ch2-35-saving-gracefully': alwaysLoading,
-  'ch2-36-saving-bytes': bareWire,
-  'ch2-37-little-box': registerIgnoringAddr,
-  'ch2-38-counter': counterWithoutReset,
+  'ch2-32-the-bus': alwaysB,
+  'ch2-33-saving-gracefully': alwaysLoading,
+  'ch2-34-saving-bytes': bareWire,
+  'ch2-38-little-box': registerIgnoringAddr,
+  'ch2-39-counter': counterWithoutReset,
 };
 
 describe('plausible wrong circuits fail', () => {
@@ -1385,7 +1393,7 @@ describe('plausible wrong circuits fail', () => {
   }
 
   it('fails the ring on `unstable` and names no tick, because nothing settled', () => {
-    const failures = failuresOf(notRing, specOf('ch2-28-circular-dependency'));
+    const failures = failuresOf(notRing, specOf('ch2-17-circular-dependency'));
     expect(failures.map((failure) => failure.reason)).toContain('unstable');
   });
 
@@ -1393,7 +1401,7 @@ describe('plausible wrong circuits fail', () => {
     // Sixteen ticks of alternating output are not evidence of a gated clock: the
     // ungated one satisfies them too. The failure has to land on tick 16, the
     // first tick `enable` is low.
-    const failures = failuresOf(freeRunningOscillator, specOf('ch2-30-odd-ticks'));
+    const failures = failuresOf(freeRunningOscillator, specOf('ch2-23-odd-cycles'));
     const first = failures.find((failure) => failure.tick >= 16);
     expect(first, 'the ungated oscillator was never caught on a held tick').toBeDefined();
     expect(first?.tick).toBe(16);
@@ -1402,14 +1410,14 @@ describe('plausible wrong circuits fail', () => {
   });
 
   it('fails the clock that never ticks on the very first beat', () => {
-    const failures = failuresOf(stuckLowOscillator, specOf('ch2-30-odd-ticks'));
+    const failures = failuresOf(stuckLowOscillator, specOf('ch2-23-odd-cycles'));
     expect(failures[0]?.tick).toBe(1);
     expect(failures[0]?.expected).toEqual({ out: 1 });
     expect(failures[0]?.actual).toEqual({ out: 0 });
   });
 
   it('fails the wrong delay on the tick it is one edge short at', () => {
-    const failures = failuresOf(twoTicksOfDelay, specOf('ch2-29-delayed-lines'));
+    const failures = failuresOf(twoTicksOfDelay, specOf('ch2-20-delayed-lines'));
     expect(failures[0]?.tick).toBe(1);
     expect(failures[0]?.expected).toEqual({ out: 0x5a });
     expect(failures[0]?.actual).toEqual({ out: 0x00 });
@@ -1419,14 +1427,14 @@ describe('plausible wrong circuits fail', () => {
     // The counterexample that makes "full" mean something: one register holds one
     // byte, so the first read of the second pass cannot return what address 0 was
     // written with.
-    const failures = failuresOf(registerIgnoringAddr, specOf('ch2-37-little-box'));
+    const failures = failuresOf(registerIgnoringAddr, specOf('ch2-38-little-box'));
     const first = failures[0];
     expect(first?.tick).toBe(257);
     expect(first?.inputs.addr).toBe(0);
     // The read pass drives the complement of the stored byte, so the value the
     // level expects at address 0 is recoverable from `d` -- and the register
     // can only offer the byte address 255 was written with.
-    expect(first?.expected).toEqual({ out: ~driven(scriptOf(L37).steps[257]!, 'd') & 0xff });
+    expect(first?.expected).toEqual({ out: ~driven(scriptOf(L38).steps[257]!, 'd') & 0xff });
     expect(first?.actual.out).not.toBe(first?.expected.out);
   });
 
@@ -1441,15 +1449,15 @@ describe('plausible wrong circuits fail', () => {
         { kind: 'input', name: 'load' },
         { kind: 'output', width: 8, from: 'd' },
       ]);
-    const failures = failuresOf(passThrough, specOf('ch2-37-little-box'));
+    const failures = failuresOf(passThrough, specOf('ch2-38-little-box'));
     const first = failures[0];
     expect(first?.tick).toBe(257);
-    expect(first?.actual.out).toBe(driven(scriptOf(L37).steps[257]!, 'd'));
+    expect(first?.actual.out).toBe(driven(scriptOf(L38).steps[257]!, 'd'));
     expect(first?.expected.out).not.toBe(first?.actual.out);
   });
 
   it('fails the counter with no reset on the first edge the level resets on', () => {
-    const failures = failuresOf(counterWithoutReset, specOf('ch2-38-counter'));
+    const failures = failuresOf(counterWithoutReset, specOf('ch2-39-counter'));
     expect(failures[0]?.tick).toBe(1);
     expect(failures[0]?.inputs).toEqual({ en: 1, reset: 1 });
     expect(failures[0]?.expected).toEqual({ out: 0 });
@@ -1457,7 +1465,7 @@ describe('plausible wrong circuits fail', () => {
   });
 
   it('fails the always-loading latch on the first edge load is low on', () => {
-    const failures = failuresOf(alwaysLoading, specOf('ch2-35-saving-gracefully'));
+    const failures = failuresOf(alwaysLoading, specOf('ch2-33-saving-gracefully'));
     expect(failures[0]?.tick).toBe(1);
     expect(failures[0]?.expected).toEqual({ out: 0 });
     expect(failures[0]?.actual).toEqual({ out: 1 });
@@ -1480,11 +1488,11 @@ describe('an empty circuit fails every level instead of throwing', () => {
 // ---------------------------------------------------------------------------
 
 describe('what each level accepts, and what that answer costs', () => {
-  it('level 29 accepts the register and the eight delay lines at the same price', () => {
+  it('level 20 accepts the register and the eight delay lines at the same price', () => {
     // One 8-bit Delay Line, eight 1-bit ones and a Register with `load` tied high
     // are the same circuit on both metrics -- which is what makes "one tick of
     // delay" the level's lesson rather than a particular part's.
-    const level = specOf('ch2-29-delayed-lines');
+    const level = specOf('ch2-20-delayed-lines');
     for (const [name, make] of [
       ['delay8', delayedLinesReference],
       ['eight delay lines', eightOneBitDelays],
@@ -1497,41 +1505,41 @@ describe('what each level accepts, and what that answer costs', () => {
     }
   });
 
-  it('level 36 accepts eight 1-bit memories for the byte register', () => {
-    const level = specOf('ch2-36-saving-bytes');
+  it('level 34 accepts eight 1-bit memories for the byte register', () => {
+    const level = specOf('ch2-34-saving-bytes');
     const result = grade(eightOneBitMemories(), registry, level);
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
     expect(result.metrics).toEqual({ gate: 0, delay: 0, tick: 6 });
     expect(result.stars).toBe(3);
   });
 
-  it('level 35 accepts the hand-built loop, for one star', () => {
-    // The same loop level 28's reference builds, wired to this level's pin names.
+  it('level 33 accepts the hand-built loop, for one star', () => {
+    // The same loop level 17's reference builds, wired to this level's pin names.
     // Correct, and one star, because this level OFFERS the packaged 1-Bit Memory
     // whose own 0/0 is the target: the chapter's ruling is that the unlocked
     // storage part is cheaper than rebuilding it from gates, and this is the
     // measurement that makes the claim a number.
-    const result = grade(savingGracefullyByLoop(), registry, specOf('ch2-35-saving-gracefully'));
+    const result = grade(savingGracefullyByLoop(), registry, specOf('ch2-33-saving-gracefully'));
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
     expect(result.metrics).toEqual({ gate: 8, delay: 3, tick: 5 });
     expect(result.stars).toBe(1);
   });
 
-  it('level 32 accepts the Switch part it is named after, at the AND price', () => {
+  it('level 24 accepts the Switch part it is named after, at the AND price', () => {
     // The chapter's own part for this lesson is a 2-NAND cell, exactly the AND
     // it is built from -- so the level can offer it without loosening anything.
-    const level = specOf('ch2-32-bit-switch');
+    const level = specOf('ch2-24-bit-switch');
     const withPart = grade(switchPart(), registry, level);
     expect(withPart.failures, JSON.stringify(withPart.failures)).toEqual([]);
     expect(withPart.metrics).toEqual({ gate: 2, delay: 1, tick: 0 });
     expect(withPart.stars).toBe(3);
   });
 
-  it('level 38 measures the packaged counter the palette withholds', () => {
+  it('level 39 measures the packaged counter the palette withholds', () => {
     // Offered, `counter8` would answer this level in one component for 0 gates --
     // which is exactly why it is not offered, and why the level's comment calls
     // the source's "≤ 65 gates" achievement vacuous under a drop-in.
-    const level = specOf('ch2-38-counter');
+    const level = specOf('ch2-39-counter');
     const result = grade(counterPart(), registry, level);
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
     expect(result.metrics).toEqual({ gate: 0, delay: 0, tick: 263 });
@@ -1541,19 +1549,19 @@ describe('what each level accepts, and what that answer costs', () => {
 });
 
 describe('the targets separate the constructions they were measured against', () => {
-  it('level 31: the sum-of-products spelling is correct and five gates over', () => {
+  it('level 28: the sum-of-products spelling is correct and five gates over', () => {
     // Same function, 9 NAND equivalents against the XOR's 4, on a path three
     // components deep instead of one, so it is a correct answer worth one star. A
     // target every correct answer met would not be measuring the level's own
     // lesson ("an XOR is the cheap conditional inversion").
-    const level = specOf('ch2-31-bit-inverter');
+    const level = specOf('ch2-28-bit-inverter');
     const result = grade(sumOfProductsInverter(), registry, level);
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
     expect(result.metrics).toEqual({ gate: 9, delay: 3, tick: 0 });
     expect(result.stars).toBe(1);
   });
 
-  it('level 33 and 34: the hand-built selector is cheaper on gates and three deep', () => {
+  it('level 30 and 32: the hand-built selector is cheaper on gates and three deep', () => {
     // The measurement worth writing down, because it is not the one a reader
     // expects: a NAND is ONE NAND equivalent, so one shared inverter of `sel`
     // really does cover all eight bits, and three NANDs per bit is 25 gates --
@@ -1562,7 +1570,7 @@ describe('the targets separate the constructions they were measured against', ()
     // it: the part is one node and this is three. The part also wins on score
     // (32 + 4 = 36 against 25 + 12 = 37), so nothing here is denied a
     // construction that meets both bounds.
-    for (const id of ['ch2-33-input-selector', 'ch2-34-the-bus']) {
+    for (const id of ['ch2-30-multiplexer', 'ch2-32-the-bus']) {
       const result = grade(gateBuiltSelector(), registry, specOf(id));
       expect(result.failures, `${id}: ${JSON.stringify(result.failures)}`).toEqual([]);
       expect(result.metrics, id).toEqual({ gate: 25, delay: 3, tick: 0 });
@@ -1570,12 +1578,12 @@ describe('the targets separate the constructions they were measured against', ()
     }
   });
 
-  it('level 38: the byte adder counts too, for 72 gates and one unit of delay', () => {
+  it('level 39: the byte adder counts too, for 72 gates and one unit of delay', () => {
     // `add8(x, 0, 1)` is an incrementer, and it is the alternative the level's
     // own `add8` palette entry makes possible: correct, and one star, because the
     // hand-built carry chain is 41 gates. It is DEEPER in gates and SHALLOWER in
     // delay, which is why the level's target states both numbers.
-    const result = grade(adderCounter(), registry, specOf('ch2-38-counter'));
+    const result = grade(adderCounter(), registry, specOf('ch2-39-counter'));
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
     expect(result.metrics).toEqual({ gate: 72, delay: 1, tick: 263 });
     expect(result.stars).toBe(1);

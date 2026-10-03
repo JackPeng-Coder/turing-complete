@@ -157,7 +157,7 @@ export function aluOp(op: number, a: number, b: number): number {
 
 export const CH3_BATCH1: readonly LevelSpec[] = [
   /**
-   * ch3-39-arithmetic-engine -- Arithmetic Engine / 算数引擎
+   * ch3-40-alu-1 -- Arithmetic Engine / 算数引擎
    *
    * SOURCED: the name in both languages, its position (the 39th level, and the
    * first of chapter 3), and the source's one-line concept -- build the ALU, the
@@ -183,10 +183,10 @@ export const CH3_BATCH1: readonly LevelSpec[] = [
    * input the player can drive has a defined answer, including that one.
    */
   {
-    id: 'ch3-39-arithmetic-engine',
+    id: 'ch3-40-alu-1',
     chapter: 3,
-    index: 39,
-    name: { zh: '算数引擎', en: 'Arithmetic Engine' },
+    index: 40,
+    name: { zh: '逻辑整合', en: 'Arithmetic Logic Unit (ALU) 1' },
     brief: {
       // THE THREE BITS ARE NAMED BY THEIR WEIGHT, and this brief had two of them
       // swapped. The code is `op = op0 + 2*op1 + 4*op2`, so `op1` is the tens bit
@@ -284,7 +284,7 @@ export const CH3_BATCH1: readonly LevelSpec[] = [
   },
 
   /**
-   * ch3-40-registers -- Registers / 寄存器之间
+   * ch3-41-registers -- Registers / 寄存器之间
    *
    * SOURCED: the name in both languages, its position, and the source's concept
    * line, which is about moving data between registers.
@@ -311,10 +311,10 @@ export const CH3_BATCH1: readonly LevelSpec[] = [
    * measured target.
    */
   {
-    id: 'ch3-40-registers',
+    id: 'ch3-41-registers',
     chapter: 3,
-    index: 40,
-    name: { zh: '寄存器之间', en: 'Registers' },
+    index: 41,
+    name: { zh: '川流不息', en: 'Registers' },
     brief: {
       zh: '一个可寻址的寄存器堆：we 为高时，addr 选中的那个字节在时钟沿被写入；we 为低时整排寄存器原样保持。out 始终输出 addr 选中的那个字节，八个地址都要能读写。',
       en: 'An addressable register bank: while we is high, the byte at addr is written on the clock edge; while we is low the whole bank holds. out always publishes the byte at addr, and all eight addresses must read and write.',
@@ -401,7 +401,165 @@ export const CH3_BATCH1: readonly LevelSpec[] = [
   },
 
   /**
-   * ch3-41-component-factory -- Component Factory / 元件工坊
+   * ch3-42-alu-2 -- Arithmetic Logic Unit (ALU) 2 / 算术逻辑单元
+   *
+   * SOURCED: the name in both languages, its position (the 42nd level, the third
+   * of chapter 3), the source's one-line concept for it -- 加入 ADD/SUB, "adds
+   * ADD/SUB" -- and, from the same table's row for ALU 1, the four operations it
+   * adds to: NAND, OR, AND and NOR. The operation SET is the source's; nothing
+   * else about this level is.
+   *
+   * AUTHORED: the pin shape (the same `IO_ALU` ALU 1 uses, three one-bit selector
+   * pins rather than one three-bit pin, for the reason that level's comment gives:
+   * no part in the game can split a three-bit value); the eight-code contract,
+   * including codes 6 and 7 publishing zero; the fuzz check; the palette; the
+   * measured three-star target; and the `alu2` reward.
+   *
+   * THE SELECTOR IS THE ISA'S OPERATION FIELD, read exactly as ALU 1 and the
+   * calculation unit read it: `op0` is the ones bit, `op1` the twos and `op2` the
+   * fours, so the code is `op0 + 2*op1 + 4*op2`, and 0 is add, 1 subtract, 2 AND,
+   * 3 OR, 4 NAND, 5 NOR. The single authority for that table is `aluOp` in this
+   * file -- the same function the previous level's expectation calls, and the
+   * function `alu8` implements -- so this level's expectation, the previous
+   * level's and the registered part cannot disagree about what a code means. That
+   * coupling is deliberate: the defect the previous level shipped was an
+   * expectation that shared a misreading with its own generator, and the cure was
+   * to give the table one home rather than two.
+   *
+   * THE OVERLAP WITH `ch3-40-alu-1`, ON THE RECORD. The source splits the machine's
+   * operation set across two levels: ALU 1 is the four logic operations and ALU 2
+   * adds ADD and SUB. This replica's ALU 1 predates that split -- it was authored
+   * as the chapter's arithmetic engine and answers all eight codes -- so as the two
+   * levels stand today they state the same function over the same interface, and a
+   * reader is owed that sentence rather than left to discover it. What ALU 2 owns
+   * is the whole table (the four logic operations plus add and subtract), which is
+   * also the contract of `alu8`, the part ALU 1 rewards and the calculation unit
+   * consumes; narrowing ALU 1 to its four logic operations is a change to THAT
+   * level's check, reference and target, and nothing here depends on it either
+   * way. The two `threeStar` targets are equal for the reason the two palettes are:
+   * the same construction is the cheapest circuit either level admits, and
+   * `test/fixtures/ch3-references.ts` files one graph for each so the measurement
+   * is written down twice rather than shared.
+   *
+   * WHY `alu8` IS NOT OFFERED, WHICH IS THE PALETTE RULE RATHER THAN AN OVERSIGHT.
+   * It is the previous level's reward, so the player owns it by now, and its pins
+   * are `a:8 b:8 op:3 -> out:8` -- this level's interface with the three selector
+   * pins packed by a `maker` at its registered eight-bit width and padded with rails
+   * on the five spare inputs (the same padding the decoder references use;
+   * `params.width = 3` is NOT the way, because an instance parameter widens every
+   * pin of that instance at once and the packer then reads its own inputs wrongly).
+   * Packing is free on both metrics, so one instance would answer the level in a
+   * single drop, measured at 264 gates and 1 delay against the 273-gate, five-deep
+   * circuit the level exists to teach. It is the same subtraction level 22 makes for
+   * `add8` and level 20 for `full_adder`: a part that is not this level's own reward
+   * and would answer the level by itself is withheld, and this comment is where the
+   * price is recorded.
+   */
+  {
+    id: 'ch3-42-alu-2',
+    chapter: 3,
+    index: 42,
+    name: { zh: '算术逻辑单元', en: 'Arithmetic Logic Unit (ALU) 2' },
+    brief: {
+      zh: 'a 与 b 各是一个字节。三个选择位按权重读成一个编号：op0 是个位、op1 是二位、op2 是四位。编号 0 加、1 减、2 与、3 或、4 与非、5 或非；编号 6、7（op1 与 op2 同时为高）输出 0。减法按 256 取模：0 减 1 得 255。这就是上一关那四个逻辑运算再加上加法与减法。',
+      en: 'a and b are each one byte. The three selector bits read as one number by weight: op0 is the ones bit, op1 the twos bit, op2 the fours bit. The code is 0 add, 1 subtract, 2 AND, 3 OR, 4 NAND, 5 NOR, and 6 or 7 (op1 and op2 both high) output 0. Subtraction wraps modulo 256: 0 minus 1 is 255. It is the previous level\'s four logic operations with addition and subtraction added.',
+    },
+    hint: {
+      zh: '和上一关同一套选择器，只是这次六个编号都要有结果。加法器给你加和减：把 b 取反再加 1 就是减，用 op0 在 b 与 ~b 之间选，并让同一个 op0 当进位。与门和或门给你与和或，同样用 op0 在两者间选；再用 op2 把结果取反就得到与非与或非。op1 在算术与逻辑之间二选一——注意 op1=op2=1 时输出必须压成 0。',
+      en: 'The same selector as the previous level, but now all six codes need an answer. The adder gives you add and subtract: subtract is b inverted plus one, so let op0 choose between b and ~b and let the same bit drive the carry. AND and OR gates give you the other pair, again selected by op0; inverting that result with op2 gives NAND and NOR. op1 chooses between the arithmetic and the logic half -- and note that when op1 and op2 are both high the output must be forced to 0.',
+    },
+    allowedComponents: [
+      'const_on',
+      'const_off',
+      'nand',
+      'not',
+      'and',
+      'or',
+      'nor',
+      'xor',
+      'xnor',
+      'and3',
+      'or3',
+      'full_adder',
+      'add8',
+      'neg8',
+      'and8',
+      'or8',
+      'nand8',
+      'nor8',
+      'xor8',
+      'xnor8',
+      'not8',
+      'splitter',
+      'maker',
+      'const8',
+      'mux8',
+      'switch8',
+      'switch',
+      ...LEVEL_IO,
+    ],
+    io: IO_ALU,
+    checks: [
+      {
+        kind: 'fuzz',
+        // A fixed literal, and this level's own: nothing draws it at run time, so
+        // the same vectors are driven on every run and after every board edit. The
+        // high half reads as this level's global index; the low half is distinct
+        // from the previous level's `0x3915_00aa`, so the two levels never grade
+        // the same sequence.
+        seed: 0x4215_00ab,
+        rounds: 64,
+        inputs: {
+          a: (s) => s.a ?? 0,
+          b: (s) => s.b ?? 0,
+          // All three selector bits are drawn independently, so the eight codes are
+          // exercised; six of them are operations and two are the reserved pair the
+          // level folds onto a zero-output rule of its own. Drawing them rather
+          // than pinning them is what makes the reserved case a test rather than a
+          // hope, exactly as on the previous level.
+          op0: (s) => s.op0 ?? 0,
+          op1: (s) => s.op1 ?? 0,
+          op2: (s) => s.op2 ?? 0,
+        },
+        outputs: {
+          // Pin `opN` is BIT N of the ISA's operation field, so the code is
+          // `op0 + 2*op1 + 4*op2` with nothing transposed, and `aluOp` is the
+          // table. The wired reference in `test/fixtures/ch3-references.ts` reads
+          // the same three pins the same way.
+          out: (v) =>
+            aluOp((v.op0 ?? 0) | ((v.op1 ?? 0) << 1) | ((v.op2 ?? 0) << 2), v.a ?? 0, v.b ?? 0),
+        },
+      },
+    ],
+    // Measured: the reference's own metrics, and they are the previous level's
+    // because the cheapest circuit either palette admits is the same construction
+    // -- one `not8` and one `mux8` pick the adder's addend (`b` or `~b`, with the
+    // same bit as the carry), an `add8` and an `and8`/`or8` pair with their own
+    // `mux8` picks, a `not8` for the NAND/NOR inversion, a `switch8` gated by
+    // `~op2` for the reserved codes, and two more `mux8`s to select the half and
+    // then the operation: 8 + 32 + 72 + 16 + 24 + 32 + 8 + 1 + 16 + 32 + 32 = 273
+    // NAND equivalents on a path five components deep. The overlap is recorded in
+    // the comment above rather than hidden by a different measurement.
+    threeStar: { gate: 273, delay: 5, tick: 0 },
+    // `alu2` USED TO BE NAMED HERE AS A REWARD, AND IT WAS A MISTAKE: the 2.x
+    // plan listed it as "a part no level hands out", but there is no `alu2` in
+    // `src/core/defs/` at all -- it was never a part, only the level's name. A
+    // reward naming an unregistered id can never appear in a palette, and
+    // `registry.test.ts` fails on it, so the line now hands out only parts that
+    // exist. OVERTURE's own ALU remains `alu8`, and this level does not list it:
+    // see the comment above for the measurement behind that.
+    //
+    // `ashr8`, `rot_l8` and `rot_r8` land here because this level is what the 2.x
+    // realignment left in the removed Logic Engine's place: chapter 2 used to hand
+    // the shift and rotate family out at that capstone, and no surviving chapter-2
+    // level has a puzzle that calls for them. They are registered parts with a
+    // sandbox life of their own, so the choice was to hand them out here or leave
+    // them dead content; the design spec's §3.3 row moved with them.
+    rewards: { components: ['ashr8', 'rot_l8', 'rot_r8'] },
+  },
+
+  /**
+   * ch3-43-the-foundry -- Component Factory / 元件工坊
    *
    * SOURCED: the name in both languages, its position, and the source's concept
    * line, which is about modularising a circuit into reusable parts.
@@ -426,10 +584,10 @@ export const CH3_BATCH1: readonly LevelSpec[] = [
    * forwarding circuit fails), and the measured target.
    */
   {
-    id: 'ch3-41-component-factory',
+    id: 'ch3-43-the-foundry',
     chapter: 3,
-    index: 41,
-    name: { zh: '元件工坊', en: 'Component Factory' },
+    index: 43,
+    name: { zh: '元件工坊', en: 'The Foundry' },
     brief: {
       zh: '这块部件有两个输出。sel 为 0 或 1 时 data 出现在 a 上、b 为 0；sel 为 2 或 3 时 data 出现在 b 上、a 为 0。两个输出任何时候都不能同时为非零。',
       en: 'This part has two outputs. When sel is 0 or 1, data appears on a and b is zero; when sel is 2 or 3, data appears on b and a is zero. The two outputs must never both be non-zero.',

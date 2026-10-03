@@ -59,7 +59,7 @@ export function bits(stem: string): string[] {
 
 export const CH2_BATCH1_REFERENCES: Record<string, () => Graph> = {
   // splitter + three XORs: one per pair, then the pair results.
-  'ch2-13-odd-number-of-signals': () =>
+  'ch2-16-odd-number-of-signals': () =>
     build([
       { kind: 'input', name: 'a', width: 4 },
       { kind: 'part', def: 'splitter', id: 'sp', from: ['a'] },
@@ -69,7 +69,7 @@ export const CH2_BATCH1_REFERENCES: Record<string, () => Graph> = {
       { kind: 'output', from: 'parity' },
     ]),
   // (a&b) | (c&d) | ((a|b)&(c|d)): the six pairs, in three terms.
-  'ch2-14-double-trouble': () =>
+  'ch2-15-double-detection': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
@@ -83,31 +83,25 @@ export const CH2_BATCH1_REFERENCES: Record<string, () => Graph> = {
       { kind: 'part', def: 'or3', id: 'at_least_two', from: ['ab', 'cd', 'cross'] },
       { kind: 'output', from: 'at_least_two' },
     ]),
-  // Two half adders, then the two partial sums added the same way.
-  'ch2-15-binary-racer': () =>
+  // The four-bit reader: every bit forwarded to the output of its own name. It is
+  // chapter 2's first level since the 2.x realignment moved it out of chapter 1,
+  // and its circuit moved here with it -- a level the batch no longer contains
+  // cannot be looked up in a map that only lists this batch. The popcount circuit
+  // that used to sit at this key belonged to the level 2.x does not have (it
+  // duplicated `ch2-18-counting-signals`); it went with the level.
+  'ch2-14-binary-racer': () =>
     build([
-      { kind: 'input', name: 'a', width: 4 },
-      { kind: 'part', def: 'splitter', id: 'sp', from: ['a'] },
-      { kind: 'part', def: 'xor', id: 's01', from: ['sp.b0', 'sp.b1'] },
-      { kind: 'part', def: 'and', id: 'c01', from: ['sp.b0', 'sp.b1'] },
-      { kind: 'part', def: 'xor', id: 's23', from: ['sp.b2', 'sp.b3'] },
-      { kind: 'part', def: 'and', id: 'c23', from: ['sp.b2', 'sp.b3'] },
-      { kind: 'part', def: 'xor', id: 'bit0', from: ['s01', 's23'] },
-      { kind: 'part', def: 'and', id: 'carry', from: ['s01', 's23'] },
-      { kind: 'part', def: 'xor', id: 'carries', from: ['c01', 'c23'] },
-      { kind: 'part', def: 'xor', id: 'bit1', from: ['carries', 'carry'] },
-      { kind: 'part', def: 'and', id: 'bit2', from: ['c01', 'c23'] },
-      { kind: 'part', def: 'const_off', id: 'z', from: [] },
-      {
-        kind: 'part',
-        def: 'maker',
-        id: 'mk',
-        from: ['bit0', 'bit1', 'bit2', 'z', 'z', 'z', 'z', 'z'],
-      },
-      { kind: 'output', width: 3, from: 'mk' },
+      { kind: 'input', name: 'b3' },
+      { kind: 'input', name: 'b2' },
+      { kind: 'input', name: 'b1' },
+      { kind: 'input', name: 'b0' },
+      { kind: 'output', name: 'OUT_out3', from: 'b3' },
+      { kind: 'output', name: 'OUT_out2', from: 'b2' },
+      { kind: 'output', name: 'OUT_out1', from: 'b1' },
+      { kind: 'output', name: 'OUT_out0', from: 'b0' },
     ]),
   // The same tree, on four separate pins.
-  'ch2-16-counting-signals': () =>
+  'ch2-18-counting-signals': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
@@ -132,7 +126,7 @@ export const CH2_BATCH1_REFERENCES: Record<string, () => Graph> = {
       { kind: 'output', width: 3, from: 'mk' },
     ]),
   // A left shift is wiring: every bit of a moves up one slot, bit 0 is 0.
-  'ch2-17-double-the-number': () =>
+  'ch2-21-double-the-number': () =>
     build([
       { kind: 'input', name: 'a', width: 8 },
       { kind: 'part', def: 'splitter', id: 'sp', from: ['a'] },
@@ -186,6 +180,37 @@ export function byteNotReference(): Graph {
   ];
   for (let bit = 0; bit < 8; bit += 1) {
     nodes.push({ kind: 'part', def: 'not', id: `n${bit}`, from: [`sa.b${bit}`] });
+  }
+  nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: bits('n') });
+  nodes.push({ kind: 'output', from: 'mk', width: 8 });
+  return build(nodes);
+}
+
+/**
+ * `~(a & b)`, bit by bit: two splitters, eight NANDs, one maker.
+ *
+ * 8 x 1 = 8 NAND equivalents at depth 1, with the packers and the level pins free
+ * on both metrics -- and that is the floor for the function, because every output
+ * bit depends on its own pair of input bits and one gate is the least that pair
+ * can cost. The level's own reward, `nand8`, ties it exactly: one instance, 8
+ * gates and 1 delay on the same documented basis (a NAND cell is one NAND per
+ * bit), which is the recorded price in `ch2-25-byte-nand`'s comment and the tie
+ * `test/levels/ch2-batch2.test.ts` measures for the byte family.
+ */
+export function byteNandReference(): Graph {
+  const nodes: Node[] = [
+    { kind: 'input', name: 'a', width: 8 },
+    { kind: 'input', name: 'b', width: 8 },
+    { kind: 'part', def: 'splitter', id: 'sa', from: ['a'] },
+    { kind: 'part', def: 'splitter', id: 'sb', from: ['b'] },
+  ];
+  for (let bit = 0; bit < 8; bit += 1) {
+    nodes.push({
+      kind: 'part',
+      def: 'nand',
+      id: `n${bit}`,
+      from: [`sa.b${bit}`, `sb.b${bit}`],
+    });
   }
   nodes.push({ kind: 'part', def: 'maker', id: 'mk', from: bits('n') });
   nodes.push({ kind: 'output', from: 'mk', width: 8 });
@@ -304,10 +329,12 @@ export function handWiredAdderReference(): Graph {
 }
 
 export const CH2_BATCH2_REFERENCES: Record<string, () => Graph> = {
-  'ch2-18-byte-or': byteOrReference,
-  'ch2-19-byte-not': byteNotReference,
+  // Level 25, the new head of the batch: the eight-NAND byte NAND, which also
+  // carries the four byte operators the retired 8-bit OR level used to hand out.
+  'ch2-25-byte-nand': byteNandReference,
+  'ch2-26-byte-not': byteNotReference,
   // sum = a XOR b, carry = a AND b: two gates, the smallest half adder there is.
-  'ch2-20-half-adder': () =>
+  'ch2-19-half-adder': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
@@ -316,8 +343,8 @@ export const CH2_BATCH2_REFERENCES: Record<string, () => Graph> = {
       { kind: 'output', name: 'OUT_sum', from: 'sum' },
       { kind: 'output', name: 'OUT_carry', from: 'carry' },
     ]),
-  'ch2-21-full-adder': fullAdderReference,
-  'ch2-22-adding-bytes': rippleAdderReference,
+  'ch2-22-full-adder': fullAdderReference,
+  'ch2-27-adding-bytes': rippleAdderReference,
 };
 
 // ---------------------------------------------------------------------------
@@ -430,6 +457,48 @@ function threeBitDecoderReference(): Graph {
   return build(nodes);
 }
 
+/**
+ * Level 36's reference: the same shared-minterm tree one width down.
+ *
+ * `sel` splits into two bits, each is inverted, and four ANDs take one literal
+ * pair apiece -- `~b0 & ~b1`, `b0 & ~b1`, `~b0 & b1`, `b0 & b1`, in one-hot order
+ * -- which the maker packs into the level's four-bit output. 2 NOTs + 4 ANDs =
+ * 2 x 1 + 4 x 2 = 10 NAND equivalents on a path two components deep, with the
+ * splitter, the maker and the level pins free on both metrics.
+ *
+ * THE UPPER FOUR MAKER INPUTS ARE TIED LOW, and the rail is written down rather
+ * than left implicit: `maker` is registered eight bits wide, so its output pin is
+ * eight bits while the level's is four, and the kernel copies the low four bits of
+ * the wider driver. The four unused inputs would read 0 unwired, which is the same
+ * value the `const_off` publishes -- stated here because it is also what makes this
+ * reference and the 1-bit decoder's (two live inputs, one rail) the same shape at
+ * different widths. The 3-bit decoder needs no pad: all eight of its maker inputs
+ * are live.
+ *
+ * It is deliberately NOT `decoder2` in one drop, although the level offers that
+ * part and the drop-in ties the gate target: a reference is the circuit the level's
+ * target was measured from, and for this level that is the tree it teaches. The
+ * drop-in's own measurement (10 gates, 1 delay) is recorded in the level's comment.
+ */
+function twoBitDecoderReference(): Graph {
+  const s0 = 'sp.b0';
+  const s1 = 'sp.b1';
+  return build([
+    { kind: 'input', name: 'sel', width: 2 },
+    { kind: 'part', def: 'splitter', id: 'sp', from: ['sel'] },
+    { kind: 'part', def: 'not', id: 'n0', from: [s0] },
+    { kind: 'part', def: 'not', id: 'n1', from: [s1] },
+    // The four minterms of the pair, in one-hot order.
+    { kind: 'part', def: 'and', id: 'o0', from: ['n0', 'n1'] },
+    { kind: 'part', def: 'and', id: 'o1', from: [s0, 'n1'] },
+    { kind: 'part', def: 'and', id: 'o2', from: ['n0', s1] },
+    { kind: 'part', def: 'and', id: 'o3', from: [s0, s1] },
+    { kind: 'part', def: 'const_off', id: 'z', from: [] },
+    { kind: 'part', def: 'maker', id: 'mk', from: ['o0', 'o1', 'o2', 'o3', 'z', 'z', 'z', 'z'] },
+    { kind: 'output', from: 'mk', width: 4 },
+  ]);
+}
+
 /** How one reference-shaped logic engine differs from the level's spec. */
 export interface EngineOptions {
   /** Where the shift amount comes from: the spec's low three bits, or the whole byte. */
@@ -540,11 +609,12 @@ export function logicEngine(options: EngineOptions = {}): Graph {
 }
 
 export const CH2_BATCH3_REFERENCES: Record<string, () => Graph> = {
-  'ch2-23-negative-numbers': absReference,
-  'ch2-24-signed-negator': negateReference,
-  'ch2-25-1-bit-decoder': oneBitDecoderReference,
-  'ch2-26-3-bit-decoder': threeBitDecoderReference,
-  'ch2-27-logic-engine': () => logicEngine(),
+  'ch2-29-negative-numbers': absReference,
+  'ch2-31-signed-negator': negateReference,
+  'ch2-35-1-bit-decoder': oneBitDecoderReference,
+  // The middle width the 2.x realignment gave a level of its own.
+  'ch2-36-2-bit-decoder': twoBitDecoderReference,
+  'ch2-37-3-bit-decoder': threeBitDecoderReference,
 };
 
 // ---------------------------------------------------------------------------
@@ -703,17 +773,17 @@ function counterReference(): Graph {
 }
 
 export const CH2_BATCH4_REFERENCES: Record<string, () => Graph> = {
-  'ch2-28-circular-dependency': circularDependencyReference,
-  'ch2-29-delayed-lines': delayedLinesReference,
-  'ch2-30-odd-ticks': oddTicksReference,
-  'ch2-31-bit-inverter': bitInverterReference,
-  'ch2-32-bit-switch': bitSwitchReference,
-  'ch2-33-input-selector': selectorReference,
-  'ch2-34-the-bus': selectorReference,
-  'ch2-35-saving-gracefully': savingGracefullyReference,
-  'ch2-36-saving-bytes': savingBytesReference,
-  'ch2-37-little-box': littleBoxReference,
-  'ch2-38-counter': counterReference,
+  'ch2-17-circular-dependency': circularDependencyReference,
+  'ch2-20-delayed-lines': delayedLinesReference,
+  'ch2-23-odd-cycles': oddTicksReference,
+  'ch2-28-bit-inverter': bitInverterReference,
+  'ch2-24-bit-switch': bitSwitchReference,
+  'ch2-30-multiplexer': selectorReference,
+  'ch2-32-the-bus': selectorReference,
+  'ch2-33-saving-gracefully': savingGracefullyReference,
+  'ch2-34-saving-bytes': savingBytesReference,
+  'ch2-38-little-box': littleBoxReference,
+  'ch2-39-counter': counterReference,
 };
 
 // ---------------------------------------------------------------------------

@@ -17,14 +17,17 @@ const byId = new Map(CH1_PART2.map((l) => [l.id, l]));
  * actually offered. (`ch1-part1.test.ts` imports it too; neither file restates
  * it.)
  *
- * Levels 7-12 cannot be gated on their own rewards alone: level 8's Delay Line
- * and levels 9-11's gates are handed out by part 1, so the gating walk below
- * starts from the starter set and walks the WHOLE chapter.
+ * Levels 7-13 cannot be gated on their own rewards alone: level 8's Delay Line
+ * and levels 9-13's gates are handed out by part 1 or by earlier levels in this
+ * half, so the gating walk below starts from the starter set and walks the WHOLE
+ * chapter.
  */
 
-describe('chapter 1 levels 7-12', () => {
-  it('exposes six levels in order', () => {
-    expect(CH1_PART2.map((l) => l.index)).toEqual([7, 8, 9, 10, 11, 12]);
+describe('chapter 1 levels 7-13', () => {
+  it('exposes seven levels in order', () => {
+    // Seven since the 2.x realignment: the XNOR capstone (12) and the logic exam
+    // (13) joined, and the level that used to be 12 left for chapter 2.
+    expect(CH1_PART2.map((l) => l.index)).toEqual([7, 8, 9, 10, 11, 12, 13]);
   });
 
   it('gates every part behind a component unlocked earlier', () => {
@@ -112,7 +115,7 @@ const solutions: Record<string, () => Graph> = {
       { kind: 'part', def: 'const_on', id: 'src', from: [] },
       { kind: 'output', from: 'src' },
     ]),
-  'ch1-08-second-tick': () =>
+  'ch1-08-second-cycle': () =>
     build([
       { kind: 'part', def: 'const_on', id: 'src', from: [] },
       { kind: 'part', def: 'delay_line', id: 'd1', from: ['src'] },
@@ -147,32 +150,44 @@ const solutions: Record<string, () => Graph> = {
       { kind: 'part', def: 'and', id: 'a2', from: ['a1', 'c'] },
       { kind: 'output', from: 'a2' },
     ]),
-  'ch1-12-binary-racer': () =>
+  // XOR into a NOT: the construction the level's own hint names, and the cheapest
+  // circuit its palette admits (4 + 1 = 5 NAND equivalents, two gates deep).
+  'ch1-12-xnor-gate': () =>
     build([
-      { kind: 'input', name: 'b3' },
-      { kind: 'input', name: 'b2' },
-      { kind: 'input', name: 'b1' },
-      { kind: 'input', name: 'b0' },
-      { kind: 'output', name: 'OUT_out3', from: 'b3' },
-      { kind: 'output', name: 'OUT_out2', from: 'b2' },
-      { kind: 'output', name: 'OUT_out1', from: 'b1' },
-      { kind: 'output', name: 'OUT_out0', from: 'b0' },
+      { kind: 'input', name: 'a' },
+      { kind: 'input', name: 'b' },
+      { kind: 'part', def: 'xor', id: 'x1', from: ['a', 'b'] },
+      { kind: 'part', def: 'not', id: 'n1', from: ['x1'] },
+      { kind: 'output', from: 'n1' },
+    ]),
+  // The shared-term majority: the three pairwise ANDs (2 each) feeding one OR3
+  // (6) -- 12 NAND equivalents, two gates deep. The three-term cascade measures
+  // the same 12 on a path three deep, which is what the level's target separates.
+  'ch1-13-logic-exam': () =>
+    build([
+      { kind: 'input', name: 'a' },
+      { kind: 'input', name: 'b' },
+      { kind: 'input', name: 'c' },
+      { kind: 'part', def: 'and', id: 'ab', from: ['a', 'b'] },
+      { kind: 'part', def: 'and', id: 'ac', from: ['a', 'c'] },
+      { kind: 'part', def: 'and', id: 'bc', from: ['b', 'c'] },
+      { kind: 'part', def: 'or3', id: 'any', from: ['ab', 'ac', 'bc'] },
+      { kind: 'output', from: 'any' },
     ]),
 };
 
-/** Circuits that a player would plausibly build and that must be rejected. */
+/**
+ * Circuits that a player would plausibly build and that must be rejected.
+ *
+ * `ch2-14-binary-racer`'s two entries used to live in this file too, because the
+ * level was chapter 1's twelfth and this half owned it. The 2.x realignment moved
+ * it to chapter 2 (`src/levels/content/ch2/batch1.ts`), so the circuits moved with
+ * it: a level this half no longer contains cannot be looked up in `byId` here, and
+ * the loops below would grade `undefined` rather than the circuit.
+ */
 const wrong: Record<string, () => Graph> = {
-  // a constant cannot depend on its inputs
-  'ch1-12-binary-racer': () =>
-    build([
-      { kind: 'part', def: 'const_on', id: 'src', from: [] },
-      { kind: 'output', name: 'OUT_out3', from: 'src' },
-      { kind: 'output', name: 'OUT_out2', from: 'src' },
-      { kind: 'output', name: 'OUT_out1', from: 'src' },
-      { kind: 'output', name: 'OUT_out0', from: 'src' },
-    ]),
   // one delay line is one tick of latency, not two
-  'ch1-08-second-tick': () =>
+  'ch1-08-second-cycle': () =>
     build([
       { kind: 'part', def: 'const_on', id: 'src', from: [] },
       { kind: 'part', def: 'delay_line', id: 'd1', from: ['src'] },
@@ -266,26 +281,32 @@ describe('an empty circuit fails every level instead of throwing', () => {
 
 describe('the chapter 1 registry', () => {
   it('orders the whole chapter by level id', () => {
-    // Scoped to chapter 1's own twelve, exactly as `ch1-part1.test.ts` scopes its
-    // half: `LEVEL_ORDER` is the whole game now that chapter 2 is joined, and the
-    // game's total length is not this file's business -- chapter 1's order and
-    // ids are, and those are unchanged.
+    // Scoped to chapter 1's own thirteen, exactly as `ch1-part1.test.ts` scopes its
+    // half: `LEVEL_ORDER` is the whole game now that chapters 2 and 3 are joined,
+    // and the game's total length is not this file's business -- chapter 1's order
+    // and ids are.
     const chapter1 = [...CH1_PART1, ...CH1_PART2].map((l) => l.id);
     expect(LEVEL_ORDER.slice(0, chapter1.length)).toEqual(chapter1);
   });
 
-  it('resolves a level from either half of the chapter', () => {
+  it('resolves this half of the chapter, and reports the level that moved out of it', () => {
     expect(getLevel('ch1-07-always-on')).toBe(CH1_PART2[0]);
-    expect(getLevel('ch1-12-binary-racer')).toBe(CH1_PART2[5]);
+    expect(getLevel('ch1-13-logic-exam')).toBe(CH1_PART2[6]);
+    // `ch2-14-binary-racer` used to BE `CH1_PART2[5]` -- chapter 1's capstone. The
+    // 2.x realignment moved it to chapter 2, so the assertion that it resolves at
+    // all is kept here, pinned to the chapter it now belongs to.
+    expect(getLevel('ch2-14-binary-racer').chapter).toBe(2);
   });
 
-  it('lists chapter 1 as all twelve levels', () => {
+  it('lists chapter 1 as all thirteen levels', () => {
+    // Thirteen since the 2.x realignment, which added the XNOR capstone (12) and
+    // the logic exam (13) and moved the level that used to be 12 into chapter 2.
     expect(levelsOfChapter(1).map((l) => l.index)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
     ]);
     // As in `ch1-part1.test.ts`: the `levelsOfChapter(2)` emptiness claim that
     // used to sit here described the unjoined chapter, and chapter assembly made
-    // it false. Chapter 1's own listing above is unchanged, and chapter 2 is
-    // covered by `test/levels/unlock-chain.test.ts`.
+    // it false. Chapter 1's own listing above is what this file owns, and the
+    // other chapters are covered by `test/levels/unlock-chain.test.ts`.
   });
 });

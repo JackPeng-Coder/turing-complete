@@ -384,7 +384,7 @@ const HELD_LOW_STEPS: readonly ScriptStep[] = Array.from({ length: 8 }, (_, tick
 
 export const CH2_BATCH4: readonly LevelSpec[] = [
   /**
-   * ch2-28-circular-dependency -- Circular Dependency / 循环依赖
+   * ch2-17-circular-dependency -- Circular Dependency / 循环依赖
    *
    * SOURCED: the name in both languages, its position (the 28th level, and the
    * first of the chapter's storage half), and the source's one-line concept --
@@ -441,9 +441,9 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
    * little box is built from.
    */
   {
-    id: 'ch2-28-circular-dependency',
+    id: 'ch2-17-circular-dependency',
     chapter: 2,
-    index: 28,
+    index: 17,
     name: { zh: '循环依赖', en: 'Circular Dependency' },
     brief: {
       zh: '这一关要做的是一块会记住一位的电路。时钟沿到来时：set 为高就把 value 存下来，set 为低就保持原来那一位，无论 value 在这一拍是什么。输出从 0 开始。注意：只用逻辑门绕成的回路在本引擎里永远不会稳定（会报「不稳定回路」），回路里必须有一个存储元件。',
@@ -478,11 +478,17 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
     // (NOT -> switch -> OR). See the comment above for what the construction and
     // the palette withholding are for.
     threeStar: { gate: 8, delay: 3, tick: 4 },
-    rewards: { components: ['ram8'] },
+    // `switch` is handed out HERE rather than at the level that used to give it
+    // (the byte adder, now level 27) because the 2.x realignment put this level
+    // first: its own hint builds the two-way choice out of two switches, and a
+    // palette may not offer a part the player has not earned yet. That makes level
+    // 24 (Bit Switch, the level named after the part) a re-teach rather than an
+    // introduction -- the design spec's §3.3 records the ruling.
+    rewards: { components: ['ram8', 'switch'] },
   },
 
   /**
-   * ch2-29-delayed-lines -- Delayed Lines / 延迟线
+   * ch2-20-delayed-lines -- Delayed Lines / 延迟线
    *
    * SOURCED: the name in both languages, its position (29th), and the concept --
    * '信号延迟一拍输出': a signal that comes out one tick late. No ports, no
@@ -509,10 +515,10 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
    * the level teaches is the tick rather than a particular part.
    */
   {
-    id: 'ch2-29-delayed-lines',
+    id: 'ch2-20-delayed-lines',
     chapter: 2,
-    index: 29,
-    name: { zh: '延迟线', en: 'Delayed Lines' },
+    index: 20,
+    name: { zh: '晚点到站', en: 'Delayed Lines' },
     brief: {
       zh: '八位输入 a。每一个时钟沿把当时 a 上的字节存下来，输出就变成它；两个时钟沿之间无论 a 怎么变，输出都不动。输出从 0 开始。',
       en: 'Eight-bit input a. Each clock edge stores the byte that is on a, and the output becomes it; between two edges the output does not move, however a changes. It starts at 0.',
@@ -549,7 +555,7 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-30-odd-ticks -- Odd Ticks / 奇变偶不变
+   * ch2-23-odd-cycles -- Odd Ticks / 奇变偶不变
    *
    * SOURCED: the name in both languages, its position (30th), and the concept,
    * which is the whole of what the source says: '构建振荡电路（时钟信号发生器）' --
@@ -585,10 +591,10 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
    * and the storage together, so neither part answers it alone.
    */
   {
-    id: 'ch2-30-odd-ticks',
+    id: 'ch2-23-odd-cycles',
     chapter: 2,
-    index: 30,
-    name: { zh: '奇变偶不变', en: 'Odd Ticks' },
+    index: 23,
+    name: { zh: '奇变偶不变', en: 'Odd Cycles' },
     brief: {
       zh: '这是本章的时钟源：电路自己产生节拍。enable 为高时，每来一个时钟沿输出就翻转一次（0、1、0、1……一直交替）；enable 为低时输出停在当时的值上，不再翻转，enable 回来之后从停下的地方接着走。输出从 0 开始。',
       en: "This is the chapter's clock source: a circuit that makes its own beat. While enable is high the output flips on every clock edge (0, 1, 0, 1, ... alternating); while enable is low the output stops where it is instead of flipping, and when enable comes back the beat resumes from the value it held. It starts at 0.",
@@ -610,56 +616,7 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-31-bit-inverter -- Bit Inverter / 1 位取反器
-   *
-   * SOURCED: the name in both languages, its position (31st), and the concept --
-   * '使用 XOR 进行位翻转': use XOR to flip a bit.
-   *
-   * AUTHORED: the `a:1 inv:1 -> out:1` shape -- the source names the gate and not
-   * the pins, so which one is the control and which is the data is this file's
-   * choice, and `inv` is the control; the four rows, built by `truthTable`, which
-   * refuses a table that leaves a declared output pin uncompared; the measured
-   * target; and the palette (one-bit parts only: every pin here is one bit wide,
-   * so the wide parts levels 9-27 unlocked have nothing to attach to -- batch 1's
-   * level-14 reason).
-   *
-   * THE TARGET SEPARATES ONE CORRECT ANSWER FROM ANOTHER, measured in the test
-   * file rather than asserted here: `xor(a, inv)` is 4 NAND equivalents -- the
-   * classic four-NAND cell -- on a path one gate deep, while the sum-of-products
-   * spelling of the same function, `(a AND NOT inv) OR (NOT a AND inv)`, is 9
-   * NAND equivalents on a path three components deep: correct, and one star. The
-   * `xor` part is offered because it is a chapter-1 part every level here already
-   * owns; it TIES this target rather than beating it, so offering it costs the
-   * level nothing.
-   *
-   * `switch` is offered and is not useful here: it is a 1-bit conditional pass,
-   * which is level 32's function rather than this one, and batch 1/2 offered
-   * plenty of parts a level cannot use.
-   */
-  {
-    id: 'ch2-31-bit-inverter',
-    chapter: 2,
-    index: 31,
-    name: { zh: '1 位取反器', en: 'Bit Inverter' },
-    brief: {
-      zh: 'inv 是一位控制信号：inv 为 1 时把 a 取反，inv 为 0 时把 a 原样送出去。四种输入组合都要对。',
-      en: 'inv is a one-bit control: when it is 1 the output is a inverted, when it is 0 the output is a unchanged. All four input combinations have to be right.',
-    },
-    hint: {
-      zh: '异或就是「可以选择要不要取反」：a 异或 inv，inv 为 1 时结果翻过来，为 0 时结果就等于 a。四个与非门就能拼出一个异或。',
-      en: 'XOR is exactly "invert, or not, as you choose": a XOR inv flips when inv is 1 and equals a when inv is 0. Four NANDs make an XOR.',
-    },
-    allowedComponents: [...GATES_1BIT, ...SWITCH_1, ...LEVEL_IO],
-    io: IO_A1_INV1_OUT1,
-    checks: [truthTable(IO_A1_INV1_OUT1, { out: ({ a, inv }) => (a ?? 0) ^ (inv ?? 0) })],
-    // Measured: one `xor` (4 NAND equivalents) on a path one gate deep, with the
-    // two level pins as the sources. The sum-of-products spelling is 9 and 3, one
-    // star -- see the comment above.
-    threeStar: { gate: 4, delay: 1, tick: 0 },
-  },
-
-  /**
-   * ch2-32-bit-switch -- Bit Switch / 1 位开关
+   * ch2-24-bit-switch -- Bit Switch / 1 位开关
    *
    * SOURCED: the name in both languages, its position (32nd), and the concept --
    * '条件通断信号（类似与门但可级联省或门）': a conditional pass, like an AND gate
@@ -691,10 +648,10 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
    * the palette is needed: one AND is the whole level.
    */
   {
-    id: 'ch2-32-bit-switch',
+    id: 'ch2-24-bit-switch',
     chapter: 2,
-    index: 32,
-    name: { zh: '1 位开关', en: 'Bit Switch' },
+    index: 24,
+    name: { zh: '二进制开关', en: 'Bit Switch' },
     brief: {
       zh: 'on 为 1 时把 a 放过去，on 为 0 时输出被按住为 0——不管 a 是什么。这就是条件通断，四种组合都要对。',
       en: 'While on is 1 the value of a passes through; while on is 0 the output is held at 0 whatever a says. That is a conditional pass, and all four combinations have to be right.',
@@ -712,7 +669,56 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-33-input-selector -- Input Selector / 数据选择器
+   * ch2-28-bit-inverter -- Bit Inverter / 1 位取反器
+   *
+   * SOURCED: the name in both languages, its position (31st), and the concept --
+   * '使用 XOR 进行位翻转': use XOR to flip a bit.
+   *
+   * AUTHORED: the `a:1 inv:1 -> out:1` shape -- the source names the gate and not
+   * the pins, so which one is the control and which is the data is this file's
+   * choice, and `inv` is the control; the four rows, built by `truthTable`, which
+   * refuses a table that leaves a declared output pin uncompared; the measured
+   * target; and the palette (one-bit parts only: every pin here is one bit wide,
+   * so the wide parts levels 9-27 unlocked have nothing to attach to -- batch 1's
+   * level-14 reason).
+   *
+   * THE TARGET SEPARATES ONE CORRECT ANSWER FROM ANOTHER, measured in the test
+   * file rather than asserted here: `xor(a, inv)` is 4 NAND equivalents -- the
+   * classic four-NAND cell -- on a path one gate deep, while the sum-of-products
+   * spelling of the same function, `(a AND NOT inv) OR (NOT a AND inv)`, is 9
+   * NAND equivalents on a path three components deep: correct, and one star. The
+   * `xor` part is offered because it is a chapter-1 part every level here already
+   * owns; it TIES this target rather than beating it, so offering it costs the
+   * level nothing.
+   *
+   * `switch` is offered and is not useful here: it is a 1-bit conditional pass,
+   * which is level 32's function rather than this one, and batch 1/2 offered
+   * plenty of parts a level cannot use.
+   */
+  {
+    id: 'ch2-28-bit-inverter',
+    chapter: 2,
+    index: 28,
+    name: { zh: '可控反相器', en: 'Bit Inverter' },
+    brief: {
+      zh: 'inv 是一位控制信号：inv 为 1 时把 a 取反，inv 为 0 时把 a 原样送出去。四种输入组合都要对。',
+      en: 'inv is a one-bit control: when it is 1 the output is a inverted, when it is 0 the output is a unchanged. All four input combinations have to be right.',
+    },
+    hint: {
+      zh: '异或就是「可以选择要不要取反」：a 异或 inv，inv 为 1 时结果翻过来，为 0 时结果就等于 a。四个与非门就能拼出一个异或。',
+      en: 'XOR is exactly "invert, or not, as you choose": a XOR inv flips when inv is 1 and equals a when inv is 0. Four NANDs make an XOR.',
+    },
+    allowedComponents: [...GATES_1BIT, ...SWITCH_1, ...LEVEL_IO],
+    io: IO_A1_INV1_OUT1,
+    checks: [truthTable(IO_A1_INV1_OUT1, { out: ({ a, inv }) => (a ?? 0) ^ (inv ?? 0) })],
+    // Measured: one `xor` (4 NAND equivalents) on a path one gate deep, with the
+    // two level pins as the sources. The sum-of-products spelling is 9 and 3, one
+    // star -- see the comment above.
+    threeStar: { gate: 4, delay: 1, tick: 0 },
+  },
+
+  /**
+   * ch2-30-multiplexer -- Input Selector / 数据选择器
    *
    * SOURCED: the name in both languages, its position (33rd), and the concept --
    * '2-to-1 多路复用器（MUX）': a 2-to-1 multiplexer. No ports, no widths, no pass
@@ -751,10 +757,10 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
    * three stars to a construction that meets both bounds.
    */
   {
-    id: 'ch2-33-input-selector',
+    id: 'ch2-30-multiplexer',
     chapter: 2,
-    index: 33,
-    name: { zh: '数据选择器', en: 'Input Selector' },
+    index: 30,
+    name: { zh: '数据选择器', en: 'Multiplexer' },
     brief: {
       zh: '两路八位数据 a 和 b，一位选择信号 sel。sel 为 0 时输出 a，sel 为 1 时输出 b——整字节一起选，没被选中的那一路一位都不许漏过去。',
       en: 'Two eight-bit data inputs a and b and one select bit sel. sel 0 publishes a and sel 1 publishes b, all eight bits at once, and not one bit of the unselected line may leak through.',
@@ -787,7 +793,7 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-34-the-bus -- The bus / 总线
+   * ch2-32-the-bus -- The bus / 总线
    *
    * SOURCED: the name in both languages, its position (34th), and the source's
    * concept, which is one line and nothing else: '共享数据传输线路的概念' -- the
@@ -830,10 +836,10 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
    * written out.
    */
   {
-    id: 'ch2-34-the-bus',
+    id: 'ch2-32-the-bus',
     chapter: 2,
-    index: 34,
-    name: { zh: '总线', en: 'The bus' },
+    index: 32,
+    name: { zh: '总线', en: 'The Bus' },
     brief: {
       zh: '总线是多路信号共享的一条数据线。本引擎没有总线协议，也不做多驱动仲裁：一个输入引脚只能被一根线驱动，几路信号同时抢一条线在这里是不允许的。所以这一关教的是总线的另一半——任何时刻只有一路驱动有效。sel 为 0 时总线上是 a，sel 为 1 时是 b，没被选中的那一路完全不出现。',
       en: 'A bus is one data line that several sources share. This engine has no bus protocol and does no multi-driver arbitration: one input pin is driven by exactly one wire, so several sources fighting over a single line is not something this engine can run. This level therefore teaches the other half of a bus -- exactly one driver is active at any moment. With sel 0 the line carries a, with sel 1 it carries b, and the unselected line does not appear at all.',
@@ -851,7 +857,7 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-35-saving-gracefully -- Saving Gracefully / 优雅存储
+   * ch2-33-saving-gracefully -- Saving Gracefully / 优雅存储
    *
    * SOURCED: the name in both languages, its position (35th), and the concept --
    * '1 位锁存器/寄存器（条件写入）': a one-bit latch or register, written
@@ -883,9 +889,9 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
    * a number in this batch rather than a sentence.
    */
   {
-    id: 'ch2-35-saving-gracefully',
+    id: 'ch2-33-saving-gracefully',
     chapter: 2,
-    index: 35,
+    index: 33,
     name: { zh: '优雅存储', en: 'Saving Gracefully' },
     brief: {
       zh: '一位的条件写入。load 为高时，时钟沿把 d 存下来；load 为低时输出保持不动，d 在这一拍说什么都不算。输出从 0 开始。',
@@ -923,7 +929,7 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-36-saving-bytes -- Saving Bytes / 存储一字节
+   * ch2-34-saving-bytes -- Saving Bytes / 存储一字节
    *
    * SOURCED: the name in both languages, its position (36th), and the concept --
    * '8 位寄存器': an eight-bit register. No ports, no widths, no pass condition,
@@ -951,10 +957,10 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
    * counterexample in the test file is exactly that wire.
    */
   {
-    id: 'ch2-36-saving-bytes',
+    id: 'ch2-34-saving-bytes',
     chapter: 2,
-    index: 36,
-    name: { zh: '存储一字节', en: 'Saving Bytes' },
+    index: 34,
+    name: { zh: '整存整取', en: 'Saving Bytes' },
     brief: {
       zh: '把一位的条件写入扩到八位：load 为高时，时钟沿把整个字节 d 存下来；load 为低时输出保持上一个存入的字节。输出从 0 开始。',
       en: 'The same conditional write one byte wide: while load is high a clock edge stores all eight bits of d; while load is low the output keeps the byte it stored. It starts at 0.',
@@ -1003,7 +1009,7 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-37-little-box -- Little Box / 小盒子
+   * ch2-38-little-box -- Little Box / 小盒子
    *
    * SOURCED: the name in both languages, its position (37th), and the source's
    * concept, which is one line and nothing else: '刚好装满存储空间的电路设计' -- a
@@ -1040,10 +1046,10 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
    * measures.
    */
   {
-    id: 'ch2-37-little-box',
+    id: 'ch2-38-little-box',
     chapter: 2,
-    index: 37,
-    name: { zh: '小盒子', en: 'Little Box' },
+    index: 38,
+    name: { zh: '方寸之间', en: 'Little Box' },
     brief: {
       zh: '一个装得满满的小盒子：256 个格子，每格一个字节。addr 是格子号（0 到 255）；load 为高时，时钟沿把 d 写进 addr 指定的那一格；输出永远显示 addr 指定的那一格里的字节，不需要时钟沿。本关要的就是「装满」：256 个地址每一个都能写进去、都能原样读回来。',
       en: 'A little box that is completely full: 256 cells, one byte each. addr is the cell number (0 through 255); while load is high a clock edge writes d into the cell addr names, and the output always shows the byte in the cell addr names, with no clock edge needed. What this level asks for is "full": every one of the 256 addresses can be written and read back unchanged.',
@@ -1071,7 +1077,7 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-38-counter -- Counter / 计数器
+   * ch2-39-counter -- Counter / 计数器
    *
    * SOURCED: the name in both languages, its position (38th, the last level of
    * the chapter), the concept -- '自增寄存器': a register that increments itself
@@ -1124,9 +1130,9 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
    * the count does not move without an edge.
    */
   {
-    id: 'ch2-38-counter',
+    id: 'ch2-39-counter',
     chapter: 2,
-    index: 38,
+    index: 39,
     name: { zh: '计数器', en: 'Counter' },
     brief: {
       zh: '一个自己会数数的寄存器。reset 为高时，时钟沿把它清成 0——reset 比 en 优先，两者同时为高时清零；否则 en 为高时加一，en 为低时保持不动。加到 255 之后再走一拍就回到 0：八位装不下 256，于是绕回来。输出从 0 开始。',

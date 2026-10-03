@@ -175,6 +175,110 @@ export function aluReference(): Graph {
 }
 
 /**
+ * Level 42: the six-operation ALU, filed under the level the 2.x shape gives
+ * ADD/SUB to.
+ *
+ * WHY IT IS NOT `aluReference()`. The two levels' contracts coincide today -- this
+ * replica's ALU 1 was authored as the chapter's arithmetic engine and answers all
+ * eight codes -- but they are separate levels with separate targets, and the source
+ * intends ALU 1 to be the four logic operations alone. One shared graph would make
+ * a later narrowing of ALU 1 silently change what level 42 is measured from;
+ * written out, each level's target is its own circuit's measurement, which is what
+ * `pins every three-star target to its reference solution own metrics` asserts. The
+ * wiring is deliberately the same construction, and its reasoning is not repeated
+ * here: `aluReference`'s header above is the place to read why the roles of `op0`,
+ * `op1` and `op2` are not interchangeable, why the NAND/NOR inversion is not
+ * masked, and why the reserved codes are zeroed in the `op1 = 1` half alone.
+ *
+ * MEASURED: 273 NAND equivalents on a path five components deep -- one `not8` and
+ * one `mux8` for the adder's addend (`b` or `~b`, with the same bit as the carry),
+ * an `add8`, an `and8`/`or8` pair behind its own `mux8`, a `not8` for the
+ * inversion, a `~op2`-gated `switch8` for codes 6 and 7, and two more `mux8`s to
+ * select the half and then the operation. That is ALU 1's measurement too, and not
+ * by coincidence: the same construction is the cheapest circuit either level's
+ * palette admits, and the 264-gate `alu8` that would beat both is withheld from
+ * both palettes -- level 42's comment carries the measurement for its own.
+ */
+export function alu2Reference(): Graph {
+  const g = emptyGraph();
+  const inst = new Map<string, string>();
+  const add = (id: string, def: string): string => {
+    const i = addInstance(g, def, 120, 0, id).id;
+    inst.set(id, i);
+    return i;
+  };
+  const input = (pin: string, width: number): string => {
+    const i = addInstance(g, 'level_input', 0, 0, `IN_${pin}`).id;
+    g.instances.find((x) => x.id === i)!.params.width = width;
+    inst.set(`IN_${pin}`, i);
+    return i;
+  };
+  const wire = (fromId: string, fromPin: string, toId: string, toPin: string): void => {
+    connect(g, { inst: inst.get(fromId)!, port: fromPin }, { inst: inst.get(toId)!, port: toPin });
+  };
+
+  input('a', 8);
+  input('b', 8);
+  input('op0', 1);
+  input('op1', 1);
+  input('op2', 1);
+
+  // The arithmetic half: op0 picks `b` or `~b` as the addend and is that same
+  // adder's carry-in, so code 0 is `a + b` and code 1 is `a + ~b + 1`.
+  add('nb', 'not8');
+  wire('IN_b', 'out', 'nb', 'a');
+  add('mxAdd', 'mux8');
+  wire('IN_b', 'out', 'mxAdd', 'a');
+  wire('nb', 'out', 'mxAdd', 'b');
+  wire('IN_op0', 'out', 'mxAdd', 'sel');
+  add('ad', 'add8');
+  wire('IN_a', 'out', 'ad', 'a');
+  wire('mxAdd', 'out', 'ad', 'b');
+  wire('IN_op0', 'out', 'ad', 'cin');
+
+  // The logic half: the same op0 picks AND or OR, and `inv` is the byte NAND/NOR
+  // reads as.
+  add('la', 'and8');
+  wire('IN_a', 'out', 'la', 'a');
+  wire('IN_b', 'out', 'la', 'b');
+  add('lo', 'or8');
+  wire('IN_a', 'out', 'lo', 'a');
+  wire('IN_b', 'out', 'lo', 'b');
+  add('mxLog', 'mux8');
+  wire('la', 'out', 'mxLog', 'a');
+  wire('lo', 'out', 'mxLog', 'b');
+  wire('IN_op0', 'out', 'mxLog', 'sel');
+
+  add('inv', 'not8');
+  wire('mxLog', 'out', 'inv', 'a');
+
+  // Codes 6 and 7 are op1 and op2 both high, so within the op1 = 1 half `~op2` is
+  // the whole discriminator: it passes the bitwise byte for codes 2 and 3 and
+  // forces zero for 6 and 7.
+  add('nOp2', 'not');
+  wire('IN_op2', 'out', 'nOp2', 'a');
+  add('zero', 'switch8');
+  wire('mxLog', 'out', 'zero', 'a');
+  wire('nOp2', 'out', 'zero', 'on');
+
+  // The halves: op2 picks arithmetic-or-NAND/NOR against bitwise-or-zero, and op1
+  // picks between the two halves. `a` is the sel = 0 input -- the arithmetic side.
+  add('mxOp2', 'mux8');
+  wire('ad', 'out', 'mxOp2', 'a');
+  wire('inv', 'out', 'mxOp2', 'b');
+  wire('IN_op2', 'out', 'mxOp2', 'sel');
+  add('mxOp1', 'mux8');
+  wire('mxOp2', 'out', 'mxOp1', 'a');
+  wire('zero', 'out', 'mxOp1', 'b');
+  wire('IN_op1', 'out', 'mxOp1', 'sel');
+
+  const out = addInstance(g, 'level_output', 240, 0, 'OUT').id;
+  outWidth(g, out, 8);
+  connect(g, { inst: inst.get('mxOp1')!, port: 'out' }, { inst: out, port: 'in' });
+  return g;
+}
+
+/**
  * Level 40: eight byte-wide registers, one per address.
  *
  * The write path is the level's point: `decoder3` turns the address into one
@@ -288,9 +392,12 @@ function fanOutReference(): Graph {
 }
 
 export const CH3_BATCH1_REFERENCES: Record<string, () => Graph> = {
-  'ch3-39-arithmetic-engine': aluReference,
-  'ch3-40-registers': registerBankReference,
-  'ch3-41-component-factory': fanOutReference,
+  'ch3-40-alu-1': aluReference,
+  'ch3-41-registers': registerBankReference,
+  // The new level of the 2.x shape: the same six-operation ALU, filed under the
+  // level that adds ADD/SUB on top of ALU 1's four logic operations.
+  'ch3-42-alu-2': alu2Reference,
+  'ch3-43-the-foundry': fanOutReference,
 };
 
 // ---------------------------------------------------------------------------
@@ -500,9 +607,9 @@ function conditionsReference(): Graph {
 }
 
 export const CH3_BATCH2_REFERENCES: Record<string, () => Graph> = {
-  'ch3-42-instruction-decoder': sliceDecoderReference,
-  'ch3-43-calculations': computeUnitReference,
-  'ch3-44-conditions': conditionsReference,
+  'ch3-44-instruction-decoder': sliceDecoderReference,
+  'ch3-46-alu': computeUnitReference,
+  'ch3-45-conditions': conditionsReference,
 };
 
 // ---------------------------------------------------------------------------
@@ -651,9 +758,9 @@ function overtureReference(): Graph {
 }
 
 export const CH3_BATCH3_REFERENCES: Record<string, () => Graph> = {
-  'ch3-45-program': overtureReference,
-  'ch3-46-immediate-values': overtureReference,
-  'ch3-47-turing-complete': overtureReference,
+  'ch3-48-program': overtureReference,
+  'ch3-47-immediate-values': overtureReference,
+  'ch3-49-turing-complete': overtureReference,
 };
 
 export const CH3_REFERENCES: Record<string, () => Graph> = {

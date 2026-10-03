@@ -96,8 +96,8 @@ describe('chapter 3 batch 1 - reference solutions', () => {
     // The fuzz check walks the six, but a check is only as strong as its
     // expectation. This compares the reference against a table computed here, so
     // a mistake in the level's own expectation cannot hide behind it.
-    const graph = CH3_BATCH1_REFERENCES['ch3-39-arithmetic-engine']!();
-    const spec = level('ch3-39-arithmetic-engine');
+    const graph = CH3_BATCH1_REFERENCES['ch3-40-alu-1']!();
+    const spec = level('ch3-40-alu-1');
     for (const [op, a, b] of [
       [0, 200, 100],
       [1, 0, 1],
@@ -191,7 +191,7 @@ describe('chapter 3 batch 1 - the checks have teeth', () => {
       { kind: 'part', def: 'add8', id: 'ad', from: ['a', 'b'] },
       { kind: 'output', from: 'ad', width: 8 },
     ]);
-    const outcome = runChecks(alwaysAdd, registry, level('ch3-39-arithmetic-engine'));
+    const outcome = runChecks(alwaysAdd, registry, level('ch3-40-alu-1'));
     expect(outcome.passed, 'an adder passed the arithmetic-engine level').toBe(false);
   });
 
@@ -209,7 +209,7 @@ describe('chapter 3 batch 1 - the checks have teeth', () => {
       { kind: 'part', def: 'add8', id: 'ad', from: ['a', 'mx'] },
       { kind: 'output', from: 'ad', width: 8 },
     ]);
-    const outcome = runChecks(noPlusOne, registry, level('ch3-39-arithmetic-engine'));
+    const outcome = runChecks(noPlusOne, registry, level('ch3-40-alu-1'));
     expect(outcome.passed, 'a subtract-without-the-plus-one passed').toBe(false);
   });
 
@@ -236,7 +236,7 @@ describe('chapter 3 batch 1 - the checks have teeth', () => {
       { kind: 'part', def: 'mem1', id: 'b7', from: ['data', 'sel.b7'] },
       { kind: 'part', def: 'maker', id: 'mk', from: ['b0', 'b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7'] },
     ]);
-    const outcome = runChecks(enableIgnored, registry, level('ch3-40-registers'));
+    const outcome = runChecks(enableIgnored, registry, level('ch3-41-registers'));
     expect(outcome.passed, 'a bank that ignores the write enable passed').toBe(false);
   });
 
@@ -262,23 +262,27 @@ describe('chapter 3 batch 1 - the checks have teeth', () => {
       { kind: 'output', name: 'a', from: 'mk', width: 8 },
       { kind: 'output', name: 'b', from: 'data', width: 8 },
     ]);
-    const outcome = runChecks(forwarded, registry, level('ch3-41-component-factory'));
+    const outcome = runChecks(forwarded, registry, level('ch3-43-the-foundry'));
     expect(outcome.passed, 'a forwarding circuit passed level 41').toBe(false);
   });
 });
 
 describe('chapter 3 batch 1 - level data', () => {
   it('uses the chapter-3 index range', () => {
-    expect(CH3_BATCH1.map((l) => l.index)).toEqual([39, 40, 41]);
+    expect(CH3_BATCH1.map((l) => l.index)).toEqual([40, 41, 42, 43]);
     expect(CH3_BATCH1.every((l) => l.chapter === 3)).toBe(true);
   });
 
-  it('rewards the three parts this chapter is built from', () => {
-    // The plan's unlock chain: these three are unlocked by this batch, and the
-    // later batch consumes them. A reward that moved would break the chapter.
+  it('rewards the parts this chapter is built from, and alu-2 carries the shifts', () => {
+    // The plan's unlock chain: the three machine parts are unlocked by this batch
+    // and the later batch consumes them. A reward that moved would break the
+    // chapter. The third row is not one of them: `ch3-42-alu-2` is the level the
+    // 2.x realignment added, and it carries the shift/rotate family, whose
+    // chapter-2 owner (the removed Logic Engine) no longer exists.
     expect(CH3_BATCH1.map((l) => l.rewards?.components)).toEqual([
       ['alu8'],
       ['regfile6'],
+      ['ashr8', 'rot_l8', 'rot_r8'],
       ['instr_decoder'],
     ]);
   });

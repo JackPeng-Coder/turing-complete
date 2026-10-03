@@ -29,11 +29,11 @@ towards a working CPU.
 
 ## What works today (Phases 0–2)
 
-- **Chapter 1 — 12 levels**, from the NAND gate to a 4-bit binary reader.
-- **Chapter 2 — 26 levels (13–38)**: parity and counting, the byte operators, half and full
-  adders, two's complement, decoders, a logic-engine capstone, and the storage half — switch,
-  delay, clock source, selector, register, RAM and counter.
-- **Chapter 3 — 9 levels (39–47)**: the ALU and the machine around it — registers and buses, the
+- **Chapter 1 — 13 levels**, from the NAND gate to the logic exam.
+- **Chapter 2 — 26 levels (14–39)**: the four-bit reader, parity and counting, the byte operators,
+  half and full adders, two's complement, decoders, the feedback and storage half — switch, delay,
+  selector, register, RAM and counter.
+- **Chapter 3 — 10 levels (40–49)**: the ALU and the machine around it — registers and buses, the
   opcode decoder, the program counter and its RAM, and a capstone that runs an assembled program
   against the machine you built.
 - A **canvas wiring board**: place parts, drag wires, pan and zoom. Wires are routed, not just drawn:
@@ -159,7 +159,7 @@ bring it back.
 src/
   core/     simulator: signals, component registry + definitions, graph/netlist, settle & tick
   asm/      the assembler and its ISA: field ranges, addressing modes, operands, program images
-  levels/   LevelSpec types, checks, grader, and content/ (47 levels: chapters 1–3)
+  levels/   LevelSpec types, the campaign table, checks, grader, and content/ (49 levels: chapters 1–3)
   app/      application state, command/undo stack, progress, and the shared viewport types
   ui/       the board's chrome: top bar, palette, clock + I/O readout, tool grid, test cases,
             chapter map, and the Canvas board (see ui/board/)
@@ -177,15 +177,13 @@ anything starts to — that file is this project's linter, because no linter is 
 
 ## Contributing / scope
 
-Phases 0–2 cover chapters 1–3 (47 of the plan's 82 levels). The full plan — 7 chapters, 82 levels, up to a working
-CPU and assembly challenges — is in [`docs/superpowers/plans/`](docs/superpowers/plans/); the design
-spec it follows is in [`docs/superpowers/specs/`](docs/superpowers/specs/).
-
-That plan follows the **1.x** structure of the game. The newer research document describes **2.x**,
-which renumbered and rewrote the campaign (13/26/10/7/26/7/4 = 93 levels, Symphony in place of LEG,
-2–64-bit widths): [`RESEARCH.md`](RESEARCH.md) carries the chapter-by-chapter comparison, and
-reading it before planning chapter 4 is the difference between extending this campaign and
-accidentally starting a different one.
+Phases 0–2 cover chapters 1–3, which is **49 of the campaign's 93 levels**. The campaign follows the
+**2.x** structure of the game (13/26/10/7/26/7/4 chapters, Symphony in place of LEG, 2–64-bit
+widths); the table that fixes it is [`src/levels/campaign.ts`](src/levels/campaign.ts), and
+`test/levels/campaign-shape.test.ts` holds every level to it. The remaining chapters 4–7 are listed
+in [`GAME_RESEARCH_2026-10-03.md`](GAME_RESEARCH_2026-10-03.md) §5; the phase they will be built in
+is not decided yet. [`RESEARCH.md`](RESEARCH.md) records where the two research documents disagree
+and which one this project follows for what.
 
 The record of how it was built is committed too. [`.superpowers/sdd/`](.superpowers/sdd/) holds one
 directory per phase: phases 0 and 1 carry every task's brief, its implementer's report, and the

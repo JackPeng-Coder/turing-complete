@@ -147,10 +147,10 @@ describe('the case list a level declares', () => {
   });
 
   it('clears the circuit once at each script’s front, and nowhere else', () => {
-    // `ch2-30-odd-ticks` declares TWO scripts, which is the case that catches a
+    // `ch2-23-odd-cycles` declares TWO scripts, which is the case that catches a
     // "reset the first case only" reading of the rule: the second script runs
     // from a cleared circuit too, exactly as `runChecks` resets per check.
-    const level = getLevel('ch2-30-odd-ticks');
+    const level = getLevel('ch2-23-odd-cycles');
     expect(level.checks.map((check) => check.kind)).toEqual(['script', 'script']);
     const plan = testCases(level);
     expect(plan.kind).toBe('cases');
@@ -165,7 +165,7 @@ describe('the case list a level declares', () => {
   });
 
   it('reports why a program level has nothing to lay out', () => {
-    const level = getLevel('ch3-47-turing-complete');
+    const level = getLevel('ch3-49-turing-complete');
     expect(level.checks[0]!.kind).toBe('program');
     expect(testCases(level)).toEqual({ kind: 'none', reason: 'program' });
   });

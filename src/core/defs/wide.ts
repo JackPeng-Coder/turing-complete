@@ -966,7 +966,7 @@ export const DECODER_WIDTHS = [1, 2, 3] as const;
  * spread it and `DefId` still narrows to the individual strings.
  *
  * The id is `decoder` + the SELECT width, which is the contract the level data
- * spells (`ch2-25-1-bit-decoder` rewards `decoder1`, level 26 `decoder3`); the
+ * spells (`ch2-35-1-bit-decoder` rewards `decoder1`, level 26 `decoder3`); the
  * output width is `2 ** w` and is deliberately not part of the name.
  */
 export const DECODER_DEF_IDS = ['decoder1', 'decoder2', 'decoder3'] as const;

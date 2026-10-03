@@ -18,7 +18,7 @@ import {
 } from '../fixtures/ch3-references';
 
 /**
- * Chapter 3, levels 42-44.
+ * Chapter 3, levels 44-46.
  *
  * The reference circuits live in `test/fixtures/ch3-references.ts` so the
  * whole-set walk can grade them too, and the counterexample circuits come from
@@ -26,7 +26,7 @@ import {
  * with one wire moved is a stronger statement than a second circuit written out
  * by hand, because the diff between it and the reference is the argument.
  *
- * Level 42's table and level 43's program are cross-checked against the ISA
+ * Level 44's table and level 46's program are cross-checked against the ISA
  * table with the offsets written out HERE, in ruling 5's own numbers: if
  * `src/asm/isa.ts` ever moved a field, the level data would move with it (it
  * reads the table) and this file would fail, which is the point of spelling the
@@ -39,21 +39,21 @@ function level(id: string): LevelSpec {
   return found;
 }
 
-/** Level 42's truth table, or a loud failure -- a check is data, and may be misshapen. */
+/** Level 44's truth table, or a loud failure -- a check is data, and may be misshapen. */
 function rowsOf(spec: LevelSpec): readonly TruthRow[] {
   const check = spec.checks[0];
   if (check?.kind !== 'truth-table') throw new Error(`${spec.id} has no truth-table check`);
   return check.rows ?? [];
 }
 
-/** Level 43's program check, or a loud failure. */
+/** Level 46's program check, or a loud failure. */
 function programOf(spec: LevelSpec): ProgramCheck {
   const check = spec.checks[0];
   if (check?.kind !== 'program') throw new Error(`${spec.id} has no program check`);
   return check;
 }
 
-/** Level 44's script check, or a loud failure. */
+/** Level 45's script check, or a loud failure. */
 function scriptOf(spec: LevelSpec): ScriptCheck {
   const check = spec.checks[0];
   if (check?.kind !== 'script') throw new Error(`${spec.id} has no script check`);
@@ -122,12 +122,12 @@ describe('chapter 3 batch 2 - reference solutions', () => {
     }
   });
 
-  it('publishes the ISA slicing of all 256 instructions at level 42', () => {
+  it('publishes the ISA slicing of all 256 instructions at level 44', () => {
     // The independent half of the ISA cross-check: these four expressions are
     // ruling 5 written out, and the level's own rows are computed from
     // `OVERTURE_ISA`. A table that omitted rows, sampled them, or hand-copied a
     // wrong offset fails here.
-    const spec = level('ch3-42-instruction-decoder');
+    const spec = level('ch3-44-instruction-decoder');
     const rows = rowsOf(spec);
     expect(rows).toHaveLength(256);
     expect(new Set(rows.map((row) => row.inputs.instr)).size).toBe(256);
@@ -142,10 +142,10 @@ describe('chapter 3 batch 2 - reference solutions', () => {
     }
   });
 
-  it('assembles level 43 program to the instruction bytes ruling 5 fixes', () => {
+  it('assembles level 46 program to the instruction bytes ruling 5 fixes', () => {
     // The level's machine executes these bytes; the test's copy is hand-encoded
     // from the ISA table, so an encoding change cannot pass by moving both sides.
-    const check = programOf(level('ch3-43-calculations'));
+    const check = programOf(level('ch3-46-alu'));
     const assembled = assemble(check.source, OVERTURE_ISA);
     expect(assembled.errors).toEqual([]);
     expect(assembled.bytes).toEqual([0x05, 0xb1, 0x82, 0x40, 0x9c, 0x48, 0x9f, 0x68, 0x9d, 0xa3]);
@@ -154,10 +154,10 @@ describe('chapter 3 batch 2 - reference solutions', () => {
     expect(check.steps.map((step) => step.inputs?.instr)).toEqual([0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
-  it('asserts a spread of results at level 43, not one constant', () => {
+  it('asserts a spread of results at level 46, not one constant', () => {
     // A check whose every expectation is the same byte would pass a machine that
     // hard-wired `res`; the walk has to move.
-    const check = programOf(level('ch3-43-calculations'));
+    const check = programOf(level('ch3-46-alu'));
     const expected = check.steps.map((step) => step.expect?.res).filter((v) => v !== undefined);
     expect(new Set(expected).size).toBeGreaterThanOrEqual(4);
     expect(expected).toContain(15);
@@ -165,11 +165,11 @@ describe('chapter 3 batch 2 - reference solutions', () => {
     expect(expected).toContain(240);
   });
 
-  it('walks level 44 conditions against a held value and against zero', () => {
+  it('walks level 45 conditions against a held value and against zero', () => {
     // Both sides of every condition are driven: 5 (nonzero) and 0, so a unit
     // that answers one of the two cannot pass, and the undefined condition code
     // 3 is driven too, so the contract is total.
-    const steps = scriptOf(level('ch3-44-conditions')).steps;
+    const steps = scriptOf(level('ch3-45-conditions')).steps;
     const codes = new Set(steps.map((step) => ((step.inputs?.instr ?? 0) >> 3) & 0b111));
     expect([...codes].sort((a, b) => a - b)).toEqual([0, 1, 2, 3]);
     expect(steps.some((step) => step.expect?.skip === 1)).toBe(true);
@@ -183,7 +183,7 @@ describe('chapter 3 batch 2 - reference solutions', () => {
 
 describe('chapter 3 batch 2 - the checks have teeth', () => {
   it('rejects a decoder that wires dst from the op pin', () => {
-    // Plausible-wrong for level 42: both pins are three bits wide and sit next
+    // Plausible-wrong for level 44: both pins are three bits wide and sit next
     // to each other, and `dst` is `instr[2:0]` while `op` is `instr[5:3]`. They
     // agree only where the word's two halves repeat.
     const swapped = build([
@@ -194,7 +194,7 @@ describe('chapter 3 batch 2 - the checks have teeth', () => {
       { kind: 'output', name: 'OUT_dst', from: 'dec.op', width: 3 },
       { kind: 'output', name: 'OUT_imm', from: 'dec.imm', width: 6 },
     ]);
-    const outcome = runChecks(swapped, registry, level('ch3-42-instruction-decoder'));
+    const outcome = runChecks(swapped, registry, level('ch3-44-instruction-decoder'));
     expect(outcome.passed, 'a decoder with dst on the op slice passed').toBe(false);
     const failure = outcome.failures[0];
     expect(failure?.reason).toBe('mismatch');
@@ -220,13 +220,13 @@ describe('chapter 3 batch 2 - the checks have teeth', () => {
       { kind: 'output', name: 'OUT_dst', from: 'dec.dst', width: 3 },
       { kind: 'output', name: 'OUT_imm', from: 'imm5', width: 6 },
     ]);
-    const outcome = runChecks(fiveBitImm, registry, level('ch3-42-instruction-decoder'));
+    const outcome = runChecks(fiveBitImm, registry, level('ch3-44-instruction-decoder'));
     expect(outcome.passed, 'a decoder that dropped immediate bit 5 passed').toBe(false);
     expect(outcome.failures[0]?.reason).toBe('mismatch');
   });
 
   it('rejects a calculation unit that writes loadi into the destination field', () => {
-    // Plausible-wrong for level 43: the write address is wired straight from
+    // Plausible-wrong for level 46: the write address is wired straight from
     // `dst`, forgetting that `loadi` always writes REG0 -- and that a `loadi`'s
     // `dst` bits are its own immediate's low three bits. The walk's first
     // `move|s0|d2` then copies a zero, so the `add` publishes 10 where the level
@@ -234,7 +234,7 @@ describe('chapter 3 batch 2 - the checks have teeth', () => {
     const outcome = runChecks(
       computeUnitGraph({ loadiAddress: 'dst' }),
       registry,
-      level('ch3-43-calculations'),
+      level('ch3-46-alu'),
     );
     expect(outcome.passed, 'a unit whose loadi writes dst passed').toBe(false);
     const failure = outcome.failures.find((f) => f.expected.res !== undefined);
@@ -251,7 +251,7 @@ describe('chapter 3 batch 2 - the checks have teeth', () => {
     const outcome = runChecks(
       computeUnitGraph({ aluOp: 'add' }),
       registry,
-      level('ch3-43-calculations'),
+      level('ch3-46-alu'),
     );
     expect(outcome.passed, 'an always-add unit passed').toBe(false);
     const failures = outcome.failures.filter((f) => f.reason === 'mismatch');
@@ -261,13 +261,13 @@ describe('chapter 3 batch 2 - the checks have teeth', () => {
   });
 
   it('rejects a condition unit that ignores the mode field', () => {
-    // Plausible-wrong for level 44: the condition decode alone decides, so a
+    // Plausible-wrong for level 45: the condition decode alone decides, so a
     // `loadi` (whose [5:3] slice is 000) looks like `j`, and so does a
     // `move|s0|d1`. The walk drives three of those while demanding `skip` 0.
     const outcome = runChecks(
       conditionsGraph({ modeGate: false }),
       registry,
-      level('ch3-44-conditions'),
+      level('ch3-45-conditions'),
     );
     expect(outcome.passed, 'a condition unit blind to the mode passed').toBe(false);
     const failures = outcome.failures.filter((f) => f.reason === 'mismatch');
@@ -284,7 +284,7 @@ describe('chapter 3 batch 2 - the checks have teeth', () => {
     const outcome = runChecks(
       conditionsGraph({ loadValue: false }),
       registry,
-      level('ch3-44-conditions'),
+      level('ch3-45-conditions'),
     );
     expect(outcome.passed, 'a condition unit with no held value passed').toBe(false);
     const failures = outcome.failures.filter((f) => f.reason === 'mismatch');
@@ -298,17 +298,19 @@ describe('chapter 3 batch 2 - the checks have teeth', () => {
 
 describe('chapter 3 batch 2 - level data', () => {
   it('uses the chapter-3 index range', () => {
-    expect(CH3_BATCH2.map((l) => l.index)).toEqual([42, 43, 44]);
+    expect(CH3_BATCH2.map((l) => l.index)).toEqual([44, 45, 46]);
     expect(CH3_BATCH2.every((l) => l.chapter === 3)).toBe(true);
   });
 
   it('rewards the three parts the chapter unlock chain needs next', () => {
-    // The plan's chain: 42 hands out the program counter, 43 the program RAM and
-    // 44 the halt line, and level 45 builds its machine from all three.
+    // The plan's chain: 44 hands out the program counter, 45 the halt line and
+    // 46 the program RAM, and level 47 builds its machine from all three -- the
+    // two rewards the walk reached after the program counter, in the batch's own
+    // (index) order.
     expect(CH3_BATCH2.map((l) => l.rewards?.components)).toEqual([
       ['pc8'],
-      ['ram_prog'],
       ['halt'],
+      ['ram_prog'],
     ]);
   });
 
@@ -323,10 +325,10 @@ describe('chapter 3 batch 2 - level data', () => {
       ...CH2_LEVELS,
       ...CH3_BATCH1,
       ...CH3_BATCH2,
-    ].filter((spec) => spec.index <= 47);
+    ].filter((spec) => spec.index <= 49);
     expect(LEVELS.length).toBeGreaterThan(0);
     for (const [index, spec] of ordered.entries()) {
-      if (spec.chapter !== 3 || spec.index < 42) continue;
+      if (spec.chapter !== 3 || spec.index < 44) continue;
       const earned = new Set<string>(STARTER_COMPONENTS);
       for (const atOrBefore of ordered.slice(0, index + 1)) {
         for (const def of atOrBefore.rewards?.components ?? []) earned.add(def);
@@ -339,13 +341,14 @@ describe('chapter 3 batch 2 - level data', () => {
     }
   });
 
-  it('keeps halt out of level 43 and the chapter palette rule honest', () => {
-    // The phase plan's batch-2 table lists `halt` in level 43's palette, but
-    // `halt` is level 44's reward: a level may not offer a part no level at or
-    // before it hands out, so 43 cannot have it and the rule above is what says
+  it('keeps halt out of level 46 and the chapter palette rule honest', () => {
+    // The phase plan's batch-2 table lists `halt` in level 46's palette, but
+    // `halt` is level 45's reward: a level may not offer a part no level at
+    // or before it hands out, so 46 cannot have it and the rule above is what
+    // says
     // so. This pins that the decision is deliberate rather than a forgotten line.
-    expect(level('ch3-43-calculations').allowedComponents).not.toContain('halt');
-    expect(level('ch3-44-conditions').rewards?.components).toEqual(['halt']);
+    expect(level('ch3-46-alu').allowedComponents).not.toContain('halt');
+    expect(level('ch3-45-conditions').rewards?.components).toEqual(['halt']);
   });
 
   it('offers every level its own I/O connectors', () => {

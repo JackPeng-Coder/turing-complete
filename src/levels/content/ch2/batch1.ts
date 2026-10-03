@@ -49,7 +49,6 @@ const IO_ABCD_OUT1: LevelIo = {
   ],
   outputs: [{ id: 'out', width: 1 }],
 };
-const IO_A4_OUT3: LevelIo = { inputs: [{ id: 'a', width: 4 }], outputs: [{ id: 'out', width: 3 }] };
 const IO_ABCD_OUT3: LevelIo = {
   inputs: [
     { id: 'a', width: 1 },
@@ -60,6 +59,29 @@ const IO_ABCD_OUT3: LevelIo = {
   outputs: [{ id: 'out', width: 3 }],
 };
 const IO_A8_OUT8: LevelIo = { inputs: [{ id: 'a', width: 8 }], outputs: [{ id: 'out', width: 8 }] };
+
+/**
+ * The four-bit reader's shape: four 1-bit inputs in, four 1-bit outputs out.
+ *
+ * This constant moved here with the level that uses it (`ch2-14-binary-racer`)
+ * when the 2.x realignment moved that level from chapter 1 into chapter 2. A
+ * constant belongs beside its only consumer: left behind in `ch1/part2.ts` it was
+ * both a `ReferenceError` here and dead code there.
+ */
+const IO_NIBBLE: LevelIo = {
+  inputs: [
+    { id: 'b3', width: 1 },
+    { id: 'b2', width: 1 },
+    { id: 'b1', width: 1 },
+    { id: 'b0', width: 1 },
+  ],
+  outputs: [
+    { id: 'out3', width: 1 },
+    { id: 'out2', width: 1 },
+    { id: 'out1', width: 1 },
+    { id: 'out0', width: 1 },
+  ],
+};
 
 /**
  * Rows for a level that publishes one value, enumerated by the kernel's own
@@ -92,7 +114,14 @@ function valueRows(io: LevelIo, expected: (inputs: Record<string, number>) => nu
   );
 }
 
-/** High bits among the low `bits` bits of `value`: the count levels 15 and 16 publish. */
+/**
+ * High bits among the low `bits` bits of `value`: the count `ch2-18-counting-signals`
+ * publishes.
+ *
+ * It served two levels while the 1.x campaign had a second counter at what is now
+ * this batch's first slot; the 2.x realignment retired that level (it duplicated
+ * this count), so the helper has one caller again.
+ */
 function onesIn(value: number, bits: number): number {
   let count = 0;
   for (let bit = 0; bit < bits; bit += 1) if ((value >>> bit) & 1) count += 1;
@@ -101,7 +130,142 @@ function onesIn(value: number, bits: number): number {
 
 export const CH2_BATCH1: readonly LevelSpec[] = [
   /**
-   * ch2-13-odd-number-of-signals -- ODD Number of Signals / 奇数个信号
+   * ch2-14-binary-racer -- Binary Racer / 二进制速算
+   *
+   * SOURCED: the name in both languages, its position (2.x's first chapter-2
+   * level; the 1.x compendium has it as chapter 2's third, global 15), and the
+   * concept -- the source calls it a timed "read the binary number at a glance"
+   * minigame, and 2.x still lists it that way.
+   *
+   * AUTHORED (this replica's design): everything a minigame cannot carry. A timed
+   * level needs a real clock, which the global constraints forbid in a checker, so
+   * the puzzle is the deterministic core of the same lesson -- four inputs b3..b0
+   * spell one number, the four outputs repeat it, 16 rows, no gates. Also
+   * authored: the `less_u` reward (it belonged to the chapter's removed popcount
+   * level, which duplicated Counting Signals) and the fact that `mem1` is NOT
+   * handed out here any more -- chapter 1's capstone does that now, because 2.x
+   * plays Circular Dependency before this level and the latch needs it.
+   *
+   * The level itself is old: it was chapter 1's twelfth level until the 2.x
+   * realignment moved it here, which is why its `threeStar` is the floor (0/0/0,
+   * a straight wire) and why this comment is newer than the spec below it.
+   */
+  {
+    id: 'ch2-14-binary-racer',
+    chapter: 2,
+    index: 14,
+    name: { zh: '二进制速算', en: 'Binary Racer' },
+    brief: {
+      zh: '四个输入位 b3 b2 b1 b0 组成一个数。一眼读出它——然后原样送到四个输出位。',
+      en: 'Bits b3..b0 form one number. Read it at a glance, then forward it to the four outputs.',
+    },
+    hint: {
+      zh: 'b3 是最高位（权 8），b0 是最低位（权 1）。把每一位直连到同名输出。',
+      en: 'b3 is the most significant bit (weight 8), b0 the least (weight 1). Wire each straight through.',
+    },
+    allowedComponents: [
+      'nand',
+      'not',
+      'and',
+      'or',
+      'const_on',
+      'delay_line',
+      'and3',
+      'xor',
+      'or3',
+      'xnor',
+      'level_input',
+      'level_output',
+    ],
+    io: IO_NIBBLE,
+    checks: [
+      truthTable(IO_NIBBLE, {
+        // `?? 0` is dead weight at runtime -- the enumerator always fills every
+        // declared input -- but a record lookup is `number | undefined` under
+        // `noUncheckedIndexedAccess`, and "an absent bit reads low" is the
+        // honest reading of it.
+        out3: ({ b3 }) => b3 ?? 0,
+        out2: ({ b2 }) => b2 ?? 0,
+        out1: ({ b1 }) => b1 ?? 0,
+        out0: ({ b0 }) => b0 ?? 0,
+      }),
+    ],
+    threeStar: { gate: 0, delay: 0, tick: 0 },
+    // `mem1` is chapter 1's last hand-out, and this is where it has to happen:
+    // chapter 2's latch level ("Circular Dependency") is built from a 1-bit
+    // memory, and no earlier level's puzzle has any use for one. Before this
+    // reward existed, `mem1` was defined in `core/defs/index.ts` and rewarded by
+    // no level anywhere, so it could never appear in any palette and that level
+    // could not be built at all.
+    //
+    // The capstone is a plausible place for a first memory to appear: "read the
+    // nibble at a glance, then forward it" is one wire away from "hold a bit",
+    // and this level's own palette does not change -- it does not list `mem1`,
+    // and a level's palette stays bounded by its `allowedComponents`. Rewards are
+    // not scored either (`grade()` reads the checks and the `threeStar` metrics,
+    // never `rewards`), so no chapter-1 score or target moves with this line.
+    rewards: { components: ['less_u'] },
+  },
+  /**
+   * ch2-15-double-detection -- Double Trouble / 成对的麻烦
+   *
+   * SOURCED: the name in both languages, its position (14th), and the concept --
+   * "pairs": what the output answers is whether at least two of the signals are
+   * high at the same time.
+   *
+   * AUTHORED (this replica's design): which pins the rule ranges over (`a`, `b`,
+   * `c`, `d`), which pin it writes (`out`), the four 1-bit pins and the 1-bit
+   * output themselves, the measured three-star target, and the palette. The
+   * brief fixes the checker kind (`constraint`) and the rule (`at-least` 2); the
+   * other rule, `sum-equals`, reduces its sum modulo the output pin's width, so
+   * on this level's 1-bit `out` it would state parity -- level 13's function --
+   * rather than "at least two". The palette is 1-bit parts only: every pin here
+   * is one bit wide, so the wide parts levels 9-13 unlocked have nothing to
+   * attach to.
+   *
+   * This level hands out no component at all, which is the brief's decision.
+   */
+  {
+    id: 'ch2-15-double-detection',
+    chapter: 2,
+    index: 15,
+    name: { zh: '成双成对', en: 'Double Detection' },
+    brief: {
+      zh: '四个一位信号 a b c d。其中同时为高的至少有 2 个时输出为高，只有 0 个或 1 个时为低。',
+      en: 'Four one-bit signals a, b, c, d. Output high when at least two of them are high at once, low when none or only one is.',
+    },
+    hint: {
+      zh: '「至少两个为高」等于三组两两组合的或：a&b、c&d，还有 (a|b)&(c|d)——最后一组管的是跨过分组的那些组合。',
+      en: '"At least two high" is the OR of three pair-terms: a&b, c&d, and (a|b)&(c|d) -- the last one covers every pair that crosses the two groups.',
+    },
+    allowedComponents: [
+      'nand',
+      'not',
+      'and',
+      'or',
+      'nor',
+      'xor',
+      'xnor',
+      'and3',
+      'or3',
+      'const_on',
+      'const_off',
+      'delay_line',
+      'level_input',
+      'level_output',
+    ],
+    io: IO_ABCD_OUT1,
+    checks: [
+      { kind: 'constraint', rule: { kind: 'at-least', inputs: ['a', 'b', 'c', 'd'], count: 2, output: 'out' } },
+    ],
+    // Measured: the reference is (a&b)|(c&d)|((a|b)&(c|d)) -- two ANDs, two ORs,
+    // one more AND and a 3-input OR = 2+2+3+3+2+6 = 18 NAND equivalents -- with
+    // the OR-AND-OR3 path setting the depth at 3.
+    threeStar: { gate: 18, delay: 3, tick: 0 },
+  },
+
+  /**
+   * ch2-16-odd-number-of-signals -- ODD Number of Signals / 奇数个信号
    *
    * SOURCED: the name in both languages, its position (the 13th level, and the
    * first of chapter 2), and the source's one-line concept -- a set of signals
@@ -131,10 +295,10 @@ export const CH2_BATCH1: readonly LevelSpec[] = [
    * `allowedComponents` still stays out).
    */
   {
-    id: 'ch2-13-odd-number-of-signals',
+    id: 'ch2-16-odd-number-of-signals',
     chapter: 2,
-    index: 13,
-    name: { zh: '奇数个信号', en: 'ODD Number of Signals' },
+    index: 16,
+    name: { zh: '奇数计数技术', en: 'Odd Number of Signals' },
     brief: {
       zh: '四位输入 a 上挂着四个信号位。为高的位有奇数个时输出为高，偶数个（一个都没有也算偶数）时为低。',
       en: 'Input a carries four signal bits. Output high when an odd number of them are high, and low when the count is even -- none at all counts as even.',
@@ -173,129 +337,7 @@ export const CH2_BATCH1: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-14-double-trouble -- Double Trouble / 成对的麻烦
-   *
-   * SOURCED: the name in both languages, its position (14th), and the concept --
-   * "pairs": what the output answers is whether at least two of the signals are
-   * high at the same time.
-   *
-   * AUTHORED (this replica's design): which pins the rule ranges over (`a`, `b`,
-   * `c`, `d`), which pin it writes (`out`), the four 1-bit pins and the 1-bit
-   * output themselves, the measured three-star target, and the palette. The
-   * brief fixes the checker kind (`constraint`) and the rule (`at-least` 2); the
-   * other rule, `sum-equals`, reduces its sum modulo the output pin's width, so
-   * on this level's 1-bit `out` it would state parity -- level 13's function --
-   * rather than "at least two". The palette is 1-bit parts only: every pin here
-   * is one bit wide, so the wide parts levels 9-13 unlocked have nothing to
-   * attach to.
-   *
-   * This level hands out no component at all, which is the brief's decision.
-   */
-  {
-    id: 'ch2-14-double-trouble',
-    chapter: 2,
-    index: 14,
-    name: { zh: '成对的麻烦', en: 'Double Trouble' },
-    brief: {
-      zh: '四个一位信号 a b c d。其中同时为高的至少有 2 个时输出为高，只有 0 个或 1 个时为低。',
-      en: 'Four one-bit signals a, b, c, d. Output high when at least two of them are high at once, low when none or only one is.',
-    },
-    hint: {
-      zh: '「至少两个为高」等于三组两两组合的或：a&b、c&d，还有 (a|b)&(c|d)——最后一组管的是跨过分组的那些组合。',
-      en: '"At least two high" is the OR of three pair-terms: a&b, c&d, and (a|b)&(c|d) -- the last one covers every pair that crosses the two groups.',
-    },
-    allowedComponents: [
-      'nand',
-      'not',
-      'and',
-      'or',
-      'nor',
-      'xor',
-      'xnor',
-      'and3',
-      'or3',
-      'const_on',
-      'const_off',
-      'delay_line',
-      'level_input',
-      'level_output',
-    ],
-    io: IO_ABCD_OUT1,
-    checks: [
-      { kind: 'constraint', rule: { kind: 'at-least', inputs: ['a', 'b', 'c', 'd'], count: 2, output: 'out' } },
-    ],
-    // Measured: the reference is (a&b)|(c&d)|((a|b)&(c|d)) -- two ANDs, two ORs,
-    // one more AND and a 3-input OR = 2+2+3+3+2+6 = 18 NAND equivalents -- with
-    // the OR-AND-OR3 path setting the depth at 3.
-    threeStar: { gate: 18, delay: 3, tick: 0 },
-  },
-
-  /**
-   * ch2-15-binary-racer -- Binary Racer / 二进制速算
-   *
-   * SOURCED: the name in both languages, its position (15th), and the fact that
-   * the source's level of this name is a TIMED binary-reading minigame -- a
-   * shape a circuit game cannot host and one this replica does not try to.
-   *
-   * AUTHORED (this replica's design): the rebuild. The timer and the typing are
-   * dropped; the concept (read a four-bit value at a glance) is kept and becomes
-   * a circuit -- `a:4 -> out:3`, publishing the NUMBER OF HIGH BITS in `a`, which
-   * is 0 to 4 and therefore fits three bits. That reading is the brief's ("4 bits
-   * -> a 3-bit count"); the generated 16 rows, the measured three-star target and
-   * the `less_u` reward are authored here.
-   *
-   * NOTE, because a reviewer will see it: this makes the level's function
-   * identical to level 16's, which counts four separate 1-bit signals. The two
-   * differ in I/O shape (a wide value that has to be split first, against four
-   * pins that arrive apart) and in the lesson each is framed around, and the
-   * coincidence follows from the brief's own table rather than from this file.
-   * If the intent was a saturating 4-into-3-bit quantizer instead, the expectation
-   * function and the reference are the only things that change.
-   */
-  {
-    id: 'ch2-15-binary-racer',
-    chapter: 2,
-    index: 15,
-    name: { zh: '二进制速算', en: 'Binary Racer' },
-    brief: {
-      zh: '四位输入 a 是一个二进制数。数出它里面有几个 1，把个数放到三位输出上：0 到 4 都装得下。',
-      en: 'Input a is a four-bit binary number. Count how many of its bits are 1 and publish that count on the three-bit output: 0 through 4 all fit.',
-    },
-    hint: {
-      zh: '先用位拆分器取到 b0..b3。两个两个半加（和是异或、进位是与），再把两个部分和半加一次；两个进位本身的和就是第 2 位。',
-      en: 'Split a into b0..b3 first. Half-add them in pairs (sum is XOR, carry is AND), then half-add the two partial sums; the two carries added together are the top bit.',
-    },
-    allowedComponents: [
-      'nand',
-      'not',
-      'and',
-      'or',
-      'nor',
-      'xor',
-      'xnor',
-      'and3',
-      'or3',
-      'const_on',
-      'const_off',
-      'delay_line',
-      'splitter',
-      'maker',
-      'const8',
-      'less_u',
-      'level_input',
-      'level_output',
-    ],
-    io: IO_A4_OUT3,
-    checks: [{ kind: 'truth-table', rows: valueRows(IO_A4_OUT3, ({ a }) => onesIn(a ?? 0, 4)) }],
-    // Measured: two half adders, then the stage that adds the two partial sums
-    // -- five XORs (20) and four ANDs (8) = 28 NAND equivalents -- with the
-    // splitter and the maker free on both metrics and a depth of 3.
-    threeStar: { gate: 28, delay: 3, tick: 0 },
-    rewards: { components: ['less_u'] },
-  },
-
-  /**
-   * ch2-16-counting-signals -- Counting Signals / 信号计数
+   * ch2-18-counting-signals -- Counting Signals / 信号计数
    *
    * SOURCED: the name in both languages, its position (16th), and the concept --
    * adding four one-bit signals, the half-adder idea.
@@ -306,9 +348,9 @@ export const CH2_BATCH1: readonly LevelSpec[] = [
    * three-star target; and the `equal8` reward.
    */
   {
-    id: 'ch2-16-counting-signals',
+    id: 'ch2-18-counting-signals',
     chapter: 2,
-    index: 16,
+    index: 18,
     name: { zh: '信号计数', en: 'Counting Signals' },
     brief: {
       zh: '四个彼此独立的一位信号。数出其中为高的个数，用三位二进制输出。',
@@ -353,7 +395,7 @@ export const CH2_BATCH1: readonly LevelSpec[] = [
   },
 
   /**
-   * ch2-17-double-the-number -- Double the Number / 加倍
+   * ch2-21-double-the-number -- Double the Number / 加倍
    *
    * SOURCED: the name in both languages, its position (17th), and the concept --
    * a left shift by one bit is a doubling.
@@ -370,10 +412,10 @@ export const CH2_BATCH1: readonly LevelSpec[] = [
    * deliberately not unlocked until a later chapter-2 level.
    */
   {
-    id: 'ch2-17-double-the-number',
+    id: 'ch2-21-double-the-number',
     chapter: 2,
-    index: 17,
-    name: { zh: '加倍', en: 'Double the Number' },
+    index: 21,
+    name: { zh: '超级加倍', en: 'Double the Number' },
     brief: {
       zh: '八位输入 a。输出它的两倍：整个字节左移一位，最低位补 0，最高位丢掉——溢出就溢出。',
       en: 'Eight-bit input a. Output twice its value: shift the whole byte one place left, fill the low bit with 0, drop the top bit. Overflow is overflow.',

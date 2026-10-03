@@ -143,7 +143,7 @@ describe('truthTable', () => {
 });
 
 const solutions: Record<string, () => Graph> = {
-  'ch1-01-crude-awakening': () =>
+  'ch1-01-humble-beginnings': () =>
     build([
       { kind: 'part', def: 'const_on', id: 'src', from: [] },
       { kind: 'output', from: 'src' },
@@ -169,7 +169,7 @@ const solutions: Record<string, () => Graph> = {
       { kind: 'part', def: 'not', id: 'g2', from: ['g1'] },
       { kind: 'output', from: 'g2' },
     ]),
-  'ch1-05-or-gate': () =>
+  'ch1-06-or-gate': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
@@ -178,13 +178,20 @@ const solutions: Record<string, () => Graph> = {
       { kind: 'part', def: 'nand', id: 'g', from: ['n1', 'n2'] },
       { kind: 'output', from: 'g' },
     ]),
-  'ch1-06-nor-gate': () =>
+  // De Morgan, not OR + NOT: the 2.x chapter puts NOR at level 5 and OR at
+  // level 6, so `or` is not in this level's palette (`allowedComponents` lists it
+  // today only because level 4 still hands it out; the level's own comment calls
+  // the reference OR + NOT). NOT(a) AND NOT(b) is the same function, measures the
+  // same 4 gates on a path two deep, and is built from parts level 2 and level 3
+  // unlocked -- which is the stronger claim the palette test below makes.
+  'ch1-05-nor-gate': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
-      { kind: 'part', def: 'or', id: 'o1', from: ['a', 'b'] },
-      { kind: 'part', def: 'not', id: 'n1', from: ['o1'] },
-      { kind: 'output', from: 'n1' },
+      { kind: 'part', def: 'not', id: 'n1', from: ['a'] },
+      { kind: 'part', def: 'not', id: 'n2', from: ['b'] },
+      { kind: 'part', def: 'and', id: 'g', from: ['n1', 'n2'] },
+      { kind: 'output', from: 'g' },
     ]),
 };
 
@@ -199,7 +206,7 @@ const wrong: Record<string, () => Graph> = {
       { kind: 'output', from: 'g' },
     ]),
   // NOT(NAND) is AND, not OR
-  'ch1-05-or-gate': () =>
+  'ch1-06-or-gate': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
@@ -208,7 +215,7 @@ const wrong: Record<string, () => Graph> = {
       { kind: 'output', from: 'g2' },
     ]),
   // two NANDs in series is AND, not NOR
-  'ch1-06-nor-gate': () =>
+  'ch1-05-nor-gate': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
@@ -300,7 +307,7 @@ describe('the level registry', () => {
   });
 
   it('resolves a level by id and rejects an unknown one', () => {
-    expect(getLevel('ch1-01-crude-awakening')).toBe(CH1_PART1[0]);
+    expect(getLevel('ch1-01-humble-beginnings')).toBe(CH1_PART1[0]);
     expect(() => getLevel('ch1-99-nope')).toThrow(/unknown level: ch1-99-nope/);
   });
 

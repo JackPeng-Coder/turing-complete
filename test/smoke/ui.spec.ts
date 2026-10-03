@@ -19,7 +19,7 @@ import { STORAGE_KEY } from '../../src/persist/storage';
  * level list is not shipping it: a level nobody can open, or one that opens but
  * never grades, is invisible in the earlier tests either way. Those tests seed a
  * save with the levels before their target already passed -- the only practical
- * way to reach level 31, let alone 47, in a browser test -- and then walk the
+ * way to reach level 31, let alone 49, in a browser test -- and then walk the
  * real path: open it, read its palette, build its reference, pass it, and watch
  * the next tile unlock.
  *
@@ -107,7 +107,7 @@ test('level 1 is playable end to end and shows its pass dialog', async ({ page }
   await expect(page.locator('.briefing-tag')).toHaveText('任务简报');
   await page.screenshot({ path: 'test-results/smoke-level1-briefing.png' });
   await page.getByRole('button', { name: '开始' }).click();
-  await expect(page.locator('.shell-bar')).toContainText('原力觉醒');
+  await expect(page.locator('.shell-bar')).toContainText('从零开始');
   // One screen at a time: the empty map screen is not in the way.
   await expect(page.locator('.screen-map')).toBeHidden();
 
@@ -247,7 +247,7 @@ test('progress survives a reload and unlocks the next level', async ({ page }) =
   await page.locator('.map-tile').nth(0).click();
   await expect(page.locator('.screen-map')).toBeHidden();
   await expect(page.locator('.screen-board')).toBeVisible();
-  await expect(page.locator('.shell-bar')).toContainText('原力觉醒');
+  await expect(page.locator('.shell-bar')).toContainText('从零开始');
   await expect(page.locator('.briefing')).toContainText('金属舱室');
 });
 
@@ -258,8 +258,8 @@ test('progress survives a reload and unlocks the next level', async ({ page }) =
  * also the level where the matrix is at its tallest, which is why it is worth a
  * walk of its own.
  */
-test('level 12 lays its sixteen cases out as columns, then plays them', async ({ page }) => {
-  await seedProgress(page, 11);
+test('level 14 lays its sixteen cases out as columns, then plays them', async ({ page }) => {
+  await seedProgress(page, 13);
   await page.goto('/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('二进制速算');
@@ -269,13 +269,13 @@ test('level 12 lays its sixteen cases out as columns, then plays them', async ({
   await expect(page.locator('.truth-table h2')).toHaveText('用例');
   await expect(page.locator('.case-count')).toHaveText('共 16 个');
   await expect(page.locator('.case-bad')).toHaveCount(0);
-  await page.screenshot({ path: 'test-results/smoke-ch1-level12-plan.png' });
+  await page.screenshot({ path: 'test-results/smoke-ch2-level14-plan.png' });
 
   await runTests(page);
   // The first case is driven before the click returns, so this is not a race.
   await expect(page.locator('.truth-table h2')).toHaveText('正在测试 用例 1 / 16');
   await expect(page.locator('.case-active')).not.toHaveCount(0);
-  await page.screenshot({ path: 'test-results/smoke-ch1-level12-running.png' });
+  await page.screenshot({ path: 'test-results/smoke-ch2-level14-running.png' });
 
   // Sixteen cases at 2x is seven seconds, so the verdict needs a longer wait
   // than the default -- and it arrives as a red matrix, not as a wall of text.
@@ -283,7 +283,7 @@ test('level 12 lays its sixteen cases out as columns, then plays them', async ({
   await expect(page.locator('.truth-table')).not.toContainText('≠');
   await expect(page.locator('.truth-table p')).toHaveCount(0);
   await expect(page.locator('.case-bad')).not.toHaveCount(0);
-  await page.screenshot({ path: 'test-results/smoke-ch1-level12-failed.png' });
+  await page.screenshot({ path: 'test-results/smoke-ch2-level14-failed.png' });
 });
 
 /**
@@ -382,7 +382,7 @@ async function peakWhite(page: Page, x: number, y: number, width: number, height
  * there, and it is the one place the crossing route always passed through.
  */
 test('a wire is routed around a gate, not through it', async ({ page }) => {
-  await seedProgress(page, 11);
+  await seedProgress(page, 13);
   await page.goto('/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('二进制速算');
@@ -447,14 +447,14 @@ test('?dev=1 opens every level, and says so', async ({ page }) => {
   await expect(page.locator('.shell-dev')).toBeVisible();
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  // Every one of the 47, from a save with nothing passed in it. Level 1 alone
+  // Every one of the 49, from a save with nothing passed in it. Level 1 alone
   // would be enabled without the flag.
-  await expect(page.locator('.map-tile:not([disabled])')).toHaveCount(47);
+  await expect(page.locator('.map-tile:not([disabled])')).toHaveCount(49);
   await page.screenshot({ path: 'test-results/smoke-dev-map.png' });
 
   // The last level opens, and it offers the parts that level was designed
   // around -- the whole reason the flag reaches the palette as well as the map.
-  await page.locator('.map-tile').nth(46).click();
+  await page.locator('.map-tile').nth(48).click();
   // Opening a level raises its briefing, and the briefing covers the bar.
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('图灵完备');
@@ -479,13 +479,13 @@ test('?dev=1 opens every level, and says so', async ({ page }) => {
  * fixed at 72 pixels tall however many pins hung off the edge of it, so eight
  * outputs trailed a column of loose squares down the paper.
  *
- * `?dev=1` opens level 47, whose palette lists every part in the game.
+ * `?dev=1` opens level 49, whose palette lists every part in the game.
  */
 test('the packers are blue funnels that hold their pins', async ({ page }) => {
   await page.goto('/?dev=1');
   await page.getByRole('button', { name: '开始' }).click();
   await page.getByRole('button', { name: '章节地图' }).click();
-  await page.locator('.map-tile').nth(46).click();
+  await page.locator('.map-tile').nth(48).click();
   await page.getByRole('button', { name: '开始' }).click();
 
   const { cx, cy } = await boardCentre(page);
@@ -571,15 +571,15 @@ test('ctrl+drag bands the parts it sweeps over', async ({ page }) => {
  * what it is DRIVING, and it is read the same way -- `level_input` has an output
  * pin, so the display reports it like any other.
  *
- * Level 13 takes a four-bit `a`, so the number is big enough to be worth reading;
+ * Level 16 takes a four-bit `a`, so the number is big enough to be worth reading;
  * one bit of it is clicked in the left-hand panel first, or the arrow would be
  * showing `0` and the test would pass on a blank body.
  */
 test('a level input shows the number it drives, like an output', async ({ page }) => {
-  await seedProgress(page, 12);
+  await seedProgress(page, 15);
   await page.goto('/');
   await page.getByRole('button', { name: '开始' }).click();
-  await expect(page.locator('.shell-bar')).toContainText('奇数个信号');
+  await expect(page.locator('.shell-bar')).toContainText('奇数计数技术');
 
   const { cx, cy } = await boardCentre(page);
   await place(page, '关卡输入', cx - 240, cy);
@@ -592,48 +592,48 @@ test('a level input shows the number it drives, like an output', async ({ page }
   await page.screenshot({ path: 'test-results/smoke-input-number.png' });
 });
 
-test('chapter 2 is reachable: level 13 opens once chapter 1 is passed', async ({ page }) => {
+test('chapter 2 is reachable: level 14 opens once chapter 1 is passed', async ({ page }) => {
   // Every chapter-1 level passed, so the resume point is chapter 2's first
-  // level. Seeding is the only practical route: unlocking level 13 by playing is
-  // twelve levels of mouse work, and this test is about the join, not about
+  // level. Seeding is the only practical route: unlocking level 14 by playing is
+  // thirteen levels of mouse work, and this test is about the join, not about
   // chapter 1's puzzles.
-  await seedProgress(page, 12);
+  await seedProgress(page, 13);
   await page.goto('/');
   await page.getByRole('button', { name: '开始' }).click();
 
-  await expect(page.locator('.shell-bar')).toContainText('奇数个信号');
-  // A chapter-2 part is in the palette: level 13 rewards the splitter, and the
-  // splitter is the only part that can expose bits 1-3 of its 4-bit input, so a
-  // palette without it could not build the level at all.
-  await expect(page.getByRole('button', { name: '位拆分器' })).toBeEnabled();
+  await expect(page.locator('.shell-bar')).toContainText('二进制速算');
+  // The palette is live across the join: this level's own parts are the chapter-1
+  // ones it lists, and the XOR gate is among them. (It is also chapter 2's first
+  // level rather than one of its byte puzzles, which is the 2.x order.)
+  await expect(page.getByRole('button', { name: '异或门' })).toBeEnabled();
   // The level's own checker is mounted and live.
   await expect(page.locator('.truth-table')).toBeVisible();
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  // All 47 tiles -- chapter 2's 26 and chapter 3's nine are on the map, which is
+  // All 49 tiles -- chapter 2's 26 and chapter 3's ten are on the map, which is
   // the player's only view of them.
-  await expect(page.locator('.map-tile')).toHaveCount(47);
-  await expect(page.locator('.map-tile').nth(12)).toContainText('奇数个信号');
-  await expect(page.locator('.map-tile').nth(12)).toBeEnabled();
-  // Unlocking stays strictly linear across the join: level 14 waits for 13.
-  await expect(page.locator('.map-tile').nth(13)).toBeDisabled();
+  await expect(page.locator('.map-tile')).toHaveCount(49);
+  await expect(page.locator('.map-tile').nth(13)).toContainText('二进制速算');
+  await expect(page.locator('.map-tile').nth(13)).toBeEnabled();
+  // Unlocking stays strictly linear across the join: level 15 waits for 14.
+  await expect(page.locator('.map-tile').nth(14)).toBeDisabled();
 
   // And a chapter-2 tile is real navigation, exactly as a chapter-1 one is.
-  await page.locator('.map-tile').nth(12).click();
+  await page.locator('.map-tile').nth(13).click();
   await expect(page.locator('.screen-map')).toBeHidden();
   await expect(page.locator('.screen-board')).toBeVisible();
-  await expect(page.locator('.shell-bar')).toContainText('奇数个信号');
-  await page.screenshot({ path: 'test-results/smoke-ch2-level13-open.png' });
+  await expect(page.locator('.shell-bar')).toContainText('二进制速算');
+  await page.screenshot({ path: 'test-results/smoke-ch2-level14-open.png' });
 });
 
 test('a chapter-2 level opens and grades end to end', async ({ page }) => {
-  // Levels 1-30 passed: the resume point is level 31, whose reference is one XOR
+  // Levels 1-27 passed: the resume point is level 28, whose reference is one XOR
   // (`a XOR inv`) -- four parts and three wires, the smallest chapter-2 circuit a
   // mouse can build, and a real chapter-2 level rather than a synthetic one.
-  await seedProgress(page, 30);
+  await seedProgress(page, 27);
   await page.goto('/');
   await page.getByRole('button', { name: '开始' }).click();
-  await expect(page.locator('.shell-bar')).toContainText('1 位取反器');
+  await expect(page.locator('.shell-bar')).toContainText('可控反相器');
 
   const { cx, cy } = await boardCentre(page);
   // LAYOUT: the two level inputs on the left, the gate in the middle, the level
@@ -661,29 +661,29 @@ test('a chapter-2 level opens and grades end to end', async ({ page }) => {
   await page.screenshot({ path: 'test-results/smoke-ch2-level31-passed.png' });
 
   // Passing wrote progress, which is what makes this "graded" rather than
-  // merely "displayed": level 31 has its star and level 32 is unlocked.
+  // merely "displayed": level 28 has its star and level 29 is unlocked.
   await expect(page.locator('.result')).toContainText('电路安静地运转着');
   await page.getByRole('button', { name: '继续' }).click();
   await page.getByRole('button', { name: '章节地图' }).click();
-  await expect(page.locator('.map-tile').nth(30)).toContainText('★');
-  await expect(page.locator('.map-tile').nth(31)).toBeEnabled();
+  await expect(page.locator('.map-tile').nth(27)).toContainText('★');
+  await expect(page.locator('.map-tile').nth(28)).toBeEnabled();
   await page.screenshot({ path: 'test-results/smoke-ch2-unlocked-next.png' });
 });
 
-test('the last chapter-2 level opens: level 38 is reachable', async ({ page }) => {
+test('the last chapter-2 level opens: level 39 is reachable', async ({ page }) => {
   // 37 passed: the resume point is the chapter's last level. Reaching it proves
   // the join reaches the end of the chapter, not just its first batch.
-  await seedProgress(page, 37);
+  await seedProgress(page, 38);
   await page.goto('/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('计数器');
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  await expect(page.locator('.map-tile')).toHaveCount(47);
-  await expect(page.locator('.map-tile').nth(37)).toContainText('计数器');
-  await expect(page.locator('.map-tile').nth(37)).toBeEnabled();
+  await expect(page.locator('.map-tile')).toHaveCount(49);
+  await expect(page.locator('.map-tile').nth(38)).toContainText('计数器');
+  await expect(page.locator('.map-tile').nth(38)).toBeEnabled();
 
-  await page.locator('.map-tile').nth(37).click();
+  await page.locator('.map-tile').nth(38).click();
   await expect(page.locator('.screen-board')).toBeVisible();
   await expect(page.locator('.shell-bar')).toContainText('计数器');
   // A real level, not an empty screen: its palette offers the register the level
@@ -696,13 +696,13 @@ test('the last chapter-2 level opens: level 38 is reachable', async ({ page }) =
 /**
  * A `script` LEVEL IS THE OTHER SHAPE OF TEST, and the run has to replay it
  * rather than reset between its cases: its steps are one run, so step 3 reads a
- * register step 2 clocked. Twenty-seven levels passed puts the resume point on
- * level 28, a script level; an empty board then fails every step, which is
+ * register step 2 clocked. Sixteen levels passed puts the resume point on
+ * level 17, a script level; an empty board then fails every step, which is
  * exactly what makes this a test of the replay -- each step is driven and read,
  * so no column is left unknown.
  */
 test('a sequential level replays its steps and reads every one of them', async ({ page }) => {
-  await seedProgress(page, 27);
+  await seedProgress(page, 16);
   await page.goto('/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('循环依赖');
@@ -717,54 +717,54 @@ test('a sequential level replays its steps and reads every one of them', async (
   // Every case was driven and read: a step the run never reached would still be
   // an unknown dot.
   await expect(page.locator('.truth-table .bit-x')).toHaveCount(0);
-  await page.screenshot({ path: 'test-results/smoke-ch2-level28-run.png' });
+  await page.screenshot({ path: 'test-results/smoke-ch2-level17-run.png' });
 });
 
-test('chapter 3 is reachable: level 39 opens once chapter 2 is passed', async ({ page }) => {
-  // 38 passed -- the whole of chapters 1 and 2 -- so the resume point is the
+test('chapter 3 is reachable: level 40 opens once chapter 2 is passed', async ({ page }) => {
+  // 39 passed -- the whole of chapters 1 and 2 -- so the resume point is the
   // first chapter-3 level. Before the chapter was appended to the level list this
   // test failed at the resume point itself, which is the point of it.
-  await seedProgress(page, 38);
+  await seedProgress(page, 39);
   await page.goto('/');
   await page.getByRole('button', { name: '开始' }).click();
-  await expect(page.locator('.shell-bar')).toContainText('算数引擎');
+  await expect(page.locator('.shell-bar')).toContainText('逻辑整合');
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  await expect(page.locator('.map-tile')).toHaveCount(47);
-  await expect(page.locator('.map-tile').nth(38)).toContainText('算数引擎');
-  await expect(page.locator('.map-tile').nth(38)).toBeEnabled();
-  // Unlocking stays strictly linear across the second join too: 40 waits for 39.
-  await expect(page.locator('.map-tile').nth(39)).toBeDisabled();
+  await expect(page.locator('.map-tile')).toHaveCount(49);
+  await expect(page.locator('.map-tile').nth(39)).toContainText('逻辑整合');
+  await expect(page.locator('.map-tile').nth(39)).toBeEnabled();
+  // Unlocking stays strictly linear across the second join too: 41 waits for 40.
+  await expect(page.locator('.map-tile').nth(40)).toBeDisabled();
 
   // A real level, not an empty screen: its palette offers the eight-bit wiring
   // the level is built from and its checker is mounted.
-  await page.locator('.map-tile').nth(38).click();
+  await page.locator('.map-tile').nth(39).click();
   await expect(page.locator('.screen-board')).toBeVisible();
-  await expect(page.locator('.shell-bar')).toContainText('算数引擎');
+  await expect(page.locator('.shell-bar')).toContainText('逻辑整合');
   await expect(page.locator('.truth-table')).toBeVisible();
-  await page.screenshot({ path: 'test-results/smoke-ch3-level39-open.png' });
+  await page.screenshot({ path: 'test-results/smoke-ch3-level40-open.png' });
 });
 
-test('the last level opens and mounts its program check: level 47', async ({ page }) => {
-  // 46 passed: the resume point is the phase's acceptance level -- the one whose
+test('the last level opens and mounts its program check: level 49', async ({ page }) => {
+  // 48 passed: the resume point is the phase's acceptance level -- the one whose
   // check runs a real OVERTURE program against the machine the player built,
   // rather than a truth table. Reaching it proves the join reaches the end of
   // chapter 3, and that the `program` check kind (level data + `checks.ts`) is
   // wired into the app rather than only into the unit tests.
-  await seedProgress(page, 46);
+  await seedProgress(page, 48);
   await page.goto('/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('图灵完备');
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  await expect(page.locator('.map-tile')).toHaveCount(47);
-  await expect(page.locator('.map-tile').nth(46)).toContainText('图灵完备');
-  await expect(page.locator('.map-tile').nth(46)).toBeEnabled();
+  await expect(page.locator('.map-tile')).toHaveCount(49);
+  await expect(page.locator('.map-tile').nth(48)).toContainText('图灵完备');
+  await expect(page.locator('.map-tile').nth(48)).toBeEnabled();
 
-  await page.locator('.map-tile').nth(46).click();
+  await page.locator('.map-tile').nth(48).click();
   await expect(page.locator('.screen-board')).toBeVisible();
   await expect(page.locator('.shell-bar')).toContainText('图灵完备');
-  // The palette is everything earned through level 46, so the six machine parts
+  // The palette is everything earned through level 48, so the six machine parts
   // are all on offer -- the claim `level-buildability.test.ts` walks, checked
   // here against the palette the app actually renders.
   await expect(page.getByRole('button', { name: '8 位运算器' })).toBeEnabled();
@@ -772,5 +772,52 @@ test('the last level opens and mounts its program check: level 47', async ({ pag
   // And the program check is mounted: an empty board must grade as a failure
   // rather than as nothing at all, which is what `missing-program` means.
   await expect(page.locator('.truth-table')).toBeVisible();
-  await page.screenshot({ path: 'test-results/smoke-ch3-level47-open.png' });
+  await page.screenshot({ path: 'test-results/smoke-ch3-level49-open.png' });
+});
+
+/**
+ * A SAVE WRITTEN BEFORE THE 2.x REALIGNMENT KEEPS ITS STARS.
+ *
+ * The realignment renamed 37 level ids and removed three, and a save is keyed by
+ * id -- so without `levels/id-map.ts` inside `migrate` every star would land on a
+ * level that no longer exists, silently, because every lookup would simply miss.
+ * The unit tests pin the translation table; this walks a real browser through it.
+ *
+ * The ids below are 1.x's. The fifth one is the interesting one: old
+ * `ch1-06-nor-gate` is the CURRENT `ch1-05-nor-gate`, because the realignment
+ * swapped OR and NOR back to the source's order -- so a resume point of level 6
+ * is the proof that the old id was translated rather than matched by number.
+ */
+test('a save written before the 2.x realignment keeps its stars', async ({ page }) => {
+  const record = { passed: true, best: null, stars: 3 };
+  await page.addInitScript(
+    ([key, json]) => globalThis.localStorage.setItem(key, json),
+    [
+      STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        levels: {
+          'ch1-01-crude-awakening': record,
+          'ch1-02-nand-gate': record,
+          'ch1-03-not-gate': record,
+          'ch1-04-and-gate': record,
+          'ch1-06-nor-gate': record,
+          // retired by the realignment: it must be dropped, not carried
+          'ch2-27-logic-engine': record,
+        },
+      }),
+    ] as const,
+  );
+
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('或门');
+
+  await page.getByRole('button', { name: '章节地图' }).click();
+  // Levels 1-5 read as passed and 6 is unlocked: six playable tiles, and the first
+  // one carries the star the legacy save earned.
+  await expect(page.locator('.map-tile:not([disabled])')).toHaveCount(6);
+  await expect(page.locator('.map-tile').nth(0)).toContainText('★');
+  await expect(page.locator('.map-tile').nth(4)).toContainText('★');
+  await page.screenshot({ path: 'test-results/smoke-migrated-save.png' });
 });

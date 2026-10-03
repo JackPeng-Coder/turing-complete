@@ -20,7 +20,7 @@ import { build, registry } from '../fixtures/build';
 import { CH2_BATCH1_REFERENCES } from '../fixtures/ch2-references';
 
 /**
- * Chapter 2's first batch: levels 13-17.
+ * Chapter 2's first batch: levels 14-21.
  *
  * The source compendium fixes these levels' names, their order and a one-line
  * concept each, and nothing else -- no ports, no widths, no pass conditions, no
@@ -46,11 +46,11 @@ function specOf(id: string): LevelSpec {
   return level;
 }
 
-const L13 = levelAt(13);
 const L14 = levelAt(14);
 const L15 = levelAt(15);
 const L16 = levelAt(16);
-const L17 = levelAt(17);
+const L18 = levelAt(18);
+const L21 = levelAt(21);
 
 /** `id:width` per pin, the shape the task brief fixes for each level. */
 function pinsOf(level: LevelSpec): { inputs: string[]; outputs: string[] } {
@@ -175,58 +175,61 @@ function vacuityProblems(level: LevelSpec): string[] {
   return problems;
 }
 
-describe('chapter 2, levels 13-17', () => {
+describe('chapter 2, levels 14-21', () => {
   it('exposes five chapter-2 levels with the briefed indices', () => {
-    expect(CH2_BATCH1.map((level) => level.index)).toEqual([13, 14, 15, 16, 17]);
+    expect(CH2_BATCH1.map((level) => level.index)).toEqual([14, 15, 16, 18, 21]);
     expect(CH2_BATCH1.map((level) => level.chapter)).toEqual([2, 2, 2, 2, 2]);
   });
 
   it('uses the ch2-<index>-<slug> id convention', () => {
     expect(CH2_BATCH1.map((level) => level.id)).toEqual([
-      'ch2-13-odd-number-of-signals',
-      'ch2-14-double-trouble',
-      'ch2-15-binary-racer',
-      'ch2-16-counting-signals',
-      'ch2-17-double-the-number',
+      'ch2-14-binary-racer',
+      'ch2-15-double-detection',
+      'ch2-16-odd-number-of-signals',
+      'ch2-18-counting-signals',
+      'ch2-21-double-the-number',
     ]);
   });
 
   it('is the first slice of the assembled chapter', () => {
     // The chapter is all four batches now, so this batch's claim is about its
     // PLACE in the join rather than about the join being this batch alone. The
-    // whole-chapter shape -- 26 levels, indices 13-38, contiguous and unique --
+    // whole-chapter shape -- 26 levels, indices 14-39, contiguous and unique --
     // is `test/levels/unlock-chain.test.ts`'s, and it walks every batch.
     expect(CH2_LEVELS.slice(0, CH2_BATCH1.length)).toEqual([...CH2_BATCH1]);
   });
 
   it('shapes every level exactly as the brief fixes it', () => {
-    expect(pinsOf(L13)).toEqual({ inputs: ['a:4'], outputs: ['out:1'] });
     expect(pinsOf(L14)).toEqual({
+      inputs: ['b3:1', 'b2:1', 'b1:1', 'b0:1'],
+      outputs: ['out3:1', 'out2:1', 'out1:1', 'out0:1'],
+    });
+    expect(pinsOf(L15)).toEqual({
       inputs: ['a:1', 'b:1', 'c:1', 'd:1'],
       outputs: ['out:1'],
     });
-    expect(pinsOf(L15)).toEqual({ inputs: ['a:4'], outputs: ['out:3'] });
-    expect(pinsOf(L16)).toEqual({
+    expect(pinsOf(L16)).toEqual({ inputs: ['a:4'], outputs: ['out:1'] });
+    expect(pinsOf(L18)).toEqual({
       inputs: ['a:1', 'b:1', 'c:1', 'd:1'],
       outputs: ['out:3'],
     });
-    expect(pinsOf(L17)).toEqual({ inputs: ['a:8'], outputs: ['out:8'] });
+    expect(pinsOf(L21)).toEqual({ inputs: ['a:8'], outputs: ['out:8'] });
   });
 
   it('names each level in both languages', () => {
     expect(CH2_BATCH1.map((level) => level.name.en)).toEqual([
-      'ODD Number of Signals',
-      'Double Trouble',
       'Binary Racer',
+      'Double Detection',
+      'Odd Number of Signals',
       'Counting Signals',
       'Double the Number',
     ]);
     expect(CH2_BATCH1.map((level) => level.name.zh)).toEqual([
-      '奇数个信号',
-      '成对的麻烦',
       '二进制速算',
+      '成双成对',
+      '奇数计数技术',
       '信号计数',
-      '加倍',
+      '超级加倍',
     ]);
     for (const level of CH2_BATCH1) {
       expect(level.brief.zh.length, `${level.id} has an empty zh brief`).toBeGreaterThan(0);
@@ -238,7 +241,7 @@ describe('chapter 2, levels 13-17', () => {
 
   it('gates every part behind a component unlocked at or before it', () => {
     // "At or before": a level may offer the parts its own rewards hand out (the
-    // brief says level 13 must list `splitter`/`maker`/`const8`), so the walk
+    // brief says level 16 must list `splitter`/`maker`/`const8`), so the walk
     // adds a level's rewards before testing its own palette and the next level's
     // after it. Chapter 1 is walked first because chapter 2's palettes are built
     // on its rewards.
@@ -254,7 +257,7 @@ describe('chapter 2, levels 13-17', () => {
   it('offers nothing from a later level', () => {
     // The same rule stated as the review asks for it: what this batch offers is
     // drawn from chapter 1's rewards, its own rewards, and the starter set --
-    // never from level 14+ (here: the wide operators and the storage family).
+    // never from a later level (here: the wide operators and the storage family).
     const throughCh1 = new Set<string>(STARTER_COMPONENTS);
     for (const level of [...CH1_PART1, ...CH1_PART2]) {
       for (const def of level.rewards?.components ?? []) throughCh1.add(def);
@@ -286,19 +289,19 @@ describe('chapter 2, levels 13-17', () => {
     // An empty `rows` array is a hard `missing-rows` failure, not "enumerate
     // everything" -- so a level that publishes a count has to have its rows
     // produced by the kernel's own enumerator.
-    expect(rowsOf(L13).length).toBe(16);
-    expect(rowsOf(L15).length).toBe(16);
+    expect(rowsOf(L14).length).toBe(16);
     expect(rowsOf(L16).length).toBe(16);
-    expect(rowsOf(L17).length).toBe(256);
+    expect(rowsOf(L18).length).toBe(16);
+    expect(rowsOf(L21).length).toBe(256);
   });
 
   it('enumerates every input combination exactly once', () => {
-    for (const level of [L13, L15, L16]) {
+    for (const level of [L14, L16, L18]) {
       const rows = rowsOf(level);
       const seen = new Set(rows.map((row) => JSON.stringify(row.inputs)));
       expect(seen.size, `${level.id} repeats or skips input combinations`).toBe(16);
     }
-    const wide = rowsOf(L17);
+    const wide = rowsOf(L21);
     expect(new Set(wide.map((row) => row.inputs.a)).size).toBe(256);
     expect(wide.map((row) => row.inputs.a).sort((x, y) => (x ?? 0) - (y ?? 0))).toEqual(
       Array.from({ length: 256 }, (_, n) => n),
@@ -306,42 +309,51 @@ describe('chapter 2, levels 13-17', () => {
   });
 
   it('states each level the brief describes', () => {
-    // Level 13: an odd number of high bits reads high.
-    const thirteen = rowsOf(L13);
-    expect(rowFor(thirteen, { a: 0 })?.outputs.out).toBe(0);
-    expect(rowFor(thirteen, { a: 1 })?.outputs.out).toBe(1);
+    // Level 14: forwarding, not arithmetic -- each input bit lands on the output
+    // pin that names it, whatever the nibble spells.
+    const fourteen = rowsOf(L14);
+    expect(rowFor(fourteen, { b3: 1, b2: 0, b1: 1, b0: 0 })?.outputs).toEqual({
+      out3: 1,
+      out2: 0,
+      out1: 1,
+      out0: 0,
+    });
+    expect(rowFor(fourteen, { b3: 0, b2: 1, b1: 1, b0: 1 })?.outputs).toEqual({
+      out3: 0,
+      out2: 1,
+      out1: 1,
+      out0: 1,
+    });
+
+    // Level 16: an odd number of high bits reads high.
+    const sixteen = rowsOf(L16);
+    expect(rowFor(sixteen, { a: 0 })?.outputs.out).toBe(0);
+    expect(rowFor(sixteen, { a: 1 })?.outputs.out).toBe(1);
     // 0b11 is two ones: even, so low. (The first draft of this line said 1 and
     // the level was right; the table is what caught it.)
-    expect(rowFor(thirteen, { a: 3 })?.outputs.out).toBe(0);
-    expect(rowFor(thirteen, { a: 7 })?.outputs.out).toBe(1);
-    expect(rowFor(thirteen, { a: 15 })?.outputs.out).toBe(0);
+    expect(rowFor(sixteen, { a: 3 })?.outputs.out).toBe(0);
+    expect(rowFor(sixteen, { a: 7 })?.outputs.out).toBe(1);
+    expect(rowFor(sixteen, { a: 15 })?.outputs.out).toBe(0);
 
-    // Level 15: the three-bit count of the ones in a.
-    const fifteen = rowsOf(L15);
-    expect(rowFor(fifteen, { a: 0 })?.outputs.out).toBe(0);
-    expect(rowFor(fifteen, { a: 5 })?.outputs.out).toBe(2);
-    expect(rowFor(fifteen, { a: 7 })?.outputs.out).toBe(3);
-    expect(rowFor(fifteen, { a: 15 })?.outputs.out).toBe(4);
+    // Level 18: the three-bit count of the four separate signals.
+    const eighteen = rowsOf(L18);
+    expect(rowFor(eighteen, { a: 1, b: 1, c: 1, d: 1 })?.outputs.out).toBe(4);
+    expect(rowFor(eighteen, { a: 1, b: 0, c: 1, d: 0 })?.outputs.out).toBe(2);
+    expect(rowFor(eighteen, { a: 0, b: 0, c: 0, d: 1 })?.outputs.out).toBe(1);
 
-    // Level 16: the same count, from four separate signals.
-    const sixteen = rowsOf(L16);
-    expect(rowFor(sixteen, { a: 1, b: 1, c: 1, d: 1 })?.outputs.out).toBe(4);
-    expect(rowFor(sixteen, { a: 1, b: 0, c: 1, d: 0 })?.outputs.out).toBe(2);
-    expect(rowFor(sixteen, { a: 0, b: 0, c: 0, d: 1 })?.outputs.out).toBe(1);
-
-    // Level 17: double, modulo 256.
-    const seventeen = rowsOf(L17);
-    expect(rowFor(seventeen, { a: 0 })?.outputs.out).toBe(0);
-    expect(rowFor(seventeen, { a: 1 })?.outputs.out).toBe(2);
-    expect(rowFor(seventeen, { a: 127 })?.outputs.out).toBe(254);
-    expect(rowFor(seventeen, { a: 128 })?.outputs.out).toBe(0);
-    expect(rowFor(seventeen, { a: 255 })?.outputs.out).toBe(254);
+    // Level 21: double, modulo 256.
+    const twentyOne = rowsOf(L21);
+    expect(rowFor(twentyOne, { a: 0 })?.outputs.out).toBe(0);
+    expect(rowFor(twentyOne, { a: 1 })?.outputs.out).toBe(2);
+    expect(rowFor(twentyOne, { a: 127 })?.outputs.out).toBe(254);
+    expect(rowFor(twentyOne, { a: 128 })?.outputs.out).toBe(0);
+    expect(rowFor(twentyOne, { a: 255 })?.outputs.out).toBe(254);
   });
 
-  it('states level 14 as an at-least-2 rule over its four pins', () => {
-    const check = L14.checks.find((entry) => entry.kind === 'constraint');
+  it('states level 15 as an at-least-2 rule over its four pins', () => {
+    const check = L15.checks.find((entry) => entry.kind === 'constraint');
     expect(check).toBeDefined();
-    if (check?.kind !== 'constraint') throw new Error('level 14 is not a constraint check');
+    if (check?.kind !== 'constraint') throw new Error('level 15 is not a constraint check');
     expect(check.rule).toEqual({
       kind: 'at-least',
       inputs: ['a', 'b', 'c', 'd'],
@@ -351,11 +363,11 @@ describe('chapter 2, levels 13-17', () => {
   });
 
   it('hands out the parts the brief assigns to each level', () => {
-    expect(L13.rewards?.components).toEqual(['splitter', 'maker', 'const8']);
-    expect(L14.rewards?.components ?? []).toEqual([]);
-    expect(L15.rewards?.components).toEqual(['less_u']);
-    expect(L16.rewards?.components).toEqual(['equal8']);
-    expect(L17.rewards?.components).toEqual(['add8', 'mul8']);
+    expect(L14.rewards?.components).toEqual(['less_u']);
+    expect(L15.rewards?.components ?? []).toEqual([]);
+    expect(L16.rewards?.components).toEqual(['splitter', 'maker', 'const8']);
+    expect(L18.rewards?.components).toEqual(['equal8']);
+    expect(L21.rewards?.components).toEqual(['add8', 'mul8']);
   });
 });
 
@@ -516,14 +528,14 @@ const solutions: Record<string, () => Graph> = CH2_BATCH1_REFERENCES;
 const wrong: Record<string, () => Graph> = {
   // "a is an odd number" instead of "an odd number of bits is high": the low bit
   // of the value, not the parity of its bits.
-  'ch2-13-odd-number-of-signals': () =>
+  'ch2-16-odd-number-of-signals': () =>
     build([
       { kind: 'input', name: 'a', width: 4 },
       { kind: 'part', def: 'splitter', id: 'sp', from: ['a'] },
       { kind: 'output', from: 'sp.b0' },
     ]),
   // The pairs only: (a&b)|(c&d) misses every cross pair.
-  'ch2-14-double-trouble': () =>
+  'ch2-15-double-detection': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
@@ -534,23 +546,9 @@ const wrong: Record<string, () => Graph> = {
       { kind: 'part', def: 'or', id: 'pairs', from: ['ab', 'cd'] },
       { kind: 'output', from: 'pairs' },
     ]),
-  // Truncation instead of a count: a & 7.
-  'ch2-15-binary-racer': () =>
-    build([
-      { kind: 'input', name: 'a', width: 4 },
-      { kind: 'part', def: 'splitter', id: 'sp', from: ['a'] },
-      { kind: 'part', def: 'const_off', id: 'z', from: [] },
-      {
-        kind: 'part',
-        def: 'maker',
-        id: 'mk',
-        from: ['sp.b0', 'sp.b1', 'sp.b2', 'z', 'z', 'z', 'z', 'z'],
-      },
-      { kind: 'output', width: 3, from: 'mk' },
-    ]),
   // Two half adders, but the second bit ORs the carries instead of adding the
   // cross term: right for two ones in one pair, wrong for a split pair.
-  'ch2-16-counting-signals': () =>
+  'ch2-18-counting-signals': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
@@ -573,7 +571,7 @@ const wrong: Record<string, () => Graph> = {
       { kind: 'output', width: 3, from: 'mk' },
     ]),
   // The shift in the wrong direction: a >> 1 halves instead of doubling.
-  'ch2-17-double-the-number': () =>
+  'ch2-21-double-the-number': () =>
     build([
       { kind: 'input', name: 'a', width: 8 },
       { kind: 'part', def: 'splitter', id: 'sp', from: ['a'] },
@@ -653,12 +651,12 @@ describe('an empty circuit fails every level instead of throwing', () => {
   }
 });
 
-describe('level 17 is solvable by arithmetic too, for fewer stars', () => {
+describe('level 21 is solvable by arithmetic too, for fewer stars', () => {
   it('doubles with add8(a, a) and scores one star', () => {
     // The level's data comment claims this alternative: an adder doubles as
     // well as a shift does, and costs gates. Measured here rather than asserted
     // in prose -- `const_off` ties `cin` low, because `build` reuses the last
-    // source for any input it is not given. Level 17 rewards `add8`, so a
+    // source for any input it is not given. Level 21 rewards `add8`, so a
     // first-time player only sees it after passing, which is why the wiring
     // reference is the one the target is measured from.
     const graph = build([
@@ -667,7 +665,7 @@ describe('level 17 is solvable by arithmetic too, for fewer stars', () => {
       { kind: 'part', def: 'const_off', id: 'z', from: [] },
       { kind: 'output', width: 8, from: 'sum' },
     ]);
-    const result = grade(graph, registry, specOf('ch2-17-double-the-number'));
+    const result = grade(graph, registry, specOf('ch2-21-double-the-number'));
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
     expect(result.passed).toBe(true);
     expect(result.metrics).toEqual({ gate: 72, delay: 1, tick: 0 });
@@ -675,7 +673,7 @@ describe('level 17 is solvable by arithmetic too, for fewer stars', () => {
   });
 });
 
-describe('level 13 is where the wide parts first appear', () => {
+describe('level 16 is where the wide parts first appear', () => {
   it('offers exactly its own rewards as parts no earlier level unlocks', () => {
     // This is no longer a defect, and the reason it is still asserted: `splitter`
     // is the only part that can expose bits 1-3 of this level's 4-bit input
@@ -692,8 +690,8 @@ describe('level 13 is where the wide parts first appear', () => {
     for (const level of [...CH1_PART1, ...CH1_PART2]) {
       for (const def of level.rewards?.components ?? []) unlockedBefore.add(def);
     }
-    const notUnlockedYet = L13.allowedComponents.filter((def) => !unlockedBefore.has(def));
+    const notUnlockedYet = L16.allowedComponents.filter((def) => !unlockedBefore.has(def));
     expect(notUnlockedYet).toEqual(['splitter', 'maker', 'const8']);
-    expect(L13.rewards?.components).toEqual(notUnlockedYet);
+    expect(L16.rewards?.components).toEqual(notUnlockedYet);
   });
 });

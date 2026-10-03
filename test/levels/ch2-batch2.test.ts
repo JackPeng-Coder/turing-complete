@@ -10,10 +10,8 @@ import { describe, expect, it } from 'vitest';
 import { STARTER_COMPONENTS } from '../../src/app/progress';
 import type { Graph } from '../../src/core/graph';
 import { DEFAULT_FUZZ_ROUNDS } from '../../src/levels/checks';
-import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
-import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
-import { CH2_BATCH1 } from '../../src/levels/content/ch2/batch1';
 import { CH2_BATCH2 } from '../../src/levels/content/ch2/batch2';
+import { LEVELS } from '../../src/levels/index';
 import { grade } from '../../src/levels/grader';
 import type {
   CheckFailure,
@@ -27,14 +25,13 @@ import {
   CH2_BATCH2_REFERENCES,
   bits,
   byteNotReference,
-  byteOrReference,
   fullAdderReference,
   handWiredAdderReference,
   rippleAdderReference,
 } from '../fixtures/ch2-references';
 
 /**
- * Chapter 2's second batch: levels 18-22 -- the byte operators and the adders.
+ * Chapter 2's second batch: levels 19-27 -- the byte operators and the adders.
  *
  * The source compendium fixes these levels' names, their order and a one-line
  * concept each, and nothing else -- no ports, no widths, no pass conditions, no
@@ -44,7 +41,7 @@ import {
  *
  * THREE THINGS THIS FILE CARRIES THAT BATCH 1'S DOES NOT:
  *
- *  * `fuzz` levels (18, 19 and 22). Their checks are not rows, so a wrong
+ *  * `fuzz` levels (25, 26 and 27). Their checks are not rows, so a wrong
  *    circuit has to be shown failing on a SPECIFIC ROUND WITH A SPECIFIC VECTOR
  *    rather than merely failing -- the `the fuzz levels name the round and the
  *    vector that failed` block replays the kernel's own vector sequence through
@@ -52,8 +49,8 @@ import {
  *    vector in the failure record are the first ones that actually disagree. A
  *    fuzz check that failed "somewhere" would be indistinguishable from a
  *    vacuous one.
- *  * the source's two ACHIEVEMENT notes in this batch (level 21's five
- *    components, level 22's delay), both of which are records about the source
+ *  * the source's two ACHIEVEMENT notes in this batch (level 22's five
+ *    components, level 27's delay), both of which are records about the source
  *    rather than pass conditions -- see the dedicated block at the end, which
  *    measures both on the reference solutions.
  *  * the `full_adder` reward, whose def was missing when this batch was authored
@@ -80,14 +77,38 @@ function specOf(id: string): LevelSpec {
   return level;
 }
 
-const L18 = levelAt(18);
 const L19 = levelAt(19);
-const L20 = levelAt(20);
-const L21 = levelAt(21);
 const L22 = levelAt(22);
+const L25 = levelAt(25);
+const L26 = levelAt(26);
+const L27 = levelAt(27);
 
-/** The batch's three fuzz levels, in order. */
-const FUZZ_LEVELS: readonly LevelSpec[] = [L18, L19, L22];
+/**
+ * The batch's three fuzz levels, in index order.
+ *
+ * It used to be `[byte OR, byte NOT, adding bytes]`; the 2.x realignment retired
+ * the 8-bit OR level and added the byte NAND in its place, and both are fuzz
+ * checks over byte operators, so the slot passes to the level that exists.
+ */
+const FUZZ_LEVELS: readonly LevelSpec[] = [L25, L26, L27];
+
+/**
+ * The campaign up to and including this batch, in play order.
+ *
+ * THE BATCHES ARE NO LONGER A RUNNING ORDER. The 2.x realignment scattered the
+ * levels across the batch files by what a task wrote rather than by where they
+ * sit in the campaign -- `switch`, for instance, is handed out by
+ * `ch2-17-circular-dependency`, which lives in `ch2/batch4.ts` but precedes every
+ * level here. So the two gating walks below read `LEVELS`, which
+ * `src/levels/content/index.ts` sorts by index, instead of the batches this file
+ * happens to import.
+ */
+const UP_TO_THIS_BATCH: readonly LevelSpec[] = LEVELS.filter(
+  (level) => level.index <= Math.max(...CH2_BATCH2.map((spec) => spec.index)),
+);
+
+/** The last global index this batch covers (27: adding bytes). */
+const LAST_INDEX = Math.max(...CH2_BATCH2.map((spec) => spec.index));
 
 /** `id:width` per pin, the shape the task brief fixes for each level. */
 function pinsOf(level: LevelSpec): { inputs: string[]; outputs: string[] } {
@@ -218,44 +239,44 @@ function vacuityProblems(level: LevelSpec): string[] {
   return problems;
 }
 
-describe('chapter 2, levels 18-22', () => {
+describe('chapter 2, levels 19-27', () => {
   it('exposes five chapter-2 levels with the briefed indices', () => {
-    expect(CH2_BATCH2.map((level) => level.index)).toEqual([18, 19, 20, 21, 22]);
+    expect(CH2_BATCH2.map((level) => level.index)).toEqual([19, 22, 25, 26, 27]);
     expect(CH2_BATCH2.map((level) => level.chapter)).toEqual([2, 2, 2, 2, 2]);
   });
 
   it('uses the ch2-<index>-<slug> id convention', () => {
     expect(CH2_BATCH2.map((level) => level.id)).toEqual([
-      'ch2-18-byte-or',
-      'ch2-19-byte-not',
-      'ch2-20-half-adder',
-      'ch2-21-full-adder',
-      'ch2-22-adding-bytes',
+      'ch2-19-half-adder',
+      'ch2-22-full-adder',
+      'ch2-25-byte-nand',
+      'ch2-26-byte-not',
+      'ch2-27-adding-bytes',
     ]);
   });
 
   it('shapes every level exactly as the brief fixes it', () => {
-    expect(pinsOf(L18)).toEqual({ inputs: ['a:8', 'b:8'], outputs: ['out:8'] });
-    expect(pinsOf(L19)).toEqual({ inputs: ['a:8'], outputs: ['out:8'] });
-    expect(pinsOf(L20)).toEqual({ inputs: ['a:1', 'b:1'], outputs: ['sum:1', 'carry:1'] });
-    expect(pinsOf(L21)).toEqual({ inputs: ['a:1', 'b:1', 'cin:1'], outputs: ['sum:1', 'cout:1'] });
-    expect(pinsOf(L22)).toEqual({ inputs: ['a:8', 'b:8', 'cin:1'], outputs: ['out:8', 'cout:1'] });
+    expect(pinsOf(L19)).toEqual({ inputs: ['a:1', 'b:1'], outputs: ['sum:1', 'carry:1'] });
+    expect(pinsOf(L22)).toEqual({ inputs: ['a:1', 'b:1', 'cin:1'], outputs: ['sum:1', 'cout:1'] });
+    expect(pinsOf(L25)).toEqual({ inputs: ['a:8', 'b:8'], outputs: ['out:8'] });
+    expect(pinsOf(L26)).toEqual({ inputs: ['a:8'], outputs: ['out:8'] });
+    expect(pinsOf(L27)).toEqual({ inputs: ['a:8', 'b:8', 'cin:1'], outputs: ['out:8', 'cout:1'] });
   });
 
   it('names each level in both languages', () => {
     expect(CH2_BATCH2.map((level) => level.name.en)).toEqual([
-      'Byte OR',
-      'Byte NOT',
       'Half Adder',
       'Full Adder',
+      'Byte NAND',
+      'Byte NOT',
       'Adding Bytes',
     ]);
     expect(CH2_BATCH2.map((level) => level.name.zh)).toEqual([
-      '8 位或',
-      '8 位非',
       '半加器',
       '全加器',
-      '8 位加法器',
+      '单字节与非',
+      '单字节非门',
+      '单字节加法',
     ]);
     for (const level of CH2_BATCH2) {
       expect(level.brief.zh.length, `${level.id} has an empty zh brief`).toBeGreaterThan(0);
@@ -267,13 +288,13 @@ describe('chapter 2, levels 18-22', () => {
 
   it('gates every part behind a component unlocked at or before it', () => {
     // "At or before": a level may offer the parts its own rewards hand out (the
-    // brief says level 18 must list the four byte operators it teaches), so the
-    // walk adds a level's rewards before testing its own palette. Chapter 1 and
-    // batch 1 are walked first because this batch's palettes are built on their
-    // rewards -- the splitter and maker this batch's byte levels are wired with
-    // arrive at level 13.
+    // brief says level 25 must list the four byte operators it teaches), so the
+    // walk adds a level's rewards before testing its own palette. The walk is in
+    // play order, which is what `UP_TO_THIS_BATCH` is: chapter 1's levels and the
+    // chapter-2 levels before this batch -- the splitter and maker the byte levels
+    // are wired with arrive at 16, and the `switch` level 27 offers at 17.
     const unlocked = new Set<string>(STARTER_COMPONENTS);
-    for (const level of [...CH1_PART1, ...CH1_PART2, ...CH2_BATCH1, ...CH2_BATCH2]) {
+    for (const level of UP_TO_THIS_BATCH) {
       for (const def of level.rewards?.components ?? []) unlocked.add(def);
       for (const def of level.allowedComponents) {
         expect(unlocked.has(def), `${level.id} offers locked component ${def}`).toBe(true);
@@ -282,14 +303,12 @@ describe('chapter 2, levels 18-22', () => {
   });
 
   it('offers nothing from a later level', () => {
-    // The same rule from the other side, and in the same order as the walk above
-    // (a level's own rewards first, then its palette -- which is what lets a
-    // level offer the parts it teaches): what this batch offers is chapter 1's
-    // rewards, batch 1's, its own, and the starter set -- never the parts the
-    // batches after it hand out (the storage family, the shifts, the signed
-    // comparison, the decoders).
+    // The same rule from the other side, over the same walk: what a level here
+    // offers is chapter 1's rewards, the chapter-2 levels before it, its own, and
+    // the starter set -- never a part a later level hands out (the decoders, the
+    // byte mux, the counter and the shifts).
     const owned = new Set<string>(STARTER_COMPONENTS);
-    for (const level of [...CH1_PART1, ...CH1_PART2, ...CH2_BATCH1, ...CH2_BATCH2]) {
+    for (const level of UP_TO_THIS_BATCH) {
       for (const def of level.rewards?.components ?? []) owned.add(def);
       for (const def of level.allowedComponents) {
         expect(owned.has(def), `${level.id} offers ${def}, which no level unlocks by then`).toBe(
@@ -297,23 +316,23 @@ describe('chapter 2, levels 18-22', () => {
         );
       }
     }
-    for (const later of [
-      'mux8',
-      'delay8',
-      'reg8',
-      'counter8',
-      'ram8',
-      'less_s',
-      'shift_l8',
-      'shift_r8',
-      'ashr8',
-      'rot_l8',
-      'div8',
-      'decoder1',
-      'decoder2',
-      'decoder3',
-    ]) {
-      expect(owned.has(later), `${later} is unlocked inside this batch`).toBe(false);
+    // The other side, DERIVED rather than listed. The list used to name the
+    // storage, shift and decoder family by hand; the 2.x realignment moved
+    // `delay8` (level 20, Delayed Lines) from after this batch to before it, which
+    // a hard-coded list cannot notice. What matters is the claim, not the names:
+    // this batch offers nothing that only a later level hands out.
+    const later = new Set<string>(
+      LEVELS.filter((level) => level.index > LAST_INDEX).flatMap(
+        (level) => level.rewards?.components ?? [],
+      ),
+    );
+    for (const level of CH2_BATCH2) {
+      for (const def of level.allowedComponents) {
+        expect(
+          later.has(def),
+          `${level.id} offers ${def}, which only a later level hands out`,
+        ).toBe(false);
+      }
     }
   });
 
@@ -328,9 +347,9 @@ describe('chapter 2, levels 18-22', () => {
     // An empty `rows` array is a hard `missing-rows` failure, not "enumerate
     // everything" -- so both adder levels build their rows with the kernel's own
     // enumerator, and the two tables are exhaustive over their pins.
-    expect(rowsOf(L20).length).toBe(4);
-    expect(rowsOf(L21).length).toBe(8);
-    for (const level of [L20, L21]) {
+    expect(rowsOf(L19).length).toBe(4);
+    expect(rowsOf(L22).length).toBe(8);
+    for (const level of [L19, L22]) {
       const rows = rowsOf(level);
       const seen = new Set(rows.map((row) => JSON.stringify(row.inputs)));
       expect(seen.size, `${level.id} repeats or skips input combinations`).toBe(rows.length);
@@ -339,7 +358,7 @@ describe('chapter 2, levels 18-22', () => {
   });
 
   it('states the half adder the way the sum-and-carry level does', () => {
-    const rows = rowsOf(L20);
+    const rows = rowsOf(L19);
     expect(rowFor(rows, { a: 0, b: 0 })?.outputs).toEqual({ sum: 0, carry: 0 });
     expect(rowFor(rows, { a: 0, b: 1 })?.outputs).toEqual({ sum: 1, carry: 0 });
     expect(rowFor(rows, { a: 1, b: 0 })?.outputs).toEqual({ sum: 1, carry: 0 });
@@ -349,7 +368,7 @@ describe('chapter 2, levels 18-22', () => {
   });
 
   it('states the full adder the way the carry-in level does', () => {
-    const rows = rowsOf(L21);
+    const rows = rowsOf(L22);
     expect(rowFor(rows, { a: 0, b: 0, cin: 0 })?.outputs).toEqual({ sum: 0, cout: 0 });
     expect(rowFor(rows, { a: 0, b: 1, cin: 1 })?.outputs).toEqual({ sum: 0, cout: 1 });
     expect(rowFor(rows, { a: 1, b: 0, cin: 1 })?.outputs).toEqual({ sum: 0, cout: 1 });
@@ -429,21 +448,23 @@ describe('chapter 2, levels 18-22', () => {
     // The expectation functions are the level's specification: a pure function
     // that computes something else is a level that grades the wrong thing, and
     // it would still be "not vacuous". These are the operators' defining values.
-    const or = expectation(L18, 'out');
-    expect(or(vector({ a: 0x0f, b: 0x30 }))).toBe(0x3f);
-    expect(or(vector({ a: 0xaa, b: 0x55 }))).toBe(0xff);
-    expect(or(vector({ a: 0xff, b: 0x00 }))).toBe(0xff);
-    expect(or(vector({ a: 0x00, b: 0x00 }))).toBe(0x00);
+    // `ch2-25-byte-nand` is the byte operator 2.x put in the retired 8-bit OR's
+    // place, so it is the one this batch's operator test names.
+    const nand = expectation(L25, 'out');
+    expect(nand(vector({ a: 0x0f, b: 0x30 }))).toBe(0xff);
+    expect(nand(vector({ a: 0xaa, b: 0x55 }))).toBe(0xff);
+    expect(nand(vector({ a: 0xff, b: 0x0f }))).toBe(0xf0);
+    expect(nand(vector({ a: 0xff, b: 0xff }))).toBe(0x00);
 
-    const not = expectation(L19, 'out');
+    const not = expectation(L26, 'out');
     expect(not(vector({ a: 0x00 }))).toBe(0xff);
     expect(not(vector({ a: 0xff }))).toBe(0x00);
     expect(not(vector({ a: 0x0f }))).toBe(0xf0);
     expect(not(vector({ a: 0xa5 }))).toBe(0x5a);
 
-    const sum = expectation(L22, 'out');
-    const carry = expectation(L22, 'cout');
-    /** Both of level 22's pins for one addend triple: they are one addition. */
+    const sum = expectation(L27, 'out');
+    const carry = expectation(L27, 'cout');
+    /** Both of level 27's pins for one addend triple: they are one addition. */
     const added = (a: number, b: number, cin: number): [number, number] => [
       sum(vector({ a, b, cin })),
       carry(vector({ a, b, cin })),
@@ -457,22 +478,25 @@ describe('chapter 2, levels 18-22', () => {
   });
 
   it('hands out the parts the brief assigns to each level', () => {
-    expect(L18.rewards?.components).toEqual(['and8', 'or8', 'nand8', 'nor8']);
-    expect(L19.rewards?.components).toEqual(['xor8', 'xnor8', 'not8']);
-    expect(L20.rewards?.components).toEqual(['full_adder']);
-    expect(L21.rewards?.components).toEqual(['neg8']);
-    expect(L22.rewards?.components).toEqual(['switch', 'switch8']);
+    expect(L19.rewards?.components).toEqual(['full_adder']);
+    expect(L22.rewards?.components).toEqual(['neg8']);
+    // The four byte operators moved here from the retired 8-bit OR level.
+    expect(L25.rewards?.components).toEqual(['and8', 'or8', 'nand8', 'nor8']);
+    expect(L26.rewards?.components).toEqual(['xor8', 'xnor8', 'not8']);
+    // `switch` is no longer part of this hand-out: 2.x plays Circular Dependency
+    // (level 17) before this level, so the one-bit switch had to move there.
+    expect(L27.rewards?.components).toEqual(['switch8']);
   });
 
   it('offers each level the parts its own lesson needs', () => {
     // Not a restatement of the palettes but of the claims their comments make:
-    // levels 18/19/22 are wired from the splitter and the maker level 13
-    // unlocked; levels 20 and 21 have no pin wider than one bit, so an eight-bit
-    // part has nothing to attach to (batch 1's level-14 call); level 22 does not
+    // levels 25/26/27 are wired from the splitter and the maker level 16
+    // unlocked; levels 19 and 22 have no pin wider than one bit, so an eight-bit
+    // part has nothing to attach to (batch 1's level-14 call); level 27 does not
     // offer the one part that would answer it in one row (`add8`), and does offer
     // `full_adder` -- whose eight-instance cascade is the level's own subject --
-    // plus the seven byte operators levels 18 and 19 unlocked.
-    for (const level of [L18, L19, L22]) {
+    // plus the seven byte operators levels 25 and 26 unlocked.
+    for (const level of [L25, L26, L27]) {
       expect(level.allowedComponents, `${level.id} cannot split a byte`).toContain('splitter');
       expect(level.allowedComponents, `${level.id} cannot pack a byte`).toContain('maker');
     }
@@ -495,29 +519,29 @@ describe('chapter 2, levels 18-22', () => {
       'switch',
       'switch8',
     ]);
-    for (const level of [L20, L21]) {
+    for (const level of [L19, L22]) {
       expect(
         level.allowedComponents.filter((def) => wide.has(def)),
         `${level.id} offers a wide part on a level whose pins are one bit wide`,
       ).toEqual([]);
     }
-    expect(L22.allowedComponents).not.toContain('add8');
-    expect(L21.allowedComponents).not.toContain('full_adder');
-    // The other side of the same decision: level 22 offers the part, so the
-    // cascade can be built from level 20's reward, and the seven byte operators
+    expect(L27.allowedComponents).not.toContain('add8');
+    expect(L22.allowedComponents).not.toContain('full_adder');
+    // The other side of the same decision: level 27 offers the part, so the
+    // cascade can be built from level 19's reward, and the seven byte operators
     // the earlier levels unlocked are not quietly dropped from its shelf.
-    expect(L22.allowedComponents).toContain('full_adder');
+    expect(L27.allowedComponents).toContain('full_adder');
     for (const def of ['and8', 'or8', 'nand8', 'nor8', 'xor8', 'xnor8', 'not8']) {
-      expect(L22.allowedComponents, `level 22 drops ${def}`).toContain(def);
+      expect(L27.allowedComponents, `level 27 drops ${def}`).toContain(def);
     }
   });
 
   it('rewards an id the registry actually implements', () => {
-    // What the module note used to get wrong at level 20: the reward was an id
+    // What the module note used to get wrong at level 19: the reward was an id
     // with no def behind it, which no palette could ever show. The def landed in
     // `523a7b9`, and this holds the note to it -- a reward that stops resolving
     // is invisible content, and the level comments now describe it as live.
-    expect(L20.rewards?.components).toEqual(['full_adder']);
+    expect(L19.rewards?.components).toEqual(['full_adder']);
     expect(registry.has('full_adder'), 'full_adder is not registered').toBe(true);
   });
 });
@@ -553,14 +577,14 @@ describe('every level carries its sourced-vs-authored data comment', () => {
   }
 
   it('records the two source achievements the batch has to honour', () => {
-    // Level 21's note is "仅用 5 个蓝色元件" and level 22's is "延迟 ≤ 35". Both are
+    // Level 22's note is "仅用 5 个蓝色元件" and level 27's is "延迟 ≤ 35". Both are
     // achievement notes, not pass conditions, and both are mapped deliberately:
     // 21 to a measured gate threshold, 22 to nothing at all beyond a recorded
     // reference value. The comments have to say so, and they have to quote the
     // source's own numbers so a reader can see what was and was not adopted.
-    const l21 = comments.get('ch2-21-full-adder') ?? '';
+    const l21 = comments.get('ch2-22-full-adder') ?? '';
     expect(l21).toContain('5 个蓝色元件');
-    const l22 = comments.get('ch2-22-adding-bytes') ?? '';
+    const l22 = comments.get('ch2-27-adding-bytes') ?? '';
     expect(l22).toContain('延迟 ≤ 35');
   });
 });
@@ -615,8 +639,8 @@ describe('reference solutions are buildable from the palette they are graded aga
 // Counterexamples
 // ---------------------------------------------------------------------------
 
-/** `a & b` on the OR level: the byte operator next door. */
-function byteAndInsteadOfOr(): Graph {
+/** `a & b` on the byte NAND: the operator next door, and the mistake to catch. */
+function byteAndInsteadOfNand(): Graph {
   return build([
     { kind: 'input', name: 'a', width: 8 },
     { kind: 'input', name: 'b', width: 8 },
@@ -666,11 +690,11 @@ function halfAdderRow(): Graph {
 
 /** Circuits a player would plausibly build and that must be rejected. */
 const wrong: Record<string, () => Graph> = {
-  'ch2-18-byte-or': byteAndInsteadOfOr,
-  'ch2-19-byte-not': bytePassThrough,
+  'ch2-25-byte-nand': byteAndInsteadOfNand,
+  'ch2-26-byte-not': bytePassThrough,
   // The sum taken from an OR instead of an XOR: the classic half-adder mistake,
   // and the one the (1, 1) row exists to catch.
-  'ch2-20-half-adder': () =>
+  'ch2-19-half-adder': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
@@ -681,7 +705,7 @@ const wrong: Record<string, () => Graph> = {
     ]),
   // The half adder again, on the level that has a carry in: the pin exists in
   // the circuit and nothing reads it.
-  'ch2-21-full-adder': () =>
+  'ch2-22-full-adder': () =>
     build([
       { kind: 'input', name: 'a' },
       { kind: 'input', name: 'b' },
@@ -691,7 +715,7 @@ const wrong: Record<string, () => Graph> = {
       { kind: 'output', name: 'OUT_sum', from: 'sum' },
       { kind: 'output', name: 'OUT_cout', from: 'cout' },
     ]),
-  'ch2-22-adding-bytes': halfAdderRow,
+  'ch2-27-adding-bytes': halfAdderRow,
 };
 
 describe('plausible wrong circuits fail', () => {
@@ -707,7 +731,7 @@ describe('plausible wrong circuits fail', () => {
   }
 
   it('fails the half adder on the row that distinguishes it from an OR', () => {
-    const result = grade(wrong['ch2-20-half-adder']!(), registry, specOf('ch2-20-half-adder'));
+    const result = grade(wrong['ch2-19-half-adder']!(), registry, specOf('ch2-19-half-adder'));
     expect(result.failures[0]?.inputs).toEqual({ a: 1, b: 1 });
     expect(result.failures[0]?.expected).toEqual({ sum: 0, carry: 1 });
     expect(result.failures[0]?.actual).toEqual({ sum: 1, carry: 1 });
@@ -717,7 +741,7 @@ describe('plausible wrong circuits fail', () => {
     // The rows are enumerated with `a` as bit 0, so the first combination this
     // circuit gets wrong is (a=0, b=0, cin=1): the sum should be 1 and it drives
     // 0, while the carry it does drive happens to be right.
-    const result = grade(wrong['ch2-21-full-adder']!(), registry, specOf('ch2-21-full-adder'));
+    const result = grade(wrong['ch2-22-full-adder']!(), registry, specOf('ch2-22-full-adder'));
     expect(result.failures[0]?.inputs).toEqual({ a: 0, b: 0, cin: 1 });
     expect(result.failures[0]?.expected).toEqual({ sum: 1, cout: 0 });
     expect(result.failures[0]?.actual).toEqual({ sum: 0, cout: 0 });
@@ -735,9 +759,12 @@ describe('the fuzz levels name the round and the vector that failed', () => {
    * round that disagrees is what the failure record has to name.
    */
   const behaviour: Record<string, (v: FuzzVector) => Record<string, number>> = {
-    'ch2-18-byte-or': (v) => ({ out: (v.a ?? 0) & (v.b ?? 0) }),
-    'ch2-19-byte-not': (v) => ({ out: v.a ?? 0 }),
-    'ch2-22-adding-bytes': (v) => ({
+    // `a & b` on the byte NAND: the operator next door, and the mistake the level
+    // exists to catch. (It is the entry the retired 8-bit OR level used to carry,
+    // with the roles reversed.)
+    'ch2-25-byte-nand': (v) => ({ out: (v.a ?? 0) & (v.b ?? 0) }),
+    'ch2-26-byte-not': (v) => ({ out: v.a ?? 0 }),
+    'ch2-27-adding-bytes': (v) => ({
       out: (v.a ?? 0) ^ (v.b ?? 0),
       cout: ((v.a ?? 0) & (v.b ?? 0)) >> 7,
     }),
@@ -810,7 +837,7 @@ describe('an empty circuit fails every level instead of throwing', () => {
 // The two source achievements, measured
 // ---------------------------------------------------------------------------
 
-describe("level 21's five-component construction is the reference it names", () => {
+describe("level 22's five-component construction is the reference it names", () => {
   it('is five components and measures the gate target the achievement maps to', () => {
     // The source's note for this level is the achievement "仅用 5 个蓝色元件" --
     // five blue components. This replica has no blue-component system (those are
@@ -820,7 +847,7 @@ describe("level 21's five-component construction is the reference it names", () 
     const graph = fullAdderReference();
     const parts = graph.instances.filter((inst) => !inst.def.startsWith('level_'));
     expect(parts.map((inst) => inst.def)).toEqual(['xor', 'and', 'xor', 'and', 'or']);
-    const result = grade(graph, registry, specOf('ch2-21-full-adder'));
+    const result = grade(graph, registry, specOf('ch2-22-full-adder'));
     expect(result.passed).toBe(true);
     expect(result.metrics).toEqual({ gate: 15, delay: 3, tick: 0 });
     expect(result.stars).toBe(3);
@@ -828,12 +855,12 @@ describe("level 21's five-component construction is the reference it names", () 
 
   it('records why the registered drop-in is withheld: it scores the target in one drop', () => {
     // The amended ruling's reason, measured instead of argued. `full_adder` is
-    // level 20's reward and this level's exact I/O, so one instance answers the
+    // level 19's reward and this level's exact I/O, so one instance answers the
     // whole eight-row table; at the registered 9-NAND cell it measures 9 gates
     // and 1 delay, which is inside the 15-and-3 target -- three stars for a part
     // the player never builds. That is why the palette withholds it here and
-    // offers it at 20 and 22, and the level's comment says so.
-    const level = specOf('ch2-21-full-adder');
+    // offers it at 19 and 27, and the level's comment says so.
+    const level = specOf('ch2-22-full-adder');
     expect(level.allowedComponents).not.toContain('full_adder');
     const dropped = grade(
       build([
@@ -853,7 +880,7 @@ describe("level 21's five-component construction is the reference it names", () 
   });
 });
 
-describe("level 22's target is the cascade's own measurement, and the source's 35 is not it", () => {
+describe("level 27's target is the cascade's own measurement, and the source's 35 is not it", () => {
   it("measures the shipped reference well inside the source's reference value", () => {
     // The source's note is the achievement "延迟 ≤ 35", which the level's data
     // comment records as a reference value and which nothing here treats as a
@@ -861,20 +888,20 @@ describe("level 22's target is the cascade's own measurement, and the source's 3
     // The measurement has to be taken, not chosen -- so this test states the
     // relation (the measured delay is inside the source's number) separately
     // from the equality `threeStar === metrics` the block above asserts.
-    const result = grade(rippleAdderReference(), registry, specOf('ch2-22-adding-bytes'));
+    const result = grade(rippleAdderReference(), registry, specOf('ch2-27-adding-bytes'));
     expect(result.metrics.delay).toBeLessThanOrEqual(35);
     expect(result.metrics).toEqual({ gate: 72, delay: 8, tick: 0 });
   });
 });
 
-describe("level 22's reference is the `full_adder` cascade, and the hand-wired chain is the alternative", () => {
+describe("level 27's reference is the `full_adder` cascade, and the hand-wired chain is the alternative", () => {
   it('files eight instances of the part as the reference, measured at 72 and 8', () => {
-    // The reference IS the cascade level 20's reward makes possible: eight
+    // The reference IS the cascade level 19's reward makes possible: eight
     // instances of the registered 9-NAND part, one per bit, with the carry chain
     // between them. Counted here rather than described, because the whole point
     // of the re-measurement is that this circuit is what `threeStar` came from,
     // and the target is its own measurement rather than a number chosen for it.
-    const level = specOf('ch2-22-adding-bytes');
+    const level = specOf('ch2-27-adding-bytes');
     expect(level.allowedComponents).toContain('full_adder');
     const reference = rippleAdderReference();
     expect(reference.instances.filter((inst) => inst.def === 'full_adder')).toHaveLength(8);
@@ -892,7 +919,7 @@ describe("level 22's reference is the `full_adder` cascade, and the hand-wired c
     // "documented alternative" paragraph: the target now separates the two
     // constructions -- 120 > 72 and 17 > 8 -- instead of being a number the
     // cheaper cascade already satisfied.
-    const level = specOf('ch2-22-adding-bytes');
+    const level = specOf('ch2-27-adding-bytes');
     const reference = grade(rippleAdderReference(), registry, level);
     const alternative = grade(handWiredAdderReference(), registry, level);
     expect(alternative.failures, JSON.stringify(alternative.failures)).toEqual([]);
@@ -909,14 +936,14 @@ describe("level 22's reference is the `full_adder` cascade, and the hand-wired c
 
   it('measures the one drop-in that would beat the reference, and shows the palette withholds it', () => {
     // The level comment's claim about what makes the shipped reference the best
-    // circuit the level can actually build: `add8` (level 17's reward) has exactly
+    // circuit the level can actually build: `add8` (level 21's reward) has exactly
     // this level's I/O -- `a:8 b:8 cin:1 -> out:8 cout:1` -- and one instance
     // measures 72 gates and 1 delay, tying the target's gates and beating its
     // delay. So it is not "worse": it is WITHHELD, and both halves are measured
     // here rather than argued. The star count is the "answers the level in a
     // single drop" half; the palette check is the "and is therefore not legal on
     // this level" half.
-    const level = specOf('ch2-22-adding-bytes');
+    const level = specOf('ch2-27-adding-bytes');
     expect(level.allowedComponents).not.toContain('add8');
     const dropped = grade(
       build([
@@ -937,27 +964,8 @@ describe("level 22's reference is the `full_adder` cascade, and the hand-wired c
 });
 
 describe('the byte operators tie the circuits the levels ask for', () => {
-  it('level 18: the or8 the level hands out scores exactly what eight ORs do', () => {
-    // The level's own reward is offered in its own palette, so this is the
-    // alternative the target must not privilege: if the two ever stop tying, the
-    // data comment's claim about which construction justifies the target is
-    // wrong.
-    const packaged = build([
-      { kind: 'input', name: 'a', width: 8 },
-      { kind: 'input', name: 'b', width: 8 },
-      { kind: 'part', def: 'or8', id: 'or', from: ['a', 'b'] },
-      { kind: 'output', from: 'or', width: 8 },
-    ]);
-    const level = specOf('ch2-18-byte-or');
-    const built = grade(byteOrReference(), registry, level);
-    const dropped = grade(packaged, registry, level);
-    expect(dropped.failures, JSON.stringify(dropped.failures)).toEqual([]);
-    expect(dropped.metrics).toEqual(built.metrics);
-    expect(dropped.stars).toBe(3);
-  });
-
-  it('level 19: not8 and nand8(a, a) tie the eight NOTs, nor8(a, a) does not', () => {
-    const level = specOf('ch2-19-byte-not');
+  it('level 26: not8 and nand8(a, a) tie the eight NOTs, nor8(a, a) does not', () => {
+    const level = specOf('ch2-26-byte-not');
     const built = grade(byteNotReference(), registry, level);
     const dropped = grade(
       build([
@@ -972,7 +980,7 @@ describe('the byte operators tie the circuits the levels ask for', () => {
     expect(dropped.metrics).toEqual(built.metrics);
     expect(dropped.stars).toBe(3);
 
-    // The byte NOT is also `nand8(a, a)`, which level 18's reward makes
+    // The byte NOT is also `nand8(a, a)`, which level 25's reward makes
     // available -- and on the documented all-NAND basis one NAND per bit is the
     // SAME 8 gates as one NOT per bit, so it ties the reference rather than
     // trailing it. That is worth stating where a reader would expect a
