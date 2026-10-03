@@ -287,24 +287,29 @@ test('level 12 lays its sixteen cases out as columns, then plays them', async ({
 });
 
 /**
- * The strongest green in a band of the board, as `G - R`.
+ * The strongest `channel` in a band of the board, as that channel against what
+ * the same pixel offers instead.
  *
- * A live wire is `#00ff9c`, which scores 255; bare paper (`#070d18`) scores 6,
- * an unlit part body (`#101b2c`) 28 and a red part body is negative. `G - max(R,
- * B)` would look tighter but is not: the wire's own blue is 156, so the wire
- * itself only scores 99 and the threshold would sit inside its own halo. It is
- * how these tests ask the canvas a question -- "is there a wire here" -- without
- * an image comparison that would fail on any other change.
+ * GREEN IS MEASURED AGAINST RED ALONE, because a live wire (`#00ff9c`) carries a
+ * lot of blue -- 156 of it -- and comparing against the largest of the other two
+ * would score the wire's own core at 99, inside its own halo. Against red it
+ * scores 255, where bare paper scores 6 and an unlit body 28.
+ *
+ * BLUE IS MEASURED AGAINST BOTH, because nothing on this board is blue-green: a
+ * word part's body (`#1250a8`) reads 88 and the paper reads 11.
  */
-async function peakGreen(
+async function peakChannel(
   page: Page,
   x: number,
   y: number,
   width: number,
-  height = 3,
+  height: number,
+  channel: 'green' | 'blue',
 ): Promise<number> {
+  const index = channel === 'green' ? 1 : 2;
+  const against = channel === 'green' ? [0] : [0, 1];
   return page.evaluate(
-    ({ x, y, width, height }) => {
+    ({ x, y, width, height, index, against }) => {
       const canvas = document.querySelector('canvas.board') as HTMLCanvasElement | null;
       const ctx = canvas?.getContext('2d');
       if (!canvas || !ctx) return 0;
@@ -318,12 +323,18 @@ async function peakGreen(
       ).data;
       let peak = -255;
       for (let i = 0; i < data.length; i += 4) {
-        peak = Math.max(peak, data[i + 1]! - data[i]!);
+        const others = against.map((c) => data[i + c]!);
+        peak = Math.max(peak, data[i + index]! - Math.max(...others));
       }
       return peak;
     },
-    { x, y, width, height },
+    { x, y, width, height, index, against },
   );
+}
+
+/** The strongest green in a band: a live wire, and nothing else, scores 255. */
+async function peakGreen(page: Page, x: number, y: number, width: number, height = 3) {
+  return peakChannel(page, x, y, width, height, 'green');
 }
 
 /**
@@ -424,6 +435,41 @@ test('?dev=1 opens every level, and says so', async ({ page }) => {
   await page.getByRole('button', { name: '章节地图' }).click();
   await expect(page.locator('.map-tile:not([disabled])')).toHaveCount(1);
   expect(new URL(page.url()).search).toBe('');
+});
+
+/**
+ * THE TWO PACKERS: blue funnels, and the reason for both words.
+ *
+ * They were green boxes that painted themselves by `outputs[0]` -- which for a
+ * splitter is bit 0, one bit wide -- so the part turned green or red with a bit
+ * that happened to be passing through, while the maker beside it turned blue
+ * because its first output was the byte. And they were boxes because a body was
+ * fixed at 72 pixels tall however many pins hung off the edge of it, so eight
+ * outputs trailed a column of loose squares down the paper.
+ *
+ * `?dev=1` opens level 47, whose palette lists every part in the game.
+ */
+test('the packers are blue funnels that hold their pins', async ({ page }) => {
+  await page.goto('/?dev=1');
+  await page.getByRole('button', { name: '开始' }).click();
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await page.locator('.map-tile').nth(46).click();
+  await page.getByRole('button', { name: '开始' }).click();
+
+  const { cx, cy } = await boardCentre(page);
+  await place(page, '位拆分器', cx - 160, cy);
+  await place(page, '位合并器', cx + 160, cy);
+  await page.screenshot({ path: 'test-results/smoke-packers.png' });
+
+  // Blue -- the word colour -- inside both bodies, with nothing wired to them.
+  // Green or red here is the defect: it means the part is reporting bit 0.
+  expect(await peakChannel(page, cx - 130, cy - 10, 20, 20, 'blue')).toBeGreaterThan(60);
+  expect(await peakChannel(page, cx + 190, cy - 10, 20, 20, 'blue')).toBeGreaterThan(60);
+  // ...and the two colours the old rule would have produced are absent. The bus
+  // body's own green-ness is 62 (its blue carries some of the channel), where a
+  // lit body reads 184 and a dead one reads negative, so the bar sits between.
+  expect(await peakChannel(page, cx - 130, cy - 10, 20, 20, 'green')).toBeLessThan(120);
+  expect(await peakChannel(page, cx + 190, cy - 10, 20, 20, 'green')).toBeLessThan(120);
 });
 
 test('chapter 2 is reachable: level 13 opens once chapter 1 is passed', async ({ page }) => {
@@ -541,10 +587,8 @@ test('a sequential level replays its steps and reads every one of them', async (
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('循环依赖');
 
-  // Two clicks take the pace from 2× to 8×: nine steps at 450ms each is four
-  // seconds of a test suite spent watching nothing happen.
-  await page.locator('.case-rate').click();
-  await page.locator('.case-rate').click();
+  // The pace a run starts at is `8×`, so nine steps take a second rather than
+  // four: nothing to click, and this is the assertion that it starts there.
   await expect(page.locator('.case-rate')).toHaveText('8×');
 
   await runTests(page);

@@ -19,6 +19,7 @@ import type { CommandStack } from '../../app/commands';
 import type { AppState, Store } from '../../app/store';
 import type { LevelSpec } from '../../levels/spec';
 import { INSTANCE_HEIGHT } from '../theme';
+import { instanceHeight } from './geometry';
 import { hitTest, screenToWorld, snap, type Point } from './view';
 
 export interface BoardInputOptions {
@@ -139,6 +140,16 @@ function deleteParts(
   return true;
 }
 
+/**
+ * How far the pointer may wander and still count as a click, in screen pixels.
+ *
+ * Four, because a hand is not a mouse trap: with an exact comparison a one-pixel
+ * twitch during a click turned it into a pan, and the click that should have
+ * cleared the selection cleared nothing. Every interface has a number like this;
+ * this is where the board keeps its own.
+ */
+const CLICK_SLOP = 4;
+
 export function attachBoardInput(  canvas: HTMLCanvasElement,
   store: Store<AppState>,
   stack: CommandStack,
@@ -146,6 +157,15 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
 ): () => void {
   let pendingFrom: WireEnd | null = null;
   let panning: Point | null = null;
+  /**
+   * A press on bare board that has not become a pan yet.
+   *
+   * The gesture is only a pan once the pointer has moved past `CLICK_SLOP`, and
+   * until then nothing has happened at all: a release here is a CLICK on bare
+   * board, which clears the selection -- the gesture that used to be lost the
+   * moment panning moved onto empty space.
+   */
+  let panFrom: Point | null = null;
   let moving: {
     id: string;
     startX: number;
@@ -168,10 +188,16 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
 
   const place = (world: Point, defId: string): void => {
     // The cursor lands on the part's pin row (its vertical centre) at its left
-    // edge, so a part dropped at (px, py) has its output pin at (px + 64, py):
+    // edge, so a part dropped at (px, py) has its output pin at (px + 72, py):
     // the row the player then drags along to wire it up.
+    //
+    // The half-height is the PART'S OWN, not the registered 72: a splitter is
+    // 192 tall because it has eight pins to hold, and centring one on a fixed 36
+    // dropped it sixty pixels below the pointer.
     const x = snap(world.x);
-    const y = snap(world.y - INSTANCE_HEIGHT / 2);
+    const reg = store.get().registry;
+    const height = reg.has(defId) ? instanceHeight(reg.get(defId)) : INSTANCE_HEIGHT;
+    const y = snap(world.y - height / 2);
     const placement = levelIoPlacement(store.get().level, store.get().graph, defId);
     let created: string | null = null;
     stack.push(
@@ -202,8 +228,11 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
     const state = store.get();
     const hit = hitTest(state.graph, state.registry, world);
 
-    if (event.button === 1 || event.shiftKey) {
+    if (event.button === 1) {
+      // The middle button is unambiguous, so it pans at once and never means a
+      // click on bare board.
       panning = localPoint(event);
+      panFrom = null;
       return;
     }
     if (event.button !== 0) return;
@@ -268,13 +297,28 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
       return;
     }
 
-    // Empty space: place the currently armed palette part, or clear the selection.
+    // EMPTY SPACE PANS. The board is larger than the window on every level past
+    // the first, and dragging the paper is what a hand tries first; the middle
+    // button still works for anyone who reaches for it out of habit.
+    //
+    // An armed palette part still takes the click, because stamping is a mode
+    // the player turned on deliberately and it has to be exitable by clicking.
     const defId = armedDef();
     if (defId) place(world, defId);
-    else store.set({ selected: [] });
+    else panFrom = localPoint(event);
   };
 
   const onPointerMove = (event: PointerEvent): void => {
+    // A press on bare board is not a pan until it has moved far enough to be
+    // one. Promoting it here rather than at the press means a click moves the
+    // view by exactly nothing -- the earlier version panned the pixels a
+    // twitching hand had wandered and then called it a click.
+    if (panFrom && !panning) {
+      const now = localPoint(event);
+      if (Math.hypot(now.x - panFrom.x, now.y - panFrom.y) <= CLICK_SLOP) return;
+      panning = panFrom;
+    }
+
     if (panning) {
       const now = localPoint(event);
       const camera = store.get().camera;
@@ -317,7 +361,17 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
   };
 
   const onPointerUp = (event: PointerEvent): void => {
-    panning = null;
+    if (panFrom || panning) {
+      const dragged = panning !== null;
+      panFrom = null;
+      panning = null;
+      // It never became a drag, so it was a click on bare board: clear the
+      // selection. A pan deliberately does NOT -- looking around the board is
+      // not a statement about what you had selected.
+      if (!dragged) store.set({ selected: [] });
+      store.set({ dragging: null });
+      return;
+    }
 
     if (moving) {
       const current = instanceOf(moving.id);

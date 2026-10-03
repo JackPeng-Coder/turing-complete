@@ -81,7 +81,9 @@ function parallelOverlap(one: readonly Point[], other: readonly Point[]): number
 
 /** Every part on the board, as rectangles. */
 function partsOf(g: Graph): Rect[] {
-  return g.instances.filter((i) => registry.has(i.def)).map((i) => instanceRect(i));
+  return g.instances
+    .filter((i) => registry.has(i.def))
+    .map((i) => instanceRect(i, registry.get(i.def)));
 }
 
 /** Wires `def`'s `port` from every source to every named target pin. */

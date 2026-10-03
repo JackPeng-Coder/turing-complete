@@ -16,6 +16,15 @@ import type { Graph, Instance } from '../../core/graph';
 import { GRID, INSTANCE_HEIGHT, INSTANCE_WIDTH, PIN_SPACING } from '../theme';
 import type { Point } from './routing';
 
+/**
+ * Blank paper above and below a part's outermost pin.
+ *
+ * Twelve, which is what makes three pins exactly 72: the registered height was
+ * chosen when every part had three pins at most, and this is the same number
+ * expressed as what it is FOR rather than as a total.
+ */
+const PIN_MARGIN = 12;
+
 /** An axis-aligned rectangle in world units. */
 export interface Rect {
   readonly x: number;
@@ -39,8 +48,28 @@ export function snap(v: number): number {
 }
 
 /** A part's body: the box every pin is laid out against. */
-export function instanceRect(inst: Instance): Rect {
-  return { x: inst.x, y: inst.y, w: INSTANCE_WIDTH, h: INSTANCE_HEIGHT };
+export function instanceRect(inst: Instance, def: ComponentDef): Rect {
+  return { x: inst.x, y: inst.y, w: INSTANCE_WIDTH, h: instanceHeight(def) };
+}
+
+/**
+ * How tall a part's body has to be to hold its own pins.
+ *
+ * A pin is a thing you aim at, so the pins keep their spacing and the BODY grows
+ * to fit them: an eight-output splitter is a tall part, not a short part with six
+ * pins hanging in space below it. That is what the board used to draw -- the
+ * registered height was fixed at 72 and `pinPosition` spread the pins evenly
+ * about the centre whatever the count, so anything with more than three pins on
+ * an edge trailed a column of loose squares down the paper.
+ *
+ * Three pins is exactly 72, so every part that already fitted is unchanged: the
+ * level connectors, every one-bit gate, and every wide operator, which has three
+ * pins at most. What grows is what should have been tall all along -- the
+ * splitter and the maker, the full adder, the wide storage and the machine.
+ */
+export function instanceHeight(def: ComponentDef): number {
+  const pins = Math.max(def.inputs.length, def.outputs.length);
+  return Math.max(INSTANCE_HEIGHT, (pins - 1) * PIN_SPACING + PIN_MARGIN * 2);
 }
 
 /** Pin layout: inputs along the left edge, outputs along the right edge. */
@@ -53,7 +82,7 @@ export function pinPosition(
   const pins = isInput ? def.inputs : def.outputs;
   const index = pins.findIndex((p) => p.id === pinId);
   const count = Math.max(1, pins.length);
-  const y = inst.y + INSTANCE_HEIGHT / 2 + (index - (count - 1) / 2) * PIN_SPACING;
+  const y = inst.y + instanceHeight(def) / 2 + (index - (count - 1) / 2) * PIN_SPACING;
   const x = isInput ? inst.x : inst.x + INSTANCE_WIDTH;
   return { x, y };
 }
@@ -63,7 +92,7 @@ export function partRects(graph: Graph, registry: Registry): Rect[] {
   const rects: Rect[] = [];
   for (const inst of graph.instances) {
     if (!registry.has(inst.def)) continue;
-    rects.push(instanceRect(inst));
+    rects.push(instanceRect(inst, registry.get(inst.def)));
   }
   return rects;
 }

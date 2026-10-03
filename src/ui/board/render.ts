@@ -73,7 +73,7 @@ function effectiveWidth(inst: Instance, pin: PinDef): number {
  * at, and the shapes are read faster than the labels are. They are the classic
  * logic symbols, which is what the original's are too.
  */
-export type GateShape = 'box' | 'd' | 'or' | 'xor' | 'triangle' | 'block';
+export type GateShape = 'box' | 'd' | 'or' | 'xor' | 'triangle' | 'block' | 'split' | 'make';
 
 export interface GateLook {
   /** The outline family. `box` is everything that is not a boolean gate. */
@@ -115,6 +115,14 @@ export function gateLookOf(def: ComponentDef): GateLook {
       return { shape: 'xor', bubble: true };
     case 'full_adder':
       return { shape: 'block', bubble: false };
+    // The two packers are the only parts whose shape is their FUNCTION rather
+    // than their family: a funnel, narrow where the word is and wide where the
+    // bits are. One word in and a bit per output out (`split`), or the same
+    // picture reversed (`make`).
+    case 'splitter':
+      return { shape: 'split', bubble: false };
+    case 'maker':
+      return { shape: 'make', bubble: false };
     default:
       return { shape: 'box', bubble: false };
   }
@@ -124,6 +132,8 @@ export function gateLookOf(def: ComponentDef): GateLook {
 const BUBBLE_ROOM = 13;
 /** How far an XOR's body sits behind its extra arc, in world pixels. */
 const XOR_BACK = 9;
+/** Half the height of a funnel's narrow end, in world pixels. */
+const FLAT_END = 9;
 
 /**
  * The face every marking and readout on the board is drawn in.
@@ -148,6 +158,9 @@ const LABEL_CENTRE: Record<GateShape, number> = {
   or: 0.45,
   xor: 0.42,
   triangle: 0.36,
+  // A funnel's mass is at its wide end, where the bits are.
+  split: 0.58,
+  make: 0.42,
 };
 
 /** The corner a block has cut off: the diagram's mark for "this is a circuit". */
@@ -201,6 +214,33 @@ function traceBody(
       ctx.lineTo(x, y + h);
       ctx.closePath();
       break;
+    case 'split': {
+      // THE FUNNEL, and the shape is the part's whole job: one word arrives at a
+      // point on the left and a bit leaves for every output down the right. The
+      // flat at the point is the single wide pin's landing.
+      const flat = Math.min(FLAT_END * zoom, h / 4);
+      ctx.moveTo(x + FLAT_END * 1.6 * zoom, y);
+      ctx.lineTo(right, y);
+      ctx.lineTo(right, y + h);
+      ctx.lineTo(x + FLAT_END * 1.6 * zoom, y + h);
+      ctx.lineTo(x, cy - flat);
+      ctx.lineTo(x, cy + flat);
+      ctx.closePath();
+      break;
+    }
+    case 'make': {
+      // The same funnel the other way round: a bit per input down the left, one
+      // word out of the point on the right.
+      const flat = Math.min(FLAT_END * zoom, h / 4);
+      ctx.moveTo(x, y);
+      ctx.lineTo(right - FLAT_END * 1.6 * zoom, y);
+      ctx.lineTo(right, cy - flat);
+      ctx.lineTo(right, cy + flat);
+      ctx.lineTo(right - FLAT_END * 1.6 * zoom, y + h);
+      ctx.lineTo(x, y + h);
+      ctx.closePath();
+      break;
+    }
     case 'd':
       // Flat where the inputs arrive, semicircular where the output leaves --
       // and the flat run has to stop short of the arc by its own radius.
@@ -267,6 +307,14 @@ function paintMarks(
  * is DOING: green while it produces a 1, red while it produces a 0, blue for a
  * word, slate until something has run. The family is still legible from the
  * silhouette (`gateLookOf`), so nothing was lost by spending the colour on state.
+ *
+ * THE WIDEST PIN DECIDES, not the first output. Reading `outputs[0]` painted the
+ * splitter green whenever its bit 0 happened to be high -- a word-handling part
+ * wearing a bit's colour, next to a maker painted blue because ITS first output
+ * was the byte -- and the two halves of one packer pair disagreed about what
+ * they were. A part is as wide as its widest pin: `and8` and `equal8` are word
+ * parts, the splitter and the maker are word parts, and the answer a comparison
+ * produces is still legible on the wire leaving it, which is green or red.
  */
 function partAppearance(
   def: ComponentDef,
@@ -274,21 +322,37 @@ function partAppearance(
   view: BoardView | null | undefined,
   driven: ReadonlyMap<string, number>,
 ): { state: PartState; colour: string; glow: string | null } {
-  // A sink has no output to report, so it reports what it is being fed.
-  const out = def.outputs[0];
-  const sink = def.inputs[0];
-  const width = out
-    ? effectiveWidth(inst, out)
-    : sink
-      ? effectiveWidth(inst, sink)
-      : 1;
-  const value = out
-    ? outputValue(view, inst.id, out.id)
-    : sink
-      ? driven.get(`${inst.id}.${sink.id}`)
-      : undefined;
-  const state = partStateOf(width, value);
+  const value = outValueOf(def, inst, view, driven);
+  const state = partStateOf(partWidthOf(def, inst), value);
   return { state, colour: bodyColourOf(state), glow: glowColourOf(state) };
+}
+
+/**
+ * How wide a part reports itself: its WIDEST pin, inputs and outputs together.
+ *
+ * Exported because the rule is worth stating on its own -- `appearance.test.ts`
+ * walks the parts whose two ends disagree about their width, which is where
+ * reading the wrong end showed up.
+ */
+export function partWidthOf(def: ComponentDef, inst: Instance): number {
+  let width = 1;
+  for (const pin of [...def.inputs, ...def.outputs]) {
+    width = Math.max(width, effectiveWidth(inst, pin));
+  }
+  return width;
+}
+
+/** What a part has to report: its own output, or what a sink is being fed. */
+function outValueOf(
+  def: ComponentDef,
+  inst: Instance,
+  view: BoardView | null | undefined,
+  driven: ReadonlyMap<string, number>,
+): number | undefined {
+  const out = def.outputs[0];
+  if (out) return outputValue(view, inst.id, out.id);
+  const sink = def.inputs[0];
+  return sink ? driven.get(`${inst.id}.${sink.id}`) : undefined;
 }
 
 function roundedRect(
@@ -851,7 +915,7 @@ function drawInstance(
   const { registry, selected, dragging } = state;
   if (!registry.has(inst.def)) return;
   const def = registry.get(inst.def);
-  const rect = instanceRect(inst);
+  const rect = instanceRect(inst, def);
   const p = worldToScreen(camera, { x: rect.x, y: rect.y });
   const w = rect.w * camera.zoom;
   const h = rect.h * camera.zoom;

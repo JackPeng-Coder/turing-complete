@@ -63,6 +63,16 @@ const TEST_RATES = [
   { label: '8×', ms: 110 },
 ] as const;
 
+/**
+ * The pace a run starts at, as an index into `TEST_RATES`: `8×`.
+ *
+ * Fast by default, because the cases are a DEMONSTRATION and a demonstration is
+ * usually watched once -- a player who wants to read a particular case presses
+ * 停止 and then steps the pace down, which is one click, where waiting out a slow
+ * run is thirty seconds nobody gets back.
+ */
+const DEFAULT_TEST_RATE = 3;
+
 /** What to say when a level's cases cannot be played one at a time. */
 const NO_CASES_NOTE = {
   program: {
@@ -152,7 +162,7 @@ if (app) {
   /** The cases the run is playing, and where in them it has got to. */
   let plan: TestPlan | null = null;
   let testStep = 0;
-  let testRate = 1;
+  let testRate = DEFAULT_TEST_RATE;
   /** The case the board is currently driven with, or `null` when none is. */
   let activeCase: number | null = null;
   let testing = false;
@@ -415,7 +425,8 @@ if (app) {
     let maxX = Number.NEGATIVE_INFINITY;
     let maxY = Number.NEGATIVE_INFINITY;
     for (const inst of graph.instances) {
-      const r = instanceRect(inst);
+      if (!store.get().registry.has(inst.def)) continue;
+      const r = instanceRect(inst, store.get().registry.get(inst.def));
       minX = Math.min(minX, r.x);
       minY = Math.min(minY, r.y);
       maxX = Math.max(maxX, r.x + r.w);

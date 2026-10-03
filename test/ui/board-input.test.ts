@@ -54,11 +54,23 @@ function board(): { store: Store<AppState>; stack: CommandStack; graph: Graph } 
  */
 function attach(store: Store<AppState>, stack: CommandStack): {
   rightClick(at: Point): boolean;
+  drag(from: Point, to: Point): void;
   detach(): void;
 } {
   const canvas = document.createElement('canvas');
   canvas.setPointerCapture = () => {};
   const detach = attachBoardInput(canvas, store, stack, { onChange: () => {} });
+  const send = (type: string, at: Point): void => {
+    canvas.dispatchEvent(
+      new PointerEvent(type, {
+        clientX: at.x,
+        clientY: at.y,
+        button: 0,
+        pointerId: 1,
+        bubbles: true,
+      }),
+    );
+  };
   return {
     rightClick(at: Point): boolean {
       const event = new MouseEvent('contextmenu', {
@@ -69,6 +81,11 @@ function attach(store: Store<AppState>, stack: CommandStack): {
       });
       canvas.dispatchEvent(event);
       return event.defaultPrevented;
+    },
+    drag(from: Point, to: Point): void {
+      send('pointerdown', from);
+      send('pointermove', to);
+      send('pointerup', to);
     },
     detach,
   };
@@ -157,6 +174,45 @@ describe('right-click on the board', () => {
       expect(graph.instances).toHaveLength(2);
       expect(graph.wires).toHaveLength(1);
       expect(stack.canUndo()).toBe(false);
+    } finally {
+      detach();
+    }
+  });
+});
+
+/**
+ * Dragging bare board moves the view, and CLICKING it clears the selection.
+ *
+ * Both are the same gesture until the pointer moves, which is why the board
+ * separates them on release rather than on press: an exact comparison used to
+ * turn a one-pixel twitch into a pan, and the click that should have deselected
+ * the part you just placed deselected nothing.
+ */
+describe('dragging bare board', () => {
+  it('pans, and leaves the selection alone', () => {
+    const { store, stack } = board();
+    const { drag, detach } = attach(store, stack);
+    try {
+      store.set({ selected: [store.get().graph.instances[0]!.id] });
+      drag({ x: 600, y: 500 }, { x: 660, y: 540 });
+      expect(store.get().camera.x).toBe(60);
+      expect(store.get().camera.y).toBe(40);
+      // Looking around the board is not a statement about what was selected.
+      expect(store.get().selected).toHaveLength(1);
+    } finally {
+      detach();
+    }
+  });
+
+  it('clears the selection when the pointer did not really move', () => {
+    const { store, stack } = board();
+    const { drag, detach } = attach(store, stack);
+    try {
+      store.set({ selected: [store.get().graph.instances[0]!.id] });
+      // A hand is not a mouse trap: two pixels of drift is still a click.
+      drag({ x: 600, y: 500 }, { x: 602, y: 501 });
+      expect(store.get().selected).toEqual([]);
+      expect(store.get().camera).toEqual({ x: 0, y: 0, zoom: 1 });
     } finally {
       detach();
     }

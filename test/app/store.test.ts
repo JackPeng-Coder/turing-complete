@@ -171,7 +171,6 @@ describe('AppState through createStore', () => {
       { kind: 'wire', fromInst: 'i1', fromPort: 'out', to: null },
       { kind: 'wire', fromInst: 'i1', fromPort: 'out', to: { x: 8, y: 12 } },
       { kind: 'pan', lastX: 10, lastY: 20 },
-      { kind: 'marquee', x0: 1, y0: 2, x1: 3, y1: 4 },
     ];
 
     for (const dragging of drags) {

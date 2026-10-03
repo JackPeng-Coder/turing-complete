@@ -36,8 +36,7 @@ export type DragState =
    * are about to connect, which is the whole of dragging one.
    */
   | { kind: 'wire'; fromInst: string; fromPort: string; to: Point | null }
-  | { kind: 'pan'; lastX: number; lastY: number }
-  | { kind: 'marquee'; x0: number; y0: number; x1: number; y1: number };
+  | { kind: 'pan'; lastX: number; lastY: number };
 
 /** The application's whole observable state. */
 export interface AppState {

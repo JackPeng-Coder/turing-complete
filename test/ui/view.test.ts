@@ -3,6 +3,7 @@ import { addInstance, emptyGraph } from '../../src/core/graph';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { createRegistry } from '../../src/core/registry';
 import { hitTest, pinPosition, screenToWorld, snap, worldToScreen } from '../../src/ui/board/view';
+import { instanceHeight } from '../../src/ui/board/geometry';
 
 const registry = createRegistry(BASE_DEFS);
 
@@ -48,5 +49,49 @@ describe('hitTest', () => {
 
   it('returns null in empty space', () => {
     expect(hitTest(emptyGraph(), registry, { x: 5000, y: 5000 })).toBeNull();
+  });
+});
+
+/**
+ * A body is as tall as its pins need, which is the fix for a column of loose pin
+ * markers trailing down the paper below the splitter: the registered height was
+ * fixed at 72 and `pinPosition` spread the pins about the centre whatever the
+ * count, so anything with a fourth pin on an edge drew it outside its own body.
+ */
+describe('a body that holds its own pins', () => {
+  const pinY = (defId: string): number[] => {
+    const def = registry.get(defId);
+    const g = emptyGraph();
+    const inst = addInstance(g, defId, 0, 0);
+    const ys: number[] = [];
+    for (const pin of def.inputs) ys.push(pinPosition(inst, def, pin.id, true).y);
+    for (const pin of def.outputs) ys.push(pinPosition(inst, def, pin.id, false).y);
+    return ys;
+  };
+
+  it('is exactly 72 for every part that already fitted', () => {
+    // Three pins is 72, which is the height every level connector, gate and wide
+    // operator was drawn at before. Nothing about those parts moved.
+    for (const id of ['level_input', 'level_output', 'nand', 'and', 'and3', 'or3', 'xor', 'add8']) {
+      expect(instanceHeight(registry.get(id)), id).toBe(72);
+    }
+  });
+
+  it('grows so that no pin of any registered part lands outside it', () => {
+    // Walked over the whole registry: a part added later with nine pins on an
+    // edge fails here rather than shipping with its pins in space.
+    for (const def of registry.all()) {
+      const height = instanceHeight(def);
+      for (const y of pinY(def.id)) {
+        expect(y, `${def.id} has a pin outside its body`).toBeGreaterThanOrEqual(0);
+        expect(y, `${def.id} has a pin outside its body`).toBeLessThanOrEqual(height);
+      }
+    }
+  });
+
+  it('is tall enough for the packers, which is what made them ugly', () => {
+    // Eight outputs at 24 apart do not fit in 72 and never did.
+    expect(instanceHeight(registry.get('splitter'))).toBe(192);
+    expect(instanceHeight(registry.get('maker'))).toBe(192);
   });
 });

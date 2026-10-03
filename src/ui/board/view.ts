@@ -80,7 +80,10 @@ export function hitTest(graph: Graph, registry: Registry, world: Point): Hit {
 
   for (let i = graph.instances.length - 1; i >= 0; i -= 1) {
     const inst = graph.instances[i]!;
-    if (pointInRect(world, instanceRect(inst))) return { kind: 'instance', id: inst.id };
+    if (!registry.has(inst.def)) continue;
+    if (pointInRect(world, instanceRect(inst, registry.get(inst.def)))) {
+      return { kind: 'instance', id: inst.id };
+    }
   }
   return null;
 }

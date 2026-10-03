@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { THEME, bodyColourOf, glowColourOf, partStateOf } from '../../src/ui/theme';
-import { gateLookOf, traceLevelArrow } from '../../src/ui/board/render';
+import { gateLookOf, partWidthOf, traceLevelArrow } from '../../src/ui/board/render';
 import { partCodeOf } from '../../src/ui/board/markings';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
+import type { Instance } from '../../src/core/graph';
 
 const registry = createRegistry(BASE_DEFS);
 
@@ -104,6 +105,48 @@ describe('gate silhouettes', () => {
     for (const id of ['level_input', 'level_output', 'const_on', 'mem1', 'delay_line']) {
       expect(gateLookOf(registry.get(id)).shape, id).toBe('box');
     }
+  });
+
+  it('draws the two packers as funnels, opposite ways round', () => {
+    // The only parts whose silhouette is their function: one word in and a bit
+    // per output out, or the same picture reversed.
+    expect(gateLookOf(registry.get('splitter')).shape).toBe('split');
+    expect(gateLookOf(registry.get('maker')).shape).toBe('make');
+  });
+});
+
+/**
+ * HOW WIDE A PART IS, which decides its colour: green for a live bit, red for a
+ * dead one, blue for a word.
+ *
+ * This was read off `outputs[0]`, and the splitter is the part that made that
+ * wrong: it takes a word in and puts out one bit per output, so its first output
+ * is one bit wide and the whole part was painted green or red by bit 0 -- next to
+ * a maker painted blue because ITS first output was the byte. One packer pair,
+ * two colours, and neither of them about the word passing through.
+ */
+describe('the width a part reports', () => {
+  const widthOf = (id: string): number =>
+    partWidthOf(registry.get(id), { params: {} } as unknown as Instance);
+
+  it('is the widest pin, not the first output', () => {
+    expect(widthOf('splitter')).toBe(8);
+    expect(widthOf('maker')).toBe(8);
+    expect(widthOf('equal8')).toBe(8);
+    expect(widthOf('and8')).toBe(8);
+  });
+
+  it('leaves a one-bit part one bit wide, whatever its shape', () => {
+    for (const id of ['nand', 'not', 'and', 'or', 'xor', 'full_adder', 'level_output']) {
+      expect(widthOf(id), id).toBe(1);
+    }
+  });
+
+  it('makes the packers word parts, so they stay blue', () => {
+    // The colour the parts are drawn in, derived the way the painter derives it.
+    expect(partStateOf(widthOf('splitter'), 1)).toBe('bus');
+    expect(bodyColourOf(partStateOf(widthOf('splitter'), 1))).toBe(THEME.busBody);
+    expect(partStateOf(widthOf('maker'), 1)).toBe('bus');
   });
 });
 
