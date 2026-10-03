@@ -89,6 +89,14 @@ async function wireParts(page: Page, cx: number, cy: number): Promise<void> {
   await dragWire(page, cx - 160 + 72, cy, cx + 160, cy);
 }
 
+/**
+ * Runs the level's cases from the test panel: the button a player presses to be
+ * judged. Nothing grades a circuit before it is pressed.
+ */
+async function runTests(page: Page): Promise<void> {
+  await page.locator('.case-test').click();
+}
+
 test('level 1 is playable end to end and shows its pass dialog', async ({ page }) => {
   await page.goto('/');
   // The briefing overlay covers the board, so it has to go before the canvas
@@ -102,6 +110,18 @@ test('level 1 is playable end to end and shows its pass dialog', async ({ page }
   await page.screenshot({ path: 'test-results/smoke-level1-parts-placed.png' });
 
   await wireParts(page, cx, cy);
+
+  // Building is not being judged. Before the test button is pressed the panel is
+  // a PLAN -- the level's one case, with its expectation and no verdict -- and
+  // the bar reports what the circuit costs and says it has not been tested.
+  await expect(page.locator('.truth-table')).toContainText('共 1 个');
+  await expect(page.locator('.truth-table')).toContainText('???');
+  await expect(page.locator('.truth-table')).not.toContainText('全部用例通过');
+  await expect(page.locator('.shell-metrics')).toContainText('未测试');
+  await expect(page.locator('.result')).toHaveCount(0);
+  await page.screenshot({ path: 'test-results/smoke-level1-plan.png' });
+
+  await runTests(page);
 
   // The level is a single truth-table row that must read 1.
   await expect(page.locator('.truth-table')).toContainText('全部用例通过');
@@ -121,7 +141,9 @@ test('level 1 is playable end to end and shows its pass dialog', async ({ page }
 /**
  * The dialog used to be the level's epilogue, re-shown by every `regrade()` that
  * still passed -- which is every edit after the first pass, so it reappeared on
- * the next click and the click after that. This is that bug, pinned.
+ * the next click and the click after that. This is that bug, pinned, and it is
+ * pinned harder than it was: an edit no longer grades AT ALL, so there is no
+ * verdict to reopen anything.
  */
 test('the pass dialog appears once, and does not come back on the next edit', async ({ page }) => {
   await page.goto('/');
@@ -129,16 +151,45 @@ test('the pass dialog appears once, and does not come back on the next edit', as
 
   const { cx, cy } = await placeParts(page);
   await wireParts(page, cx, cy);
+  await expect(page.locator('.result')).toHaveCount(0);
+  await runTests(page);
   await expect(page.locator('.result')).toBeVisible();
 
   await page.getByRole('button', { name: '继续' }).click();
   await expect(page.locator('.result')).toHaveCount(0);
 
   // An edit that leaves the circuit passing -- a spare part on the board -- is
-  // exactly what used to reopen it.
-  await place(page, '高电平', cx - 160, cy + 160);
-  await expect(page.locator('.truth-table')).toContainText('全部用例通过');
+  // exactly what used to reopen it. It goes ABOVE the circuit, not below it: the
+  // test panel is an overlay along the bottom of the stage and a click that lands
+  // on it is a click on the panel, not on the board.
+  await place(page, '高电平', cx - 160, cy - 160);
+  await expect(page.locator('.shell-metrics')).toContainText('未测试');
   await expect(page.locator('.result')).toHaveCount(0);
+});
+
+/**
+ * The complaint this whole panel was rebuilt around: a failing level used to
+ * answer with one sentence per case -- `用例 3 · out: 0 ≠ 1`, fifteen lines of it
+ * on a fifteen-row table. The matrix says which bit is wrong and for which case
+ * without a word, so a failing run has to produce a red cell and no prose.
+ */
+test('a failing run says so with a red cell, not a wall of text', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+
+  const { cx, cy } = await boardCentre(page);
+  // Level 1 wants the output held high; Constant Off is the wrong answer.
+  await place(page, '低电平', cx - 160, cy);
+  await place(page, '关卡输出', cx + 160, cy);
+  await dragWire(page, cx - 160 + 72, cy, cx + 160, cy);
+
+  await runTests(page);
+  await expect(page.locator('.truth-table h2')).toHaveText('未通过');
+  await expect(page.locator('.case-bad')).toHaveCount(1);
+  await expect(page.locator('.truth-table')).not.toContainText('≠');
+  await expect(page.locator('.truth-table p')).toHaveCount(0);
+  await expect(page.locator('.result')).toHaveCount(0);
+  await page.screenshot({ path: 'test-results/smoke-level1-failed.png' });
 });
 
 test('the pass dialog leads to the next level', async ({ page }) => {
@@ -147,6 +198,7 @@ test('the pass dialog leads to the next level', async ({ page }) => {
 
   const { cx, cy } = await placeParts(page);
   await wireParts(page, cx, cy);
+  await runTests(page);
 
   await page.getByRole('button', { name: '下一关' }).click();
   await expect(page.locator('.result')).toHaveCount(0);
@@ -161,6 +213,7 @@ test('progress survives a reload and unlocks the next level', async ({ page }) =
 
   const { cx, cy } = await placeParts(page);
   await wireParts(page, cx, cy);
+  await runTests(page);
   await expect(page.locator('.truth-table')).toContainText('全部用例通过');
 
   await page.reload();
@@ -185,6 +238,41 @@ test('progress survives a reload and unlocks the next level', async ({ page }) =
   await expect(page.locator('.screen-board')).toBeVisible();
   await expect(page.locator('.shell-bar')).toContainText('原力觉醒');
   await expect(page.locator('.briefing')).toContainText('金属舱室');
+});
+
+/**
+ * LEVEL 12 IS THE LEVEL THE COMPLAINT CAME FROM: four inputs, four outputs, a
+ * sixteen-row table, and a circuit reading zero everywhere -- fifteen failing
+ * cases, which the old panel answered with fifteen lines of `out3: 0 ≠ 1`. It is
+ * also the level where the matrix is at its tallest, which is why it is worth a
+ * walk of its own.
+ */
+test('level 12 lays its sixteen cases out as columns, then plays them', async ({ page }) => {
+  await seedProgress(page, 11);
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('二进制速算');
+
+  // Nothing built yet: sixteen columns of expectations, no verdict, and not one
+  // fabricated output.
+  await expect(page.locator('.truth-table h2')).toHaveText('用例');
+  await expect(page.locator('.case-count')).toHaveText('共 16 个');
+  await expect(page.locator('.case-bad')).toHaveCount(0);
+  await page.screenshot({ path: 'test-results/smoke-ch1-level12-plan.png' });
+
+  await runTests(page);
+  // The first case is driven before the click returns, so this is not a race.
+  await expect(page.locator('.truth-table h2')).toHaveText('正在测试 用例 1 / 16');
+  await expect(page.locator('.case-active')).not.toHaveCount(0);
+  await page.screenshot({ path: 'test-results/smoke-ch1-level12-running.png' });
+
+  // Sixteen cases at 2x is seven seconds, so the verdict needs a longer wait
+  // than the default -- and it arrives as a red matrix, not as a wall of text.
+  await expect(page.locator('.truth-table h2')).toHaveText('未通过', { timeout: 20_000 });
+  await expect(page.locator('.truth-table')).not.toContainText('≠');
+  await expect(page.locator('.truth-table p')).toHaveCount(0);
+  await expect(page.locator('.case-bad')).not.toHaveCount(0);
+  await page.screenshot({ path: 'test-results/smoke-ch1-level12-failed.png' });
 });
 
 test('chapter 2 is reachable: level 13 opens once chapter 1 is passed', async ({ page }) => {
@@ -246,6 +334,11 @@ test('a chapter-2 level opens and grades end to end', async ({ page }) => {
   await dragWire(page, cx + 72, cy, cx + 200, cy); // XOR -> out
 
   // The grade is the level's own: a truth table over a and inv, all four rows.
+  // The run plays them one at a time, so the heading counts up -- and it is
+  // caught mid-run here, which is what makes this a test of the animation rather
+  // than of its result.
+  await runTests(page);
+  await expect(page.locator('.truth-table h2')).toHaveText('正在测试 用例 1 / 4');
   await expect(page.locator('.truth-table')).toContainText('全部用例通过');
   await expect(page.locator('.shell-metrics')).toContainText('总开销');
   await page.screenshot({ path: 'test-results/smoke-ch2-level31-passed.png' });
@@ -281,6 +374,34 @@ test('the last chapter-2 level opens: level 38 is reachable', async ({ page }) =
   await expect(page.getByRole('button', { name: '8 位寄存器' })).toBeEnabled();
   await expect(page.locator('.truth-table')).toBeVisible();
   await page.screenshot({ path: 'test-results/smoke-ch2-level38-open.png' });
+});
+
+/**
+ * A `script` LEVEL IS THE OTHER SHAPE OF TEST, and the run has to replay it
+ * rather than reset between its cases: its steps are one run, so step 3 reads a
+ * register step 2 clocked. Twenty-seven levels passed puts the resume point on
+ * level 28, a script level; an empty board then fails every step, which is
+ * exactly what makes this a test of the replay -- each step is driven and read,
+ * so no column is left unknown.
+ */
+test('a sequential level replays its steps and reads every one of them', async ({ page }) => {
+  await seedProgress(page, 27);
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('循环依赖');
+
+  // Two clicks take the pace from 2× to 8×: nine steps at 450ms each is four
+  // seconds of a test suite spent watching nothing happen.
+  await page.locator('.case-rate').click();
+  await page.locator('.case-rate').click();
+  await expect(page.locator('.case-rate')).toHaveText('8×');
+
+  await runTests(page);
+  await expect(page.locator('.truth-table h2')).toContainText('正在测试 用例 1 /');
+  await expect(page.locator('.truth-table h2')).toHaveText('未通过');
+  // Every case was driven and read: an unread step would leave `???` behind.
+  await expect(page.locator('.truth-table')).not.toContainText('???');
+  await page.screenshot({ path: 'test-results/smoke-ch2-level28-run.png' });
 });
 
 test('chapter 3 is reachable: level 39 opens once chapter 2 is passed', async ({ page }) => {

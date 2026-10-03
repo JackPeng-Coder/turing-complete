@@ -10,7 +10,7 @@ import { loadProgress, saveProgress } from './persist/storage';
 import { applyGrade, resumePointOf, type Progress } from './app/progress';
 import { mountShell } from './ui/shell';
 import { mountPalette } from './ui/palette';
-import { mountTruthTable, staticCases, type Case } from './ui/truthTable';
+import { mountTruthTable, TEST_DEMO_LIMIT } from './ui/truthTable';
 import { mountIoPanel } from './ui/ioPanel';
 import { showResult } from './ui/result';
 import { mountToolbar } from './ui/toolbar';
@@ -20,6 +20,7 @@ import { renderBoard, type BoardView } from './ui/board/render';
 import { attachBoardInput, deleteSelection } from './ui/board/interact';
 import { createDisplay, type DisplaySimulation, type SignalSnapshot } from './ui/board/signals';
 import { instanceRect, screenToWorld } from './ui/board/view';
+import { testCases, type TestPlan } from './levels/checks';
 import type { LevelSpec } from './levels/spec';
 
 const registry = createRegistry(BASE_DEFS);
@@ -34,6 +35,7 @@ const store: Store<AppState> = createStore<AppState>({
   camera: { x: 40, y: 40, zoom: 1 },
   selected: [],
   dragging: null,
+  metrics: null,
   lastGrade: null,
   status: null,
 });
@@ -41,8 +43,36 @@ const store: Store<AppState> = createStore<AppState>({
 const stack = new CommandStack();
 const app = document.querySelector<HTMLDivElement>('#app');
 
-/** How long the auto-test holds each case before moving to the next. */
-const TEST_STEP_MS = 700;
+/**
+ * How long the test run holds each case before moving to the next, by speed.
+ *
+ * The run is a demonstration, so the pace is the player's: a fifteen-row truth
+ * table takes seven seconds at `2×` and a fuzz level's sixty-four rounds take
+ * half a minute, which is either a lesson or a waste of time depending on what
+ * the circuit is doing. Fastest last.
+ */
+const TEST_RATES = [
+  { label: '1×', ms: 900 },
+  { label: '2×', ms: 450 },
+  { label: '4×', ms: 220 },
+  { label: '8×', ms: 110 },
+] as const;
+
+/** What to say when a level's cases cannot be played one at a time. */
+const NO_CASES_NOTE = {
+  program: {
+    zh: '本关的用例是一次程序运行，无法逐个演示：已直接判定',
+    en: 'This level’s cases are one program run, so they cannot be played one at a time: graded directly',
+  },
+  custom: {
+    zh: '本关的用例由本关自己的检查器生成，无法逐个演示：已直接判定',
+    en: 'This level generates its own cases, so they cannot be played one at a time: graded directly',
+  },
+  empty: {
+    zh: '本关没有可演示的用例：已直接判定',
+    en: 'This level declares no cases to play: graded directly',
+  },
+} as const;
 
 /** Clock rates the player can cycle through, fastest last. */
 const RATES = [
@@ -114,15 +144,21 @@ if (app) {
   let timer: ReturnType<typeof setInterval> | null = null;
   /** The last settle's values, shared by everything that reads them. */
   let snapshot: SignalSnapshot | null = null;
-  /** True once this visit has shown the pass dialog; reset on entering a level. */
-  let passShown = false;
-  /** The test cases being played, and where in them the auto-test has got to. */
-  let testCases: readonly Case[] = [];
+  /** The cases the run is playing, and where in them it has got to. */
+  let plan: TestPlan | null = null;
   let testStep = 0;
+  let testRate = 1;
   /** The case the board is currently driven with, or `null` when none is. */
   let activeCase: number | null = null;
   let testing = false;
   let testTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * What each case read off the board, so the columns keep their numbers after
+   * the run has moved on. The grade cannot supply them: it records the cases
+   * that FAILED, and a table that goes blank wherever the circuit was right
+   * tells a player nothing about the ones they got wrong.
+   */
+  let testResults: (Readonly<Record<string, number>> | null)[] = [];
 
   const paint = (): void => {
     if (!boardScreen.hidden) renderBoard(canvas, store, store.get().camera, view);
@@ -150,61 +186,160 @@ if (app) {
   const levelOutputs = (): Readonly<Record<string, number>> | null =>
     snapshot?.stable ? Object.fromEntries(snapshot.levelOutputs) : null;
 
-  /** Drives one input vector onto the board and repaints everything that shows it. */
-  const driveTo = (values: Readonly<Record<string, number>>): void => {
+  /**
+   * Drives one input vector onto the board and re-reads it, painting nothing.
+   *
+   * The run's fast phase drives hundreds of vectors back to back, and repainting
+   * the canvas and two panels per vector is what would make it slow rather than
+   * the simulation.
+   */
+  const driveQuiet = (values: Readonly<Record<string, number>>): void => {
     vector = { ...values };
     display?.drive(vector);
     sample();
+  };
+
+  /** Drives one input vector onto the board and repaints everything that shows it. */
+  const driveTo = (values: Readonly<Record<string, number>>): void => {
+    driveQuiet(values);
     paint();
     io.render();
     truth.render();
   };
 
-  const stopAutoTest = (finish: boolean): void => {
+  const stopTestTimer = (): void => {
     if (testTimer !== null) clearTimeout(testTimer);
     testTimer = null;
-    testing = false;
-    activeCase = null;
-    if (finish) regrade();
-    truth.render();
-    paintTools();
   };
 
   /**
-   * One case per tick: drive it, settle it, repaint the board, and light up that
-   * case's column so the reader's eye follows the board.
+   * The end of a run, and the only place a level is passed.
+   *
+   * The verdict is the END of a demonstration the player asked for, not a
+   * background process: a level that graded itself after every wire spent the
+   * whole build telling a player they were wrong. The run's own `grade()` is the
+   * one that counts, so nothing here is computed twice.
    */
-  const runTestStep = (): void => {
-    if (!testing) return;
-    if (testStep >= testCases.length) {
-      stopAutoTest(true);
-      return;
-    }
-    activeCase = testStep;
-    const item = testCases[testStep]!;
-    testStep += 1;
-    driveTo(item.inputs);
-    testTimer = setTimeout(runTestStep, TEST_STEP_MS);
+  const finishTest = (): void => {
+    stopTestTimer();
+    testing = false;
+    activeCase = null;
+    plan = null;
+
+    const { graph, level: current, progress: current0 } = store.get();
+    const result = grade(graph, registry, current);
+    // One state change covers all three readers: the panel takes its verdict,
+    // the bar takes the stars, and the board keeps the last case's vector.
+    store.set({ lastGrade: result, metrics: result.metrics });
+    paintTools();
+    if (!result.passed) return;
+
+    progress = applyGrade(current0, current, result);
+    saveProgress(progress);
+    store.set({ progress });
+
+    closeResult();
+    showResult(current, result, registry, {
+      onContinue: closeResult,
+      onNext: () => {
+        closeResult();
+        const next = nextLevelId();
+        if (next) openLevel(next);
+      },
+      hasNext: nextLevelId() !== null,
+    });
   };
 
-  const startAutoTest = (): void => {
-    testCases = staticCases(store.get().level);
-    if (testCases.length === 0) {
-      // A `fuzz`, `script` or `program` level generates its vectors inside the
-      // checker. Playing something made up here would be showing the player a
-      // test the level never runs, so say so instead.
-      store.set({
-        status: {
-          zh: '本关的用例由检查器现场生成，无法逐个演示',
-          en: 'This level generates its cases while checking; they cannot be played one by one',
-        },
-      });
+  /**
+   * One case per tick of the run: drive it, clock it, paint it, remember what it
+   * read, and light up that case's column so the reader's eye follows the board.
+   *
+   * PAST `TEST_DEMO_LIMIT` THE RUN HURRIES, and the panel's note says so. A
+   * level may declare hundreds of cases (513 on `ch2-37-little-box`), and at the
+   * pace a fifteen-row table wants that is minutes of watching a counter count.
+   * The cases still ALL run -- only the painting stops, and only where there is
+   * nothing left to see: past the thirty-second case no column on screen changes
+   * at all, because the table shows twenty.
+   */
+  const runTestStep = (): void => {
+    const current = plan;
+    if (!testing || current === null || current.kind !== 'cases') return;
+    const item = current.cases[testStep];
+    if (item === undefined) {
+      finishTest();
       return;
     }
+
+    const demonstrating = testStep < TEST_DEMO_LIMIT;
+    activeCase = testStep;
+    // A case's own `reset` says whether it starts from a cleared circuit: a
+    // truth table's rows each do, and only a script's FIRST step does -- step 3
+    // reads a register step 2 clocked. The checker does exactly this.
+    if (item.reset) display?.reset();
+    if (demonstrating) driveTo(item.inputs);
+    else driveQuiet(item.inputs);
+    while ((snapshot?.tick ?? 0) < item.tick) {
+      display?.tick();
+      if (demonstrating) {
+        sample();
+        paint();
+      }
+    }
+    testResults[testStep] = levelOutputs();
+    testStep += 1;
+    // The fast phase has no column left to light up -- the table shows twenty --
+    // but the heading counts the cases, so it is repainted now and then rather
+    // than showing a total the run left behind.
+    if (demonstrating || (testStep & 7) === 0) truth.render();
+    testTimer = setTimeout(runTestStep, demonstrating ? TEST_RATES[testRate]!.ms : 0);
+  };
+
+  /**
+   * The test button: play the level's cases, then judge the circuit.
+   *
+   * A level whose cases the checker generates privately, and a board that will
+   * not compile at all, have nothing to play -- but pressing 测试 must always
+   * produce a verdict, so both go straight to `finishTest`.
+   */
+  const startTest = (): void => {
+    stopTestTimer();
+    // The run drives its own clock edges; a ticking clock underneath it would
+    // step the same storage twice per case and show a circuit nobody built.
+    running = false;
+    stopClock();
+
+    const planned = testCases(store.get().level);
+    testResults = [];
+    if (planned.kind === 'none' || display === null) {
+      if (planned.kind === 'none') store.set({ status: NO_CASES_NOTE[planned.reason] });
+      plan = null;
+      activeCase = null;
+      finishTest();
+      return;
+    }
+
+    plan = planned;
     testing = true;
     testStep = 0;
+    activeCase = null;
     paintTools();
+    truth.render();
     runTestStep();
+  };
+
+  /** The stop button: abandon the run without judging anything. */
+  const stopTest = (): void => {
+    stopTestTimer();
+    testing = false;
+    activeCase = null;
+    plan = null;
+    paintTools();
+    truth.render();
+  };
+
+  const toggleTest = (): void => {
+    if (testing) stopTest();
+    else startTest();
   };
 
   /**
@@ -337,9 +472,10 @@ if (app) {
     canvas.dataset.pendingDef = '';
     running = false;
     stopClock();
-    stopAutoTest(false);
+    stopTest();
     vector = {};
-    passShown = false;
+    plan = null;
+    testResults = [];
     // The display is rebuilt from the store's *new* graph, so the store has to
     // be told about the level change first.
     store.set({
@@ -347,6 +483,7 @@ if (app) {
       graph: emptyGraph(next.id),
       selected: [],
       lastGrade: null,
+      metrics: null,
       status: null,
       camera: { x: 40, y: 40, zoom: 1 },
     });
@@ -365,39 +502,30 @@ if (app) {
     document.querySelector('.result')?.remove();
   };
 
-  const regrade = (): void => {
-    const { graph, level: current, progress: current0 } = store.get();
-    const result = grade(graph, registry, current);
-    store.set({ lastGrade: result });
-    if (!result.passed) return;
-
-    progress = applyGrade(current0, current, result);
-    saveProgress(progress);
-    store.set({ progress });
-
-    // ONCE PER VISIT, and this is the whole fix for a dialog that would not go
-    // away: `regrade` runs after EVERY edit, so gating on `passed` alone
-    // re-opened the pass dialog on the next click, and the click after that.
-    // Passing the level again after breaking it is not worth a second
-    // interruption either -- the top bar and the test panel both say so.
-    if (passShown) return;
-    passShown = true;
-    closeResult();
-    showResult(current, result, registry, {
-      onContinue: closeResult,
-      onNext: () => {
-        closeResult();
-        const next = nextLevelId();
-        if (next) openLevel(next);
-      },
-      hasNext: nextLevelId() !== null,
-    });
+  /**
+   * Measures the circuit that is on the board right now.
+   *
+   * A MEASUREMENT, NOT A VERDICT. The gate count, the delay and the cost are
+   * what the original's own bar shows while a circuit is being drawn, and they
+   * are recomputed on every edit. Whether the circuit is CORRECT is
+   * `finishTest`'s business, and the verdict is dropped here rather than
+   * recomputed: a result reached before the last wire moved describes a circuit
+   * that is no longer on the board.
+   */
+  const measure = (): void => {
+    const { graph, level: current } = store.get();
+    store.set({ metrics: grade(graph, registry, current).metrics, lastGrade: null });
   };
 
-  /** Every board edit: the circuit changed, so the display and the grade did too. */
+  /** Every board edit: the circuit changed, so the display and the measurement did too. */
   const onChange = (): void => {
+    if (testing) stopTest();
     rebuild();
-    regrade();
+    // The columns keep their layout but lose their numbers: they were read from
+    // the circuit as it was before this edit.
+    testResults = [];
+    activeCase = null;
+    measure();
   };
 
   const mapRender = mountMap(mapScreen, store, openLevel);
@@ -416,6 +544,14 @@ if (app) {
   const truth = mountTruthTable(testsOverlay, store, {
     live: levelOutputs,
     active: () => activeCase,
+    results: () => testResults,
+    testing: () => testing,
+    rate: () => TEST_RATES[testRate]!.label,
+    onToggleTest: toggleTest,
+    onCycleRate: () => {
+      testRate = (testRate + 1) % TEST_RATES.length;
+      truth.render();
+    },
   });
   const io = mountIoPanel(stage, store, {
     vector: () => vector,
@@ -457,10 +593,7 @@ if (app) {
       io.render();
       paintTools();
     },
-    onToggleTest: () => {
-      if (testing) stopAutoTest(true);
-      else startAutoTest();
-    },
+    onToggleTest: toggleTest,
   });
 
   /**

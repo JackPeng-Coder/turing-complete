@@ -35,8 +35,14 @@ towards a working CPU.
 - **A live board**: every wire and pin shows the value it is carrying, the level's input bits are
   clickable so you can drive a half-built circuit and watch it work, and the clock can be stepped,
   run or reset.
-- **Live truth-table checking** as you build.
-- **Gate / delay / tick scoring**, with a three-star target for every level.
+- **The level's test cases, laid out as a matrix** while you build: one row per pin, one column per
+  case, expectations filled in and your own output unknown until you run them.
+- **An on-demand test run.** Nothing grades your circuit while you are drawing it. Press 测试 and the
+  board is driven through the level's cases one at a time -- the inputs change, the column lights up,
+  the output takes its value -- at a speed you choose, and the verdict comes at the end. A level whose
+  cases the checker generates privately (a program image) says so instead of inventing one.
+- **Gate / delay / tick cost, measured live**, and a three-star target for every level. The cost is a
+  measurement and updates as you edit; whether the circuit is *correct* is what the test run says.
 - **Progress saved to `localStorage`**, so a refresh keeps your stars.
 - A **chapter map** for navigating levels and seeing what is unlocked.
 
@@ -100,7 +106,7 @@ test/       Vitest unit/level tests and the Playwright smoke specs
 
 ## Contributing / scope
 
-Phases 0–1 cover chapters 1–2 (38 of the plan's 82 levels). The full plan — 7 chapters, 82 levels, up to a working
+Phases 0–2 cover chapters 1–3 (47 of the plan's 82 levels). The full plan — 7 chapters, 82 levels, up to a working
 CPU and assembly challenges — is in [`docs/superpowers/plans/`](docs/superpowers/plans/); the design
 spec it follows is in [`docs/superpowers/specs/`](docs/superpowers/specs/).
 

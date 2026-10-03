@@ -1329,4 +1329,146 @@ export function countTicksUsed(graph: Graph, registry: Registry, spec: LevelSpec
   return runChecks(graph, registry, spec).ticksUsed;
 }
 
+// ---------------------------------------------------------------------------
+// the case list the board plays
+// ---------------------------------------------------------------------------
+
+/** One case a level's checks drive: the vector in, what the level expects back. */
+export interface TestCase {
+  readonly inputs: Readonly<Record<string, number>>;
+  /** The outputs this case asserts; empty for a case that asserts nothing. */
+  readonly expected: Readonly<Record<string, number>>;
+  /**
+   * Clock edges to apply after driving, before reading. Always 0 for a
+   * combinational level; a `script` step states the tick it belongs to.
+   */
+  readonly tick: number;
+  /**
+   * True when the circuit is cleared before this case is driven.
+   *
+   * THE ONE THING THAT MAKES A CASE LIST PLAYABLE, and it is per case rather than
+   * per level because a level may declare checks of both shapes --
+   * `ch2-30-odd-ticks` declares two scripts, and a level with a table and a
+   * script would declare one of each. A truth table, a constraint and a fuzz
+   * check each drive one vector into a freshly reset circuit, so every one of
+   * their cases says `true`. A script's steps are one run -- step 3 reads a
+   * register step 2 clocked -- so only its first step does, and the rest carry
+   * the clock on from where the previous one left it.
+   */
+  readonly reset: boolean;
+}
+
+/** What a level will test, or why it cannot be laid out case by case. */
+export type TestPlan =
+  | { readonly kind: 'cases'; readonly cases: readonly TestCase[] }
+  | { readonly kind: 'none'; readonly reason: 'program' | 'custom' | 'empty' };
+
+/**
+ * The cases this level's checks drive, in the order the checker drives them.
+ *
+ * WHY THIS EXISTS. The bottom panel used to be a report rather than a plan: it
+ * showed the failures the last grade happened to record, so a player could not
+ * see what a level would test until after it had already judged them, and a
+ * circuit that passed left nothing to look at. The cases are declared data -- a
+ * truth table's `rows`, the inputs a `constraint` enumerates, a `fuzz` check's
+ * own seeded vectors, a `script`'s steps -- so they can be laid out before the
+ * circuit is built and then played one at a time.
+ *
+ * IT IS DERIVED FROM THE PRIMITIVES THE CHECKER ITSELF USES: `enumerateInputs`
+ * and `evaluateRule` for a constraint, `planFuzz` and `fuzzVectors` for a fuzz
+ * check, and the checks' own `rows` and `steps`. A list that drifted from what
+ * `runChecks` drives would animate a test the level never runs, which is worse
+ * than no animation at all; `test/levels/testcases.test.ts` pins the agreement
+ * by driving a known-wrong circuit through the real checker and matching its
+ * failure records against this list, vector by vector.
+ *
+ * `program` AND `custom` HAVE NO LIST, and they are not an oversight. A program's
+ * vectors only mean anything with the assembled image loaded into the circuit's
+ * RAM, which is the check's own business; a custom check's cases live in code
+ * this module cannot see. Both report a reason, and the test button still grades
+ * them -- it just cannot play them.
+ *
+ * NEVER THROWS. It is called from the panel's render path, on every board edit,
+ * with level data that reaches the kernel untyped. A malformed check, an input
+ * function that throws, a value the enumeration cannot express: each drops those
+ * cases rather than taking the board down with it -- the rule `runChecks`
+ * follows, one level up.
+ */
+export function testCases(spec: LevelSpec): TestPlan {
+  const cases: TestCase[] = [];
+  let blocked: 'program' | 'custom' | null = null;
+  const checks: readonly LevelCheck[] = Array.isArray(spec.checks) ? spec.checks : [];
+
+  for (const entry of checks) {
+    if (!isRecord(entry) || typeof entry.kind !== 'string') continue;
+    const check: LevelCheck = entry;
+    try {
+      if (check.kind === 'truth-table') {
+        for (const row of check.rows ?? []) {
+          cases.push({
+            inputs: numericOnly(row.inputs ?? {}),
+            expected: numericOnly(row.outputs ?? {}),
+            tick: 0,
+            reset: true,
+          });
+        }
+        continue;
+      }
+      if (check.kind === 'constraint') {
+        for (const inputs of enumerateInputs(spec)) {
+          const want = evaluateRule(check.rule, inputs, outputWidth(spec, check.rule.output));
+          cases.push({
+            inputs,
+            expected: { [check.rule.output]: want },
+            tick: 0,
+            reset: true,
+          });
+        }
+        continue;
+      }
+      if (check.kind === 'fuzz') {
+        const plan = planFuzz(check, spec);
+        if (plan.kind !== 'plan') continue;
+        // `fuzzVectors` yields the values the pins are DRIVEN with, which is the
+        // same record `runChecks` writes into a failure -- not the raw draw.
+        for (const inputs of fuzzVectors(check.seed, plan)) {
+          const expected: Record<string, number> = {};
+          for (const pin of plan.outputs) {
+            const value: unknown = pin.fn(inputs);
+            if (typeof value === 'number') expected[pin.id] = value;
+          }
+          cases.push({ inputs, expected, tick: 0, reset: true });
+        }
+        continue;
+      }
+      if (check.kind === 'script') {
+        const steps = check.steps ?? [];
+        for (const [index, step] of steps.entries()) {
+          cases.push({
+            inputs: numericOnly(step.inputs ?? {}),
+            expected: numericOnly(step.expect ?? {}),
+            tick: step.tick,
+            // Only a script's FIRST step starts from a cleared circuit:
+            // `runChecks` resets once per check and then walks the steps. A
+            // level that declares two scripts (`ch2-30-odd-ticks`) resets twice,
+            // once at each script's front.
+            reset: index === 0,
+          });
+        }
+        continue;
+      }
+      if (check.kind === 'program') blocked ??= 'program';
+      else if (check.kind === 'custom') blocked ??= 'custom';
+    } catch {
+      // Deliberately silent: see "NEVER THROWS" above. The checker reports the
+      // same defect properly, with a reason and a detail, when it is run.
+    }
+  }
+
+  if (cases.length === 0) {
+    return blocked === null ? { kind: 'none', reason: 'empty' } : { kind: 'none', reason: blocked };
+  }
+  return { kind: 'cases', cases };
+}
+
 export { formatPort };

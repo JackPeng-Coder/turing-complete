@@ -34,11 +34,11 @@
   --radius: 10px;
   /* Height of the bottom test panel. The parts panel above it has to leave
      exactly this much room, so both read it from here rather than guessing.
-     A level with six pins by six cases runs to six rows plus the `1 != 0` lines
-     under them, and those lines are the most useful thing on a failure -- worth
-     a quarter of the board rather than an eighth. The panel scrolls when a
+     The panel is one row per pin and two rows per output pin -- four inputs and
+     four outputs is twelve rows, the tallest shape in the game -- so it is worth
+     three tenths of the board rather than a quarter. It still scrolls when a
      level has more pins than this holds. */
-  --test-h: clamp(150px, 25vh, 250px);
+  --test-h: clamp(150px, 30vh, 300px);
   /* The halo a lit thing sits in. One place, so a wire, a bit cell and a title
      glow by the same amount instead of three guesses. */
   --glow-on: 0 0 9px rgba(0, 255, 156, 0.5);
@@ -285,7 +285,31 @@ html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--
   border-top-right-radius: var(--radius);
   box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.28);
 }
-.truth-table h2 { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+.truth-table h2 { margin: 0; font-size: 14px; font-weight: 600; }
+/* The panel's own controls: the button that plays the columns below it, and the
+   pace it plays them at. The panel can be collapsed, which is why the toolbar
+   carries the same control -- see `toolbar.ts`. */
+.case-head { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; }
+.case-gap { flex: 1 1 auto; }
+.case-test,
+.case-rate {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  padding: 3px 14px;
+  cursor: pointer;
+}
+.case-rate { min-width: 3.5em; padding: 3px 8px; }
+.case-test:hover,
+.case-rate:hover { background: var(--panel-hover); border-color: var(--accent); }
+.case-test[aria-pressed='true'] {
+  background: var(--panel-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .case-row { display: flex; align-items: center; gap: 14px; min-height: 30px; }
 .case-label {
   flex: 0 0 auto;
@@ -299,6 +323,7 @@ html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--
 .case-cell { display: flex; gap: 2px; }
 .case-cell .bit { width: 16px; height: 16px; }
 .case-note { color: var(--text-muted); font-size: 13px; }
+.case-count { color: var(--text-muted); font-size: 13px; }
 .case-bad { outline: 2px solid var(--off); outline-offset: 2px; border-radius: 4px; }
 /* The case the auto-test is on: the board is driving it, and the reader's eye
    has to follow it across the matrix. */

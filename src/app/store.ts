@@ -19,7 +19,7 @@
  */
 import type { Graph } from '../core/graph';
 import type { Registry } from '../core/registry';
-import type { GradeResult } from '../levels/grader';
+import type { GradeResult, Metrics } from '../levels/grader';
 import type { LevelSpec } from '../levels/spec';
 import type { Progress } from './progress';
 import type { Camera, Point } from '../ui/board/view';
@@ -48,6 +48,24 @@ export interface AppState {
   camera: Camera;
   selected: string[];
   dragging: DragState | null;
+  /**
+   * What the circuit on the board costs, measured as it is edited.
+   *
+   * A MEASUREMENT, NOT A VERDICT, and it is a separate field from `lastGrade`
+   * for exactly that reason. The top bar has always shown the gate count and the
+   * delay while a player builds -- that is the original's own readout and it is
+   * what makes a three-star target something to aim at rather than a surprise --
+   * but a level that announced "未通过" after every wire was judging a circuit
+   * that was still being drawn. Measuring is continuous; judging waits for the
+   * test run.
+   */
+  metrics: Metrics | null;
+  /**
+   * The result of the last TEST RUN, or `null` until the player asks for one.
+   *
+   * Cleared by every edit, because a verdict reached before the last wire was
+   * moved describes a circuit that is no longer on the board.
+   */
   lastGrade: GradeResult | null;
   status: { zh: string; en: string } | null;
 }

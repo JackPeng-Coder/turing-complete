@@ -32,6 +32,11 @@ export interface ToolbarState {
  * has no notion of a selection region, no per-part label and no breakpoints, so
  * those three are absent rather than present and inert -- a dead control is
  * worse than a missing one, because the player only finds out by clicking it.
+ *
+ * THE TEST BUTTON LIVES HERE AND IN THE TEST PANEL. The panel's own button is
+ * the discoverable one -- it sits on the columns it plays -- but the panel can be
+ * collapsed to give the board its height back, and the run has to stay reachable
+ * when it is. Both call the same handler.
  */
 export function mountToolbar(
   root: HTMLElement,
@@ -59,7 +64,7 @@ export function mountToolbar(
   const zoomOut = button('缩小', 'zoom-out', () => options.onZoom(1 / 1.25));
   const fit = button('适应画面', 'fit', () => options.onZoom(0));
   const gridToggle = button('网格', 'grid', () => options.onToggleGrid());
-  const test = button('自动测试', 'test', () => options.onToggleTest());
+  const test = button('测试', 'test', () => options.onToggleTest());
   const step = button('单步', 'step', () => options.onStep());
   const run = button('运行', 'play', () => options.onToggleRun());
   const stop = button('停止并复位', 'stop', () => options.onStop());
@@ -75,8 +80,8 @@ export function mountToolbar(
       run.setAttribute('aria-label', state.running ? '暂停' : '运行');
       test.setAttribute('aria-pressed', String(state.testing));
       test.replaceChildren(iconSvg(state.testing ? 'stop' : 'test'));
-      test.setAttribute('aria-label', state.testing ? '停止测试' : '自动测试');
-      test.title = state.testing ? '停止测试' : '自动测试：逐个演示本关用例';
+      test.setAttribute('aria-label', state.testing ? '停止测试' : '测试');
+      test.title = state.testing ? '停止测试' : '测试：逐个播放本关用例，最后给出判定';
     },
   };
 }

@@ -1,4 +1,5 @@
 import type { AppState, Store } from '../app/store';
+import { scoreOf } from '../levels/grader';
 import { THEME } from './theme';
 
 export interface ShellOptions {
@@ -10,7 +11,13 @@ export interface ShellOptions {
 
 /**
  * The top bar: which level is open, what the player has armed in the palette,
- * the last grade, and the way back to the chapter map.
+ * what the circuit costs, and the way back to the chapter map.
+ *
+ * THE READOUT IS TWO FACTS, not one. `metrics` is measured on every edit -- the
+ * original shows its gate and delay counters while a circuit is being drawn, and
+ * so does this -- while the star or `未通过` suffix only appears once a test run
+ * has produced it. A bar that said `未通过` after every wire judged a circuit
+ * that was still being built.
  *
  * It is the first flex child of the app container so the screens below it get
  * the remaining height. The level name is the original's rose, centred, with the
@@ -71,19 +78,25 @@ export function mountShell(
   root.prepend(bar);
 
   const render = (): void => {
-    const { level, lastGrade, status: message } = store.get();
+    const { level, lastGrade, metrics: measured, status: message } = store.get();
     title.textContent = `${level.chapter}-${level.index} ${level.name.zh}`;
     status.textContent = message ? message.zh : '';
     if (!hint.hidden) hint.textContent = level.hint.zh;
 
-    if (!lastGrade) {
+    if (!measured) {
       metrics.textContent = '尚未评测';
       metrics.style.color = THEME.textMuted;
       return;
     }
-    const stars = lastGrade.stars > 0 ? '★'.repeat(lastGrade.stars) : '未通过';
-    metrics.textContent = `门 ${lastGrade.metrics.gate} 个 · 延迟 ${lastGrade.metrics.delay} · 拍 ${lastGrade.metrics.tick} · 总开销 ${lastGrade.score} · ${stars}`;
-    metrics.style.color = lastGrade.passed ? THEME.success : THEME.error;
+    // What the circuit COSTS is measured continuously; whether it is CORRECT is
+    // only known from a test run, so the suffix stays 未测试 -- in the muted
+    // colour, since it is the absence of a verdict and not a bad one -- until
+    // the player asks for one.
+    const verdict =
+      lastGrade === null ? '未测试' : lastGrade.stars > 0 ? '★'.repeat(lastGrade.stars) : '未通过';
+    metrics.textContent = `门 ${measured.gate} 个 · 延迟 ${measured.delay} · 拍 ${measured.tick} · 总开销 ${scoreOf(measured)} · ${verdict}`;
+    metrics.style.color =
+      lastGrade === null ? THEME.textMuted : lastGrade.passed ? THEME.success : THEME.error;
   };
   store.subscribe(render);
   render();

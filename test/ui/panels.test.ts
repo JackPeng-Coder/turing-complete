@@ -35,6 +35,7 @@ function makeStore(levelId: string): Store<AppState> {
     camera: { x: 0, y: 0, zoom: 1 },
     selected: [],
     dragging: null,
+    metrics: null,
     lastGrade: null,
     status: null,
   });
@@ -79,7 +80,24 @@ describe('palette panel', () => {
 });
 
 describe('truth table panel', () => {
-  it('reports a pass with the three metrics', () => {
+  it('lays the level’s declared cases out before anything has been run', () => {
+    // The panel is a PLAN, not a report: the columns exist as soon as the level
+    // is open, with the level's own expectations in them, exactly as the
+    // original's bottom panel shows them. Nothing is marked wrong, and no output
+    // is invented -- an unrun circuit has no output, which is what `???` says.
+    const store = makeStore('ch1-04-and-gate');
+    const root = document.createElement('div');
+    mountTruthTable(root, store);
+    expect(root.querySelector('h2')?.textContent).toBe('用例');
+    expect(root.querySelector('.case-count')?.textContent).toBe('共 4 个');
+    // 输入 a / 输入 b / 预期 out / 当前 out
+    expect(root.querySelectorAll('tr')).toHaveLength(4);
+    expect(root.querySelectorAll('td')).toHaveLength(16);
+    expect(root.querySelectorAll('.case-bad')).toHaveLength(0);
+    expect([...root.querySelectorAll('td')].map((td) => td.textContent)).toContain('???');
+  });
+
+  it('reports a pass with the level’s own heading', () => {
     const store = makeStore('ch1-01-crude-awakening');
     store.set({
       lastGrade: {
@@ -94,10 +112,16 @@ describe('truth table panel', () => {
     const root = document.createElement('div');
     mountTruthTable(root, store);
     expect(root.textContent).toContain('全部用例通过');
-    expect(root.textContent).toContain('门 0');
   });
 
-  it('lists failing rows with expected and actual values', () => {
+  /**
+   * The wall of text, pinned. The panel used to print `用例 3 · out3: 0 ≠ 1`
+   * under the matrix, one line per failing case -- which on a fifteen-row level
+   * was fifteen lines of the same sentence, and is the complaint this test
+   * exists to keep fixed. The matrix already says which bit is wrong and for
+   * which case: the cell is outlined.
+   */
+  it('outlines the wrong cell instead of printing a line per failing case', () => {
     const store = makeStore('ch1-04-and-gate');
     store.set({
       lastGrade: {
@@ -120,14 +144,18 @@ describe('truth table panel', () => {
     });
     const root = document.createElement('div');
     mountTruthTable(root, store);
-    expect(root.textContent).toContain('1 ≠ 0');
+    expect(root.querySelector('h2')?.textContent).toBe('未通过');
+    // Exactly one cell -- the FIRST case's `当前 out` -- is outlined.
+    expect(root.querySelectorAll('.case-bad')).toHaveLength(1);
+    expect(root.querySelectorAll('p')).toHaveLength(0);
+    expect(root.textContent).not.toContain('≠');
   });
 
   /**
-   * The auto-test's payoff: while it is on a case, that column is highlighted
-   * and `当前` shows what the CIRCUIT is producing for it, read off the live
-   * board -- not the last grade's record. Playing the cases one at a time is
-   * only worth doing if the answer changes with the case.
+   * The run's payoff: while it is on a case, that column is highlighted and
+   * `当前` shows what the CIRCUIT is producing for it, read off the live board --
+   * not the last grade's record. Playing the cases one at a time is only worth
+   * doing if the answer changes with the case.
    */
   it('reads the current output off the board for the case being played', () => {
     const store = makeStore('ch1-04-and-gate');
@@ -151,7 +179,7 @@ describe('truth table panel', () => {
     expect(root.querySelectorAll('.case-bad')).toHaveLength(1);
     // One cell per row wears the highlight.
     expect(root.querySelectorAll('.case-active')).toHaveLength(4);
-    expect(root.querySelector('.truth-table h2')?.textContent).toBe('正在测试 用例 1');
+    expect(root.querySelector('h2')?.textContent).toBe('正在测试 用例 1 / 4');
 
     live = { out: 0 };
     active = 1;
@@ -159,7 +187,72 @@ describe('truth table panel', () => {
     expect(rows()[3]).toEqual(['', '0', '', '']);
     // A 0 where the second case expects 0: nothing is marked wrong.
     expect(root.querySelectorAll('.case-bad')).toHaveLength(0);
-    expect(root.querySelector('.truth-table h2')?.textContent).toBe('正在测试 用例 2');
+    expect(root.querySelector('h2')?.textContent).toBe('正在测试 用例 2 / 4');
+  });
+
+  /**
+   * A run's numbers outlive the run. The grade cannot supply them -- it records
+   * the cases that FAILED -- so a table that read its `当前` row from the grade
+   * alone would go blank wherever the circuit was right, which is half the
+   * answer a player needs.
+   */
+  it('keeps every case’s number after the run has moved on', () => {
+    const store = makeStore('ch1-04-and-gate');
+    const root = document.createElement('div');
+    const results: Array<Record<string, number> | null> = [
+      { out: 0 },
+      { out: 0 },
+      { out: 0 },
+      { out: 1 },
+    ];
+    mountTruthTable(root, store, { live: () => null, active: () => null, results: () => results });
+
+    const current = [...root.querySelectorAll('tr')][3]!;
+    // A cell is its bits, not text: `panels.test.ts` elsewhere reads every `td`
+    // to prove a failure that drove no vector fabricates no `0`, and a bit cell
+    // that also spelled its value out would defeat that reading.
+    const bits = (tr: Element): string[] =>
+      [...tr.querySelectorAll('td')].map((td) =>
+        [...td.querySelectorAll('.bit')].map((b) => b.className.replace('bit bit-', '')).join(''),
+      );
+    expect(bits(current)).toEqual(['0', '0', '0', '1']);
+    expect(root.querySelectorAll('.case-bad')).toHaveLength(0);
+  });
+
+  it('offers the test and the speed as buttons, and reports the running state', () => {
+    const store = makeStore('ch1-04-and-gate');
+    const root = document.createElement('div');
+    const fired: string[] = [];
+    let testing = false;
+    mountTruthTable(root, store, {
+      live: () => null,
+      active: () => null,
+      testing: () => testing,
+      rate: () => '2×',
+      onToggleTest: () => fired.push('test'),
+      onCycleRate: () => fired.push('rate'),
+    });
+
+    expect(root.querySelector('.case-rate')?.textContent).toBe('2×');
+    (root.querySelector('.case-test') as HTMLButtonElement).click();
+    (root.querySelector('.case-rate') as HTMLButtonElement).click();
+    expect(fired).toEqual(['test', 'rate']);
+
+    testing = true;
+    store.set({});
+    expect(root.querySelector('.case-test')?.textContent).toBe('停止');
+    expect(root.querySelector('.case-test')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('says why a level’s cases cannot be laid out', () => {
+    // A `program` level's vectors only mean anything with the assembled image
+    // loaded into the circuit's RAM. Rendering a made-up column would be showing
+    // the player a test the level never runs.
+    const store = makeStore('ch3-47-turing-complete');
+    const root = document.createElement('div');
+    mountTruthTable(root, store);
+    expect(root.textContent).toContain('无法逐列演示');
+    expect(root.querySelectorAll('td')).not.toHaveLength(0);
   });
 
   it('shows the reason and detail when a failure drove no vector at all', () => {
@@ -200,11 +293,24 @@ describe('truth table panel', () => {
 });
 
 describe('shell bar', () => {
-  it('shows the level name and score once graded', () => {
+  /**
+   * The bar reports two different things and they arrive at different times:
+   * what the circuit COSTS, measured on every edit, and whether it is CORRECT,
+   * which only a test run can say. Saying `未通过` while a player is still
+   * drawing is the behaviour this split removes.
+   */
+  it('measures the circuit on every edit, and stars it only once it is tested', () => {
     const store = makeStore('ch1-04-and-gate');
     const root = document.createElement('div');
     mountShell(root, store, { onOpenMap: () => {} });
     expect(root.textContent).toContain('与门');
+    expect(root.textContent).toContain('尚未评测');
+
+    store.set({ metrics: { gate: 2, delay: 2, tick: 0 } });
+    expect(root.textContent).toContain('总开销 10');
+    expect(root.textContent).toContain('未测试');
+    expect(root.textContent).not.toContain('未通过');
+
     store.set({
       lastGrade: {
         passed: true,
@@ -330,6 +436,7 @@ describe('level io placement', () => {
       camera: { x: 0, y: 0, zoom: 1 },
       selected: [],
       dragging: null,
+      metrics: null,
       lastGrade: null,
       status: null,
     });
@@ -368,6 +475,7 @@ describe('io readout panel', () => {
       camera: { x: 0, y: 0, zoom: 1 },
       selected: [],
       dragging: null,
+      metrics: null,
       lastGrade: null,
       status: null,
     });
@@ -480,7 +588,7 @@ describe('toolbar', () => {
       '放大',
       '缩小',
       '适应画面',
-      '自动测试',
+      '测试',
       '单步',
       '运行',
       '停止并复位',
@@ -516,7 +624,7 @@ describe('toolbar', () => {
     const { root, render } = mount();
     render({ running: false, grid: true, testing: true, rate: '10Hz' });
     expect(root.querySelector('[aria-label="停止测试"]')).not.toBeNull();
-    expect(root.querySelector('[aria-label="自动测试"]')).toBeNull();
+    expect(root.querySelector('[aria-label="测试"]')).toBeNull();
   });
 
   it('starts with nothing pressed and no clock', () => {
@@ -524,7 +632,7 @@ describe('toolbar', () => {
     render({ running: false, grid: true, testing: false, rate: '10Hz' });
     expect(root.querySelector('[aria-label="运行"]')?.getAttribute('aria-pressed')).toBe('false');
     expect(root.querySelector('[aria-label="网格"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect(root.querySelector('[aria-label="自动测试"]')?.getAttribute('aria-pressed')).toBe(
+    expect(root.querySelector('[aria-label="测试"]')?.getAttribute('aria-pressed')).toBe(
       'false',
     );
   });
