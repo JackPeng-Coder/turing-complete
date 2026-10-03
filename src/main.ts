@@ -20,7 +20,7 @@ import { narrativeFor } from './ui/narrative';
 import { renderBoard, type BoardView } from './ui/board/render';
 import { attachBoardInput, deleteSelection } from './ui/board/interact';
 import { createDisplay, type DisplaySimulation, type SignalSnapshot } from './ui/board/signals';
-import { instanceRect, screenToWorld } from './ui/board/view';
+import { instanceRect, screenToWorld, type Point } from './ui/board/view';
 import { testCases, type TestPlan } from './levels/checks';
 import type { LevelSpec } from './levels/spec';
 
@@ -39,6 +39,7 @@ const store: Store<AppState> = createStore<AppState>({
   camera: { x: 40, y: 40, zoom: 1 },
   selected: [],
   dragging: null,
+  armed: null,
   dev,
   metrics: null,
   lastGrade: null,
@@ -148,7 +149,16 @@ if (app) {
    * What the board paints beyond the store: the live pin values and the view
    * flags. Rebuilt by `sample()` on every change to the circuit or the clock.
    */
-  let view: BoardView = { outputs: new Map(), stable: false, grid: true };
+  let view: BoardView = { outputs: new Map(), stable: false, grid: true, ghost: null };
+  /**
+   * Where the pointer is, in world units, or `null` when it is off the board.
+   *
+   * View state, not store state: it changes on every mouse move, and the only
+   * thing that reads it is the ghost of the part armed in the palette. Reported
+   * by the board only while something IS armed, so an unarmed hover costs
+   * nothing at all.
+   */
+  let ghost: Point | null = null;
   /** The running display, or `null` while the circuit cannot be compiled. */
   let display: DisplaySimulation | null = null;
   /** What the level's input pins are driven with while the player builds. */
@@ -190,6 +200,7 @@ if (app) {
       outputs: snapshot?.outputs ?? new Map(),
       stable: snapshot?.stable ?? false,
       grid: gridOn,
+      ghost,
     };
   };
 
@@ -463,13 +474,19 @@ if (app) {
     }
   };
 
-  const onPickPart = (defId: string): void => {
+  const onPickPart = (defId: string | null): void => {
+    if (defId === null) {
+      // The way back to holding nothing: with a part armed, dragging the board
+      // places parts, so panning needs this state.
+      store.set({ armed: null, status: null });
+      return;
+    }
     // The palette only offers ids the registry knows; the guard keeps the
     // "registry.get throws" contract local rather than implied.
     if (!registry.has(defId)) return;
-    canvas.dataset.pendingDef = defId;
     const def = registry.get(defId);
     store.set({
+      armed: defId,
       status: {
         zh: `已选 ${def.name.zh} — 点击画板放置，Esc 取消`,
         en: `${def.name.en} selected — click the board to place, Esc to cancel`,
@@ -485,19 +502,20 @@ if (app) {
   const openLevel = (levelId: string): void => {
     const next = getLevel(levelId);
     stack.clear();
-    canvas.dataset.pendingDef = '';
     running = false;
     stopClock();
     stopTest();
     vector = {};
     plan = null;
     testResults = [];
+    ghost = null;
     // The display is rebuilt from the store's *new* graph, so the store has to
     // be told about the level change first.
     store.set({
       level: next,
       graph: emptyGraph(next.id),
       selected: [],
+      armed: null,
       lastGrade: null,
       metrics: null,
       status: null,
@@ -640,7 +658,15 @@ if (app) {
     driveTo({ ...vector, [pinId]: current >= max ? 0 : current + 1 });
   };
 
-  attachBoardInput(canvas, store, stack, { onChange, onPick: onPickInstance });
+  attachBoardInput(canvas, store, stack, {
+    onChange,
+    onPick: onPickInstance,
+    onHover: (at) => {
+      ghost = at;
+      view = { ...view, ghost };
+      paint();
+    },
+  });
 
   // Render on state change only: a continuous rAF loop would repaint a static
   // board 60 times a second forever. Panning, zooming and dragging all go

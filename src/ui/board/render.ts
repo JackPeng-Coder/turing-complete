@@ -20,6 +20,7 @@
 import {
   BUS_WIDTH,
   GRID,
+  INSTANCE_WIDTH,
   PART_RADIUS,
   PIN_RADIUS,
   THEME,
@@ -30,7 +31,8 @@ import {
   type PartState,
 } from '../theme';
 import type { AppState, Store } from '../../app/store';
-import { instanceRect, pinPosition, worldToScreen, type Camera, type Point } from './view';
+import { instanceRect, placementAt, pinPosition, worldToScreen, type Camera, type Point } from './view';
+import { instanceHeight } from './geometry';
 import { CORNER_RADIUS, cornerRadii, longestSegment, routeWire } from './routing';
 import { planRoutes } from './routes';
 import { partCodeOf } from './markings';
@@ -51,6 +53,14 @@ export interface BoardView {
   readonly stable: boolean;
   /** Whether the snap grid is drawn. */
   readonly grid: boolean;
+  /**
+   * Where the pointer is, in world units, or `null` when it is off the board.
+   *
+   * View state rather than store state: it belongs beside the camera, it changes
+   * on every mouse move, and the only thing on the board that reads it is the
+   * ghost of the part armed in the palette.
+   */
+  readonly ghost: Point | null;
 }
 
 /**
@@ -878,6 +888,32 @@ export function traceLevelArrow(
 }
 
 /**
+ * The selection band, while Ctrl is being dragged.
+ *
+ * Filled and outlined in the operator's colour, the same one a selected part's
+ * outline uses, because it is the same statement: "these are the ones I mean".
+ * It is drawn in WORLD coordinates through the same transform as everything
+ * else, so it stays glued to the parts it is sweeping over while the board is
+ * panned mid-drag.
+ */
+function drawMarquee(ctx: CanvasRenderingContext2D, state: AppState, camera: Camera): void {
+  const drag = state.dragging;
+  if (drag?.kind !== 'marquee') return;
+  const a = worldToScreen(camera, { x: Math.min(drag.x0, drag.x1), y: Math.min(drag.y0, drag.y1) });
+  const b = worldToScreen(camera, { x: Math.max(drag.x0, drag.x1), y: Math.max(drag.y0, drag.y1) });
+  const w = b.x - a.x;
+  const h = b.y - a.y;
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 45, 120, 0.14)';
+  ctx.fillRect(a.x, a.y, w, h);
+  ctx.strokeStyle = THEME.armed;
+  ctx.lineWidth = 1.5 * camera.zoom;
+  ctx.setLineDash([6 * camera.zoom, 4 * camera.zoom]);
+  ctx.strokeRect(a.x, a.y, w, h);
+  ctx.restore();
+}
+
+/**
  * The wire being pulled out of a pin, from that pin to the pointer.
  *
  * Dashed and in the armed colour, so it reads as a proposal rather than as a
@@ -1045,6 +1081,54 @@ function drawInstance(
   }
 }
 
+/**
+ * The part armed in the palette, following the pointer at 45% opacity.
+ *
+ * It is drawn at the position the drop WOULD take (`placementAt`, the same
+ * function the drop itself uses), so the preview is not an approximation of the
+ * result: what you see under the cursor is where the part lands, on the grid,
+ * with the same silhouette and the same marking it will have. A ghost drawn at
+ * the raw pointer would be a preview of a placement that never happens.
+ *
+ * No values, no badges, no pins: this is a part that does not exist yet, and
+ * anything on it that reported a signal would be reporting one from nowhere.
+ */
+function drawGhost(
+  ctx: CanvasRenderingContext2D,
+  state: AppState,
+  camera: Camera,
+  at: Point | null,
+): void {
+  const defId = state.armed;
+  if (!defId || !at || !state.registry.has(defId)) return;
+  const def = state.registry.get(defId);
+  const corner = worldToScreen(camera, placementAt(at, def));
+  const w = INSTANCE_WIDTH * camera.zoom;
+  const h = instanceHeight(def) * camera.zoom;
+  const gate = gateLookOf(def);
+
+  ctx.save();
+  ctx.globalAlpha = 0.45;
+  const isLevelInput = def.category === 'level' && defId === 'level_input';
+  if (isLevelInput) traceLevelArrow(ctx, corner, w, h, camera.zoom);
+  else traceBody(ctx, gate, corner.x, corner.y, w, h, camera.zoom, PART_RADIUS * camera.zoom);
+  ctx.fillStyle = THEME.idleBody;
+  ctx.fill();
+  ctx.strokeStyle = THEME.armed;
+  ctx.lineWidth = Math.max(1, 1.5 * camera.zoom);
+  ctx.stroke();
+  outlinedText(
+    ctx,
+    partCodeOf(def),
+    corner.x + w * LABEL_CENTRE[gate.shape],
+    corner.y + h / 2,
+    Math.max(10, Math.min(16, 15 * camera.zoom)),
+    camera.zoom,
+    w * (gate.shape === 'triangle' ? 0.46 : gate.shape === 'box' ? 0.84 : 0.66),
+  );
+  ctx.restore();
+}
+
 export function renderBoard(
   canvas: HTMLCanvasElement,
   store: Store<AppState>,
@@ -1078,4 +1162,8 @@ export function renderBoard(
   drawWires(ctx, graph, camera, registry, view);
   drawDragPreview(ctx, state, camera);
   for (const inst of graph.instances) drawInstance(ctx, state, inst, camera, view, driven);
+  drawMarquee(ctx, state, camera);
+  // The ghost last: it is the thing the player is holding, and nothing on the
+  // board should be painted over it.
+  drawGhost(ctx, state, camera, view?.ghost ?? null);
 }

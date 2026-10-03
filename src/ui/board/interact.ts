@@ -19,7 +19,7 @@ import type { CommandStack } from '../../app/commands';
 import type { AppState, Store } from '../../app/store';
 import type { LevelSpec } from '../../levels/spec';
 import { INSTANCE_HEIGHT } from '../theme';
-import { instanceHeight } from './geometry';
+import { placementAt, instanceRect } from './geometry';
 import { hitTest, screenToWorld, snap, type Point } from './view';
 
 export interface BoardInputOptions {
@@ -34,6 +34,14 @@ export interface BoardInputOptions {
    * filling in a form.
    */
   onPick?(instId: string): void;
+  /**
+   * Where the pointer is, in world units, or `null` when it has left the board.
+   *
+   * Reported only while a part is armed, because that is the only thing on this
+   * board that follows the pointer: an unarmed hover has nothing to say, and a
+   * repaint per mouse move for nothing is a repaint per mouse move.
+   */
+  onHover?(at: Point | null): void;
 }
 
 /** The instance id a freshly placed level-IO part takes, and the pin's width. */
@@ -184,20 +192,17 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
 
   const instanceOf = (id: string) => store.get().graph.instances.find((i) => i.id === id);
 
-  const armedDef = (): string => (canvas.dataset.pendingDef ?? '').trim();
+  const armedDef = (): string => store.get().armed ?? '';
 
   const place = (world: Point, defId: string): void => {
     // The cursor lands on the part's pin row (its vertical centre) at its left
     // edge, so a part dropped at (px, py) has its output pin at (px + 72, py):
-    // the row the player then drags along to wire it up.
-    //
-    // The half-height is the PART'S OWN, not the registered 72: a splitter is
-    // 192 tall because it has eight pins to hold, and centring one on a fixed 36
-    // dropped it sixty pixels below the pointer.
-    const x = snap(world.x);
+    // the row the player then drags along to wire it up. `placementAt` states
+    // that rule once, because the ghost on the pointer is drawn from it too.
     const reg = store.get().registry;
-    const height = reg.has(defId) ? instanceHeight(reg.get(defId)) : INSTANCE_HEIGHT;
-    const y = snap(world.y - height / 2);
+    const { x, y } = reg.has(defId)
+      ? placementAt(world, reg.get(defId))
+      : { x: snap(world.x), y: snap(world.y - INSTANCE_HEIGHT / 2) };
     const placement = levelIoPlacement(store.get().level, store.get().graph, defId);
     let created: string | null = null;
     stack.push(
@@ -220,6 +225,11 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
       store.get().graph,
     );
     options.onChange();
+    // The part is on the board now, so the ghost would be drawn straight over
+    // it -- the thing you just placed sitting under a translucent copy of
+    // itself until you moved the mouse. It comes back with the next move, which
+    // is also when it has somewhere new to be.
+    options.onHover?.(null);
   };
 
   const onPointerDown = (event: PointerEvent): void => {
@@ -236,6 +246,16 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
       return;
     }
     if (event.button !== 0) return;
+
+    // CTRL DRAGS A SELECTION BAND, wherever it starts: on bare board, on a part,
+    // on a wire. Ctrl is the modifier for "this drag is about selecting", so it
+    // cannot also mean "move this part" -- and a band that starts on top of a
+    // part is exactly how you select that part and its neighbours together.
+    if (event.ctrlKey || event.metaKey) {
+      options.onHover?.(null);
+      store.set({ dragging: { kind: 'marquee', x0: world.x, y0: world.y, x1: world.x, y1: world.y } });
+      return;
+    }
 
     if (hit?.kind === 'pin' && !hit.isInput) {
       pendingFrom = { inst: hit.inst, port: hit.port };
@@ -309,6 +329,23 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
   };
 
   const onPointerMove = (event: PointerEvent): void => {
+    // The ghost only exists while a part is in hand and NOTHING is being dragged:
+    // during a band or a wire the pointer is drawing something else, and a
+    // translucent part riding along on top of it is in the way of the thing the
+    // player is actually doing.
+    if (options.onHover && armedDef() && store.get().dragging === null) {
+      options.onHover(worldPoint(event));
+    }
+
+    const band = store.get().dragging;
+    if (band?.kind === 'marquee') {
+      const at = worldPoint(event);
+      store.set({
+        dragging: { kind: 'marquee', x0: band.x0, y0: band.y0, x1: at.x, y1: at.y },
+      });
+      return;
+    }
+
     // A press on bare board is not a pan until it has moved far enough to be
     // one. Promoting it here rather than at the press means a click moves the
     // view by exactly nothing -- the earlier version panned the pixels a
@@ -361,6 +398,31 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
   };
 
   const onPointerUp = (event: PointerEvent): void => {
+    const band = store.get().dragging;
+    if (band?.kind === 'marquee') {
+      // Everything the band touched, in one selection. A band that never moved
+      // is a point, so it selects the part under it and nothing else -- which
+      // makes Ctrl+click the way to select one part without clearing the rest.
+      const left = Math.min(band.x0, band.x1);
+      const right = Math.max(band.x0, band.x1);
+      const top = Math.min(band.y0, band.y1);
+      const bottom = Math.max(band.y0, band.y1);
+      const { graph, registry } = store.get();
+      const selected: string[] = [];
+      for (const inst of graph.instances) {
+        if (!registry.has(inst.def)) continue;
+        const rect = instanceRect(inst, registry.get(inst.def));
+        const overlaps =
+          rect.x <= right &&
+          rect.x + rect.w >= left &&
+          rect.y <= bottom &&
+          rect.y + rect.h >= top;
+        if (overlaps) selected.push(inst.id);
+      }
+      store.set({ selected, dragging: null });
+      return;
+    }
+
     if (panFrom || panning) {
       const dragged = panning !== null;
       panFrom = null;
@@ -493,10 +555,12 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
     if (event.key === 'Escape' && armedDef()) {
       // Disarm the palette part: without this, stamping stays on forever and
       // every later click on empty space drops another copy.
-      canvas.dataset.pendingDef = '';
-      store.set({ status: null });
+      store.set({ armed: null, status: null });
     }
   };
+
+  /** The pointer left the board: there is nowhere for a ghost to be. */
+  const onPointerLeave = (): void => options.onHover?.(null);
 
   /**
    * RIGHT-CLICK REMOVES WHAT IS UNDER THE POINTER, and nothing else.
@@ -550,6 +614,7 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
   canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('wheel', onWheel, { passive: false });
   canvas.addEventListener('contextmenu', onContextMenu);
+  canvas.addEventListener('pointerleave', onPointerLeave);
   globalThis.addEventListener('keydown', onKeyDown);
 
   return () => {
@@ -558,6 +623,7 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
     canvas.removeEventListener('pointerup', onPointerUp);
     canvas.removeEventListener('wheel', onWheel);
     canvas.removeEventListener('contextmenu', onContextMenu);
+    canvas.removeEventListener('pointerleave', onPointerLeave);
     globalThis.removeEventListener('keydown', onKeyDown);
   };
 }

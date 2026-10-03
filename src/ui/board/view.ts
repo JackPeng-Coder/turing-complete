@@ -13,14 +13,15 @@ import type { Registry } from '../../core/registry';
 import type { Graph } from '../../core/graph';
 import { PIN_RADIUS } from '../theme';
 import { distanceToPath, type Point } from './routing';
-import { instanceRect, pinPosition, snap } from './geometry';
+import { instanceRect, pinPosition, placementAt, snap } from './geometry';
 import { planRoutes } from './routes';
 
 // `Point` is defined next to the routing it is used by, and `instanceRect` /
-// `pinPosition` / `snap` now live in `geometry.ts`. All four are re-exported
-// here, so the board's public geometry still arrives from one module.
+// `pinPosition` / `snap` / `placementAt` now live in `geometry.ts`. All of them
+// are re-exported here, so the board's public geometry still arrives from one
+// module.
 export type { Point };
-export { instanceRect, pinPosition, snap };
+export { instanceRect, pinPosition, placementAt, snap };
 
 export interface Camera {
   x: number;

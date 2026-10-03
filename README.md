@@ -74,6 +74,18 @@ in a corner badge, so `and` and `and8` share a marking and the `8` tells them ap
 the Chinese name, because that is what you read when *choosing* a part; the tooltip carries the English
 name and the board marking, which is where the two vocabularies meet.
 
+The board's gestures:
+
+| Gesture | What it does |
+| --- | --- |
+| Drag empty board, or drag with the middle button | Pan the view |
+| Click empty board | Clear the selection |
+| **Ctrl+drag** | Band-select every part the band touches |
+| Right-click a part or a wire | Delete it — one undoable step |
+| Click a palette slot | Arm that part: the slot stays lit and a translucent copy follows the pointer, on the grid, at the size and position it will land |
+| Click the board while armed | Place a copy, and stay armed so you can stamp several |
+| The ✕ in the palette's plate, or Esc | Put the part back down, which gives the plain drag back to the board |
+
 ## Running it
 
 On any normal machine with Node and pnpm on `PATH`:

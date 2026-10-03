@@ -408,6 +408,22 @@ button { font-family: inherit; }
   color: var(--neon);
 }
 .palette h2::before { content: ''; width: 3px; height: 12px; background: var(--neon); }
+/* The way back to holding nothing. In the plate, so it is where the eye already
+   is when the tray is holding a part, and magenta because it is a control. */
+.palette-release {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--hot);
+  background: transparent;
+  color: var(--hot);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.palette-release:hover { background: var(--hot); color: var(--void); }
 /* A category key: a rule that runs out to the panel's edge, so the groups read as
    dividers in one rack rather than as headings in a list. */
 .palette-group {
@@ -436,6 +452,16 @@ button { font-family: inherit; }
 .palette-item:hover {
   background: var(--slab-lit);
   border-color: var(--hair-lit);
+  border-left-color: var(--hot);
+  color: #fff;
+}
+/* THE ARMED SLOT, which is the part in your hand: filled magenta like every
+   other control that is ON, and it stays lit until the part is placed and the
+   player lets go of it. The ghost under the pointer is the same statement. */
+.palette-item-armed,
+.palette-item-armed:hover {
+  background: rgba(255, 45, 120, 0.18);
+  border-color: var(--hot);
   border-left-color: var(--hot);
   color: #fff;
 }

@@ -463,13 +463,72 @@ test('the packers are blue funnels that hold their pins', async ({ page }) => {
 
   // Blue -- the word colour -- inside both bodies, with nothing wired to them.
   // Green or red here is the defect: it means the part is reporting bit 0.
-  expect(await peakChannel(page, cx - 130, cy - 10, 20, 20, 'blue')).toBeGreaterThan(60);
-  expect(await peakChannel(page, cx + 190, cy - 10, 20, 20, 'blue')).toBeGreaterThan(60);
+  // Sampled low in the body, clear of the marking and of the top bevel.
+  expect(await peakChannel(page, cx - 140, cy + 40, 24, 20, 'blue')).toBeGreaterThan(60);
+  expect(await peakChannel(page, cx + 180, cy + 40, 24, 20, 'blue')).toBeGreaterThan(60);
   // ...and the two colours the old rule would have produced are absent. The bus
   // body's own green-ness is 62 (its blue carries some of the channel), where a
   // lit body reads 184 and a dead one reads negative, so the bar sits between.
-  expect(await peakChannel(page, cx - 130, cy - 10, 20, 20, 'green')).toBeLessThan(120);
-  expect(await peakChannel(page, cx + 190, cy - 10, 20, 20, 'green')).toBeLessThan(120);
+  expect(await peakChannel(page, cx - 140, cy + 40, 24, 20, 'green')).toBeLessThan(120);
+  expect(await peakChannel(page, cx + 180, cy + 40, 24, 20, 'green')).toBeLessThan(120);
+});
+
+/**
+ * THE ARMED PART, in both places it shows: the slot in the tray that stays lit,
+ * and the translucent copy of the part that follows the pointer at the position
+ * the drop would take.
+ *
+ * Both exist because of the same hole: with a part armed, a click on the board
+ * places instead of clearing, so the tray has to say what is in your hand -- and
+ * a drag has to be given back, which is what the ✕ is for.
+ */
+test('the armed part is lit in the tray and carried under the pointer', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  const { cx, cy } = await boardCentre(page);
+
+  const slot = page.getByRole('button', { name: '高电平', exact: true });
+  await slot.click();
+  await expect(slot).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.palette-item-armed')).toHaveCount(1);
+
+  // The ghost is under the pointer, on the grid, at the size the part will be.
+  await page.mouse.move(cx - 120, cy - 40);
+  await page.screenshot({ path: 'test-results/smoke-ghost.png' });
+
+  // ...and the ✕ puts it down, which gives the plain drag back to the board.
+  await expect(page.locator('.palette-release')).toBeVisible();
+  await page.locator('.palette-release').click();
+  await expect(slot).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.palette-item-armed')).toHaveCount(0);
+  await expect(page.locator('.palette-release')).toBeHidden();
+});
+
+/**
+ * Ctrl+drag is the selection band. Checked by what it is FOR: the band sweeps up
+ * both parts in one gesture and the bin takes them both away.
+ */
+test('ctrl+drag bands the parts it sweeps over', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  const { cx, cy } = await placeParts(page);
+  // The probe sits in the source's body: painted green while it is there.
+  expect(await peakGreen(page, cx - 124, cy, 20, 20)).toBeGreaterThan(120);
+
+  await page.keyboard.down('Control');
+  await page.mouse.move(cx - 240, cy - 100);
+  await page.mouse.down();
+  await page.mouse.move(cx + 260, cy + 100, { steps: 8 });
+  // Photographed with the button still down: the band is what is being checked,
+  // and it is gone the moment the pointer is released.
+  await page.screenshot({ path: 'test-results/smoke-marquee.png' });
+  await page.mouse.up();
+  await page.keyboard.up('Control');
+  // Both parts wear the selection outline -- and then the bin takes them both.
+  await page.screenshot({ path: 'test-results/smoke-marquee-selected.png' });
+  await page.getByRole('button', { name: '删除选中' }).click();
+  expect(await peakGreen(page, cx - 124, cy, 20, 20)).toBeLessThan(60);
+  await page.screenshot({ path: 'test-results/smoke-marquee-deleted.png' });
 });
 
 test('chapter 2 is reachable: level 13 opens once chapter 1 is passed', async ({ page }) => {

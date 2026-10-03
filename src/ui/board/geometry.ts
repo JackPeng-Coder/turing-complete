@@ -96,3 +96,16 @@ export function partRects(graph: Graph, registry: Registry): Rect[] {
   }
   return rects;
 }
+
+/**
+ * Where a part dropped at `world` lands.
+ *
+ * The cursor becomes the part's left edge at its vertical centre -- the row of
+ * its first output pin -- so the hand is already on the wire the player is about
+ * to pull. Stated once because two things need it: the drop itself, and the
+ * translucent ghost that shows where the drop will be. A ghost that previewed a
+ * different position from the one the part took would be worse than no ghost.
+ */
+export function placementAt(world: Point, def: ComponentDef): Point {
+  return { x: snap(world.x), y: snap(world.y - instanceHeight(def) / 2) };
+}

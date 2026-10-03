@@ -36,7 +36,15 @@ export type DragState =
    * are about to connect, which is the whole of dragging one.
    */
   | { kind: 'wire'; fromInst: string; fromPort: string; to: Point | null }
-  | { kind: 'pan'; lastX: number; lastY: number };
+  | { kind: 'pan'; lastX: number; lastY: number }
+  /**
+   * The band being dragged across the board with Ctrl held.
+   *
+   * It lives here because the board PAINTS it: a selection rectangle that only
+   * appeared once you let go would give no feedback about what you are about to
+   * select, which is the whole of dragging one.
+   */
+  | { kind: 'marquee'; x0: number; y0: number; x1: number; y1: number };
 
 /** The application's whole observable state. */
 export interface AppState {
@@ -53,6 +61,16 @@ export interface AppState {
    * `app/dev.ts` owns the rule; the two gates are in `app/progress.ts`.
    */
   dev: boolean;
+  /**
+   * The part armed in the palette, waiting to be dropped, or `null`.
+   *
+   * APPLICATION STATE, not a flag on the canvas: arming changes what a click on
+   * the board does, it lights the part's slot in the palette, and it puts a
+   * translucent copy of the part under the pointer. It used to live in
+   * `canvas.dataset.pendingDef`, which only the board could read -- so the
+   * palette had no way to show which of its buttons was live.
+   */
+  armed: string | null;
   /**
    * What the circuit on the board costs, measured as it is edited.
    *

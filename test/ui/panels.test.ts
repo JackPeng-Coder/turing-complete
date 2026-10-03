@@ -35,6 +35,7 @@ function makeStore(levelId: string): Store<AppState> {
     camera: { x: 0, y: 0, zoom: 1 },
     selected: [],
     dragging: null,
+    armed: null,
     dev: false,
     metrics: null,
     lastGrade: null,
@@ -43,13 +44,16 @@ function makeStore(levelId: string): Store<AppState> {
 }
 
 describe('palette panel', () => {
+  /** Every SLOT in the tray. The ✕ that releases the armed part is not one. */
+  const slots = (root: HTMLElement): (string | null)[] =>
+    [...root.querySelectorAll('.palette-item')].map((b) => b.textContent);
+
   it('offers nothing but the starter components while nothing is unlocked', () => {
     // level 2 needs a NAND, which only level 1's reward unlocks
     const store = makeStore('ch1-02-nand-gate');
     const root = document.createElement('div');
     mountPalette(root, store, () => {});
-    const labels = [...root.querySelectorAll('button')].map((b) => b.textContent);
-    expect(labels).toEqual(['关卡输入', '关卡输出']);
+    expect(slots(root)).toEqual(['关卡输入', '关卡输出']);
   });
 
   it('offers a part once its unlocking level is passed', () => {
@@ -72,10 +76,49 @@ describe('palette panel', () => {
   it('reports the picked part id, not its label', () => {
     const store = makeStore('ch1-01-crude-awakening');
     const root = document.createElement('div');
-    const picked: string[] = [];
+    const picked: (string | null)[] = [];
     mountPalette(root, store, (defId) => picked.push(defId));
     const on = [...root.querySelectorAll('button')].find((b) => b.textContent === '高电平');
     on?.click();
+    expect(picked).toEqual(['const_on']);
+  });
+
+  /**
+   * THE WAY BACK TO HOLDING NOTHING, and the slot that shows you are holding
+   * something.
+   *
+   * With a part armed, a drag on the board places parts instead of panning it,
+   * so "nothing armed" is a state a player has to be able to reach without
+   * knowing that Esc is the key.
+   */
+  it('lights the armed slot and offers a way out of it', () => {
+    const store = makeStore('ch1-01-crude-awakening');
+    const root = document.createElement('div');
+    const picked: (string | null)[] = [];
+    mountPalette(root, store, (defId) => picked.push(defId));
+    const slot = (): HTMLButtonElement =>
+      [...root.querySelectorAll<HTMLButtonElement>('.palette-item')].find(
+        (button) => button.textContent === '高电平',
+      )!;
+    const release = (): HTMLButtonElement => root.querySelector('.palette-release')!;
+
+    expect(slot().classList.contains('palette-item-armed')).toBe(false);
+    expect(release().hidden).toBe(true);
+
+    store.set({ armed: 'const_on' });
+    expect(slot().classList.contains('palette-item-armed')).toBe(true);
+    expect(slot().getAttribute('aria-pressed')).toBe('true');
+    expect(release().hidden).toBe(false);
+
+    // The ✕ puts it down.
+    release().click();
+    expect(picked).toEqual([null]);
+
+    // Clicking the slot again does NOT: stamping the same part three times in a
+    // row is the commonest thing a player does, and a slot that put itself down
+    // on the second click would place one part and then silently stop placing.
+    picked.length = 0;
+    slot().click();
     expect(picked).toEqual(['const_on']);
   });
 });
@@ -423,8 +466,16 @@ describe('level io placement', () => {
   }
 
   /** Arms `defId` in the palette and clicks empty board space with it. */
-  function drop(canvas: HTMLCanvasElement, defId: string, x: number, y: number): void {
-    canvas.dataset.pendingDef = defId;
+  function drop(
+    store: Store<AppState>,
+    canvas: HTMLCanvasElement,
+    defId: string,
+    x: number,
+    y: number,
+  ): void {
+    // What a click on the palette does now: the armed part is application state,
+    // not a flag on the canvas, because the palette has to be able to see it.
+    store.set({ armed: defId });
     canvas.dispatchEvent(new PointerEvent('pointerdown', { clientX: x, clientY: y, button: 0 }));
   }
 
@@ -454,6 +505,7 @@ describe('level io placement', () => {
       camera: { x: 0, y: 0, zoom: 1 },
       selected: [],
       dragging: null,
+      armed: null,
       dev: false,
       metrics: null,
       lastGrade: null,
@@ -465,8 +517,8 @@ describe('level io placement', () => {
     canvas.setPointerCapture = () => {};
     const detach = attachBoardInput(canvas, store, new CommandStack(), { onChange: () => {} });
     try {
-      drop(canvas, 'level_input', 40, 40);
-      drop(canvas, 'level_output', 400, 40);
+      drop(store, canvas, 'level_input', 40, 40);
+      drop(store, canvas, 'level_output', 400, 40);
     } finally {
       detach();
     }
@@ -494,6 +546,7 @@ describe('io readout panel', () => {
       camera: { x: 0, y: 0, zoom: 1 },
       selected: [],
       dragging: null,
+      armed: null,
       dev: false,
       metrics: null,
       lastGrade: null,

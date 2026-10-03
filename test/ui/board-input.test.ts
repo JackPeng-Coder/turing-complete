@@ -36,6 +36,7 @@ function board(): { store: Store<AppState>; stack: CommandStack; graph: Graph } 
     camera: { x: 0, y: 0, zoom: 1 },
     selected: [],
     dragging: null,
+    armed: null,
     dev: false,
     metrics: null,
     lastGrade: null,
@@ -54,18 +55,19 @@ function board(): { store: Store<AppState>; stack: CommandStack; graph: Graph } 
  */
 function attach(store: Store<AppState>, stack: CommandStack): {
   rightClick(at: Point): boolean;
-  drag(from: Point, to: Point): void;
+  drag(from: Point, to: Point, options?: { ctrl?: boolean }): void;
   detach(): void;
 } {
   const canvas = document.createElement('canvas');
   canvas.setPointerCapture = () => {};
   const detach = attachBoardInput(canvas, store, stack, { onChange: () => {} });
-  const send = (type: string, at: Point): void => {
+  const send = (type: string, at: Point, ctrl = false): void => {
     canvas.dispatchEvent(
       new PointerEvent(type, {
         clientX: at.x,
         clientY: at.y,
         button: 0,
+        ctrlKey: ctrl,
         pointerId: 1,
         bubbles: true,
       }),
@@ -82,10 +84,11 @@ function attach(store: Store<AppState>, stack: CommandStack): {
       canvas.dispatchEvent(event);
       return event.defaultPrevented;
     },
-    drag(from: Point, to: Point): void {
-      send('pointerdown', from);
-      send('pointermove', to);
-      send('pointerup', to);
+    drag(from: Point, to: Point, options?: { ctrl?: boolean }): void {
+      const ctrl = options?.ctrl ?? false;
+      send('pointerdown', from, ctrl);
+      send('pointermove', to, ctrl);
+      send('pointerup', to, ctrl);
     },
     detach,
   };
@@ -213,6 +216,54 @@ describe('dragging bare board', () => {
       drag({ x: 600, y: 500 }, { x: 602, y: 501 });
       expect(store.get().selected).toEqual([]);
       expect(store.get().camera).toEqual({ x: 0, y: 0, zoom: 1 });
+    } finally {
+      detach();
+    }
+  });
+});
+
+/**
+ * Ctrl+drag is the selection band, and it is the reason the pan and the band can
+ * share the left button: Ctrl is the modifier for "this drag is about selecting",
+ * so it wins wherever it starts -- over bare board, over a part, over a wire --
+ * and a plain drag keeps meaning whatever the thing under it means.
+ */
+describe('the selection band', () => {
+  it('selects every part it sweeps over, and only those', () => {
+    const { store, stack, graph } = board();
+    const { drag, detach } = attach(store, stack);
+    try {
+      // The source is at (0,0)-(72,72); the gate at (200,0)-(272,72).
+      drag({ x: -20, y: -20 }, { x: 100, y: 100 }, { ctrl: true });
+      expect(store.get().selected).toEqual([graph.instances[0]!.id]);
+      expect(store.get().camera).toEqual({ x: 0, y: 0, zoom: 1 });
+      expect(store.get().dragging).toBeNull();
+    } finally {
+      detach();
+    }
+  });
+
+  it('takes both when the band covers both', () => {
+    const { store, stack, graph } = board();
+    const { drag, detach } = attach(store, stack);
+    try {
+      drag({ x: -20, y: -20 }, { x: 400, y: 100 }, { ctrl: true });
+      expect(store.get().selected).toHaveLength(2);
+      expect(store.get().selected).toContain(graph.instances[1]!.id);
+    } finally {
+      detach();
+    }
+  });
+
+  it('is a band across bare board, not a pan', () => {
+    // The two gestures share the left button, so this is the assertion that the
+    // modifier is what separates them.
+    const { store, stack } = board();
+    const { drag, detach } = attach(store, stack);
+    try {
+      drag({ x: 600, y: 400 }, { x: 700, y: 500 }, { ctrl: true });
+      expect(store.get().camera).toEqual({ x: 0, y: 0, zoom: 1 });
+      expect(store.get().selected).toEqual([]);
     } finally {
       detach();
     }
