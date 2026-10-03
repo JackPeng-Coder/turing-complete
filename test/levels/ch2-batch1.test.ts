@@ -77,12 +77,6 @@ function rowFor(rows: readonly TruthRow[], inputs: Record<string, number>): Trut
   );
 }
 
-/** High bits in the low `bits` bits of `value`. */
-function onesIn(value: number, bits: number): number {
-  let count = 0;
-  for (let bit = 0; bit < bits; bit += 1) if ((value >>> bit) & 1) count += 1;
-  return count;
-}
 
 /**
  * Why this level's checks would let a circuit pass unmeasured, in the words of

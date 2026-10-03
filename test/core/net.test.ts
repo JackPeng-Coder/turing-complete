@@ -1078,7 +1078,7 @@ function narrowDriverFixture(): WideFixture {
   const registry = createRegistry([...BASE_DEFS, feedDef(8), passDef(1), passDef(8)]);
   const g = emptyGraph();
   const bit = addInstance(g, 'pass1', 0, 0, 'bit');
-  const feed = addInstance(g, 'feed8', 0, 40, 'feed');
+  addInstance(g, 'feed8', 0, 40, 'feed');
   const wide = addInstance(g, 'pass8', 0, 80, 'wide');
   connect(g, { inst: bit.id, port: 'out' }, { inst: wide.id, port: 'in' });
   return { graph: g, registry };

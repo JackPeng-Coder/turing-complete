@@ -493,7 +493,7 @@ afterEach(() => {
 });
 
 /** A checker that drives the level's own pins and reports what it saw. */
-const sweepAnd: CustomChecker = (io, spec) => {
+const sweepAnd: CustomChecker = (io, _spec) => {
   const failures: CheckFailure[] = [];
   for (const [a, b] of [
     [0x0f, 0x33],

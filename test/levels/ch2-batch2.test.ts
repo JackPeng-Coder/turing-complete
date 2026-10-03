@@ -19,7 +19,6 @@ import type {
   CheckFailure,
   FuzzCheck,
   FuzzVector,
-  LevelCheck,
   LevelSpec,
   TruthRow,
 } from '../../src/levels/spec';

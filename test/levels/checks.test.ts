@@ -293,7 +293,7 @@ describe('multi-output binding', () => {
     const xor = addInstance(g, 'xor', 60, 20);
     const and = addInstance(g, 'and', 60, 80);
     const sum = addInstance(g, 'level_output', 160, 20, 'OUT_sum');
-    const carry = addInstance(g, 'level_output', 160, 80, 'OUT_carry');
+    addInstance(g, 'level_output', 160, 80, 'OUT_carry');
     connect(g, { inst: inA.id, port: 'out' }, { inst: xor.id, port: 'a' });
     connect(g, { inst: inB.id, port: 'out' }, { inst: xor.id, port: 'b' });
     connect(g, { inst: inA.id, port: 'out' }, { inst: and.id, port: 'a' });

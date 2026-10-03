@@ -1,6 +1,6 @@
 import type { Graph } from '../../src/core/graph';
 import { addInstance, connect, emptyGraph } from '../../src/core/graph';
-import { build, type Node } from './build';
+import { build } from './build';
 
 /** Sets a level `level_output` instance's pin width (`params.width`). */
 function outWidth(g: Graph, id: string, width: number): void {
