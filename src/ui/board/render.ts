@@ -586,6 +586,26 @@ function drawWire(
 }
 
 /**
+ * Where a bus's value is written: the SCREEN point at the middle of its longest
+ * run, or `null` when the label would not fit.
+ *
+ * Its own function because the camera is not optional here and the bug was
+ * exactly that. The painter used to call `worldToScreen({ x: 0, y: 0, zoom },
+ * segment.mid)` -- a camera with no pan -- so the label was drawn
+ * `camera.x * zoom` pixels away from its wire: a fifth of a screen at zoom 4,
+ * and moving further off with every click of the zoom button, which is what the
+ * player noticed. The number belongs ON the wire, at every zoom and every pan.
+ */
+export function valueLabelAt(
+  points: readonly Point[],
+  camera: Camera,
+): { text: Point; length: number } | null {
+  const segment = longestSegment(points);
+  if (!segment) return null;
+  return { text: worldToScreen(camera, segment.mid), length: segment.length * camera.zoom };
+}
+
+/**
  * A bus's value, written on its longest segment.
  *
  * Room is the constraint, not the number: a label longer than the wire it sits
@@ -598,13 +618,14 @@ function drawValueLabel(
   ctx: CanvasRenderingContext2D,
   points: readonly Point[],
   value: number,
-  zoom: number,
+  camera: Camera,
 ): void {
-  const segment = longestSegment(points);
-  if (!segment) return;
-  const length = segment.length * zoom;
+  const anchor = valueLabelAt(points, camera);
+  if (!anchor) return;
+  const { text: at, length } = anchor;
   if (length < 24) return;
 
+  const zoom = camera.zoom;
   const size = Math.max(9, Math.min(15, 13 * zoom));
   ctx.font = `bold ${size}px ui-monospace, "Cascadia Mono", Consolas, monospace`;
   ctx.textAlign = 'center';
@@ -615,7 +636,6 @@ function drawValueLabel(
   }
   if (ctx.measureText(text).width > length) return;
 
-  const at = worldToScreen({ x: 0, y: 0, zoom }, segment.mid);
   ctx.lineWidth = Math.max(2, 3 * zoom);
   ctx.strokeStyle = THEME.board;
   ctx.strokeText(text, at.x, at.y);
@@ -758,7 +778,7 @@ function drawWires(
     const value = outputValue(view, from.id, wire.from.port);
     drawWire(ctx, points, width, value, camera);
     if (width > 1 && value !== undefined && value !== 0) {
-      drawValueLabel(ctx, points, value, camera.zoom);
+      drawValueLabel(ctx, points, value, camera);
     }
   }
 }

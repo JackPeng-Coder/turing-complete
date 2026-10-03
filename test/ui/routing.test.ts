@@ -9,8 +9,9 @@ import {
   routeWire,
   type Point,
 } from '../../src/ui/board/routing';
-import { hitTest, pinPosition } from '../../src/ui/board/view';
+import { hitTest, pinPosition, worldToScreen } from '../../src/ui/board/view';
 import { planRoutes } from '../../src/ui/board/routes';
+import { valueLabelAt } from '../../src/ui/board/render';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { addInstance, connect, emptyGraph } from '../../src/core/graph';
@@ -136,6 +137,54 @@ describe('distanceToPath', () => {
   it('is the whole path length from one end to the other', () => {
     // 100 + 100 + 100: the path is three equal legs, not a 200 unit diagonal.
     expect(pathLength(route)).toBe(300);
+  });
+});
+
+/**
+ * WHERE A BUS WRITES ITS VALUE.
+ *
+ * The painter used to hand `worldToScreen` a camera with no pan -- `{ x: 0, y: 0,
+ * zoom }` -- so the number was drawn `camera.x * zoom` pixels off its own wire: a
+ * fifth of a screen at zoom 4, drifting further with every click of the zoom
+ * button. The player saw it as a zoom bug, and it was one: the label moved and
+ * the wire did not.
+ */
+describe('the bus value label', () => {
+  const route: Point[] = [
+    { x: 0, y: 0 },
+    { x: 200, y: 0 },
+    { x: 200, y: 40 },
+  ];
+
+  it('sits at the middle of the longest run, in SCREEN coordinates', () => {
+    const at = valueLabelAt(route, { x: 0, y: 0, zoom: 1 });
+    expect(at?.text).toEqual({ x: 100, y: 0 });
+    expect(at?.length).toBe(200);
+  });
+
+  it('follows the pan: a moved camera moves the label by the same amount', () => {
+    const home = valueLabelAt(route, { x: 0, y: 0, zoom: 1 })!;
+    const panned = valueLabelAt(route, { x: 40, y: 25, zoom: 1 })!;
+    expect(panned.text.x - home.text.x).toBe(40);
+    expect(panned.text.y - home.text.y).toBe(25);
+  });
+
+  it('follows the zoom, and stays on its wire', () => {
+    // The contract in one line: the label's screen point is where the wire's
+    // world point lands. Anything else is the label being drawn somewhere the
+    // wire is not, whatever the numbers happen to be.
+    for (const zoom of [0.5, 1, 2, 4]) {
+      const camera = { x: 40, y: 40, zoom };
+      const at = valueLabelAt(route, camera)!;
+      expect(at.text).toEqual(worldToScreen(camera, { x: 100, y: 0 }));
+      // ...and the length it measures room against is the SCREEN length, or a
+      // label would be truncated by a zoom it does not know about.
+      expect(at.length).toBe(200 * zoom);
+    }
+  });
+
+  it('is null for a path with no length to write on', () => {
+    expect(valueLabelAt([{ x: 5, y: 5 }], { x: 0, y: 0, zoom: 1 })).toBeNull();
   });
 });
 
