@@ -86,13 +86,36 @@ function roundedRect(
   y: number,
   w: number,
   h: number,
-  r: number,
+  r: number | readonly number[],
 ): void {
   ctx.beginPath();
   // `roundRect` is the fast path on every current browser; the rectangle
   // fallback keeps an older one from throwing once per frame.
-  if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, r);
+  if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, r as number);
   else ctx.rect(x, y, w, h);
+}
+
+/**
+ * The outline of a part's body.
+ *
+ * A primitive boolean gate gets the original's own silhouette -- a flat left
+ * edge where its inputs arrive and a semicircular right one with the output at
+ * its tip -- while everything else is a rounded rectangle. The distinction is
+ * the original's, and it is worth keeping: a board of identical boxes gives no
+ * clue which parts are the tiny gates and which are the machine.
+ *
+ * `roundRect` takes one radius per corner, so the D is a corner list and not a
+ * hand-built arc.
+ */
+function bodyShape(
+  def: ComponentDef,
+  w: number,
+  h: number,
+  zoom: number,
+): number | readonly number[] {
+  if (def.category === 'logic1') return [0, h / 2, h / 2, 0];
+  if (def.category === 'level') return h / 2;
+  return PART_RADIUS * zoom;
 }
 
 /**
@@ -504,6 +527,33 @@ function drawLevelInput(
   ctx.fill();
 }
 
+/**
+ * The wire being pulled out of a pin, from that pin to the pointer.
+ *
+ * Dashed and in the armed colour, so it reads as a proposal rather than as a
+ * connection: nothing exists in the graph until the pointer is released on an
+ * input pin.
+ */
+function drawDragPreview(
+  ctx: CanvasRenderingContext2D,
+  state: AppState,
+  camera: Camera,
+): void {
+  const drag = state.dragging;
+  if (drag?.kind !== 'wire' || !drag.to) return;
+  const from = state.graph.instances.find((inst) => inst.id === drag.fromInst);
+  if (!from || !state.registry.has(from.def)) return;
+  const a = pinPosition(from, state.registry.get(from.def), drag.fromPort, false);
+  ctx.save();
+  ctx.setLineDash([6 * camera.zoom, 5 * camera.zoom]);
+  ctx.lineCap = 'round';
+  tracePath(ctx, routeWire(a, drag.to), camera);
+  ctx.strokeStyle = THEME.armed;
+  ctx.lineWidth = WIRE_WIDTH * camera.zoom * 0.8;
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawInstance(
   ctx: CanvasRenderingContext2D,
   state: AppState,
@@ -520,11 +570,8 @@ function drawInstance(
   const w = rect.w * camera.zoom;
   const h = rect.h * camera.zoom;
   const isSelected = selected.includes(inst.id);
-  const isLevel = def.category === 'level';
-  const isLevelInput = isLevel && inst.id.startsWith('IN_');
-  // A level pin is a pill or a circle rather than a box: it is the level's own
-  // connector, not a component, and the original draws the two differently.
-  const radius = isLevel ? h / 2 : PART_RADIUS * camera.zoom;
+  const isLevelInput = def.category === 'level' && inst.id.startsWith('IN_');
+  const radius = bodyShape(def, w, h, camera.zoom);
 
   if (isLevelInput) {
     drawLevelInput(ctx, p, w, h, camera.zoom);
@@ -568,10 +615,13 @@ function drawInstance(
   } else {
     const label = labelOf(inst, def);
     const size = Math.max(10, Math.min(16, 15 * camera.zoom));
+    // A D-shaped gate's right half is its arc, so its text sits left of centre
+    // to stay on the flat part of the body.
+    const shift = def.category === 'logic1' ? h * 0.12 : 0;
     outlinedText(
       ctx,
       label,
-      p.x + w / 2,
+      p.x + w / 2 - shift,
       p.y + h / 2,
       size,
       camera.zoom,
@@ -639,5 +689,6 @@ export function renderBoard(
   const driven = drivenInputs(graph, view);
   // Wires under parts: a part body must stay readable where a wire runs into it.
   drawWires(ctx, graph, camera, registry, view);
+  drawDragPreview(ctx, state, camera);
   for (const inst of graph.instances) drawInstance(ctx, state, inst, camera, view, driven);
 }

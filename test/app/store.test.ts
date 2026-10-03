@@ -163,7 +163,11 @@ describe('AppState through createStore', () => {
     const store = createStore<AppState>(appState());
     const drags: DragState[] = [
       { kind: 'instance', ids: ['i1'], offsetX: 4, offsetY: -2 },
-      { kind: 'wire', fromInst: 'i1', fromPort: 'out' },
+      // A wire drag starts with no pointer position and gains one on the first
+      // move; both states have to survive a `set`, because the board paints the
+      // second and the pin highlight needs the first.
+      { kind: 'wire', fromInst: 'i1', fromPort: 'out', to: null },
+      { kind: 'wire', fromInst: 'i1', fromPort: 'out', to: { x: 8, y: 12 } },
       { kind: 'pan', lastX: 10, lastY: 20 },
       { kind: 'marquee', x0: 1, y0: 2, x1: 3, y1: 4 },
     ];

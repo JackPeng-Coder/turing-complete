@@ -186,8 +186,11 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
 
     if (hit?.kind === 'pin' && !hit.isInput) {
       pendingFrom = { inst: hit.inst, port: hit.port };
-      // Published so the board can light up the pin the wire is coming from.
-      store.set({ dragging: { kind: 'wire', fromInst: hit.inst, fromPort: hit.port } });
+      // Published so the board can draw the wire following the pointer, and
+      // light up the pin it is coming from.
+      store.set({
+        dragging: { kind: 'wire', fromInst: hit.inst, fromPort: hit.port, to: null },
+      });
       return;
     }
 
@@ -259,6 +262,20 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
         },
       });
       panning = now;
+      return;
+    }
+
+    if (pendingFrom) {
+      // The rubber band. One repaint per move is the point: what moved is the
+      // wire.
+      store.set({
+        dragging: {
+          kind: 'wire',
+          fromInst: pendingFrom.inst,
+          fromPort: pendingFrom.port,
+          to: worldPoint(event),
+        },
+      });
       return;
     }
 

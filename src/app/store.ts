@@ -22,12 +22,20 @@ import type { Registry } from '../core/registry';
 import type { GradeResult } from '../levels/grader';
 import type { LevelSpec } from '../levels/spec';
 import type { Progress } from './progress';
-import type { Camera } from '../ui/board/view';
+import type { Camera, Point } from '../ui/board/view';
 
 /** What the pointer is currently doing on the board. */
 export type DragState =
   | { kind: 'instance'; ids: string[]; offsetX: number; offsetY: number }
-  | { kind: 'wire'; fromInst: string; fromPort: string }
+  /**
+   * A wire being pulled out of an output pin.
+   *
+   * `to` is where the pointer is, in world units, or `null` before it has moved.
+   * It lives here rather than in the input module because the board PAINTS it:
+   * a wire that appears only once you let go gives no feedback about what you
+   * are about to connect, which is the whole of dragging one.
+   */
+  | { kind: 'wire'; fromInst: string; fromPort: string; to: Point | null }
   | { kind: 'pan'; lastX: number; lastY: number }
   | { kind: 'marquee'; x0: number; y0: number; x1: number; y1: number };
 

@@ -122,6 +122,26 @@ html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--
 .overlay-tools { top: 12px; left: 220px; }
 .overlay-parts { top: 12px; right: 12px; bottom: calc(var(--test-h) + 12px); width: 216px; }
 .overlay-tests { left: 0; right: 0; bottom: 0; }
+/* The chevron rides just above the test panel. Because its `bottom` is measured
+   from `--test-h`, collapsing the panel carries the button down with it. */
+.overlay-toggle { left: 14px; bottom: calc(var(--test-h) + 6px); }
+.board-stage.collapsed { --test-h: 0px; }
+/* `box-sizing: border-box` floors a zero height at the padding, so a collapsed
+   panel would still show a 32 pixel strip of itself. The padding has to go with
+   the height. */
+.board-stage.collapsed .truth-table { padding: 0; box-shadow: none; overflow: hidden; }
+.panel-toggle {
+  width: 38px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.panel-toggle:hover { background: var(--panel-hover); }
 
 .card {
   width: 100%;

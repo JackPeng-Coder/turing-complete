@@ -74,8 +74,26 @@ if (app) {
   partsOverlay.className = 'overlay overlay-parts';
   const testsOverlay = document.createElement('div');
   testsOverlay.className = 'overlay overlay-tests';
-  stage.append(partsOverlay, testsOverlay);
+  const toggleOverlay = document.createElement('div');
+  toggleOverlay.className = 'overlay overlay-toggle';
+  stage.append(partsOverlay, testsOverlay, toggleOverlay);
   boardScreen.append(stage);
+
+  // The original's chevron: the test panel takes a fifth of the board, and a
+  // player wiring a big circuit wants it back. Collapsing sets `--test-h` to
+  // zero on the stage, which moves this button down with it and lets the parts
+  // panel grow into the space -- one class, three consequences.
+  const collapse = document.createElement('button');
+  collapse.type = 'button';
+  collapse.className = 'panel-toggle';
+  collapse.textContent = '⌄';
+  collapse.setAttribute('aria-label', '收起用例面板');
+  collapse.addEventListener('click', () => {
+    const collapsed = stage.classList.toggle('collapsed');
+    collapse.textContent = collapsed ? '⌃' : '⌄';
+    collapse.setAttribute('aria-label', collapsed ? '展开用例面板' : '收起用例面板');
+  });
+  toggleOverlay.append(collapse);
 
   /**
    * What the board paints beyond the store: the live pin values and the view
