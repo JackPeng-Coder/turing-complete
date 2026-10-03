@@ -89,7 +89,7 @@ async function wireParts(page: Page, cx: number, cy: number): Promise<void> {
   await dragWire(page, cx - 160 + 72, cy, cx + 160, cy);
 }
 
-test('level 1 is playable end to end and shows its epilogue', async ({ page }) => {
+test('level 1 is playable end to end and shows its pass dialog', async ({ page }) => {
   await page.goto('/');
   // The briefing overlay covers the board, so it has to go before the canvas
   // can be touched at all.
@@ -105,11 +105,54 @@ test('level 1 is playable end to end and shows its epilogue', async ({ page }) =
 
   // The level is a single truth-table row that must read 1.
   await expect(page.locator('.truth-table')).toContainText('全部用例通过');
-  await expect(page.locator('.shell-metrics')).toContainText('得分');
+  await expect(page.locator('.shell-metrics')).toContainText('总开销');
 
-  // Passing a level shows its epilogue, which never takes part in grading.
-  await expect(page.locator('.briefing')).toContainText('门开了');
+  // Passing opens the result dialog: the original's contents -- what the level
+  // unlocked, what the circuit cost, and a way onward -- plus this project's own
+  // epilogue, which never takes part in grading.
+  const result = page.locator('.result');
+  await expect(result).toContainText('解锁内容');
+  await expect(result).toContainText('关卡小结');
+  await expect(result).toContainText('关卡完成');
+  await expect(result).toContainText('门开了');
   await page.screenshot({ path: 'test-results/smoke-level1-passed.png' });
+});
+
+/**
+ * The dialog used to be the level's epilogue, re-shown by every `regrade()` that
+ * still passed -- which is every edit after the first pass, so it reappeared on
+ * the next click and the click after that. This is that bug, pinned.
+ */
+test('the pass dialog appears once, and does not come back on the next edit', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+
+  const { cx, cy } = await placeParts(page);
+  await wireParts(page, cx, cy);
+  await expect(page.locator('.result')).toBeVisible();
+
+  await page.getByRole('button', { name: '继续' }).click();
+  await expect(page.locator('.result')).toHaveCount(0);
+
+  // An edit that leaves the circuit passing -- a spare part on the board -- is
+  // exactly what used to reopen it.
+  await place(page, '高电平', cx - 160, cy + 160);
+  await expect(page.locator('.truth-table')).toContainText('全部用例通过');
+  await expect(page.locator('.result')).toHaveCount(0);
+});
+
+test('the pass dialog leads to the next level', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+
+  const { cx, cy } = await placeParts(page);
+  await wireParts(page, cx, cy);
+
+  await page.getByRole('button', { name: '下一关' }).click();
+  await expect(page.locator('.result')).toHaveCount(0);
+  // Level 2, and its own briefing, exactly as opening it from the map would.
+  await expect(page.locator('.shell-bar')).toContainText('与非门');
+  await expect(page.locator('.briefing')).toBeVisible();
 });
 
 test('progress survives a reload and unlocks the next level', async ({ page }) => {
@@ -204,13 +247,13 @@ test('a chapter-2 level opens and grades end to end', async ({ page }) => {
 
   // The grade is the level's own: a truth table over a and inv, all four rows.
   await expect(page.locator('.truth-table')).toContainText('全部用例通过');
-  await expect(page.locator('.shell-metrics')).toContainText('得分');
+  await expect(page.locator('.shell-metrics')).toContainText('总开销');
   await page.screenshot({ path: 'test-results/smoke-ch2-level31-passed.png' });
 
   // Passing wrote progress, which is what makes this "graded" rather than
   // merely "displayed": level 31 has its star and level 32 is unlocked.
-  await expect(page.locator('.briefing')).toContainText('电路安静地运转着');
-  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.result')).toContainText('电路安静地运转着');
+  await page.getByRole('button', { name: '继续' }).click();
   await page.getByRole('button', { name: '章节地图' }).click();
   await expect(page.locator('.map-tile').nth(30)).toContainText('★');
   await expect(page.locator('.map-tile').nth(31)).toBeEnabled();

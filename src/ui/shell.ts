@@ -82,7 +82,7 @@ export function mountShell(
       return;
     }
     const stars = lastGrade.stars > 0 ? '★'.repeat(lastGrade.stars) : '未通过';
-    metrics.textContent = `门 ${lastGrade.metrics.gate} 个 · 延迟 ${lastGrade.metrics.delay} · 拍 ${lastGrade.metrics.tick} · 得分 ${lastGrade.score} · ${stars}`;
+    metrics.textContent = `门 ${lastGrade.metrics.gate} 个 · 延迟 ${lastGrade.metrics.delay} · 拍 ${lastGrade.metrics.tick} · 总开销 ${lastGrade.score} · ${stars}`;
     metrics.style.color = lastGrade.passed ? THEME.success : THEME.error;
   };
   store.subscribe(render);
@@ -120,6 +120,7 @@ export type IconName =
   | 'stop'
   | 'grid'
   | 'trash'
+  | 'test'
   | 'fit';
 
 /** Stroke-only 24x24 glyphs, so a button's colour drives the whole icon. */
@@ -136,6 +137,8 @@ const ICON_PATHS: Record<IconName, string> = {
   stop: 'M6 6h12v12H6z',
   grid: 'M4 8h16M4 16h16M8 4v16M16 4v16',
   trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
+  // A clipboard with a tick on it: the level's cases, run one at a time.
+  test: 'M9 4h6v3H9zM7 5H5v15h14V5h-2M9 13l2 2 4-4',
   fit: 'M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5',
 };
 

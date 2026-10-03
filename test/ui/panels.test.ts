@@ -123,6 +123,45 @@ describe('truth table panel', () => {
     expect(root.textContent).toContain('1 ≠ 0');
   });
 
+  /**
+   * The auto-test's payoff: while it is on a case, that column is highlighted
+   * and `当前` shows what the CIRCUIT is producing for it, read off the live
+   * board -- not the last grade's record. Playing the cases one at a time is
+   * only worth doing if the answer changes with the case.
+   */
+  it('reads the current output off the board for the case being played', () => {
+    const store = makeStore('ch1-04-and-gate');
+    const root = document.createElement('div');
+    let active: number | null = 0;
+    let live: Record<string, number> | null = { out: 1 };
+    mountTruthTable(root, store, { live: () => live, active: () => active });
+
+    /** Each row as its cells read: a bare bit, or the arrow's own class. */
+    const rows = (): string[][] =>
+      [...root.querySelectorAll('tr')].map((tr) =>
+        [...tr.querySelectorAll('td')].map((td) =>
+          [...td.querySelectorAll('.bit')].map((b) => b.className.replace('bit bit-', '')).join(''),
+        ),
+      );
+
+    // The AND level's own rows: 00, 01, 10, 11 -> 0, 0, 0, 1.
+    // Rows are 输入 a, 输入 b, 预期 out, 当前 out.
+    expect(rows()[3]).toEqual(['1', '', '', '']);
+    // ...and the live 1 disagrees with that case's expected 0.
+    expect(root.querySelectorAll('.case-bad')).toHaveLength(1);
+    // One cell per row wears the highlight.
+    expect(root.querySelectorAll('.case-active')).toHaveLength(4);
+    expect(root.querySelector('.truth-table h2')?.textContent).toBe('正在测试 用例 1');
+
+    live = { out: 0 };
+    active = 1;
+    store.set({});
+    expect(rows()[3]).toEqual(['', '0', '', '']);
+    // A 0 where the second case expects 0: nothing is marked wrong.
+    expect(root.querySelectorAll('.case-bad')).toHaveLength(0);
+    expect(root.querySelector('.truth-table h2')?.textContent).toBe('正在测试 用例 2');
+  });
+
   it('shows the reason and detail when a failure drove no vector at all', () => {
     // The `unstable` reason (levels 28 and 30) is raised by `settle`, before any
     // vector is driven, so all three maps are empty. Rendering those pins as 0
@@ -176,7 +215,7 @@ describe('shell bar', () => {
         issues: [],
       },
     });
-    expect(root.textContent).toContain('得分 10');
+    expect(root.textContent).toContain('总开销 10');
     expect(root.textContent).toContain('★★★');
   });
 
@@ -423,6 +462,7 @@ describe('toolbar', () => {
       onStep: () => fired.push('step'),
       onToggleRun: () => fired.push('run'),
       onStop: () => fired.push('stop'),
+      onToggleTest: () => fired.push('test'),
     });
     return { root, fired, render: toolbar.render };
   }
@@ -435,15 +475,28 @@ describe('toolbar', () => {
     // No button here is decorative: a tool that looks live and does nothing is
     // only discovered by clicking it.
     const { root, fired, render } = mount();
-    render({ running: false, grid: true, rate: '10Hz' });
-    for (const label of ['放大', '缩小', '适应画面', '单步', '运行', '停止并复位', '网格', '删除选中']) {
-      press(root, label);
-    }
+    render({ running: false, grid: true, testing: false, rate: '10Hz' });
+    const labels = [
+      '放大',
+      '缩小',
+      '适应画面',
+      '自动测试',
+      '单步',
+      '运行',
+      '停止并复位',
+      '网格',
+      '删除选中',
+    ];
+    // The grid has an odd count, so one cell is a spacer element rather than a
+    // button; this is what keeps a tenth, inert one from being added later.
+    expect(root.querySelectorAll('button')).toHaveLength(labels.length);
+    for (const label of labels) press(root, label);
     expect(fired).toEqual([
       'zoom:1.25',
       'zoom:0.8',
       // 0 is the toolbar's "fit it on screen", not a zoom factor
       'zoom:0',
+      'test',
       'step',
       'run',
       'stop',
@@ -454,16 +507,26 @@ describe('toolbar', () => {
 
   it('shows the run button as paused while the clock is running', () => {
     const { root, render } = mount();
-    render({ running: true, grid: false, rate: '1Hz' });
+    render({ running: true, grid: false, testing: false, rate: '1Hz' });
     expect(root.querySelector('[aria-label="暂停"]')).not.toBeNull();
     expect(root.querySelector('[aria-label="网格"]')?.getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('turns the test button into a stop button while the cases play', () => {
+    const { root, render } = mount();
+    render({ running: false, grid: true, testing: true, rate: '10Hz' });
+    expect(root.querySelector('[aria-label="停止测试"]')).not.toBeNull();
+    expect(root.querySelector('[aria-label="自动测试"]')).toBeNull();
+  });
+
   it('starts with nothing pressed and no clock', () => {
     const { root, render } = mount();
-    render({ running: false, grid: true, rate: '10Hz' });
+    render({ running: false, grid: true, testing: false, rate: '10Hz' });
     expect(root.querySelector('[aria-label="运行"]')?.getAttribute('aria-pressed')).toBe('false');
     expect(root.querySelector('[aria-label="网格"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[aria-label="自动测试"]')?.getAttribute('aria-pressed')).toBe(
+      'false',
+    );
   });
 });
 

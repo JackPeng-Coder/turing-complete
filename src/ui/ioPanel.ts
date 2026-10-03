@@ -128,6 +128,11 @@ function unknownBits(width: number): Array<0 | 1 | 'x'> {
 /**
  * One `输入状态` / `输出状态` block: a heading over one row per pin.
  *
+ * The ordinal leads each row, because a board of two identical green arrows and
+ * a panel of two rows of identical cells leave the player no way to tell the
+ * second input from the first. The name follows it when there is one: `1. clk`
+ * says both which pin it is and what the level calls it.
+ *
  * A level that declares no pin of a kind gets a sentence instead of an empty
  * box, so "nothing here yet" and "this level has none" do not look the same.
  */
@@ -151,13 +156,14 @@ function group(
     return box;
   }
 
-  for (const pin of pins) {
+  for (const [position, pin] of pins.entries()) {
     const { bits, value } = renderPin(pin);
     const row = document.createElement('div');
     row.className = 'io-pin';
     const name = document.createElement('div');
     name.className = 'io-pin-name';
-    name.textContent = pin.label?.zh ?? pin.id;
+    const pinName = pin.label?.zh ?? pin.id;
+    name.textContent = pinName === String(position + 1) ? `${position + 1}` : `${position + 1}. ${pinName}`;
     const readout = document.createElement('div');
     readout.className = 'io-value';
     readout.textContent = value === undefined ? '???' : String(value);

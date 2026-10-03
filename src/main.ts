@@ -10,14 +10,15 @@ import { loadProgress, saveProgress } from './persist/storage';
 import { applyGrade, resumePointOf, type Progress } from './app/progress';
 import { mountShell } from './ui/shell';
 import { mountPalette } from './ui/palette';
-import { mountTruthTable } from './ui/truthTable';
+import { mountTruthTable, staticCases, type Case } from './ui/truthTable';
 import { mountIoPanel } from './ui/ioPanel';
+import { showResult } from './ui/result';
 import { mountToolbar } from './ui/toolbar';
 import { mountMap } from './ui/map';
 import { narrativeFor } from './ui/narrative';
 import { renderBoard, type BoardView } from './ui/board/render';
 import { attachBoardInput, deleteSelection } from './ui/board/interact';
-import { createDisplay, type DisplaySimulation } from './ui/board/signals';
+import { createDisplay, type DisplaySimulation, type SignalSnapshot } from './ui/board/signals';
 import { instanceRect, screenToWorld } from './ui/board/view';
 import type { LevelSpec } from './levels/spec';
 
@@ -39,6 +40,9 @@ const store: Store<AppState> = createStore<AppState>({
 
 const stack = new CommandStack();
 const app = document.querySelector<HTMLDivElement>('#app');
+
+/** How long the auto-test holds each case before moving to the next. */
+const TEST_STEP_MS = 700;
 
 /** Clock rates the player can cycle through, fastest last. */
 const RATES = [
@@ -108,23 +112,99 @@ if (app) {
   let running = false;
   let rateIndex = 1;
   let timer: ReturnType<typeof setInterval> | null = null;
+  /** The last settle's values, shared by everything that reads them. */
+  let snapshot: SignalSnapshot | null = null;
+  /** True once this visit has shown the pass dialog; reset on entering a level. */
+  let passShown = false;
+  /** The test cases being played, and where in them the auto-test has got to. */
+  let testCases: readonly Case[] = [];
+  let testStep = 0;
+  /** The case the board is currently driven with, or `null` when none is. */
+  let activeCase: number | null = null;
+  let testing = false;
+  let testTimer: ReturnType<typeof setTimeout> | null = null;
 
   const paint = (): void => {
     if (!boardScreen.hidden) renderBoard(canvas, store, store.get().camera, view);
   };
 
   const paintTools = (): void => {
-    toolbar.render({ running, grid: gridOn, rate: RATES[rateIndex]!.label });
+    toolbar.render({ running, grid: gridOn, testing, rate: RATES[rateIndex]!.label });
   };
 
   /** Re-reads the display into `view`. Paints nothing: callers decide when. */
   const sample = (): void => {
-    const snapshot = display?.read() ?? null;
+    snapshot = display?.read() ?? null;
     view = {
       outputs: snapshot?.outputs ?? new Map(),
       stable: snapshot?.stable ?? false,
       grid: gridOn,
     };
+  };
+
+  /**
+   * The level's output pins as they stand right now, or `null` when nothing is
+   * running. Read from the cached snapshot rather than by calling `read()` again:
+   * the panel and the readout both ask, and each call builds two maps.
+   */
+  const levelOutputs = (): Readonly<Record<string, number>> | null =>
+    snapshot?.stable ? Object.fromEntries(snapshot.levelOutputs) : null;
+
+  /** Drives one input vector onto the board and repaints everything that shows it. */
+  const driveTo = (values: Readonly<Record<string, number>>): void => {
+    vector = { ...values };
+    display?.drive(vector);
+    sample();
+    paint();
+    io.render();
+    truth.render();
+  };
+
+  const stopAutoTest = (finish: boolean): void => {
+    if (testTimer !== null) clearTimeout(testTimer);
+    testTimer = null;
+    testing = false;
+    activeCase = null;
+    if (finish) regrade();
+    truth.render();
+    paintTools();
+  };
+
+  /**
+   * One case per tick: drive it, settle it, repaint the board, and light up that
+   * case's column so the reader's eye follows the board.
+   */
+  const runTestStep = (): void => {
+    if (!testing) return;
+    if (testStep >= testCases.length) {
+      stopAutoTest(true);
+      return;
+    }
+    activeCase = testStep;
+    const item = testCases[testStep]!;
+    testStep += 1;
+    driveTo(item.inputs);
+    testTimer = setTimeout(runTestStep, TEST_STEP_MS);
+  };
+
+  const startAutoTest = (): void => {
+    testCases = staticCases(store.get().level);
+    if (testCases.length === 0) {
+      // A `fuzz`, `script` or `program` level generates its vectors inside the
+      // checker. Playing something made up here would be showing the player a
+      // test the level never runs, so say so instead.
+      store.set({
+        status: {
+          zh: '本关的用例由检查器现场生成，无法逐个演示',
+          en: 'This level generates its cases while checking; they cannot be played one by one',
+        },
+      });
+      return;
+    }
+    testing = true;
+    testStep = 0;
+    paintTools();
+    runTestStep();
   };
 
   /**
@@ -232,7 +312,7 @@ if (app) {
     }
   };
 
-  const onPick = (defId: string): void => {
+  const onPickPart = (defId: string): void => {
     // The palette only offers ids the registry knows; the guard keeps the
     // "registry.get throws" contract local rather than implied.
     if (!registry.has(defId)) return;
@@ -257,7 +337,9 @@ if (app) {
     canvas.dataset.pendingDef = '';
     running = false;
     stopClock();
+    stopAutoTest(false);
     vector = {};
+    passShown = false;
     // The display is rebuilt from the store's *new* graph, so the store has to
     // be told about the level change first.
     store.set({
@@ -273,16 +355,43 @@ if (app) {
     showBriefing(narrativeFor(levelId).before);
   };
 
+  /** The next level in the shipped order, or `null` on the last one. */
+  const nextLevelId = (): string | null => {
+    const index = LEVEL_ORDER.indexOf(store.get().level.id);
+    return index >= 0 && index + 1 < LEVEL_ORDER.length ? LEVEL_ORDER[index + 1]! : null;
+  };
+
+  const closeResult = (): void => {
+    document.querySelector('.result')?.remove();
+  };
+
   const regrade = (): void => {
     const { graph, level: current, progress: current0 } = store.get();
     const result = grade(graph, registry, current);
     store.set({ lastGrade: result });
-    if (result.passed) {
-      progress = applyGrade(current0, current, result);
-      saveProgress(progress);
-      store.set({ progress });
-      showBriefing(narrativeFor(current.id).after);
-    }
+    if (!result.passed) return;
+
+    progress = applyGrade(current0, current, result);
+    saveProgress(progress);
+    store.set({ progress });
+
+    // ONCE PER VISIT, and this is the whole fix for a dialog that would not go
+    // away: `regrade` runs after EVERY edit, so gating on `passed` alone
+    // re-opened the pass dialog on the next click, and the click after that.
+    // Passing the level again after breaking it is not worth a second
+    // interruption either -- the top bar and the test panel both say so.
+    if (passShown) return;
+    passShown = true;
+    closeResult();
+    showResult(current, result, registry, {
+      onContinue: closeResult,
+      onNext: () => {
+        closeResult();
+        const next = nextLevelId();
+        if (next) openLevel(next);
+      },
+      hasNext: nextLevelId() !== null,
+    });
   };
 
   /** Every board edit: the circuit changed, so the display and the grade did too. */
@@ -303,23 +412,18 @@ if (app) {
   // DOM order is visual order inside the stage, but every panel is an overlay:
   // the palette on the right, the readout on the left, the test cases along the
   // bottom, and the board underneath all of them.
-  mountPalette(partsOverlay, store, onPick);
-  mountTruthTable(testsOverlay, store);
+  mountPalette(partsOverlay, store, onPickPart);
+  const truth = mountTruthTable(testsOverlay, store, {
+    live: levelOutputs,
+    active: () => activeCase,
+  });
   const io = mountIoPanel(stage, store, {
     vector: () => vector,
-    outputs: () => {
-      if (!display || !view.stable) return null;
-      const snapshot = display.read();
-      return Object.fromEntries(snapshot.levelOutputs);
-    },
+    outputs: levelOutputs,
     rate: () => RATES[rateIndex]!.label,
-    tick: () => display?.read().tick ?? 0,
+    tick: () => snapshot?.tick ?? 0,
     onToggleBit: (pinId, bit) => {
-      vector = { ...vector, [pinId]: (vector[pinId] ?? 0) ^ (1 << bit) };
-      display?.drive(vector);
-      sample();
-      paint();
-      io.render();
+      driveTo({ ...vector, [pinId]: (vector[pinId] ?? 0) ^ (1 << bit) });
     },
     onCycleRate: () => {
       rateIndex = (rateIndex + 1) % RATES.length;
@@ -353,9 +457,31 @@ if (app) {
       io.render();
       paintTools();
     },
+    onToggleTest: () => {
+      if (testing) stopAutoTest(true);
+      else startAutoTest();
+    },
   });
 
-  attachBoardInput(canvas, store, stack, { onChange });
+  /**
+   * A click on a level input flips what it drives.
+   *
+   * One bit toggles; a wider pin counts up and wraps, because a click is a
+   * nudge and not a way to type a byte -- exact values are the readout panel's
+   * job, and it has a cell per bit. Doing nothing for every other part is
+   * deliberate: a click on a gate means select, and always has.
+   */
+  const onPickInstance = (instId: string): void => {
+    if (!instId.startsWith('IN_')) return;
+    const pinId = instId.slice(3);
+    const pin = store.get().level.io.inputs.find((candidate) => candidate.id === pinId);
+    if (!pin) return;
+    const max = pin.width >= 31 ? Number.MAX_SAFE_INTEGER : 2 ** pin.width - 1;
+    const current = vector[pinId] ?? 0;
+    driveTo({ ...vector, [pinId]: current >= max ? 0 : current + 1 });
+  };
+
+  attachBoardInput(canvas, store, stack, { onChange, onPick: onPickInstance });
 
   // Render on state change only: a continuous rAF loop would repaint a static
   // board 60 times a second forever. Panning, zooming and dragging all go

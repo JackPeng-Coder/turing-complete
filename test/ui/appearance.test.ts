@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { THEME, bodyColourOf, glowColourOf, partStateOf } from '../../src/ui/theme';
+import { gateLookOf } from '../../src/ui/board/render';
+import { createRegistry } from '../../src/core/registry';
+import { BASE_DEFS } from '../../src/core/defs/index';
+
+const registry = createRegistry(BASE_DEFS);
 
 /**
  * The board's colour rule, on its own.
@@ -48,5 +53,55 @@ describe('the board value rule', () => {
     expect(new Set([THEME.on, THEME.off, THEME.bus]).size).toBe(3);
     expect(new Set([THEME.onBody, THEME.offBody, THEME.busBody]).size).toBe(3);
     expect(new Set([THEME.onBody, THEME.offBody, THEME.busBody, THEME.idleBody]).size).toBe(4);
+  });
+});
+
+/**
+ * The original draws every gate differently, and so does the board: the shapes
+ * are read faster than the labels are, and a grid of identical boxes says
+ * nothing about what is on it.
+ */
+describe('gate silhouettes', () => {
+  /**
+   * The whole family, walked rather than listed: a gate added to `logic1`
+   * without a silhouette fails here instead of shipping as a plain box that
+   * looks like a register.
+   */
+  it('gives every boolean part a shape of its own', () => {
+    const family = registry.byCategory('logic1');
+    expect(family).toHaveLength(10);
+    for (const def of family) {
+      expect(gateLookOf(def).shape, `${def.id} has no silhouette`).not.toBe('box');
+    }
+  });
+
+  it('distinguishes the inverting gates with a bubble', () => {
+    // AND and NAND share a body; the bubble is the whole difference between
+    // them, and it is how a logic diagram has always said so.
+    const look = (id: string) => gateLookOf(registry.get(id));
+    expect(look('and').shape).toBe(look('nand').shape);
+    expect(look('and').bubble).toBe(false);
+    expect(look('nand').bubble).toBe(true);
+    expect(look('or').shape).toBe(look('nor').shape);
+    expect(look('xor').shape).toBe(look('xnor').shape);
+    for (const id of ['not', 'nor', 'xnor']) expect(look(id).bubble, id).toBe(true);
+    for (const id of ['or', 'xor', 'and3', 'or3', 'and', 'full_adder']) {
+      expect(look(id).bubble, id).toBe(false);
+    }
+  });
+
+  it('separates the OR family from the XOR family', () => {
+    const shape = (id: string) => gateLookOf(registry.get(id)).shape;
+    expect(shape('or')).toBe('or');
+    expect(shape('xor')).toBe('xor');
+    expect(shape('xor')).not.toBe(shape('or'));
+    // The full adder is a circuit and not a gate, so it is drawn as a block.
+    expect(shape('full_adder')).toBe('block');
+  });
+
+  it('leaves ordinary parts as boxes', () => {
+    for (const id of ['level_input', 'level_output', 'const_on', 'mem1', 'delay_line']) {
+      expect(gateLookOf(registry.get(id)).shape, id).toBe('box');
+    }
   });
 });

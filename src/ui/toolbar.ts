@@ -11,11 +11,15 @@ export interface ToolbarOptions {
   onToggleRun(): void;
   /** Stop the clock and clear every storage element. */
   onStop(): void;
+  /** Start or stop playing the level's test cases one at a time. */
+  onToggleTest(): void;
 }
 
 export interface ToolbarState {
   readonly running: boolean;
   readonly grid: boolean;
+  /** True while the level's test cases are being played. */
+  readonly testing: boolean;
   /** The clock's rate, as the original labels it: `10Hz`. */
   readonly rate: string;
 }
@@ -55,11 +59,12 @@ export function mountToolbar(
   const zoomOut = button('缩小', 'zoom-out', () => options.onZoom(1 / 1.25));
   const fit = button('适应画面', 'fit', () => options.onZoom(0));
   const gridToggle = button('网格', 'grid', () => options.onToggleGrid());
+  const test = button('自动测试', 'test', () => options.onToggleTest());
   const step = button('单步', 'step', () => options.onStep());
   const run = button('运行', 'play', () => options.onToggleRun());
   const stop = button('停止并复位', 'stop', () => options.onStop());
   const trash = button('删除选中', 'trash', () => options.onDeleteSelection());
-  grid.append(zoomIn, zoomOut, step, run, fit, stop, gridToggle, trash);
+  grid.append(zoomIn, zoomOut, test, step, run, grow(), fit, stop, gridToggle, trash);
 
   return {
     render(state: ToolbarState): void {
@@ -68,6 +73,17 @@ export function mountToolbar(
       run.replaceChildren(iconSvg(state.running ? 'pause' : 'play'));
       run.title = state.running ? `暂停 ${state.rate}` : `运行 ${state.rate}`;
       run.setAttribute('aria-label', state.running ? '暂停' : '运行');
+      test.setAttribute('aria-pressed', String(state.testing));
+      test.replaceChildren(iconSvg(state.testing ? 'stop' : 'test'));
+      test.setAttribute('aria-label', state.testing ? '停止测试' : '自动测试');
+      test.title = state.testing ? '停止测试' : '自动测试：逐个演示本关用例';
     },
   };
+}
+
+/** A spacer, so the odd button out does not stretch across the grid. */
+function grow(): HTMLElement {
+  const span = document.createElement('span');
+  span.className = 'tool-gap';
+  return span;
 }

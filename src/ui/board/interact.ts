@@ -24,6 +24,15 @@ import { hitTest, screenToWorld, snap, type Point } from './view';
 export interface BoardInputOptions {
   /** Called after any model mutation so the UI can re-render and re-grade. */
   onChange(): void;
+  /**
+   * A CLICK -- not a drag -- on a part, reported by instance id.
+   *
+   * What a click means belongs to the caller: the board does not know which
+   * parts are switches. It is how a level's input is flipped without going to
+   * the readout panel, which is the difference between driving a circuit and
+   * filling in a form.
+   */
+  onPick?(instId: string): void;
 }
 
 /** The instance id a freshly placed level-IO part takes, and the pin's width. */
@@ -325,6 +334,11 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
           store.get().graph,
         );
         options.onChange();
+      } else if (current) {
+        // It did not move, so it was a click. Positions are snapped, so a press
+        // and release inside one grid cell lands back on the part's own
+        // coordinates and needs no undo entry.
+        options.onPick?.(id);
       }
       store.set({ dragging: null });
       return;

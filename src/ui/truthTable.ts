@@ -29,33 +29,57 @@ import { THEME } from './theme';
  *
  * Reporting is capped: a failing 16-row level must not turn the panel into a
  * wall of text, and the first wrong rows are the ones that explain the bug.
+ *
+ * WHICH INPUT IS WHICH. The label column carries the pin's ordinal as well as
+ * its name (`输入 1 a`, not `输入 a`), because a board of identical arrows and a
+ * table of identical cells give a player no way to tell the second input from
+ * the first. A single output drops its ordinal: the original's own panel says
+ * `预期输出`, and with one output there is nothing to disambiguate.
  */
-export function mountTruthTable(root: HTMLElement, store: Store<AppState>): { render(): void } {
+export interface TruthTableOptions {
+  /** The level's output values right now, or `null` when nothing is running. */
+  live(): Readonly<Record<string, number>> | null;
+  /** The case the auto-test is on, or `null` when it is not running. */
+  active(): number | null;
+}
+
+export function mountTruthTable(
+  root: HTMLElement,
+  store: Store<AppState>,
+  options?: TruthTableOptions,
+): { render(): void } {
   const panel = document.createElement('section');
   panel.className = 'truth-table';
   root.append(panel);
 
   const rowLimit = 20;
-  /** Level id plus grade identity: the panel shows nothing else. */
-  let shown: { level: string; grade: GradeResult | null } | null = null;
+  /** Level id, grade identity and the auto-test's position: nothing else shows. */
+  let shown: { level: string; grade: GradeResult | null; active: number | null } | null = null;
 
   const render = (): void => {
     const { lastGrade, level } = store.get();
-    if (shown && shown.level === level.id && shown.grade === lastGrade) return;
-    shown = { level: level.id, grade: lastGrade };
+    const active = options?.active() ?? null;
+    const live = options?.live() ?? null;
+    if (shown && shown.level === level.id && shown.grade === lastGrade && shown.active === active) {
+      return;
+    }
+    shown = { level: level.id, grade: lastGrade, active };
 
     panel.replaceChildren();
     const heading = document.createElement('h2');
-    heading.textContent = lastGrade?.passed ? '全部用例通过' : '用例';
-    heading.style.color = !lastGrade
-      ? THEME.textMuted
-      : lastGrade.passed
-        ? THEME.success
-        : THEME.error;
+    heading.textContent = active !== null ? `正在测试 用例 ${active + 1}` : lastGrade?.passed ? '全部用例通过' : '用例';
+    heading.style.color =
+      active !== null
+        ? THEME.label
+        : !lastGrade
+          ? THEME.textMuted
+          : lastGrade.passed
+            ? THEME.success
+            : THEME.error;
     panel.append(heading);
 
     if (!lastGrade) {
-      renderMatrix(panel, level, staticCases(level), []);
+      renderMatrix(panel, level, staticCases(level), [], active, live);
       return;
     }
 
@@ -79,7 +103,7 @@ export function mountTruthTable(root: HTMLElement, store: Store<AppState>): { re
 
     const driven = lastGrade.failures.filter((f) => hasVector(f));
     const undriven = lastGrade.failures.filter((f) => !hasVector(f));
-    renderMatrix(panel, level, driven.slice(0, rowLimit), driven.slice(0, rowLimit));
+    renderMatrix(panel, level, driven.slice(0, rowLimit), driven.slice(0, rowLimit), active, live);
     renderDetails(panel, driven.slice(0, rowLimit), undriven);
   };
   store.subscribe(render);
@@ -91,7 +115,7 @@ export function mountTruthTable(root: HTMLElement, store: Store<AppState>): { re
  * One column of the matrix: the vector driven, what was expected and what came
  * out. `actual` is absent when the circuit has not been run against this case.
  */
-interface Case {
+export interface Case {
   readonly inputs: Readonly<Record<string, number>>;
   readonly expected: Readonly<Record<string, number>>;
   readonly actual: Readonly<Record<string, number>> | null;
@@ -103,8 +127,12 @@ interface Case {
  * Only a `truth-table` check has rows to show. A `fuzz`, `script` or `program`
  * check drives vectors that are computed from a seed or from step data, so there
  * is nothing static to put in a column.
+ *
+ * Exported because the auto-test plays exactly these: a second derivation of
+ * "the cases this level declares" would be a second thing to keep in step with
+ * the checker, and the checker's rows are the ones that count.
  */
-function staticCases(level: LevelSpec): Case[] {
+export function staticCases(level: LevelSpec): Case[] {
   for (const check of level.checks) {
     if (check.kind !== 'truth-table') continue;
     return (check.rows ?? []).map((row) => ({
@@ -126,37 +154,54 @@ function renderMatrix(
   level: LevelSpec,
   cases: readonly Case[],
   represented: readonly CheckFailure[],
+  active: number | null,
+  live: Readonly<Record<string, number>> | null,
 ): void {
   const table = document.createElement('table');
   const inputs = level.io.inputs;
   const outputs = level.io.outputs;
+  const manyOutputs = outputs.length > 1;
 
-  for (const pin of inputs) {
+  for (const [position, pin] of inputs.entries()) {
     const row = document.createElement('tr');
-    row.append(labelCell(`输入 ${pinName(pin)}`));
+    row.append(labelCell(`输入 ${position + 1} ${pinName(pin)}`.trim()));
     for (const [index, item] of cases.entries()) {
-      row.append(bitsCell(item.inputs[pin.id] ?? 0, pin.width, isWrong(represented[index], pin)));
+      // While the auto-test is on a case, that case's column is the one being
+      // driven: the board is showing it and the reader's eye has to follow.
+      const cell = bitsCell(item.inputs[pin.id] ?? 0, pin.width, isWrong(represented[index], pin));
+      if (index === active) cell.classList.add('case-active');
+      row.append(cell);
     }
     if (cases.length === 0) row.append(noteCell(inputs.length ? '—' : ''));
     table.append(row);
   }
 
-  for (const pin of outputs) {
+  for (const [position, pin] of outputs.entries()) {
+    const ordinal = manyOutputs ? ` ${position + 1}` : '';
     const expected = document.createElement('tr');
-    expected.append(labelCell(`预期 ${pinName(pin)}`));
+    expected.append(labelCell(`预期${ordinal} ${pinName(pin)}`.trim()));
     const actual = document.createElement('tr');
-    actual.append(labelCell(`当前 ${pinName(pin)}`));
+    actual.append(labelCell(`当前${ordinal} ${pinName(pin)}`.trim()));
 
     for (const [index, item] of cases.entries()) {
       const want = item.expected[pin.id];
-      expected.append(
-        want === undefined ? noteCell('—') : bitsCell(want, pin.width, false),
-      );
-      const got = item.actual?.[pin.id];
-      const bad = represented[index] !== undefined && got !== want;
-      actual.append(
-        got === undefined ? noteCell('???') : bitsCell(got, pin.width, bad),
-      );
+      const expectedCell =
+        want === undefined ? noteCell('—') : bitsCell(want, pin.width, false);
+      if (index === active) expectedCell.classList.add('case-active');
+      expected.append(expectedCell);
+
+      // While the auto-test is ON THIS CASE, `当前` is what the circuit is
+      // producing for it right now, read off the live board -- which is the
+      // whole point of playing the cases one at a time. Otherwise it is the
+      // last grade's own record, and unknown when there has not been one.
+      const got = index === active && live ? live[pin.id] : item.actual?.[pin.id];
+      const bad =
+        index === active && live
+          ? want !== undefined && got !== want
+          : represented[index] !== undefined && got !== want;
+      const actualCell = got === undefined ? noteCell('???') : bitsCell(got, pin.width, bad);
+      if (index === active) actualCell.classList.add('case-active');
+      actual.append(actualCell);
     }
     if (cases.length === 0) {
       expected.append(noteCell('???'));

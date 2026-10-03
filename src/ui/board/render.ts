@@ -64,13 +64,198 @@ function effectiveWidth(inst: Instance, pin: PinDef): number {
 }
 
 /**
+ * The silhouette a part is drawn in.
+ *
+ * The original gives every gate its own outline, and it is worth copying: a
+ * board of identical boxes tells a player nothing about what they are looking
+ * at, and the shapes are read faster than the labels are. They are the classic
+ * logic symbols, which is what the original's are too.
+ */
+export type GateShape = 'box' | 'd' | 'or' | 'xor' | 'triangle' | 'block';
+
+export interface GateLook {
+  /** The outline family. `box` is everything that is not a boolean gate. */
+  readonly shape: GateShape;
+  /** True when the gate inverts: its output carries the classic bubble. */
+  readonly bubble: boolean;
+}
+
+/**
+ * The look of a part, keyed on its id.
+ *
+ * The two inversion families are told apart by the bubble and not by the body,
+ * which is how a logic diagram works and what makes `nand` distinct from `and`:
+ * ten boolean parts, ten silhouettes -- a triangle for NOT, a D for AND and its
+ * three-input form, a shield for OR, a shield with a second arc for XOR, a
+ * bubble on the four that invert, and a chamfered block for the full adder,
+ * which is a circuit rather than a gate and is drawn as one.
+ *
+ * A test walks the registry's `logic1` family and fails on any that falls
+ * through to `box`, so a gate added later cannot quietly ship without a shape.
+ */
+export function gateLookOf(def: ComponentDef): GateLook {
+  switch (def.id) {
+    case 'not':
+      return { shape: 'triangle', bubble: true };
+    case 'and':
+    case 'and3':
+      return { shape: 'd', bubble: false };
+    case 'nand':
+      return { shape: 'd', bubble: true };
+    case 'or':
+    case 'or3':
+      return { shape: 'or', bubble: false };
+    case 'nor':
+      return { shape: 'or', bubble: true };
+    case 'xor':
+      return { shape: 'xor', bubble: false };
+    case 'xnor':
+      return { shape: 'xor', bubble: true };
+    case 'full_adder':
+      return { shape: 'block', bubble: false };
+    default:
+      return { shape: 'box', bubble: false };
+  }
+}
+
+/** Room reserved at the output edge for the inversion bubble, in world pixels. */
+const BUBBLE_ROOM = 13;
+/** How far an XOR's body sits behind its extra arc, in world pixels. */
+const XOR_BACK = 9;
+
+/**
+ * Where a label sits in a body, as a fraction of its width.
+ *
+ * Text centred in a silhouette rather than a rectangle lands on the arc or runs
+ * off the point: a triangle's mass is behind its apex, a D's is left of its
+ * semicircle, a shield's left of its point.
+ */
+const LABEL_CENTRE: Record<GateShape, number> = {
+  box: 0.5,
+  block: 0.5,
+  d: 0.42,
+  or: 0.45,
+  xor: 0.42,
+  triangle: 0.36,
+};
+
+/** The corner a block has cut off: the diagram's mark for "this is a circuit". */
+const BLOCK_CHAMFER = 14;
+
+/**
+ * Begins the path of a part's body.
+ *
+ * `box` is left to `roundedRect`; the rest are the classic symbols. Every gate
+ * that inverts gives up `BUBBLE_ROOM` at its output edge so the bubble has
+ * somewhere to sit that is not on top of the pin.
+ */
+function traceBody(
+  ctx: CanvasRenderingContext2D,
+  look: GateLook,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  zoom: number,
+  boxRadius: number,
+): void {
+  if (look.shape === 'box') {
+    roundedRect(ctx, x, y, w, h, boxRadius);
+    return;
+  }
+  const right = x + w - (look.bubble ? BUBBLE_ROOM * zoom : 0);
+  const cy = y + h / 2;
+  const radius = h / 2;
+  ctx.beginPath();
+  switch (look.shape) {
+    case 'block': {
+      // A rounded rectangle with its top-left corner cut off: the long-standing
+      // mark for a block that is a circuit rather than a gate.
+      const cut = BLOCK_CHAMFER * zoom;
+      const r = Math.min(PART_RADIUS * zoom, h / 4);
+      ctx.moveTo(x + cut, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.arcTo(x + w, y, x + w, y + r, r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+      ctx.lineTo(x + r, y + h);
+      ctx.arcTo(x, y + h, x, y + h - r, r);
+      ctx.lineTo(x, y + cut);
+      ctx.closePath();
+      break;
+    }
+    case 'triangle':
+      ctx.moveTo(x, y);
+      ctx.lineTo(right, cy);
+      ctx.lineTo(x, y + h);
+      ctx.closePath();
+      break;
+    case 'd':
+      // Flat where the inputs arrive, semicircular where the output leaves --
+      // and the flat run has to stop short of the arc by its own radius.
+      ctx.moveTo(x, y);
+      ctx.lineTo(right - radius, y);
+      ctx.arc(right - radius, cy, radius, -Math.PI / 2, Math.PI / 2);
+      ctx.lineTo(x, y + h);
+      ctx.closePath();
+      break;
+    default: {
+      // OR and XOR: a concave back, and two convex curves meeting in a point.
+      const back = look.shape === 'xor' ? x + XOR_BACK * zoom : x;
+      const belly = x + (right - x) * 0.58;
+      ctx.moveTo(back, y);
+      ctx.quadraticCurveTo(belly, y, right, cy);
+      ctx.quadraticCurveTo(belly, y + h, back, y + h);
+      ctx.quadraticCurveTo(back + (right - back) * 0.34, cy, back, y);
+      ctx.closePath();
+      break;
+    }
+  }
+}
+
+/**
+ * The marks a silhouette carries beyond its outline: XOR's second arc at the
+ * input edge, and the bubble on the four gates that invert.
+ */
+function paintMarks(
+  ctx: CanvasRenderingContext2D,
+  look: GateLook,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  zoom: number,
+): void {
+  const cy = y + h / 2;
+  if (look.shape === 'xor') {
+    const right = x + w - (look.bubble ? BUBBLE_ROOM * zoom : 0);
+    ctx.beginPath();
+    ctx.moveTo(x + 3 * zoom, y);
+    ctx.quadraticCurveTo(x + (right - x) * 0.42, cy, x + 3 * zoom, y + h);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+    ctx.lineWidth = Math.max(1, 1.5 * zoom);
+    ctx.stroke();
+  }
+  if (look.bubble) {
+    const r = (BUBBLE_ROOM * zoom) / 2;
+    ctx.beginPath();
+    ctx.arc(x + w - r, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = THEME.board;
+    ctx.fill();
+    ctx.strokeStyle = THEME.idleEdge;
+    ctx.lineWidth = Math.max(1, 1.5 * zoom);
+    ctx.stroke();
+  }
+}
+
+/**
  * A part's body is its own state, not its family.
  *
  * It used to be keyed on `def.category` -- blue for the primitive gates, green
  * for the wide ones -- which said what a part IS. The board now says what a part
  * is DOING: green while it produces a 1, red while it produces a 0, blue for a
  * word, slate until something has run. The family is still legible from the
- * silhouette (`bodyShape`), so nothing was lost by spending the colour on state.
+ * silhouette (`gateLookOf`), so nothing was lost by spending the colour on state.
  */
 function partAppearance(
   def: ComponentDef,
@@ -111,26 +296,11 @@ function roundedRect(
 }
 
 /**
- * The outline of a part's body.
- *
- * A primitive boolean gate gets the original's own silhouette -- a flat left
- * edge where its inputs arrive and a semicircular right one with the output at
- * its tip -- while everything else is a rounded rectangle. The distinction is
- * the original's, and it is worth keeping: a board of identical boxes gives no
- * clue which parts are the tiny gates and which are the machine.
- *
- * `roundRect` takes one radius per corner, so the D is a corner list and not a
- * hand-built arc.
+ * The outline of a part's body that is NOT a boolean gate: a level pin is a pill
+ * or a circle, everything else a rounded rectangle.
  */
-function bodyShape(
-  def: ComponentDef,
-  w: number,
-  h: number,
-  zoom: number,
-): number | readonly number[] {
-  if (def.category === 'logic1') return [0, h / 2, h / 2, 0];
-  if (def.category === 'level') return h / 2;
-  return PART_RADIUS * zoom;
+function boxRadiusOf(def: ComponentDef, h: number, zoom: number): number {
+  return def.category === 'level' ? h / 2 : PART_RADIUS * zoom;
 }
 
 /**
@@ -414,6 +584,46 @@ function outlinedText(
 }
 
 /**
+ * The pin's name, printed in a badge at a part's top-left corner.
+ *
+ * A level's arrow and its circle say what they are carrying but not WHICH pin
+ * they are, and a level with four visually identical outputs -- or two identical
+ * inputs -- left the player guessing. The badge is the board's half of the
+ * answer; the other half is the ordinal in the test panel's label column.
+ *
+ * The name comes from the instance id, which is what binds the part to the level
+ * (`IN_a`, `OUT`, `OUT_out3`), so it is the same string `bindLevelIo` matches on
+ * and cannot drift from it.
+ */
+function levelPinName(inst: Instance): string {
+  const name = inst.id.replace(/^IN_/, '').replace(/^OUT_?/, '');
+  return name.length > 0 ? name : 'out';
+}
+
+function drawNameBadge(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  text: string,
+  zoom: number,
+): void {
+  const size = Math.max(7, 9 * zoom);
+  ctx.font = `600 ${size}px ui-monospace, "Cascadia Mono", Consolas, monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const padX = 4 * zoom;
+  const boxW = ctx.measureText(text).width + padX * 2;
+  const boxH = size + 4 * zoom;
+  ctx.fillStyle = THEME.backdrop;
+  ctx.globalAlpha = 0.85;
+  roundedRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 3 * zoom);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = THEME.label;
+  ctx.fillText(text, x, y + 0.5 * zoom);
+}
+
+/**
  * The bit width of a part's pins, printed in a corner badge.
  *
  * Cyan rather than one of the three value colours: a width is not a value, and a
@@ -630,37 +840,39 @@ function drawInstance(
   const h = rect.h * camera.zoom;
   const isSelected = selected.includes(inst.id);
   const isLevelInput = def.category === 'level' && inst.id.startsWith('IN_');
-  const radius = bodyShape(def, w, h, camera.zoom);
-  const look = partAppearance(def, inst, view, driven);
+  const box = boxRadiusOf(def, h, camera.zoom);
+  const gate = gateLookOf(def);
+  const { colour, glow } = partAppearance(def, inst, view, driven);
 
   if (isLevelInput) {
-    drawLevelInput(ctx, p, w, h, camera.zoom, look.colour);
+    drawLevelInput(ctx, p, w, h, camera.zoom, colour);
   } else {
     // A lit part is haloed by a wide translucent stroke of its own body path,
     // the same two-pass glow a lit wire gets: one reading, everywhere.
-    if (look.glow) {
+    if (glow) {
       ctx.save();
       ctx.globalAlpha = 0.28;
-      ctx.strokeStyle = look.glow;
+      ctx.strokeStyle = glow;
       ctx.lineWidth = 7 * camera.zoom;
-      roundedRect(ctx, p.x, p.y, w, h, radius);
+      traceBody(ctx, gate, p.x, p.y, w, h, camera.zoom, box);
       ctx.stroke();
       ctx.restore();
     }
-    ctx.fillStyle = look.colour;
+    ctx.fillStyle = colour;
     ctx.strokeStyle = isSelected ? THEME.selection : THEME.idleEdge;
     ctx.lineWidth = isSelected ? 3 : 1.5 * camera.zoom;
-    roundedRect(ctx, p.x, p.y, w, h, radius);
+    traceBody(ctx, gate, p.x, p.y, w, h, camera.zoom, box);
     ctx.fill();
     ctx.stroke();
     // A light bevel along the top: the original's parts are lit from above, and
     // it is what keeps a flat fill from reading as a placeholder.
     ctx.save();
-    roundedRect(ctx, p.x, p.y, w, h, radius);
+    traceBody(ctx, gate, p.x, p.y, w, h, camera.zoom, box);
     ctx.clip();
     ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
     ctx.fillRect(p.x, p.y, w, h * 0.45);
     ctx.restore();
+    paintMarks(ctx, gate, p.x, p.y, w, h, camera.zoom);
   }
 
   const outputWidth = def.outputs[0] ? effectiveWidth(inst, def.outputs[0]) : 1;
@@ -686,22 +898,34 @@ function drawInstance(
   } else {
     const label = labelOf(inst, def);
     const size = Math.max(10, Math.min(16, 15 * camera.zoom));
-    // A D-shaped gate's right half is its arc, so its text sits left of centre
-    // to stay on the flat part of the body.
-    const shift = def.category === 'logic1' ? h * 0.12 : 0;
+    const centre = LABEL_CENTRE[gate.shape];
     outlinedText(
       ctx,
       label,
-      p.x + w / 2 - shift,
+      p.x + w * centre,
       p.y + h / 2,
       size,
       camera.zoom,
-      w - 12 * camera.zoom,
+      // A silhouette is not a rectangle: a triangle has room for about half the
+      // width a box does, and a shield's point takes the rest.
+      w * (gate.shape === 'triangle' ? 0.46 : gate.shape === 'box' ? 0.84 : 0.66),
     );
   }
 
   if (outputWidth > 1) {
     drawWidthBadge(ctx, p.x + w - 8 * camera.zoom, p.y + 3 * camera.zoom, outputWidth, camera.zoom);
+  }
+  // The pin's own name, opposite the width badge. Level parts only: an ordinary
+  // gate is already labelled in the middle of its body.
+  if (def.category === 'level') {
+    const width = 22 * camera.zoom;
+    drawNameBadge(
+      ctx,
+      p.x + (inst.id.startsWith('IN_') ? width : 20 * camera.zoom),
+      p.y + 3 * camera.zoom,
+      levelPinName(inst),
+      camera.zoom,
+    );
   }
 
   const armed =

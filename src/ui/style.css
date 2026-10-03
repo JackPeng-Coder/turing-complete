@@ -242,6 +242,9 @@ html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--
 }
 .tool-btn:disabled { color: #6f6a88; cursor: not-allowed; }
 .tool-btn svg { width: 22px; height: 22px; display: block; }
+/* The grid has an odd number of buttons, so the last cell is left empty rather
+   than stretched. */
+.tool-gap { width: 50px; height: 50px; }
 
 /* ---------------------------------------------------------------- palette -- */
 .palette {
@@ -297,6 +300,14 @@ html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--
 .case-cell .bit { width: 16px; height: 16px; }
 .case-note { color: var(--text-muted); font-size: 13px; }
 .case-bad { outline: 2px solid var(--off); outline-offset: 2px; border-radius: 4px; }
+/* The case the auto-test is on: the board is driving it, and the reader's eye
+   has to follow it across the matrix. */
+.case-active {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+  background: rgba(255, 214, 10, 0.08);
+}
 .case-detail { color: var(--off); font-size: 13px; margin: 2px 0; }
 .case-pass { color: var(--on); font-size: 14px; margin: 0 0 6px; }
 .case-error { color: var(--off); font-size: 14px; margin: 0 0 6px; }
@@ -324,6 +335,136 @@ html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--
 .map-tile:disabled { opacity: 0.45; cursor: not-allowed; }
 /* The level the board has open, so the player can see where they are. */
 .map-tile-current { border-color: var(--accent); }
+
+/* ----------------------------------------------------------- pass dialog -- */
+/* The original's own panel: a titled bar, a summary on the left, the medal and
+   the ways onward on the right. Deliberately narrow enough to read at 1280x800
+   without covering the board the player just finished. */
+.result {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(5, 7, 15, 0.82);
+  z-index: 30;
+}
+.result-card {
+  width: min(660px, 92vw);
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  background: var(--panel);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
+}
+.result-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 14px;
+  background: #16264a;
+  color: var(--text);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+.result-close {
+  border: 0;
+  border-radius: 5px;
+  background: var(--off);
+  color: var(--text);
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.result-close:hover { background: #ff5271; }
+.result-left { padding: 16px 20px 20px; }
+.result-right {
+  padding: 22px 18px;
+  background: #0a1120;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+.result-heading {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.result-heading + .result-unlocks { margin-bottom: 18px; }
+.result-unlocks { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.result-chip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  background: #1250a8;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.25;
+  box-shadow: var(--glow-bus);
+}
+.result-chip b { font-size: 12px; letter-spacing: 0.04em; }
+.result-trophy {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: #2a2410;
+  color: #ffd60a;
+  box-shadow: 0 0 12px rgba(255, 214, 10, 0.35);
+}
+.result-trophy svg { width: 22px; height: 22px; }
+.result-hint { font-size: 12px; color: var(--text-muted); }
+.result-summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 7px 20px;
+  margin: 0;
+  font-size: 14px;
+}
+.result-summary dt { color: var(--text-muted); }
+.result-summary dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; }
+.result-story {
+  margin: 18px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--panel-edge);
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-muted);
+}
+/* The medal: the one place on this panel that is allowed to be loud. */
+.result-medal {
+  width: 104px;
+  height: 104px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, #58ffb4, #00a862 70%);
+  box-shadow: 0 0 34px rgba(0, 255, 156, 0.5);
+}
+.result-medal svg { width: 54px; height: 54px; }
+.result-verdict { margin: 0; font-size: 16px; color: var(--text); }
+.result-actions { display: flex; gap: 10px; margin-top: auto; }
+.result-actions button {
+  padding: 8px 18px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.result-actions button:hover:not(:disabled) { background: var(--panel-hover); }
+.result-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+.result-next { border-color: var(--accent) !important; color: var(--accent) !important; }
 
 /* --------------------------------------------------------------- briefing -- */
 .briefing {
