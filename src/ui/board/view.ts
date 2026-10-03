@@ -9,17 +9,17 @@
  */
 import type { ComponentDef, Registry } from '../../core/registry';
 import type { Graph, Instance } from '../../core/graph';
-import { GRID, INSTANCE_HEIGHT, INSTANCE_WIDTH, PIN_RADIUS } from '../theme';
+import { GRID, INSTANCE_HEIGHT, INSTANCE_WIDTH, PIN_RADIUS, PIN_SPACING } from '../theme';
+import { distanceToPath, routeWire, type Point } from './routing';
+
+// `Point` is defined next to the routing it is used by, and re-exported here so
+// that the board's public geometry keeps arriving from one module.
+export type { Point };
 
 export interface Camera {
   x: number;
   y: number;
   zoom: number;
-}
-
-export interface Point {
-  x: number;
-  y: number;
 }
 
 export function worldToScreen(camera: Camera, p: Point): Point {
@@ -58,7 +58,7 @@ export function pinPosition(
   const pins = isInput ? def.inputs : def.outputs;
   const index = pins.findIndex((p) => p.id === pinId);
   const count = Math.max(1, pins.length);
-  const y = inst.y + INSTANCE_HEIGHT / 2 + (index - (count - 1) / 2) * 14;
+  const y = inst.y + INSTANCE_HEIGHT / 2 + (index - (count - 1) / 2) * PIN_SPACING;
   const x = isInput ? inst.x : inst.x + INSTANCE_WIDTH;
   return { x, y };
 }
@@ -75,15 +75,6 @@ function distance(a: Point, b: Point): number {
 
 function pointInRect(p: Point, r: { x: number; y: number; w: number; h: number }): boolean {
   return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
-}
-
-function distanceToSegment(p: Point, a: Point, b: Point): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lengthSq = dx * dx + dy * dy;
-  if (lengthSq === 0) return distance(p, a);
-  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq));
-  return distance(p, { x: a.x + t * dx, y: a.y + t * dy });
 }
 
 export function hitTest(graph: Graph, registry: Registry, world: Point): Hit {
@@ -114,7 +105,10 @@ export function hitTest(graph: Graph, registry: Registry, world: Point): Hit {
     if (!fromDef || !toDef) continue;
     const a = pinPosition(from, fromDef, wire.from.port, false);
     const b = pinPosition(to, toDef, wire.to.port, true);
-    if (distanceToSegment(world, a, b) <= 4) return { kind: 'wire', id: wire.id };
+    // The polyline the board draws, not the straight chord under it: the two
+    // differ by up to half the wire's span, and a player clicking a wire aims at
+    // the line they can see.
+    if (distanceToPath(world, routeWire(a, b)) <= 4) return { kind: 'wire', id: wire.id };
   }
 
   for (let i = graph.instances.length - 1; i >= 0; i -= 1) {

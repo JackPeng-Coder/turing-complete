@@ -10,7 +10,7 @@ import { STORAGE_KEY } from '../../src/persist/storage';
  * progress still there.
  *
  * The drag offsets are deliberately hard-coded against the board's geometry:
- * `pinPosition()` puts an output pin at `x + INSTANCE_WIDTH (64)`, vertically
+ * `pinPosition()` puts an output pin at `x + INSTANCE_WIDTH (72)`, vertically
  * centred, and a part dropped at cursor `(px, py)` lands with its pin row on
  * `py`. If the part size changes, these offsets have to change with it -- that
  * coupling is the point, because pointer feel is part of the UI contract.
@@ -86,7 +86,7 @@ async function placeParts(page: Page): Promise<{ cx: number; cy: number }> {
 
 /** Drags a wire from the source's output pin to the output part's input pin. */
 async function wireParts(page: Page, cx: number, cy: number): Promise<void> {
-  await dragWire(page, cx - 160 + 64, cy, cx + 160, cy);
+  await dragWire(page, cx - 160 + 72, cy, cx + 160, cy);
 }
 
 test('level 1 is playable end to end and shows its epilogue', async ({ page }) => {
@@ -189,7 +189,7 @@ test('a chapter-2 level opens and grades end to end', async ({ page }) => {
 
   const { cx, cy } = await boardCentre(page);
   // LAYOUT: the two level inputs on the left, the gate in the middle, the level
-  // output on the right. A two-input gate's pins sit 7px either side of its drop
+  // output on the right. A two-input gate's pins sit 12px either side of its drop
   // row and a one-pin part's pin sits on it, so every wire below is a straight
   // run between the coordinates these four drops produce.
   await place(page, '关卡输入', cx - 260, cy - 20);
@@ -198,9 +198,9 @@ test('a chapter-2 level opens and grades end to end', async ({ page }) => {
   await place(page, '关卡输出', cx + 200, cy);
   await page.screenshot({ path: 'test-results/smoke-ch2-level31-parts-placed.png' });
 
-  await dragWire(page, cx - 196, cy - 20, cx, cy - 7); // a -> XOR
-  await dragWire(page, cx - 196, cy + 20, cx, cy + 7); // inv -> XOR
-  await dragWire(page, cx + 64, cy, cx + 200, cy); // XOR -> out
+  await dragWire(page, cx - 188, cy - 20, cx, cy - 12); // a -> XOR
+  await dragWire(page, cx - 188, cy + 20, cx, cy + 12); // inv -> XOR
+  await dragWire(page, cx + 72, cy, cx + 200, cy); // XOR -> out
 
   // The grade is the level's own: a truth table over a and inv, all four rows.
   await expect(page.locator('.truth-table')).toContainText('全部用例通过');

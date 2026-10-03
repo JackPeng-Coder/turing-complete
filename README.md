@@ -22,20 +22,26 @@ A from-scratch, from-NAND-to-CPU educational puzzle game that reimplements the *
 LevelHead's *Turing Complete*: you start with one primitive gate and build your way up, gate by gate,
 towards a working CPU.
 
-## What works today (Phases 0–1)
+## What works today (Phases 0–2)
 
 - **Chapter 1 — 12 levels**, from the NAND gate to a 4-bit binary reader.
 - **Chapter 2 — 26 levels (13–38)**: parity and counting, the byte operators, half and full
   adders, two's complement, decoders, a logic-engine capstone, and the storage half — switch,
   delay, clock source, selector, register, RAM and counter.
+- **Chapter 3 — 9 levels (39–47)**: the ALU and the machine around it — registers and buses, the
+  opcode decoder, the program counter and its RAM, and a capstone that runs an assembled program
+  against the machine you built.
 - A **canvas wiring board**: place parts, drag wires, pan and zoom.
+- **A live board**: every wire and pin shows the value it is carrying, the level's input bits are
+  clickable so you can drive a half-built circuit and watch it work, and the clock can be stepped,
+  run or reset.
 - **Live truth-table checking** as you build.
 - **Gate / delay / tick scoring**, with a three-star target for every level.
 - **Progress saved to `localStorage`**, so a refresh keeps your stars.
 - A **chapter map** for navigating levels and seeing what is unlocked.
 
-Chapters 3–7 (the OVERTURE and LEG CPUs, programming, the assembly challenges and the sandbox) are
-planned but not built yet.
+Chapters 4–7 (programming and the assembly IDE, the LEG CPU, functions, the assembly challenges and
+the sandbox) are planned but not built yet.
 
 ## Running it
 
@@ -83,9 +89,11 @@ Screenshots are written under `test-results/`, which Playwright wipes at the sta
 ```
 src/
   core/     simulator: signals, component registry + definitions, graph/netlist, settle & tick
-  levels/   LevelSpec types, checks, grader, and content/ (38 levels: chapters 1–2)
+  levels/   LevelSpec types, checks, grader, and content/ (47 levels: chapters 1–3)
   app/      application state, command/undo stack, progress
-  ui/       DOM shell + Canvas board, palette, truth table, chapter map
+  ui/       the board's chrome: top bar, palette, clock + I/O readout, tool grid, test cases,
+            chapter map, and the Canvas board (see ui/board/)
+  ui/board/ the board itself: camera and hit testing, wire routing, painting, live signals
   persist/  localStorage save and load
 test/       Vitest unit/level tests and the Playwright smoke specs
 ```

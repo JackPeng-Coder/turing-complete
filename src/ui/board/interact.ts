@@ -78,8 +78,44 @@ export function levelIoPlacement(
   return undefined;
 }
 
-export function attachBoardInput(
-  canvas: HTMLCanvasElement,
+/**
+ * Deletes everything selected as one undoable step, wires included.
+ *
+ * Its own export rather than only a branch of the key handler: the toolbar's bin
+ * button is the same operation, and two copies of the wire-collection rule would
+ * be two chances to leave a dangling wire behind. Returns whether anything was
+ * deleted, so a caller can tell "nothing selected" from "done".
+ */
+export function deleteSelection(
+  store: Store<AppState>,
+  stack: CommandStack,
+  onChange: () => void,
+): boolean {
+  const ids = store.get().selected;
+  if (ids.length === 0) return false;
+  const removed = store.get().graph.instances.filter((i) => ids.includes(i.id));
+  const wires = store
+    .get()
+    .graph.wires.filter((w) => ids.includes(w.from.inst) || ids.includes(w.to.inst));
+  stack.push(
+    {
+      label: 'delete',
+      do: (g) => {
+        for (const inst of removed) removeInstance(g, inst.id);
+      },
+      undo: (g) => {
+        for (const inst of removed) g.instances.push(inst);
+        for (const wire of wires) g.wires.push(wire);
+      },
+    },
+    store.get().graph,
+  );
+  store.set({ selected: [] });
+  onChange();
+  return true;
+}
+
+export function attachBoardInput(  canvas: HTMLCanvasElement,
   store: Store<AppState>,
   stack: CommandStack,
   options: BoardInputOptions,
@@ -350,27 +386,7 @@ export function attachBoardInput(
     }
 
     if (event.key === 'Delete' || event.key === 'Backspace') {
-      const ids = store.get().selected;
-      if (ids.length === 0) return;
-      const removed = store.get().graph.instances.filter((i) => ids.includes(i.id));
-      const wires = store
-        .get()
-        .graph.wires.filter((w) => ids.includes(w.from.inst) || ids.includes(w.to.inst));
-      stack.push(
-        {
-          label: 'delete',
-          do: (g) => {
-            for (const inst of removed) removeInstance(g, inst.id);
-          },
-          undo: (g) => {
-            for (const inst of removed) g.instances.push(inst);
-            for (const wire of wires) g.wires.push(wire);
-          },
-        },
-        store.get().graph,
-      );
-      store.set({ selected: [] });
-      options.onChange();
+      deleteSelection(store, stack, options.onChange);
       return;
     }
 

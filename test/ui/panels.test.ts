@@ -12,6 +12,8 @@ import { grade } from '../../src/levels/grader';
 import { mountPalette } from '../../src/ui/palette';
 import { mountTruthTable } from '../../src/ui/truthTable';
 import { mountShell } from '../../src/ui/shell';
+import { mountIoPanel, type IoPanelOptions } from '../../src/ui/ioPanel';
+import { mountToolbar, type ToolbarState } from '../../src/ui/toolbar';
 import { mountMap } from '../../src/ui/map';
 import { NARRATIVE, narrativeFor } from '../../src/ui/narrative';
 import { THEME } from '../../src/ui/theme';
@@ -308,6 +310,160 @@ describe('level io placement', () => {
       ['IN_a', 8],
       ['OUT', 8],
     ]);
+  });
+});
+
+describe('io readout panel', () => {
+  /** A level whose input is a byte, so a pin has more than one cell to draw. */
+  function wideStore(): Store<AppState> {
+    const level: LevelSpec = {
+      ...getLevel('ch1-02-nand-gate'),
+      id: 'test-wide-io',
+      io: { inputs: [{ id: 'a', width: 8 }], outputs: [{ id: 'out', width: 8 }] },
+    };
+    return createStore<AppState>({
+      level,
+      graph: emptyGraph(level.id),
+      registry,
+      progress: emptyProgress(),
+      camera: { x: 0, y: 0, zoom: 1 },
+      selected: [],
+      dragging: null,
+      lastGrade: null,
+      status: null,
+    });
+  }
+
+  function mount(
+    store: Store<AppState>,
+    overrides: Partial<IoPanelOptions> = {},
+  ): { root: HTMLElement; toggled: Array<[string, number]> } {
+    const root = document.createElement('div');
+    const toggled: Array<[string, number]> = [];
+    mountIoPanel(root, store, {
+      vector: () => ({}),
+      outputs: () => null,
+      rate: () => '10Hz',
+      tick: () => 0,
+      onToggleBit: (pin, bit) => toggled.push([pin, bit]),
+      onCycleRate: () => {},
+      ...overrides,
+    });
+    return { root, toggled };
+  }
+
+  it('draws one cell per bit of every pin the level declares', () => {
+    const { root } = mount(wideStore());
+    const pins = [...root.querySelectorAll('.io-pin')];
+    // one input and one output, both eight bits wide
+    expect(pins).toHaveLength(2);
+    expect(pins[0]!.querySelectorAll('.bit')).toHaveLength(8);
+    expect(pins[1]!.querySelectorAll('.bit')).toHaveLength(8);
+  });
+
+  it('reports the bit a click flips, counting from the least significant end', () => {
+    // The cells run most significant first, which is the order a byte is read
+    // in; the bit index has to be the value's own, or the player toggles 128
+    // when they clicked the 1s column.
+    const { root, toggled } = mount(wideStore());
+    const cells = root.querySelectorAll('.io-pin .bit');
+    (cells[0] as HTMLElement).click();
+    (cells[7] as HTMLElement).click();
+    expect(toggled).toEqual([
+      ['a', 7],
+      ['a', 0],
+    ]);
+  });
+
+  it('shows the driven value as a number as well as bits', () => {
+    const { root } = mount(wideStore(), { vector: () => ({ a: 5 }) });
+    const input = root.querySelectorAll('.io-pin')[0]!;
+    expect(input.querySelector('.io-value')?.textContent).toBe('5');
+    expect([...input.querySelectorAll('.bit')].map((b) => b.className)).toEqual([
+      'bit bit-0',
+      'bit bit-0',
+      'bit bit-0',
+      'bit bit-0',
+      'bit bit-0',
+      'bit bit-1',
+      'bit bit-0',
+      'bit bit-1',
+    ]);
+  });
+
+  /**
+   * Nothing has been simulated yet, so an output is not 0. Rendering it as 0
+   * would tell the player their circuit drives the pin low, which is a claim the
+   * app cannot make before it has run anything.
+   */
+  it('leaves outputs unknown until something has run', () => {
+    const { root } = mount(wideStore());
+    const output = root.querySelectorAll('.io-pin')[1]!;
+    expect(output.querySelector('.io-value')?.textContent).toBe('???');
+    expect(output.querySelectorAll('.bit-x')).toHaveLength(8);
+  });
+
+  it('keeps the clock and the collapse control apart', () => {
+    const { root } = mount(wideStore(), { tick: () => 3, rate: () => '1Hz' });
+    expect(root.querySelector('.card .io-value')?.textContent).toBe('3 拍 · 1Hz');
+    const state = root.querySelectorAll('.card')[1]!;
+    (root.querySelector('[aria-label="收起状态面板"]') as HTMLButtonElement).click();
+    expect((state as HTMLElement).hidden).toBe(true);
+  });
+});
+
+describe('toolbar', () => {
+  function mount(): { root: HTMLElement; fired: string[]; render: (s: ToolbarState) => void } {
+    const root = document.createElement('div');
+    const fired: string[] = [];
+    const toolbar = mountToolbar(root, {
+      onZoom: (factor) => fired.push(`zoom:${factor}`),
+      onToggleGrid: () => fired.push('grid'),
+      onDeleteSelection: () => fired.push('delete'),
+      onStep: () => fired.push('step'),
+      onToggleRun: () => fired.push('run'),
+      onStop: () => fired.push('stop'),
+    });
+    return { root, fired, render: toolbar.render };
+  }
+
+  const press = (root: HTMLElement, label: string): void => {
+    (root.querySelector(`[aria-label="${label}"]`) as HTMLButtonElement).click();
+  };
+
+  it('drives every tool it draws', () => {
+    // No button here is decorative: a tool that looks live and does nothing is
+    // only discovered by clicking it.
+    const { root, fired, render } = mount();
+    render({ running: false, grid: true, rate: '10Hz' });
+    for (const label of ['放大', '缩小', '适应画面', '单步', '运行', '停止并复位', '网格', '删除选中']) {
+      press(root, label);
+    }
+    expect(fired).toEqual([
+      'zoom:1.25',
+      'zoom:0.8',
+      // 0 is the toolbar's "fit it on screen", not a zoom factor
+      'zoom:0',
+      'step',
+      'run',
+      'stop',
+      'grid',
+      'delete',
+    ]);
+  });
+
+  it('shows the run button as paused while the clock is running', () => {
+    const { root, render } = mount();
+    render({ running: true, grid: false, rate: '1Hz' });
+    expect(root.querySelector('[aria-label="暂停"]')).not.toBeNull();
+    expect(root.querySelector('[aria-label="网格"]')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('starts with nothing pressed and no clock', () => {
+    const { root, render } = mount();
+    render({ running: false, grid: true, rate: '10Hz' });
+    expect(root.querySelector('[aria-label="运行"]')?.getAttribute('aria-pressed')).toBe('false');
+    expect(root.querySelector('[aria-label="网格"]')?.getAttribute('aria-pressed')).toBe('true');
   });
 });
 
