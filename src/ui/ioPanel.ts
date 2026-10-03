@@ -115,7 +115,10 @@ function mountClock(options: IoPanelOptions): {
   collapse.textContent = '−';
   collapse.setAttribute('aria-label', '收起状态面板');
   const body = document.createElement('div');
-  body.className = 'io-value';
+  // `io-value` because it is the same kind of readout as a pin's number, and
+  // `panels.test.ts` reads it as one; `io-tick` because a block of text is not a
+  // column of numbers and must not be right-aligned like one.
+  body.className = 'io-value io-tick';
   head.append(title, rate, collapse);
   element.append(head, body);
   return { element, collapse, rate, body };

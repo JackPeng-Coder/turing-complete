@@ -643,6 +643,11 @@ function showBriefing(text: { zh: string; en: string }): void {
   document.querySelector('.briefing')?.remove();
   const panel = document.createElement('div');
   panel.className = 'briefing';
+  // The overlay covers the whole board, so it has to say what it is: without a
+  // label it is indistinguishable from a dialog that wants an answer.
+  const tag = document.createElement('div');
+  tag.className = 'briefing-tag';
+  tag.textContent = '任务简报';
   const body = document.createElement('p');
   body.textContent = text.zh;
   body.lang = 'zh-CN';
@@ -650,6 +655,6 @@ function showBriefing(text: { zh: string; en: string }): void {
   start.type = 'button';
   start.textContent = '开始';
   start.addEventListener('click', () => panel.remove());
-  panel.append(body, start);
+  panel.append(tag, body, start);
   document.body.append(panel);
 }

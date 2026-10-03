@@ -1,8 +1,31 @@
-/* Literal colours are the one accepted exception to "colours come from
-   theme.ts": a stylesheet cannot import a TypeScript constant without a build
-   step. The values mirror `src/ui/theme.ts`, which states the rule they obey:
-   GREEN is 1, RED is 0, BLUE is wider than one bit, and NEUTRAL SLATE is
-   "nothing has been simulated yet".
+/* ============================================================ the instrument ==
+
+   This is not a page with cards on it. It is a bench instrument: a patch bay on
+   the right, probes on the left, a test log along the bottom, and a board that
+   runs the whole width underneath all of them. The chrome is therefore styled as
+   HARDWARE -- flat slabs separated by hairlines and hue -- rather than as the
+   soft floating cards a web app would wear.
+
+   TWO COLOUR AXES, and keeping them apart is the whole design:
+
+     * ON THE BOARD, the value rule from `theme.ts` holds: GREEN is 1, RED is 0,
+       BLUE is wider than one bit, SLATE is nothing simulated yet. Nothing here
+       touches it.
+
+     * ON THE CHROME, cyan is the INSTRUMENT'S VOICE -- titles, labels, measured
+       numbers, rules -- and magenta is the OPERATOR'S HAND: every control the
+       player can press. Magenta never appears on the board, so "pink means I can
+       touch this" can never be misread as a value.
+
+   NO SHADOWS ANYWHERE. Not one `box-shadow`, not one `text-shadow`, no blur of
+   any kind. Separation comes from a 1px hairline and a change of surface, and
+   emphasis comes from a solid fill or a 2px rule. This is a deliberate limit, not
+   an omission: a soft shadow is the one thing that would make this read as a web
+   page instead of a panel bolted to a chassis.
+
+   NO ROUNDED CORNERS EITHER, with exactly one exception: the bit arrow, which is
+   round because its POINT carries the value (see `.bit`). A circle that means
+   something survives; a 10px corner radius that means nothing does not.
 
    THE BOARD IS FULL BLEED. The canvas fills the whole stage and every panel
    floats over it as an overlay, which is how the original composes its board:
@@ -12,354 +35,552 @@
    board underneath. */
 :root {
   color-scheme: dark;
-  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
-  --backdrop: #05070f;
-  --board: #0a1526;
-  --chrome: #080c16;
-  --panel: #101a2e;
-  --panel-hover: #17263f;
-  --panel-edge: #1f3a5c;
-  --title: #00e5ff;
-  --label: #4dd8ff;
-  --text: #e6f0fb;
-  --text-muted: #7b93b0;
+  /* Two faces, two jobs. Monospace is the instrument -- every label, every
+     measured number, every part name. The reading face is for PROSE only: a
+     level's brief, the epilogue, the one place a player reads sentences rather
+     than scans a readout. */
+  --face-ui: ui-monospace, "Cascadia Mono", "Consolas", "SFMono-Regular", "Menlo", monospace;
+  --face-read: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+
+  /* -- surfaces: three, flat, in ascending order of "closer to the operator" -- */
+  --void: #04070d;
+  --slab: #080e18;
+  --slab-lit: #0f1a28;
+  --hair: #17334a;
+  --hair-lit: #2c6383;
+
+  /* -- the instrument's voice -- */
+  --neon: #22e0ff;
+  --neon-dim: #1487a8;
+  /* -- the operator's hand: controls only, never a value -- */
+  --hot: #ff2d78;
+  --hot-dim: #7d1637;
+
+  /* -- values: the board's own rule, mirrored from `theme.ts` -- */
   --on: #00ff9c;
   --off: #ff2b4e;
   --bus: #0a84ff;
-  --idle: #1e2c44;
+  --idle: #16233a;
   --bit-unknown: #3d4d66;
-  /* The one colour that is not a value: selection, the armed pin, the rubber
-     band, and the pressed ring on a tool button. */
-  --accent: #ffd60a;
-  --radius: 10px;
+  --amber: #ffb020;
+
+  --text: #d7e6f5;
+  --text-muted: #6b8aa8;
+
   /* Height of the bottom test panel. The parts panel above it has to leave
-     exactly this much room, so both read it from here rather than guessing.
-     The panel is one row per pin and two rows per output pin -- four inputs and
-     four outputs is twelve rows, the tallest shape in the game -- so it is worth
-     three tenths of the board rather than a quarter. It still scrolls when a
-     level has more pins than this holds. */
+     exactly this much room, so both read it from here rather than guessing. The
+     panel is one row per pin and two rows per output pin -- four inputs and four
+     outputs is twelve rows, the tallest shape in the game -- so it is worth
+     three tenths of the board. It still scrolls when a level has more pins than
+     this holds. */
   --test-h: clamp(150px, 30vh, 300px);
-  /* The halo a lit thing sits in. One place, so a wire, a bit cell and a title
-     glow by the same amount instead of three guesses. */
-  --glow-on: 0 0 9px rgba(0, 255, 156, 0.5);
-  --glow-bus: 0 0 9px rgba(10, 132, 255, 0.5);
-  --glow-accent: 0 0 12px rgba(0, 229, 255, 0.45);
+
+  /* THE SIGNATURE: a scale of 1px ticks. It replaces the drop shadow as the
+     thing that finishes an edge, and it is used in exactly the two places where
+     something is MEASURED -- the cost readout in the top bar and the case matrix
+     along the bottom. Anywhere else would be decoration. */
+  --ruler-h: repeating-linear-gradient(90deg, var(--hair-lit) 0 1px, transparent 1px 9px);
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--text); }
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--face-ui);
+  font-size: 14px;
+}
 #app { display: flex; flex-direction: column; height: 100vh; }
 
+/* Keyboard focus is always visible and always magenta -- the operator's colour,
+   so "the thing that will respond to me" reads the same way whether it is hovered
+   or tabbed to. */
+:focus-visible { outline: 2px solid var(--hot); outline-offset: 1px; }
+button { font-family: inherit; }
+
 /* ---------------------------------------------------------------- top bar -- */
+/* The bar is the instrument's nameplate: the machine's status on the left, the
+   level's address in the middle, and the cost readout -- on its ruler -- right. */
 .shell-bar {
   position: relative;
   flex: 0 0 auto;
-  height: clamp(48px, 5.5vh, 68px);
+  height: clamp(46px, 5.5vh, 64px);
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 12px;
   padding: 0 14px;
-  background: var(--chrome);
+  background: var(--slab);
+  border-bottom: 1px solid var(--hair);
 }
-/* The hint pops out under the bar, out of the grid's flow. */
+/* The scale along the edge the bar shares with the board. */
+.shell-bar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background-image: var(--ruler-h);
+  opacity: 0.75;
+  pointer-events: none;
+}
+/* The hint pops out under the bar, out of the grid's flow. A slab with a magenta
+   top rule: it is a thing the operator asked for. */
 .shell-hint {
   position: absolute;
   top: calc(100% + 6px);
   right: 14px;
   margin: 0;
-  max-width: 42ch;
-  padding: 10px 14px;
-  background: var(--panel);
-  border-radius: var(--radius);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+  max-width: 46ch;
+  padding: 12px 14px 13px;
+  background: var(--slab);
+  border: 1px solid var(--hair-lit);
+  border-top: 2px solid var(--hot);
+  font-family: var(--face-read);
   font-size: 13px;
-  line-height: 1.7;
+  line-height: 1.8;
   color: var(--text);
   z-index: 20;
 }
-.shell-left { display: flex; align-items: center; gap: 4px; justify-self: start; }
+.shell-left { display: flex; align-items: center; gap: 2px; justify-self: start; min-width: 0; }
 .shell-right { display: flex; align-items: center; gap: 14px; justify-self: end; }
 .shell-title {
   justify-self: center;
-  color: var(--title);
-  font-size: clamp(15px, 1.5vw, 21px);
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   white-space: nowrap;
-  text-shadow: var(--glow-accent);
+}
+/* The level's address, boxed: `1-4`. Boxed rather than written because on this
+   instrument the address is the thing you navigate by. */
+.shell-index {
+  padding: 2px 7px;
+  border: 1px solid var(--hot);
+  color: var(--hot);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+}
+.shell-name {
+  color: var(--neon);
+  font-size: clamp(15px, 1.45vw, 20px);
+  font-weight: 600;
+  letter-spacing: 0.16em;
 }
 /* Icon-only buttons: the icon is an SVG child, so the button's text content --
    which the panel tests read as the part's name -- stays empty here. */
 .shell-icon {
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   display: grid;
   place-items: center;
   padding: 0;
-  border: 0;
-  border-radius: 8px;
+  border: 1px solid transparent;
   background: transparent;
-  color: var(--text);
+  color: var(--text-muted);
   cursor: pointer;
+  transition: color 90ms linear, border-color 90ms linear;
 }
-.shell-icon:hover { background: var(--panel); }
-.shell-icon svg { width: 22px; height: 22px; display: block; }
-.shell-stats { display: flex; gap: 18px; font-size: 13px; color: var(--text); }
-.shell-stats b { font-weight: 600; font-variant-numeric: tabular-nums; }
-.shell-status { font-size: 12px; color: var(--text-muted); max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shell-metrics { font-size: 13px; font-variant-numeric: tabular-nums; }
+.shell-icon:hover { color: var(--neon); border-color: var(--hair-lit); }
+.shell-icon svg { width: 20px; height: 20px; display: block; }
+.shell-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 8px;
+}
+/* The cost readout: the measured half of the bar, in the instrument's colour,
+   sitting directly on the ruler. */
+.shell-metrics { font-size: 12.5px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
 
 /* ---------------------------------------------------------------- screens -- */
 /* One screen at a time fills the space below the shell bar. */
 .screens { flex: 1 1 auto; min-height: 0; display: flex; }
 .screen { flex: 1 1 auto; min-width: 0; min-height: 0; }
 /* `hidden` has to beat `.screen-board`'s own `display: flex`. An author rule
-   outranks the user-agent `[hidden] { display: none }` whatever its
-   specificity, so without this the board stays on screen next to the map --
-   it merely stops being the flex child that grows. */
+   outranks the user-agent `[hidden] { display: none }` whatever its specificity,
+   so without this the board stays on screen next to the map -- it merely stops
+   being the flex child that grows. */
 .screen[hidden] { display: none; }
 .screen-board { display: flex; flex-direction: column; }
-.screen-map { overflow: auto; padding: 20px; }
+.screen-map {
+  overflow: auto;
+  padding: 22px 24px 40px;
+  /* Empty space on this screen is a work surface, so it gets a graticule rather
+     than a flat fill. Two hairline gradients -- no blur, no image. */
+  background-image:
+    linear-gradient(rgba(34, 224, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 224, 255, 0.045) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
 
 /* ------------------------------------------------------------------ board -- */
-.board-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; background: var(--backdrop); }
+.board-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; background: var(--void); }
 /* The board is an ordinary in-flow flex child of the stage, never an absolutely
    positioned layer: its DOM box and its drawable area have to be the same
    rectangle, or canvas.clientWidth/clientHeight stop matching the pointer
    coordinates. */
-.board { display: block; width: 100%; height: 100%; background: var(--board); touch-action: none; cursor: crosshair; }
+.board { display: block; width: 100%; height: 100%; background: var(--void); touch-action: none; cursor: crosshair; }
 
 /* Floating panels. The container takes no pointer events so the board stays
    clickable through the gaps. */
 .overlay { position: absolute; pointer-events: none; z-index: 2; }
 .overlay > * { pointer-events: auto; }
-.overlay-left { top: 12px; left: 12px; width: 200px; display: flex; flex-direction: column; gap: 8px; }
-.overlay-tools { top: 12px; left: 220px; }
-.overlay-parts { top: 12px; right: 12px; bottom: calc(var(--test-h) + 12px); width: 216px; }
+.overlay-left { top: 12px; left: 12px; width: 204px; display: flex; flex-direction: column; gap: 6px; }
+.overlay-tools { top: 12px; left: 228px; }
+.overlay-parts { top: 12px; right: 12px; bottom: calc(var(--test-h) + 12px); width: 218px; }
 .overlay-tests { left: 0; right: 0; bottom: 0; }
 /* The chevron rides just above the test panel. Because its `bottom` is measured
    from `--test-h`, collapsing the panel carries the button down with it. */
 .overlay-toggle { left: 14px; bottom: calc(var(--test-h) + 6px); }
 .board-stage.collapsed { --test-h: 0px; }
 /* `box-sizing: border-box` floors a zero height at the padding, so a collapsed
-   panel would still show a 32 pixel strip of itself. The padding has to go with
-   the height. */
-.board-stage.collapsed .truth-table { padding: 0; box-shadow: none; overflow: hidden; }
+   panel would still show a strip of itself. The padding has to go with the
+   height. */
+.board-stage.collapsed .truth-table { padding: 0; border-width: 0; overflow: hidden; }
 .panel-toggle {
-  width: 38px;
-  height: 28px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--panel);
-  color: var(--text);
-  font-size: 15px;
+  width: 40px;
+  height: 22px;
+  border: 1px solid var(--hair);
+  background: var(--slab);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 13px;
   line-height: 1;
   cursor: pointer;
 }
-.panel-toggle:hover { background: var(--panel-hover); }
+.panel-toggle:hover { color: var(--hot); border-color: var(--hot); }
 
-.card {
-  width: 100%;
-  background: var(--panel);
-  border-radius: var(--radius);
-  padding: 10px 12px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
-}
+/* THE PLATE: every panel's header, one shape everywhere.
+
+   A colour block, a wide-tracked name, and a hairline running to the panel's
+   edge. It is the instrument's label strip -- the thing that says which module
+   you are looking at -- and it is why no panel needs a shadow to look raised. */
+.card,
+.palette,
+.truth-table { background: var(--slab); }
+.card { border: 1px solid var(--hair); }
 .card-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  font-size: 13px;
-  color: var(--text);
-  margin: -2px 0 4px;
+  padding: 7px 10px 7px 9px;
+  border-bottom: 1px solid var(--hair);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  color: var(--neon);
 }
+.card-head::before { content: ''; width: 3px; height: 12px; background: var(--neon); flex: 0 0 auto; }
+.card-head > span:first-child { flex: 1 1 auto; }
 .card-head button {
   border: 0;
   background: transparent;
   color: var(--text-muted);
-  font-size: 15px;
+  font-family: inherit;
+  font-size: 14px;
   line-height: 1;
   cursor: pointer;
-  padding: 0 4px;
+  padding: 0 2px;
 }
+.card-head button:hover { color: var(--hot); }
 
 /* ------------------------------------------------------------- io readout -- */
-.io-group { margin-top: 8px; }
+.io-group { padding: 8px 10px 6px; }
+.io-group + .io-group { border-top: 1px solid var(--hair); }
 .io-group h3 {
-  margin: 0 0 4px;
-  font-size: 13px;
+  margin: 0 0 6px;
+  font-size: 11px;
   font-weight: 500;
-  color: var(--text);
-  text-align: center;
+  color: var(--text-muted);
+  letter-spacing: 0.24em;
 }
-.io-pin { text-align: center; margin-bottom: 4px; }
-.io-pin-name { font-size: 12px; color: var(--text); }
-.io-bits { display: flex; justify-content: center; gap: 3px; margin: 3px 0 1px; }
-.io-value { font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
-.io-empty { font-size: 12px; color: var(--text-muted); text-align: center; }
+/* ONE LINE PER PIN, and the line wraps only when a byte needs the room.
+ 
+   The pin, its cells and its number are one readout row: `1. b3  ◗  0`. It used
+   to be three stacked lines per pin, which on a four-in four-out level ran past
+   the bottom of the window -- a readout that cannot be read is not a readout.
+   A wide pin's cells are the one thing that will not fit beside their name, so
+   they wrap to a second line and the row grows only where it has to. */
+.io-pin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 2px 0;
+}
+.io-pin-name { flex: 0 0 auto; font-size: 11px; color: var(--text-muted); letter-spacing: 0.06em; }
+.io-bits { display: flex; gap: 3px; margin-left: auto; }
+.io-value { flex: 0 0 auto; min-width: 2ch; text-align: right; font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
+/* The clock's edge count: a sentence, not a column of digits. */
+.io-tick { display: block; padding: 8px 10px 9px; text-align: left; letter-spacing: 0.06em; }
+
 /* The bit cell: a round arrow whose point carries the value.
 
    A 1 is a round body with its point at the UPPER RIGHT, a 0 the same body with
    its point at the LOWER LEFT, and an unknown value a plain dot -- no point at
    all, which is the honest shape for "no direction known yet". Shape carries the
    value alongside colour, so the two states stay apart for a player who cannot
-   separate the red from the green. */
+   separate the red from the green.
+
+   NO HALO. A lit bit used to be box-shadowed green; at this size the colour and
+   the point already say it, and a blur would be the one soft thing on a panel
+   built from hard edges. */
 .bit { width: 15px; height: 15px; display: inline-block; background: var(--bit-unknown); border-radius: 50%; }
-.bit-1 {
-  background: var(--on);
-  border-radius: 50% 0 50% 50%;
-  box-shadow: var(--glow-on);
-}
+.bit-1 { background: var(--on); border-radius: 50% 0 50% 50%; }
 .bit-0 { background: var(--off); border-radius: 50% 50% 50% 0; }
 .bit-x { background: var(--bit-unknown); border-radius: 50%; }
 .io-bits .bit { cursor: pointer; }
-.io-bits .bit:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+.io-bits .bit:hover { outline: 2px solid var(--hot); outline-offset: 1px; }
+.io-empty { font-size: 11px; color: var(--text-muted); padding-bottom: 4px; }
 
 /* ---------------------------------------------------------------- toolbar -- */
-.tools { display: grid; grid-template-columns: repeat(2, 50px); gap: 8px; }
+.tools { display: grid; grid-template-columns: repeat(2, 46px); gap: 6px; }
 .tool-btn {
-  width: 50px;
-  height: 50px;
+  width: 46px;
+  height: 46px;
   display: grid;
   place-items: center;
   padding: 0;
-  border: 0;
-  border-radius: 10px;
-  background: var(--panel);
+  border: 1px solid var(--hair);
+  background: var(--slab);
   color: var(--text);
   font-size: 11px;
   line-height: 1;
   cursor: pointer;
+  transition: border-color 90ms linear, color 90ms linear, background-color 90ms linear;
 }
-.tool-btn:hover { background: var(--panel-hover); }
-/* A pressed tool keeps the panel's own fill and gains an accent ring: a fully
-   accent-filled button competes with the circuit for attention. */
-.tool-btn[aria-pressed="true"] {
-  background: var(--panel-hover);
-  box-shadow: inset 0 0 0 2px var(--accent);
-  color: var(--accent);
+.tool-btn:hover { border-color: var(--hot); color: var(--hot); }
+/* A pressed tool is an OPERATOR state, so it is magenta -- and it is a real 2px
+   border rather than an inset ring, because a ring is a shadow by another name. */
+.tool-btn[aria-pressed='true'] {
+  background: var(--slab-lit);
+  border-color: var(--hot);
+  color: var(--hot);
 }
-.tool-btn:disabled { color: #6f6a88; cursor: not-allowed; }
-.tool-btn svg { width: 22px; height: 22px; display: block; }
+.tool-btn:disabled { color: #3b4d5e; cursor: not-allowed; }
+.tool-btn svg { width: 20px; height: 20px; display: block; }
 /* The grid has an odd number of buttons, so the last cell is left empty rather
    than stretched. */
-.tool-gap { width: 50px; height: 50px; }
+.tool-gap { width: 46px; height: 46px; }
 
 /* ---------------------------------------------------------------- palette -- */
+/* The patch bay: a rack of labelled slots. */
 .palette {
   height: 100%;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px;
-  background: var(--panel);
-  border-radius: var(--radius);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  padding: 0;
+  border: 1px solid var(--hair);
 }
-.palette h2 { margin: 0 0 2px; font-size: 12px; font-weight: 500; color: var(--text-muted); }
-.palette-group { font-size: 11px; color: var(--text-muted); margin-top: 6px; letter-spacing: 0.06em; }
+.palette h2 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px 7px 9px;
+  background: var(--slab);
+  border-bottom: 1px solid var(--hair);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  color: var(--neon);
+}
+.palette h2::before { content: ''; width: 3px; height: 12px; background: var(--neon); }
+/* A category key: a rule that runs out to the panel's edge, so the groups read as
+   dividers in one rack rather than as headings in a list. */
+.palette-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 9px 10px 3px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  letter-spacing: 0.26em;
+}
+.palette-group::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--hair); }
 .palette-item {
-  padding: 7px 10px;
+  margin: 0 8px 3px;
+  padding: 7px 9px;
   text-align: left;
-  background: #0d1730;
-  border: 1px solid transparent;
-  border-radius: 7px;
+  background: transparent;
+  border: 1px solid var(--hair);
+  border-left: 2px solid var(--hair);
   cursor: pointer;
   color: var(--text);
   font-size: 13px;
-  font-family: inherit;
+  letter-spacing: 0.04em;
+  transition: border-color 90ms linear, background-color 90ms linear, color 90ms linear;
 }
-.palette-item:hover { background: var(--panel-hover); border-color: var(--panel-edge); }
-.palette-item:disabled { opacity: 0.45; cursor: not-allowed; }
+.palette-item:hover {
+  background: var(--slab-lit);
+  border-color: var(--hair-lit);
+  border-left-color: var(--hot);
+  color: #fff;
+}
+.palette-item:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ------------------------------------------------------------ test panel -- */
+/* The test log: the level's cases, one column each, and one of the only two
+   places on the board that carries the ruler -- because this is where the machine
+   is measured against what the level asked for. */
 .truth-table {
-  background: var(--chrome);
+  position: relative;
   height: var(--test-h);
-  padding: 14px 24px 18px;
+  padding: 16px 24px 18px;
   overflow: auto;
   text-align: center;
-  border-top-left-radius: var(--radius);
-  border-top-right-radius: var(--radius);
-  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.28);
+  border-top: 1px solid var(--hair-lit);
 }
-.truth-table h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.truth-table::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 5px;
+  background-image: var(--ruler-h);
+  opacity: 0.8;
+  pointer-events: none;
+}
+.truth-table h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+}
 /* The panel's own controls: the button that plays the columns below it, and the
    pace it plays them at. The panel can be collapsed, which is why the toolbar
    carries the same control -- see `toolbar.ts`. */
-.case-head { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; }
+.case-head { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; }
 .case-gap { flex: 1 1 auto; }
+/* THE PRIMARY CONTROL of the whole app: the operator's hand, filled magenta, and
+   the only filled control on the board screen. */
 .case-test,
 .case-rate {
-  font: inherit;
-  font-size: 13px;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--panel-edge);
-  border-radius: 6px;
-  padding: 3px 14px;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--hot);
+  background: transparent;
+  border: 1px solid var(--hot-dim);
+  padding: 4px 14px;
   cursor: pointer;
+  transition: background-color 90ms linear, border-color 90ms linear, color 90ms linear;
 }
-.case-rate { min-width: 3.5em; padding: 3px 8px; }
+.case-rate { min-width: 3.6em; padding: 4px 8px; letter-spacing: 0.02em; }
 .case-test:hover,
-.case-rate:hover { background: var(--panel-hover); border-color: var(--accent); }
-.case-test[aria-pressed='true'] {
-  background: var(--panel-hover);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.case-row { display: flex; align-items: center; gap: 14px; min-height: 30px; }
+.case-rate:hover { border-color: var(--hot); background: var(--slab-lit); }
+.case-test[aria-pressed='true'] { background: var(--hot); border-color: var(--hot); color: var(--void); }
 .case-label {
   flex: 0 0 auto;
   min-width: 8.5em;
   text-align: right;
-  color: var(--label);
-  font-size: 15px;
-  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
 }
-.case-cells { display: flex; gap: 14px; }
 .case-cell { display: flex; gap: 2px; }
 .case-cell .bit { width: 16px; height: 16px; }
-.case-note { color: var(--text-muted); font-size: 13px; }
-.case-count { color: var(--text-muted); font-size: 13px; }
-.case-bad { outline: 2px solid var(--off); outline-offset: 2px; border-radius: 4px; }
-/* The case the auto-test is on: the board is driving it, and the reader's eye
-   has to follow it across the matrix. */
+.case-note { color: var(--text-muted); font-size: 12px; }
+.case-count { color: var(--text-muted); font-size: 12px; letter-spacing: 0.06em; }
+/* A wrong cell is BOXED, not tinted: the bit inside keeps its own colour, which
+   is the value, and the box is the verdict about it. */
+.case-bad { outline: 2px solid var(--off); outline-offset: 2px; }
+/* The case being driven: the operator's colour, because the run is the operator's
+   doing, plus a filled block so the eye catches it across a fifteen-column
+   matrix. */
 .case-active {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--hot);
   outline-offset: 2px;
-  border-radius: 4px;
-  background: rgba(255, 214, 10, 0.08);
+  background: rgba(255, 45, 120, 0.14);
 }
-.case-detail { color: var(--off); font-size: 13px; margin: 2px 0; }
-.case-pass { color: var(--on); font-size: 14px; margin: 0 0 6px; }
-.case-error { color: var(--off); font-size: 14px; margin: 0 0 6px; }
+.case-detail { color: var(--off); font-size: 12px; margin: 2px 0; }
+.case-error { color: var(--off); font-size: 13px; margin: 0 0 6px; }
 /* The failing-vector table is still a table: `panels.test.ts` reads its cells to
    prove that a failure which drove no vector fabricates no `0`. */
 .truth-table table { margin: 0 auto; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .truth-table td, .truth-table th { padding: 2px 10px; text-align: left; }
-.truth-table th { color: var(--text-muted); font-weight: 600; font-size: 12px; }
+.truth-table th { color: var(--text-muted); font-weight: 500; font-size: 12px; }
 
 /* -------------------------------------------------------------------- map -- */
-.map h2 { margin: 0 0 14px; font-size: 16px; color: var(--text); }
-.map-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.map h2 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 18px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: var(--neon);
+}
+.map h2::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--hair); }
+/* A chapter is a band of the map: its key on the left, its levels to the right.
+   The levels shipped as one undifferentiated grid; they are seven chapters, and
+   the band is what says so. */
+.map-chapter {
+  display: grid;
+  grid-template-columns: 74px 1fr;
+  gap: 14px;
+  align-items: start;
+  padding: 12px 0;
+  border-top: 1px solid var(--hair);
+}
+.map-chapter-key {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--neon-dim);
+}
+.map-chapter-key b { font-size: 20px; font-weight: 600; color: var(--neon); letter-spacing: 0; }
+.map-chapter-key span { color: var(--text-muted); }
+.map-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 6px; }
+/* A level tile is a slot on the rack: an address column, a name, and a state. */
 .map-tile {
-  padding: 12px;
+  display: flex;
+  align-items: stretch;
+  padding: 0;
   text-align: left;
-  background: var(--panel);
-  border: 1px solid transparent;
-  border-radius: 8px;
+  background: var(--slab);
+  border: 1px solid var(--hair);
   cursor: pointer;
   color: var(--text);
   font-family: inherit;
   font-size: 13px;
+  letter-spacing: 0.04em;
+  transition: border-color 90ms linear, background-color 90ms linear;
 }
-.map-tile:hover:not(:disabled) { background: var(--panel-hover); }
-.map-tile:disabled { opacity: 0.45; cursor: not-allowed; }
-/* The level the board has open, so the player can see where they are. */
-.map-tile-current { border-color: var(--accent); }
+/* The address column: the same shape on every slot, so numbers line up down the
+   rack and a level is found by counting rather than by reading. */
+.map-tile-index {
+  flex: 0 0 auto;
+  width: 30px;
+  display: grid;
+  place-items: center;
+  border-right: 1px solid var(--hair);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.map-tile-name { flex: 1 1 auto; padding: 9px 11px; min-width: 0; }
+.map-tile:hover:not(:disabled) { background: var(--slab-lit); border-color: var(--hair-lit); }
+.map-tile:disabled { opacity: 0.34; cursor: not-allowed; }
+/* The level the board has open -- the operator's current position, so magenta. */
+.map-tile-current { border-color: var(--hot); background: var(--slab-lit); }
+.map-tile-current .map-tile-index {
+  background: var(--hot);
+  color: var(--void);
+  border-right-color: var(--hot);
+}
 
 /* ----------------------------------------------------------- pass dialog -- */
 /* The original's own panel: a titled bar, a summary on the left, the medal and
@@ -370,128 +591,142 @@ html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(5, 7, 15, 0.82);
+  background: rgba(4, 7, 13, 0.9);
   z-index: 30;
 }
 .result-card {
   width: min(660px, 92vw);
   display: grid;
   grid-template-columns: 1.2fr 1fr;
-  background: var(--panel);
-  border-radius: 12px;
+  background: var(--slab);
+  border: 1px solid var(--neon-dim);
   overflow: hidden;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
 }
 .result-bar {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 9px 14px;
-  background: #16264a;
-  color: var(--text);
-  font-size: 14px;
-  letter-spacing: 0.04em;
+  padding: 9px 12px 9px 10px;
+  background: var(--hot);
+  color: var(--void);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
 }
 .result-close {
-  border: 0;
-  border-radius: 5px;
-  background: var(--off);
-  color: var(--text);
-  width: 24px;
-  height: 24px;
-  font-size: 13px;
+  border: 1px solid var(--void);
+  background: transparent;
+  color: var(--void);
+  width: 22px;
+  height: 22px;
+  font-family: inherit;
+  font-size: 12px;
   line-height: 1;
   cursor: pointer;
 }
-.result-close:hover { background: #ff5271; }
-.result-left { padding: 16px 20px 20px; }
+.result-close:hover { background: var(--void); color: var(--hot); }
+.result-left { padding: 18px 20px 20px; border-right: 1px solid var(--hair); }
 .result-right {
   padding: 22px 18px;
-  background: #0a1120;
+  background: var(--void);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 16px;
 }
 .result-heading {
-  margin: 0 0 8px;
-  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--text);
+  letter-spacing: 0.2em;
+  color: var(--neon);
 }
+.result-heading::before { content: ''; width: 3px; height: 11px; background: var(--neon); }
 .result-heading + .result-unlocks { margin-bottom: 18px; }
 .result-unlocks { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* An unlocked part is a thing the machine gained, so it wears the bus colour --
+   flat, boxed, no halo. */
 .result-chip {
   display: inline-flex;
   flex-direction: column;
   gap: 1px;
   padding: 6px 10px;
-  border-radius: 7px;
-  background: #1250a8;
+  background: rgba(10, 132, 255, 0.16);
+  border: 1px solid var(--bus);
   color: var(--text);
-  font-size: 11px;
-  line-height: 1.25;
-  box-shadow: var(--glow-bus);
+  font-size: 10.5px;
+  line-height: 1.3;
+  letter-spacing: 0.06em;
 }
-.result-chip b { font-size: 12px; letter-spacing: 0.04em; }
+.result-chip b { font-size: 12px; letter-spacing: 0.06em; }
 .result-trophy {
   display: grid;
   place-items: center;
   width: 38px;
   height: 38px;
-  border-radius: 9px;
-  background: #2a2410;
-  color: #ffd60a;
-  box-shadow: 0 0 12px rgba(255, 214, 10, 0.35);
+  border: 1px solid var(--amber);
+  background: rgba(255, 176, 32, 0.12);
+  color: var(--amber);
 }
-.result-trophy svg { width: 22px; height: 22px; }
-.result-hint { font-size: 12px; color: var(--text-muted); }
+.result-trophy svg { width: 21px; height: 21px; }
+.result-hint { font-size: 11px; color: var(--text-muted); letter-spacing: 0.06em; }
 .result-summary {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 7px 20px;
+  gap: 8px 20px;
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
 }
-.result-summary dt { color: var(--text-muted); }
+.result-summary dt { color: var(--text-muted); letter-spacing: 0.08em; }
 .result-summary dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; }
 .result-story {
-  margin: 18px 0 0;
+  margin: 20px 0 0;
   padding-top: 14px;
-  border-top: 1px solid var(--panel-edge);
+  border-top: 1px solid var(--hair);
+  font-family: var(--face-read);
   font-size: 13px;
-  line-height: 1.8;
+  line-height: 1.85;
   color: var(--text-muted);
 }
-/* The medal: the one place on this panel that is allowed to be loud. */
+/* The medal: the one place on this panel allowed to be loud. Flat green, a black
+   gutter, a second green ring -- a stamped disc, not a glowing orb. */
 .result-medal {
-  width: 104px;
-  height: 104px;
+  width: 96px;
+  height: 96px;
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: radial-gradient(circle at 38% 32%, #58ffb4, #00a862 70%);
-  box-shadow: 0 0 34px rgba(0, 255, 156, 0.5);
+  background: var(--on);
+  border: 6px solid var(--void);
+  outline: 1px solid var(--on);
+  color: var(--void);
 }
-.result-medal svg { width: 54px; height: 54px; }
-.result-verdict { margin: 0; font-size: 16px; color: var(--text); }
-.result-actions { display: flex; gap: 10px; margin-top: auto; }
+.result-medal svg { width: 46px; height: 46px; }
+.result-verdict { margin: 0; font-size: 14px; letter-spacing: 0.18em; color: var(--text); }
+.result-actions { display: flex; gap: 8px; margin-top: auto; }
 .result-actions button {
   padding: 8px 18px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 8px;
-  background: var(--panel);
+  border: 1px solid var(--hair);
+  background: transparent;
   color: var(--text);
-  font-size: 14px;
   font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 0.1em;
   cursor: pointer;
+  transition: border-color 90ms linear, color 90ms linear, background-color 90ms linear;
 }
-.result-actions button:hover:not(:disabled) { background: var(--panel-hover); }
-.result-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
-.result-next { border-color: var(--accent) !important; color: var(--accent) !important; }
+.result-actions button:hover:not(:disabled) { border-color: var(--hot); color: var(--hot); }
+.result-actions button:disabled { opacity: 0.35; cursor: not-allowed; }
+/* The way onward is the operator's move, so it is the filled magenta control. */
+.result-next { background: var(--hot) !important; border-color: var(--hot) !important; color: var(--void) !important; }
 
 /* --------------------------------------------------------------- briefing -- */
+/* The one screen with prose on it, so it is the one screen that switches to the
+   reading face. */
 .briefing {
   position: fixed;
   inset: 0;
@@ -499,21 +734,45 @@ html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 24px;
-  background: rgba(5, 7, 15, 0.94);
+  gap: 26px;
+  background: rgba(4, 7, 13, 0.95);
   z-index: 10;
   padding: 40px;
   text-align: center;
 }
-.briefing p { max-width: 52ch; line-height: 1.75; font-size: 17px; color: var(--text); margin: 0; }
-.briefing button {
-  padding: 9px 28px;
-  background: var(--panel);
-  border: 1px solid var(--accent);
-  color: var(--accent);
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 15px;
-  font-family: inherit;
+.briefing p {
+  max-width: 54ch;
+  line-height: 1.9;
+  font-family: var(--face-read);
+  font-size: 17px;
+  color: var(--text);
+  margin: 0;
 }
-.briefing button:hover { background: var(--panel-hover); }
+/* The strip above the prose: which level this is, and that it is a briefing. */
+.briefing-tag {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  letter-spacing: 0.28em;
+  color: var(--neon);
+}
+.briefing-tag::before,
+.briefing-tag::after { content: ''; width: 46px; height: 1px; background: var(--hair-lit); }
+.briefing button {
+  padding: 9px 30px;
+  background: transparent;
+  border: 1px solid var(--hot);
+  color: var(--hot);
+  font-family: inherit;
+  font-size: 14px;
+  letter-spacing: 0.24em;
+  cursor: pointer;
+  transition: background-color 90ms linear, color 90ms linear;
+}
+.briefing button:hover { background: var(--hot); color: var(--void); }
+
+/* Accessibility floor: nothing moves that does not have to. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

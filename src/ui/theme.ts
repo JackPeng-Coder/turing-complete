@@ -19,35 +19,42 @@
  */
 export const THEME = {
   /** The near-black the board floats on, behind the floating panels. */
-  backdrop: '#05070f',
-  /** Board paper: a deep navy, dark enough for a lit wire to glow against. */
-  board: '#0a1526',
+  backdrop: '#04070d',
+  /**
+   * Board paper: a deep navy, dark enough for a lit wire to glow against.
+   *
+   * Darkened with the chrome when the interface was rebuilt as an instrument:
+   * the panels are near-black slabs now, and a mid-navy board between two of
+   * them read as a different material rather than as the bench they sit on.
+   */
+  board: '#070d18',
   /**
    * The fine diagonal weave over the paper -- a circuit board's grain.
    *
-   * Deliberately only three to seven levels above the paper. The original's
+   * Deliberately only three to five levels above the paper. The original's
    * weave is the same ratio (+4/+5) and it is calibrated that way on purpose:
    * the first pass at this palette used +8/+21/+30, which on a board this dark
    * is a sixty per cent brightness swing and read as noise competing with the
    * wires rather than as paper.
    */
-  boardHatch: '#0d1a2d',
+  boardHatch: '#0a1220',
   /** The snap grid's major line, drawn over the weave: a hint, not a fence. */
-  boardGrid: '#17324f',
+  boardGrid: '#14304c',
 
-  /** Top bar and the bottom test panel. */
-  chrome: '#080c16',
-  /** Floating cards and tool buttons. */
-  panel: '#101a2e',
-  panelHover: '#17263f',
-  panelEdge: '#1f3a5c',
+  /** Top bar and the bottom test panel. Mirrors `--slab` in `style.css`. */
+  chrome: '#080e18',
+  /** Floating cards and tool buttons. Mirrors `--slab-lit`. */
+  panel: '#0f1a28',
+  panelHover: '#16273a',
+  /** The hairline every panel is bounded by. Mirrors `--hair`. */
+  panelEdge: '#17334a',
 
-  /** The level name in the top bar. */
-  title: '#00e5ff',
+  /** The level name in the top bar; the instrument's own voice. */
+  title: '#22e0ff',
   /** Pin labels down the left of the test panel. */
-  label: '#4dd8ff',
-  text: '#e6f0fb',
-  textMuted: '#7b93b0',
+  label: '#7fd8ee',
+  text: '#d7e6f5',
+  textMuted: '#6b8aa8',
 
   // -- green: a single bit carrying 1, and a part producing one -------------
   /** A live 1-bit wire, a lit bit cell, a pin at 1. */
@@ -73,20 +80,29 @@ export const THEME = {
 
   // -- neutral: nothing has been simulated ---------------------------------
   /** An undriven pin, an unknown bit, a wire with no value. */
-  idle: '#1e2c44',
+  idle: '#16233a',
   /** A part body with no value to report. */
-  idleBody: '#16233a',
-  idleEdge: '#26405f',
+  idleBody: '#101b2c',
+  idleEdge: '#1d3450',
   /** The olive-grey the original used for an unknown bit, kept as the third cell. */
   unknown: '#3d4d66',
 
-  selection: '#ffd60a',
-  /** The rubber band and the armed pin: the one colour that is not a value. */
-  armed: '#ffd60a',
+  /**
+   * THE OPERATOR'S COLOUR, and the one colour that is never a value.
+   *
+   * Selection, the rubber band and the armed pin are all things the PLAYER is
+   * doing, so they wear the same magenta the chrome uses for its controls --
+   * the interface's rule, stated once in `style.css`: cyan is the instrument's
+   * voice, magenta is the operator's hand. It cannot be confused with the red of
+   * a 0 because a selection is a 2px ring AROUND a part and a 0 is a fill.
+   */
+  selection: '#ff2d78',
+  /** The rubber band and the armed pin. */
+  armed: '#ff2d78',
   error: '#ff2b4e',
   success: '#00ff9c',
-  warning: '#ffd60a',
-  accent: '#00e5ff',
+  warning: '#ffb020',
+  accent: '#22e0ff',
 } as const;
 
 /**
@@ -155,8 +171,16 @@ export const INSTANCE_HEIGHT = 72;
 /** Vertical distance between two pins on the same edge, in world pixels. */
 export const PIN_SPACING = 24;
 
-/** Corner radius of a part body, in world pixels. */
-export const PART_RADIUS = 14;
+/**
+ * Corner radius of a part body, in world pixels.
+ *
+ * Six, not fourteen. The rest of the interface is built from hard edges -- see
+ * the note at the top of `style.css` -- and a pill-shaped gate was the last soft
+ * thing on the board. A part is a chip on a bench, so its corners are cut, not
+ * rounded off; the shapes that are CURVED (the D of an AND, the shield of an OR,
+ * a level connector's disc) are curved because that curve is the symbol.
+ */
+export const PART_RADIUS = 6;
 
 /** Thickness of a 1-bit wire, in world pixels. */
 export const WIRE_WIDTH = 8;

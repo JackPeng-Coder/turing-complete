@@ -49,6 +49,24 @@ towards a working CPU.
 Chapters 4–7 (programming and the assembly IDE, the LEG CPU, functions, the assembly challenges and
 the sandbox) are planned but not built yet.
 
+## Interface
+
+The chrome is styled as bench instrumentation, not as a page with cards on it: flat slabs separated
+by 1px hairlines, **no shadows anywhere** — not one `box-shadow` or `text-shadow` in the stylesheet —
+and no rounded corners except the bit arrows, whose roundness carries the value.
+
+Two colour axes, kept apart on purpose:
+
+- **On the board**, green is 1, red is 0, and blue is wider than one bit. That is the value rule
+  stated in [`src/ui/theme.ts`](src/ui/theme.ts), and slate — never red — means nothing has been
+  simulated yet.
+- **On the chrome**, cyan is the instrument's voice (titles, labels, measured numbers) and magenta is
+  the operator's hand: every control you can press. Magenta never appears on the board, so a value
+  can never be mistaken for something clickable.
+
+A scale of 1px ticks finishes the two edges where something is *measured* — the cost readout in the
+top bar and the case matrix along the bottom — and appears nowhere else.
+
 ## Running it
 
 On any normal machine with Node and pnpm on `PATH`:

@@ -100,7 +100,10 @@ async function runTests(page: Page): Promise<void> {
 test('level 1 is playable end to end and shows its pass dialog', async ({ page }) => {
   await page.goto('/');
   // The briefing overlay covers the board, so it has to go before the canvas
-  // can be touched at all.
+  // can be touched at all. Photographed first: it is the screen a level opens
+  // on, and nothing else in this suite ever sees it.
+  await expect(page.locator('.briefing-tag')).toHaveText('任务简报');
+  await page.screenshot({ path: 'test-results/smoke-level1-briefing.png' });
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('原力觉醒');
   // One screen at a time: the empty map screen is not in the way.
@@ -296,7 +299,7 @@ test('chapter 2 is reachable: level 13 opens once chapter 1 is passed', async ({
   // All 47 tiles -- chapter 2's 26 and chapter 3's nine are on the map, which is
   // the player's only view of them.
   await expect(page.locator('.map-tile')).toHaveCount(47);
-  await expect(page.locator('.map-tile').nth(12)).toContainText('13. 奇数个信号');
+  await expect(page.locator('.map-tile').nth(12)).toContainText('奇数个信号');
   await expect(page.locator('.map-tile').nth(12)).toBeEnabled();
   // Unlocking stays strictly linear across the join: level 14 waits for 13.
   await expect(page.locator('.map-tile').nth(13)).toBeDisabled();
@@ -363,7 +366,7 @@ test('the last chapter-2 level opens: level 38 is reachable', async ({ page }) =
 
   await page.getByRole('button', { name: '章节地图' }).click();
   await expect(page.locator('.map-tile')).toHaveCount(47);
-  await expect(page.locator('.map-tile').nth(37)).toContainText('38. 计数器');
+  await expect(page.locator('.map-tile').nth(37)).toContainText('计数器');
   await expect(page.locator('.map-tile').nth(37)).toBeEnabled();
 
   await page.locator('.map-tile').nth(37).click();
@@ -415,7 +418,7 @@ test('chapter 3 is reachable: level 39 opens once chapter 2 is passed', async ({
 
   await page.getByRole('button', { name: '章节地图' }).click();
   await expect(page.locator('.map-tile')).toHaveCount(47);
-  await expect(page.locator('.map-tile').nth(38)).toContainText('39. 算数引擎');
+  await expect(page.locator('.map-tile').nth(38)).toContainText('算数引擎');
   await expect(page.locator('.map-tile').nth(38)).toBeEnabled();
   // Unlocking stays strictly linear across the second join too: 40 waits for 39.
   await expect(page.locator('.map-tile').nth(39)).toBeDisabled();
@@ -442,7 +445,7 @@ test('the last level opens and mounts its program check: level 47', async ({ pag
 
   await page.getByRole('button', { name: '章节地图' }).click();
   await expect(page.locator('.map-tile')).toHaveCount(47);
-  await expect(page.locator('.map-tile').nth(46)).toContainText('47. 图灵完备');
+  await expect(page.locator('.map-tile').nth(46)).toContainText('图灵完备');
   await expect(page.locator('.map-tile').nth(46)).toBeEnabled();
 
   await page.locator('.map-tile').nth(46).click();

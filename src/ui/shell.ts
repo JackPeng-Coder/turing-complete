@@ -57,6 +57,15 @@ export function mountShell(
 
   const title = document.createElement('h1');
   title.className = 'shell-title';
+  // The address and the name are separate nodes so they can be separate things on
+  // screen: `1-4` boxed in the operator's magenta, the name wide-tracked in the
+  // instrument's cyan. The level's address is what a player navigates by, so it
+  // is drawn as an address rather than written into a sentence.
+  const index = document.createElement('span');
+  index.className = 'shell-index';
+  const name = document.createElement('span');
+  name.className = 'shell-name';
+  title.append(index, name);
 
   const right = document.createElement('div');
   right.className = 'shell-right';
@@ -79,7 +88,8 @@ export function mountShell(
 
   const render = (): void => {
     const { level, lastGrade, metrics: measured, status: message } = store.get();
-    title.textContent = `${level.chapter}-${level.index} ${level.name.zh}`;
+    index.textContent = `${level.chapter}-${level.index}`;
+    name.textContent = level.name.zh;
     status.textContent = message ? message.zh : '';
     if (!hint.hidden) hint.textContent = level.hint.zh;
 
