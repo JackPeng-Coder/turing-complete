@@ -6,15 +6,20 @@ drawn procedurally and every line of in-game copy is original. It is an independ
 for study and personal use, not for commercial distribution. The mechanics and the teaching
 progression are a homage to LevelHead's *Turing Complete* — please support the original.
 
-**One exception, and it is deliberate.** The repository also carries the user-supplied research
-compendium (`GAME_REFERENCE.md`) that this replica was built from, plus the
-structure extract derived from it under `.superpowers/research/`. That compendium is a third-party
-document about the game and **does reproduce passages of the original's text**, including some
-dialogue. It is committed as research provenance, not as content the game ships: nothing under
-`src/` reads it, and the shipped game's own text remains entirely original. If you are looking for
-what the *game* contains, see [chapter-2 level provenance](docs/research/chapter-2-level-provenance.md),
-which records per level exactly which facts came from the source and which are this replica's own
-design.
+**One exception, and it is deliberate.** The repository also carries two user-supplied research
+documents that this replica was built from — [`GAME_REFERENCE.md`](GAME_REFERENCE.md) (a 1.x
+compendium) and [`GAME_RESEARCH_2026-10-03.md`](GAME_RESEARCH_2026-10-03.md) (a sourced 2.x
+dossier) — plus the structure extract derived from the first under `.superpowers/research/`. Both
+are third-party documents about the game and **both reproduce passages of the original's text**,
+including dialogue and the official store description. They are committed as research provenance,
+not as content the game ships: nothing under `src/` reads them, no image of the original's art is
+committed at all, and the shipped game's own text remains entirely original.
+
+[`RESEARCH.md`](RESEARCH.md) is the entry point to all of it: what each file is, where the two
+disagree — they describe different versions of the game — and which one this replica follows. For
+what the *game* contains level by level, see
+[chapter-2 level provenance](docs/research/chapter-2-level-provenance.md), which records exactly
+which facts came from the source and which are this replica's own design.
 
 ## What this is
 
@@ -176,6 +181,12 @@ Phases 0–2 cover chapters 1–3 (47 of the plan's 82 levels). The full plan �
 CPU and assembly challenges — is in [`docs/superpowers/plans/`](docs/superpowers/plans/); the design
 spec it follows is in [`docs/superpowers/specs/`](docs/superpowers/specs/).
 
+That plan follows the **1.x** structure of the game. The newer research document describes **2.x**,
+which renumbered and rewrote the campaign (13/26/10/7/26/7/4 = 93 levels, Symphony in place of LEG,
+2–64-bit widths): [`RESEARCH.md`](RESEARCH.md) carries the chapter-by-chapter comparison, and
+reading it before planning chapter 4 is the difference between extending this campaign and
+accidentally starting a different one.
+
 The record of how it was built is committed too. [`.superpowers/sdd/`](.superpowers/sdd/) holds one
 directory per phase: phases 0 and 1 carry every task's brief, its implementer's report, and the
 review diffs behind each verdict — phase 0 is missing the briefs for tasks 9 and 11, which were
@@ -191,7 +202,7 @@ them still contain them, and `git log --all -- docs/session-archive` finds them.
 ## License
 
 MIT — see [LICENSE](LICENSE). Not affiliated with LevelHead; no original art, audio, or fonts are
-included, and every line of the game's own copy is original. The research compendium committed at
-the repository root is a separate third-party document and is not covered by that statement or by
-this project's MIT license — see the note above. If you enjoy this, buy *Turing Complete* and
-support the original.
+included, and every line of the game's own copy is original. The two research documents committed at
+the repository root are separate third-party documents: they are not covered by that statement, and
+[LICENSE](LICENSE) excludes them from the MIT grant by name. If you enjoy this, buy *Turing Complete*
+and support the original.

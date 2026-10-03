@@ -32,8 +32,12 @@ README.md carries the full statement, including exactly what was and was not
 copied from the original.
 
 The MIT license above covers this project's source code and the game's own
-in-game text. It does NOT cover `GAME_REFERENCE.md` at the repository root: that
-is a third-party research compendium about the game, it reproduces passages of
-the original's text, and it is committed here as provenance for this replica's
-design rather than as content the game ships. Nothing under `src/` reads it.
-That document remains the property of its authors.
+in-game text. It does NOT cover two third-party research documents at the
+repository root: `GAME_REFERENCE.md` and `GAME_RESEARCH_2026-10-03.md`. Both are
+compendia *about* the game, both reproduce passages of the original's text
+(including dialogue and the official store description), and both are committed
+here as provenance for this replica's design rather than as content the game
+ships. Nothing under `src/` reads them, and no image of the original's art is
+included anywhere in this repository. Those documents remain the property of
+their authors; `RESEARCH.md` records what each one is and which version of the
+game it documents.
