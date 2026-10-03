@@ -35,6 +35,7 @@ function makeStore(levelId: string): Store<AppState> {
     camera: { x: 0, y: 0, zoom: 1 },
     selected: [],
     dragging: null,
+    dev: false,
     metrics: null,
     lastGrade: null,
     status: null,
@@ -123,9 +124,9 @@ describe('truth table panel', () => {
    * under the matrix, one line per failing case -- which on a fifteen-row level
    * was fifteen lines of the same sentence, and is the complaint this test
    * exists to keep fixed. The matrix already says which bit is wrong and for
-   * which case: the cell is outlined.
+   * which case: the cell is boxed.
    */
-  it('outlines the wrong cell instead of printing a line per failing case', () => {
+  it('boxes the wrong pair instead of printing a line per failing case', () => {
     const store = makeStore('ch1-04-and-gate');
     store.set({
       lastGrade: {
@@ -149,8 +150,17 @@ describe('truth table panel', () => {
     const root = document.createElement('div');
     mountTruthTable(root, store);
     expect(root.querySelector('h2')?.textContent).toBe('未通过');
-    // Exactly one cell -- the FIRST case's `当前 out` -- is outlined.
-    expect(root.querySelectorAll('.case-bad')).toHaveLength(1);
+    // The `预期 out` and `当前 out` cells of the first case: two cells, one box.
+    const boxed = [...root.querySelectorAll('.case-bad')];
+    expect(boxed).toHaveLength(2);
+    expect(boxed.map((cell) => cell.previousElementSibling?.textContent)).toEqual([
+      '预期 out',
+      '当前 out',
+    ]);
+    // The ends of that box are rounded and the middle is not: it reads as one
+    // frame around the pair rather than two separate marks.
+    expect(boxed[0]!.classList.contains('bad-cap-top')).toBe(true);
+    expect(boxed[1]!.classList.contains('bad-cap-bottom')).toBe(true);
     expect(root.querySelectorAll('p')).toHaveLength(0);
     expect(root.textContent).not.toContain('≠');
   });
@@ -179,10 +189,14 @@ describe('truth table panel', () => {
     // The AND level's own rows: 00, 01, 10, 11 -> 0, 0, 0, 1.
     // Rows are 输入 a, 输入 b, 预期 out, 当前 out.
     expect(rows()[3]).toEqual(['1', 'x', 'x', 'x']);
-    // ...and the live 1 disagrees with that case's expected 0.
-    expect(root.querySelectorAll('.case-bad')).toHaveLength(1);
-    // One cell per row wears the highlight.
+    // ...and the live 1 disagrees with that case's expected 0, so that case's
+    // expectation and value are boxed together.
+    expect(root.querySelectorAll('.case-bad')).toHaveLength(2);
+    // One cell per row wears the column's highlight, and the column's band is
+    // rounded at the two ends rather than at every cell.
     expect(root.querySelectorAll('.case-active')).toHaveLength(4);
+    expect(root.querySelectorAll('.case-active.cap-top')).toHaveLength(1);
+    expect(root.querySelectorAll('.case-active.cap-bottom')).toHaveLength(1);
     expect(root.querySelector('h2')?.textContent).toBe('正在测试 用例 1 / 4');
 
     live = { out: 0 };
@@ -440,6 +454,7 @@ describe('level io placement', () => {
       camera: { x: 0, y: 0, zoom: 1 },
       selected: [],
       dragging: null,
+      dev: false,
       metrics: null,
       lastGrade: null,
       status: null,
@@ -479,6 +494,7 @@ describe('io readout panel', () => {
       camera: { x: 0, y: 0, zoom: 1 },
       selected: [],
       dragging: null,
+      dev: false,
       metrics: null,
       lastGrade: null,
       status: null,

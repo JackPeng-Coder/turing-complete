@@ -100,12 +100,29 @@ export function deleteSelection(
   stack: CommandStack,
   onChange: () => void,
 ): boolean {
-  const ids = store.get().selected;
-  if (ids.length === 0) return false;
-  const removed = store.get().graph.instances.filter((i) => ids.includes(i.id));
-  const wires = store
-    .get()
-    .graph.wires.filter((w) => ids.includes(w.from.inst) || ids.includes(w.to.inst));
+  if (store.get().selected.length === 0) return false;
+  if (!deleteParts(store, stack, store.get().selected)) return false;
+  store.set({ selected: [] });
+  onChange();
+  return true;
+}
+
+/**
+ * Takes parts off the board, and every wire that touched one, as ONE step.
+ *
+ * The undo has to bring the wires back too: a part and the wires that reached it
+ * are a single thing the player drew, and an undo that restored a bare part
+ * would leave the circuit it was cut out of still cut.
+ */
+function deleteParts(
+  store: Store<AppState>,
+  stack: CommandStack,
+  ids: readonly string[],
+): boolean {
+  const graph = store.get().graph;
+  const removed = graph.instances.filter((inst) => ids.includes(inst.id));
+  if (removed.length === 0) return false;
+  const wires = graph.wires.filter((w) => ids.includes(w.from.inst) || ids.includes(w.to.inst));
   stack.push(
     {
       label: 'delete',
@@ -117,10 +134,8 @@ export function deleteSelection(
         for (const wire of wires) g.wires.push(wire);
       },
     },
-    store.get().graph,
+    graph,
   );
-  store.set({ selected: [] });
-  onChange();
   return true;
 }
 
@@ -429,10 +444,58 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
     }
   };
 
+  /**
+   * RIGHT-CLICK REMOVES WHAT IS UNDER THE POINTER, and nothing else.
+   *
+   * It is the shortcut for the two commonest edits on a board -- undo a part
+   * dropped in the wrong place, and cut a wire that went somewhere silly -- and
+   * both are one undoable step, so a right-click that was a mistake costs one
+   * Ctrl+Z. It deliberately does NOT touch the selection: a player who has
+   * selected five parts and right-clicks a sixth means that sixth one.
+   *
+   * The browser's own menu is suppressed over the whole board, hit or miss: this
+   * is a work surface, and a context menu covering the circuit is never what a
+   * right-click here was for.
+   */
+  const onContextMenu = (event: MouseEvent): void => {
+    event.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const world = screenToWorld(store.get().camera, {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    });
+    const graph = store.get().graph;
+    const hit = hitTest(graph, store.get().registry, world);
+    if (!hit) return;
+
+    if (hit.kind === 'wire') {
+      const wire = graph.wires.find((w) => w.id === hit.id);
+      if (!wire) return;
+      stack.push(
+        {
+          label: 'delete wire',
+          do: (g) => disconnect(g, wire.id),
+          undo: (g) => void g.wires.push(wire),
+        },
+        graph,
+      );
+      options.onChange();
+      return;
+    }
+
+    const id = hit.kind === 'instance' ? hit.id : hit.inst;
+    if (!deleteParts(store, stack, [id])) return;
+    // A part that was selected and is now gone must not stay in the selection,
+    // or the next press of the bin button would try to delete it twice.
+    store.set({ selected: store.get().selected.filter((selected) => selected !== id) });
+    options.onChange();
+  };
+
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('wheel', onWheel, { passive: false });
+  canvas.addEventListener('contextmenu', onContextMenu);
   globalThis.addEventListener('keydown', onKeyDown);
 
   return () => {
@@ -440,6 +503,7 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
     canvas.removeEventListener('pointermove', onPointerMove);
     canvas.removeEventListener('pointerup', onPointerUp);
     canvas.removeEventListener('wheel', onWheel);
+    canvas.removeEventListener('contextmenu', onContextMenu);
     globalThis.removeEventListener('keydown', onKeyDown);
   };
 }

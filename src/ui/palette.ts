@@ -46,8 +46,8 @@ export function mountPalette(
   let shown = '';
 
   const render = (): void => {
-    const { level, progress, registry } = store.get();
-    const available = paletteDefsFor(progress, LEVELS, level).filter((defId) =>
+    const { level, progress, registry, dev } = store.get();
+    const available = paletteDefsFor(progress, LEVELS, level, dev).filter((defId) =>
       registry.has(defId),
     );
     const key = `${level.id}|${available.join(',')}`;

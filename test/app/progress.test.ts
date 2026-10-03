@@ -83,6 +83,19 @@ describe('isUnlocked', () => {
   it('throws for ids outside the order', () => {
     expect(() => isUnlocked(emptyProgress(), 'zzz', order)).toThrow(/unknown level/i);
   });
+
+  /**
+   * Developer mode opens every level, from a save with nothing passed in it --
+   * which is the whole point of it: the levels after the one you are stuck on
+   * are the ones you cannot reach by playing.
+   */
+  it('opens every level in developer mode', () => {
+    const fresh = emptyProgress();
+    for (const id of order) expect(isUnlocked(fresh, id, order, true), id).toBe(true);
+    // ...and an unknown id is still an error: the flag opens gates, it does not
+    // make the level list unbounded.
+    expect(() => isUnlocked(fresh, 'zzz', order, true)).toThrow(/unknown level/i);
+  });
 });
 
 describe('resumePointOf', () => {
@@ -117,6 +130,13 @@ describe('resumePointOf', () => {
     // empty chapter list would otherwise answer `undefined` behind a `string`
     // return type.
     expect(() => resumePointOf(emptyProgress(), [])).toThrow(/empty level order/);
+  });
+
+  it('is unaffected by developer mode: where you are is not a gate', () => {
+    // The flag has no parameter here on purpose. Dev mode opens the map; it does
+    // not decide which level the app opens on, and a resume point that moved
+    // when a debug switch flipped would be a second, hidden meaning for it.
+    expect(resumePointOf(emptyProgress(), order)).toBe('a');
   });
 });
 
@@ -177,6 +197,27 @@ describe('paletteDefsFor', () => {
     const palette = paletteDefsFor(emptyProgress(), levels, level);
     expect(palette).toEqual(['nand', 'level_input', 'level_output']);
     expect(palette).not.toContain('not');
+  });
+
+  /**
+   * Developer mode opens the LOCK, and only the lock: the level's own list stays
+   * the answer, so the palette a developer gets on level 40 is the palette level
+   * 40 was designed around rather than every part in the game. Without this half
+   * the flag is useless -- open level 47 with a starter palette and there is
+   * nothing to build it out of -- and with more than this half it stops being a
+   * way to reach a level and becomes a different game.
+   */
+  it('offers every part a level lists, in developer mode', () => {
+    expect(paletteDefsFor(emptyProgress(), levels, gated, true)).toEqual([
+      'xor',
+      'level_input',
+      'level_output',
+    ]);
+    expect(paletteDefsFor(emptyProgress(), levels, level, true)).toEqual([
+      'nand',
+      'level_input',
+      'level_output',
+    ]);
   });
 
   it('adds a passed level rewards to the next level palette', () => {

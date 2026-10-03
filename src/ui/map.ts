@@ -29,7 +29,7 @@ export function mountMap(
   root.append(section);
 
   const render = (): void => {
-    const { progress, level: current } = store.get();
+    const { progress, level: current, dev } = store.get();
     const order = LEVELS.map((l) => l.id);
     section.replaceChildren();
     const heading = document.createElement('h2');
@@ -68,7 +68,7 @@ export function mountMap(
         tile.type = 'button';
         tile.className = 'map-tile';
         const record = progress.levels[level.id];
-        const unlocked = isUnlocked(progress, level.id, order);
+        const unlocked = isUnlocked(progress, level.id, order, dev);
         tile.disabled = !unlocked;
         // The number lives in its own element rather than in the tile's text: it
         // is an address, it belongs in the address column, and it stays in the

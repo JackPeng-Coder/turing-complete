@@ -7,6 +7,8 @@ export interface ShellOptions {
   onOpenMap(): void;
   /** Show the level's briefing again. Absent leaves the button out. */
   onShowBrief?(): void;
+  /** Leave developer mode. Absent leaves the DEV light out entirely. */
+  onExitDev?(): void;
 }
 
 /**
@@ -72,7 +74,19 @@ export function mountShell(
   const metrics = document.createElement('span');
   metrics.className = 'shell-metrics';
   const hintButton = iconButton('提示', 'bulb');
-  right.append(metrics, hintButton);
+  // THE DEV LIGHT. A mode that opens every gate has to be impossible to forget:
+  // a player who wandered into `?dev=1` would otherwise see a game with all
+  // forty-seven levels unlocked and no explanation. It sits next to the level
+  // name because that is what it is about, and it is a button, so leaving the
+  // mode is one click rather than an edit to the address bar.
+  const dev = document.createElement('button');
+  dev.type = 'button';
+  dev.className = 'shell-dev';
+  dev.textContent = 'DEV';
+  dev.hidden = true;
+  dev.title = '开发者模式：所有关卡已解锁 · 点击退出';
+  dev.addEventListener('click', () => options.onExitDev?.());
+  right.append(dev, metrics, hintButton);
 
   const hint = document.createElement('p');
   hint.className = 'shell-hint';
@@ -87,7 +101,8 @@ export function mountShell(
   root.prepend(bar);
 
   const render = (): void => {
-    const { level, lastGrade, metrics: measured, status: message } = store.get();
+    const { level, lastGrade, metrics: measured, status: message, dev: devOn } = store.get();
+    dev.hidden = !devOn;
     index.textContent = `${level.chapter}-${level.index}`;
     name.textContent = level.name.zh;
     status.textContent = message ? message.zh : '';

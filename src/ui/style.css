@@ -195,6 +195,21 @@ button { font-family: inherit; }
 /* The cost readout: the measured half of the bar, in the instrument's colour,
    sitting directly on the ruler. */
 .shell-metrics { font-size: 12.5px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+/* THE DEV LIGHT: on whenever `?dev=1` is, and never subtle. A mode that opens
+   every gate has to be visible from across the room, or a report of "progress is
+   broken" is about a tab nobody remembers turning into a sandbox. */
+.shell-dev {
+  padding: 3px 9px;
+  border: 1px solid var(--amber);
+  background: rgba(255, 176, 32, 0.14);
+  color: var(--amber);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  cursor: pointer;
+}
+.shell-dev:hover { background: var(--amber); color: var(--void); }
 
 /* ---------------------------------------------------------------- screens -- */
 /* One screen at a time fills the space below the shell bar. */
@@ -491,17 +506,26 @@ button { font-family: inherit; }
 .case-cell .bit { width: 16px; height: 16px; }
 .case-note { color: var(--text-muted); font-size: 12px; }
 .case-count { color: var(--text-muted); font-size: 12px; letter-spacing: 0.06em; }
-/* A wrong cell is BOXED, not tinted: the bit inside keeps its own colour, which
-   is the value, and the box is the verdict about it. */
-.case-bad { outline: 2px solid var(--off); outline-offset: 2px; }
-/* The case being driven: the operator's colour, because the run is the operator's
-   doing, plus a filled block so the eye catches it across a fifteen-column
-   matrix. */
-.case-active {
-  outline: 2px solid var(--hot);
-  outline-offset: 2px;
-  background: rgba(255, 45, 120, 0.14);
-}
+/* THE RUN'S COLUMN IS ONE BOX, not a ladder of outlines.
+
+   The fill sits on the `td`, so every cell of the column stacks into a single
+   continuous band, and the two ends are rounded by the `cap-top` / `cap-bottom`
+   classes the panel puts on the first and last row. No outline anywhere: a ring
+   around each cell said the same thing twelve times and chopped the column into
+   twelve pieces. */
+.case-active { background-color: rgba(255, 45, 120, 0.14); }
+.cap-top { border-top-left-radius: 10px; border-top-right-radius: 10px; }
+.cap-bottom { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
+/* A WRONG PAIR IS ONE BOX TOO: the expectation and the value that came out are
+   adjacent rows of the same column, so they are framed together -- translucent,
+   rounded, and in the value's own red.
+
+   Drawn as a background IMAGE over the column's background COLOUR, so a mismatch
+   inside the running column shows red on top of magenta instead of the two
+   fighting over one property. */
+.case-bad { background-image: linear-gradient(rgba(255, 43, 78, 0.3), rgba(255, 43, 78, 0.3)); }
+.bad-cap-top { border-top-left-radius: 10px; border-top-right-radius: 10px; }
+.bad-cap-bottom { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
 .case-detail { color: var(--off); font-size: 12px; margin: 2px 0; }
 .case-error { color: var(--off); font-size: 13px; margin: 0 0 6px; }
 /* The failing-vector table is still a table: `panels.test.ts` reads its cells to

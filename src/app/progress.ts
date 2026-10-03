@@ -51,14 +51,21 @@ export function emptyProgress(): Progress {
  * Level unlocking is strictly linear: the first level is always reachable, and
  * every other one needs its immediate predecessor passed. `order` is the
  * authoritative level sequence (see `LEVEL_ORDER`).
+ *
+ * `dev` opens all of them (`app/dev.ts`). It is the last parameter rather than a
+ * second function so that a caller cannot reach for "the unlocked check" and
+ * silently get the gated one; `paletteDefsFor` takes the same flag, and passing
+ * it to one and not the other gives a level you can open but not build.
  */
 export function isUnlocked(
   progress: Progress,
   levelId: string,
   order: readonly string[],
+  dev = false,
 ): boolean {
   const index = order.indexOf(levelId);
   if (index < 0) throw new Error(`unknown level: ${levelId}`);
+  if (dev) return true;
   if (index === 0) return true;
   const previous = order[index - 1]!;
   return progress.levels[previous]?.passed === true;
@@ -127,12 +134,19 @@ export function unlockedComponents(
  * on parts an earlier level rewards. `test/app/progress.test.ts` states the rule
  * for a synthetic level, and the buildability walk's `chapter 1 palettes are
  * unchanged` block pins both halves of that claim on the shipped data.
+ *
+ * `dev` skips the unlocked half of the intersection and keeps the other: the
+ * level's own list is still the upper bound, because dev mode is "open every
+ * gate", not "hand out parts this level was never designed around". The same
+ * flag opens the levels themselves -- see `isUnlocked`.
  */
 export function paletteDefsFor(
   progress: Progress,
   levels: readonly LevelSpec[],
   level: LevelSpec,
+  dev = false,
 ): string[] {
+  if (dev) return [...level.allowedComponents];
   const unlocked = new Set([
     ...unlockedComponents(progress, levels),
     ...(level.rewards?.components ?? []),

@@ -69,6 +69,9 @@ export function mountToolbar(
   const run = button('运行', 'play', () => options.onToggleRun());
   const stop = button('停止并复位', 'stop', () => options.onStop());
   const trash = button('删除选中', 'trash', () => options.onDeleteSelection());
+  // The bin is where a player looks for "how do I get rid of this", so it is
+  // where the board's own shortcut belongs.
+  trash.title = '删除选中 · 在画板上右键可直接删除元件或导线';
   grid.append(zoomIn, zoomOut, test, step, run, grow(), fit, stop, gridToggle, trash);
 
   return {

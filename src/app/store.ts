@@ -49,6 +49,12 @@ export interface AppState {
   selected: string[];
   dragging: DragState | null;
   /**
+   * Whether `?dev=1` asked for developer mode: every level reachable and every
+   * part a level lists offered by its palette. It never writes progress.
+   * `app/dev.ts` owns the rule; the two gates are in `app/progress.ts`.
+   */
+  dev: boolean;
+  /**
    * What the circuit on the board costs, measured as it is edited.
    *
    * A MEASUREMENT, NOT A VERDICT, and it is a separate field from `lastGrade`

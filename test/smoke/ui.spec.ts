@@ -192,7 +192,11 @@ test('a failing run says so with a red cell, not a wall of text', async ({ page 
 
   await runTests(page);
   await expect(page.locator('.truth-table h2')).toHaveText('未通过');
-  await expect(page.locator('.case-bad')).toHaveCount(1);
+  // The expectation and the value that came out, boxed together: two cells, one
+  // rounded frame, and rounded at its two ends.
+  await expect(page.locator('.case-bad')).toHaveCount(2);
+  await expect(page.locator('.case-bad.bad-cap-top')).toHaveCount(1);
+  await expect(page.locator('.case-bad.bad-cap-bottom')).toHaveCount(1);
   await expect(page.locator('.truth-table')).not.toContainText('≠');
   await expect(page.locator('.truth-table p')).toHaveCount(0);
   await expect(page.locator('.result')).toHaveCount(0);
@@ -361,6 +365,65 @@ test('a wire is routed around a gate, not through it', async ({ page }) => {
   // hiding a crossing underneath) and clears the gate's own output pin.
   const beyond = await peakGreen(page, inputPin.x + 78, inputPin.y - 7, 52, 9);
   expect(beyond, 'the wire ran through the gate').toBeLessThan(60);
+});
+
+/**
+ * Right-click is the board's own delete: the part under the pointer, and the
+ * wires that reached it, as one undoable step. Checked through the readout rather
+ * than the graph -- level 1's output is driven high by the source, so removing
+ * the source has to show up as the value falling back to 0, and Ctrl+Z has to
+ * bring both the part and its wire back.
+ */
+test('right-click removes the part under the pointer, undoably', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+
+  const { cx, cy } = await placeParts(page);
+  await wireParts(page, cx, cy);
+  const outValue = page.locator('.io-pin .io-value').first();
+  await expect(outValue).toHaveText('1');
+
+  // The source's body, clear of its output pin and of the wire leaving it.
+  await page.mouse.click(cx - 124, cy, { button: 'right' });
+  await expect(outValue).toHaveText('0');
+  await page.screenshot({ path: 'test-results/smoke-right-click-delete.png' });
+
+  await page.keyboard.press('Control+z');
+  await expect(outValue).toHaveText('1');
+});
+
+/**
+ * DEVELOPER MODE, END TO END. The unit tests pin what `?dev` means to the two
+ * gates; this walks the thing a developer actually does -- land on the URL, open
+ * the map, click the last level -- and the thing that keeps it honest: the game
+ * says so, loudly, and one click puts it back.
+ */
+test('?dev=1 opens every level, and says so', async ({ page }) => {
+  await page.goto('/?dev=1');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-dev')).toBeVisible();
+
+  await page.getByRole('button', { name: '章节地图' }).click();
+  // Every one of the 47, from a save with nothing passed in it. Level 1 alone
+  // would be enabled without the flag.
+  await expect(page.locator('.map-tile:not([disabled])')).toHaveCount(47);
+  await page.screenshot({ path: 'test-results/smoke-dev-map.png' });
+
+  // The last level opens, and it offers the parts that level was designed
+  // around -- the whole reason the flag reaches the palette as well as the map.
+  await page.locator('.map-tile').nth(46).click();
+  // Opening a level raises its briefing, and the briefing covers the bar.
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('图灵完备');
+  await expect(page.getByRole('button', { name: '8 位运算器', exact: true })).toBeEnabled();
+
+  // One click leaves the mode, and the URL goes with it: a refresh must not
+  // bring back a sandbox nobody asked for again.
+  await page.locator('.shell-dev').click();
+  await expect(page.locator('.shell-dev')).toBeHidden();
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await expect(page.locator('.map-tile:not([disabled])')).toHaveCount(1);
+  expect(new URL(page.url()).search).toBe('');
 });
 
 test('chapter 2 is reachable: level 13 opens once chapter 1 is passed', async ({ page }) => {

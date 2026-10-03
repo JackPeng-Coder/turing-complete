@@ -117,6 +117,7 @@ describe('AppState through createStore', () => {
     camera: { x: 0, y: 0, zoom: 1 },
     selected: [],
     dragging: null,
+    dev: false,
     metrics: null,
     lastGrade: null,
     status: null,

@@ -8,6 +8,7 @@ import { CommandStack } from './app/commands';
 import { grade } from './levels/grader';
 import { loadProgress, saveProgress } from './persist/storage';
 import { applyGrade, resumePointOf, type Progress } from './app/progress';
+import { devModeFrom } from './app/dev';
 import { mountShell } from './ui/shell';
 import { mountPalette } from './ui/palette';
 import { mountTruthTable, TEST_DEMO_LIMIT } from './ui/truthTable';
@@ -27,6 +28,9 @@ const registry = createRegistry(BASE_DEFS);
 let progress: Progress = loadProgress();
 const level: LevelSpec = getLevel(resumePointOf(progress, LEVEL_ORDER));
 
+/** `?dev=1`: every level reachable and every listed part on offer. See `dev.ts`. */
+let dev = devModeFrom(globalThis.location.search);
+
 const store: Store<AppState> = createStore<AppState>({
   level,
   graph: emptyGraph(level.id),
@@ -35,6 +39,7 @@ const store: Store<AppState> = createStore<AppState>({
   camera: { x: 40, y: 40, zoom: 1 },
   selected: [],
   dragging: null,
+  dev,
   metrics: null,
   lastGrade: null,
   status: null,
@@ -536,6 +541,16 @@ if (app) {
       mapRender.render();
     },
     onShowBrief: () => showBriefing(narrativeFor(store.get().level.id).before),
+    onExitDev: () => {
+      // Live rather than through a reload: the map and the palette read `dev`
+      // from the store, so switching it off re-renders them where they stand --
+      // and the address bar is cleaned up so a refresh does not bring it back.
+      dev = false;
+      store.set({ dev });
+      const url = new URL(globalThis.location.href);
+      url.searchParams.delete('dev');
+      globalThis.history.replaceState(null, '', url);
+    },
   });
   // DOM order is visual order inside the stage, but every panel is an overlay:
   // the palette on the right, the readout on the left, the test cases along the

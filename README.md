@@ -115,6 +115,16 @@ The Playwright suite (`pnpm smoke`) needs two things the unit tests do not:
 
 Screenshots are written under `test-results/`, which Playwright wipes at the start of every run.
 
+### Developer mode
+
+`?dev=1` opens every level from the chapter map and offers every part a level lists, so a level can be
+opened and built without playing up to it. It opens exactly those two gates and nothing else: it never
+writes progress, so no level is passed and no star is awarded on its account.
+
+While it is on, the top bar carries an amber `DEV` light — a mode that unlocks the whole game has to be
+impossible to forget — and clicking that light leaves the mode and cleans the URL, so a refresh does not
+bring it back.
+
 ## Project layout
 
 ```

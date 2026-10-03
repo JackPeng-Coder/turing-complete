@@ -326,15 +326,22 @@ function renderMatrix(
   const inputs = level.io.inputs;
   const outputs = level.io.outputs;
   const manyOutputs = outputs.length > 1;
+  // Which row is the table's first, so the active column's band can be rounded
+  // at its ends: a level with no input pins starts on its expectations.
+  const startsOnOutputs = inputs.length === 0;
 
   for (const [position, pin] of inputs.entries()) {
     const row = document.createElement('tr');
     row.append(labelCell(`输入 ${position + 1} ${pinName(pin)}`.trim()));
     for (const [index, item] of cases.entries()) {
+      const cell = bitsCell(item.inputs[pin.id] ?? 0, pin.width);
+      if (disagrees(item, pin)) cell.classList.add('case-bad', 'bad-cap-top', 'bad-cap-bottom');
       // While the run is on a case, that case's column is the one being driven:
       // the board is showing it and the reader's eye has to follow.
-      const cell = bitsCell(item.inputs[pin.id] ?? 0, pin.width, disagrees(item, pin));
-      if (index === active) cell.classList.add('case-active');
+      if (index === active) {
+        cell.classList.add('case-active');
+        if (position === 0) cell.classList.add('cap-top');
+      }
       row.append(cell);
     }
     if (cases.length === 0) row.append(noteCell(inputs.length ? '—' : ''));
@@ -349,15 +356,29 @@ function renderMatrix(
     actual.append(labelCell(`当前${ordinal} ${pinName(pin)}`.trim()));
 
     for (const [index, item] of cases.entries()) {
+      // THE PAIR IS WRONG TOGETHER, so it is boxed together: what the level asked
+      // for on top, what came out below, one red block. Boxing only the `当前`
+      // cell said "this is wrong" but made the reader find the expectation again
+      // two rows up; the two cells are adjacent for every pin, so the box is
+      // simply both of them.
+      const wrong = disagrees(item, pin);
+
       const want = item.expected[pin.id];
-      const expectedCell = want === undefined ? noteCell('—') : bitsCell(want, pin.width, false);
-      if (index === active) expectedCell.classList.add('case-active');
+      const expectedCell = want === undefined ? noteCell('—') : bitsCell(want, pin.width);
+      if (wrong) expectedCell.classList.add('case-bad', 'bad-cap-top');
+      if (index === active) {
+        expectedCell.classList.add('case-active');
+        if (position === 0 && startsOnOutputs) expectedCell.classList.add('cap-top');
+      }
       expected.append(expectedCell);
 
       const got = item.actual?.[pin.id];
-      const actualCell =
-        got === undefined ? unknownCell(pin.width) : bitsCell(got, pin.width, disagrees(item, pin));
-      if (index === active) actualCell.classList.add('case-active');
+      const actualCell = got === undefined ? unknownCell(pin.width) : bitsCell(got, pin.width);
+      if (wrong) actualCell.classList.add('case-bad', 'bad-cap-bottom');
+      if (index === active) {
+        actualCell.classList.add('case-active');
+        if (position === outputs.length - 1) actualCell.classList.add('cap-bottom');
+      }
       actual.append(actualCell);
     }
     if (cases.length === 0) {
@@ -411,11 +432,17 @@ function noteCell(text: string): HTMLTableCellElement {
  * No text: the cell is the bits. `panels.test.ts` reads every `td` in the panel
  * to prove a failure that drove no vector fabricates no `0`, and a bit cell that
  * also spelled its value out would defeat that reading.
+ *
+ * The cell is also the BOX. A highlight is a translucent fill on the `td` itself
+ * rather than a ring around the bits inside it, so a column's cells stack into
+ * one continuous band instead of a ladder of little outlines -- see `.case-active`
+ * and `.case-bad` in `style.css`, and the `cap-top`/`cap-bottom` classes the
+ * caller adds to round the two ends.
  */
-function bitsCell(value: number, width: number, wrong: boolean): HTMLTableCellElement {
+function bitsCell(value: number, width: number): HTMLTableCellElement {
   const cell = document.createElement('td');
   const box = document.createElement('span');
-  box.className = wrong ? 'case-cell case-bad' : 'case-cell';
+  box.className = 'case-cell';
   for (const bit of bitsOf(value, width)) box.append(bitElement(bit));
   cell.append(box);
   return cell;
