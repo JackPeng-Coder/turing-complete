@@ -74,8 +74,11 @@ in a corner badge, so `and` and `and8` share a marking and the `8` tells them ap
 the Chinese name, because that is what you read when *choosing* a part; the tooltip carries the English
 name and the board marking, which is where the two vocabularies meet.
 
-The board's gestures:
+A level connector is named by a badge and carries its **number**: the output's disc shows what it holds
+and the input's arrow shows what it is driving, so the two ends of a level are one kind of part rather
+than two.
 
+The board's gestures:
 | Gesture | What it does |
 | --- | --- |
 | Drag empty board, or drag with the middle button | Pan the view |

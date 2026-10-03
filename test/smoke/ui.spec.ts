@@ -338,6 +338,38 @@ async function peakGreen(page: Page, x: number, y: number, width: number, height
 }
 
 /**
+ * The brightest WHITE in a band, as the smallest channel of each pixel.
+ *
+ * A part's number is drawn in `#d7e6f5` with a dark outline, so it reads about
+ * 215; every body colour the board uses is either saturated (one channel near
+ * zero) or dark, and the paper reads 7. It is how a test asks "is there a
+ * NUMBER here" about text that is painted on a canvas.
+ */
+async function peakWhite(page: Page, x: number, y: number, width: number, height: number) {
+  return page.evaluate(
+    ({ x, y, width, height }) => {
+      const canvas = document.querySelector('canvas.board') as HTMLCanvasElement | null;
+      const ctx = canvas?.getContext('2d');
+      if (!canvas || !ctx) return 0;
+      const dpr = globalThis.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const data = ctx.getImageData(
+        Math.round((x - rect.left) * dpr),
+        Math.round((y - rect.top) * dpr),
+        Math.max(1, Math.round(width * dpr)),
+        Math.max(1, Math.round(height * dpr)),
+      ).data;
+      let peak = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        peak = Math.max(peak, Math.min(data[i]!, data[i + 1]!, data[i + 2]!));
+      }
+      return peak;
+    },
+    { x, y, width, height },
+  );
+}
+
+/**
  * THE WIRE THAT WENT THROUGH A GATE.
  *
  * Reported from a real board: a source sitting to the RIGHT of the gate it feeds
@@ -529,6 +561,35 @@ test('ctrl+drag bands the parts it sweeps over', async ({ page }) => {
   await page.getByRole('button', { name: '删除选中' }).click();
   expect(await peakGreen(page, cx - 124, cy, 20, 20)).toBeLessThan(60);
   await page.screenshot({ path: 'test-results/smoke-marquee-deleted.png' });
+});
+
+/**
+ * BOTH ENDS OF A LEVEL SHOW THEIR NUMBER.
+ *
+ * The output has always drawn what it holds in its disc; the input drew nothing,
+ * which made one connector look like two different parts. What the input holds is
+ * what it is DRIVING, and it is read the same way -- `level_input` has an output
+ * pin, so the display reports it like any other.
+ *
+ * Level 13 takes a four-bit `a`, so the number is big enough to be worth reading;
+ * one bit of it is clicked in the left-hand panel first, or the arrow would be
+ * showing `0` and the test would pass on a blank body.
+ */
+test('a level input shows the number it drives, like an output', async ({ page }) => {
+  await seedProgress(page, 12);
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('奇数个信号');
+
+  const { cx, cy } = await boardCentre(page);
+  await place(page, '关卡输入', cx - 240, cy);
+  // Bit 3 of `a`, so the arrow reads 8 rather than 0.
+  await page.locator('.io-pin .bit').first().click();
+  await expect(page.locator('.io-pin .io-value').first()).toHaveText('8');
+
+  // The arrow's mass, where its number is drawn.
+  expect(await peakWhite(page, cx - 210, cy - 12, 40, 24)).toBeGreaterThan(150);
+  await page.screenshot({ path: 'test-results/smoke-input-number.png' });
 });
 
 test('chapter 2 is reachable: level 13 opens once chapter 1 is passed', async ({ page }) => {

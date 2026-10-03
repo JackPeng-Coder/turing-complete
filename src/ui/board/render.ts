@@ -1004,15 +1004,22 @@ function drawInstance(
   // labelled. Its body used to print the instance id (`IN_b3`, `OUT_out3`),
   // which is the string that binds the part to the level -- the app's own
   // bookkeeping, drawn on the board for the player to read, and a duplicate of
-  // the badge above it. The output keeps its number, because a number in a disc
-  // is what the disc is for.
+  // the badge above it.
+  //
+  // BOTH ENDS SHOW THE NUMBER, and the input is not a special case: a disc that
+  // says what it holds and an arrow that says nothing is one connector drawn two
+  // ways. What the input holds is what it is DRIVING, which is the same reading
+  // the left-hand panel takes -- `level_input` has an output pin, so the value is
+  // read exactly as an output's is.
   const bound = def.category === 'level' && /^(IN_|OUT)/.test(inst.id);
   if (bound) {
-    if (!isLevelInput && value !== undefined) {
+    if (value !== undefined) {
       outlinedText(
         ctx,
         String(value),
-        p.x + w / 2,
+        // The arrow's mass is behind its apex, so its number sits further left
+        // than a disc's: centred, the last digit of `255` runs off the slope.
+        p.x + w * (isLevelInput ? 0.42 : 0.5),
         p.y + h / 2,
         Math.max(12, 20 * camera.zoom),
         camera.zoom,
