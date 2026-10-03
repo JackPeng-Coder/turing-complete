@@ -356,13 +356,13 @@ function renderMatrix(
 
       const got = item.actual?.[pin.id];
       const actualCell =
-        got === undefined ? noteCell('???') : bitsCell(got, pin.width, disagrees(item, pin));
+        got === undefined ? unknownCell(pin.width) : bitsCell(got, pin.width, disagrees(item, pin));
       if (index === active) actualCell.classList.add('case-active');
       actual.append(actualCell);
     }
     if (cases.length === 0) {
-      expected.append(noteCell('???'));
-      actual.append(noteCell('???'));
+      expected.append(noteCell('—'));
+      actual.append(unknownCell(pin.width));
     }
     table.append(expected, actual);
   }
@@ -417,6 +417,30 @@ function bitsCell(value: number, width: number, wrong: boolean): HTMLTableCellEl
   const box = document.createElement('span');
   box.className = wrong ? 'case-cell case-bad' : 'case-cell';
   for (const bit of bitsOf(value, width)) box.append(bitElement(bit));
+  cell.append(box);
+  return cell;
+}
+
+/**
+ * A cell for a value that has not been read yet: one NEUTRAL dot per bit.
+ *
+ * It used to be the literal text `???`, which was three problems at once. It said
+ * the same thing in every column of a sixteen-case table, so a row of them was a
+ * wall of punctuation where a row of dots is a row of "nothing here yet". It was
+ * the wrong KIND of thing -- these cells hold bits, and the readout panel beside
+ * the board had already settled what an unknown bit looks like: a plain grey dot,
+ * no point, which is the honest shape for "no direction known yet". And it was
+ * the only place in the game that spelled a state out in words instead of drawing
+ * it.
+ *
+ * The third bit state is not invented here: `bit.ts` has carried `'x'` since the
+ * input readout needed it. This is the test matrix learning the same vocabulary.
+ */
+function unknownCell(width: number): HTMLTableCellElement {
+  const cell = document.createElement('td');
+  const box = document.createElement('span');
+  box.className = 'case-cell';
+  for (let i = 0; i < width; i += 1) box.append(bitElement('x'));
   cell.append(box);
   return cell;
 }

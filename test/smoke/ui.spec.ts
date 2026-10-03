@@ -120,7 +120,9 @@ test('level 1 is playable end to end and shows its pass dialog', async ({ page }
   // a PLAN -- the level's one case, with its expectation and no verdict -- and
   // the bar reports what the circuit costs and says it has not been tested.
   await expect(page.locator('.truth-table')).toContainText('共 1 个');
-  await expect(page.locator('.truth-table')).toContainText('???');
+  // The unrun output is a neutral dot per bit, never a value and never the word
+  // `???` the panel used to print.
+  await expect(page.locator('.truth-table .bit-x')).toHaveCount(1);
   await expect(page.locator('.truth-table')).not.toContainText('全部用例通过');
   await expect(page.locator('.shell-metrics')).toContainText('未测试');
   await expect(page.locator('.result')).toHaveCount(0);
@@ -485,8 +487,9 @@ test('a sequential level replays its steps and reads every one of them', async (
   await runTests(page);
   await expect(page.locator('.truth-table h2')).toContainText('正在测试 用例 1 /');
   await expect(page.locator('.truth-table h2')).toHaveText('未通过');
-  // Every case was driven and read: an unread step would leave `???` behind.
-  await expect(page.locator('.truth-table')).not.toContainText('???');
+  // Every case was driven and read: a step the run never reached would still be
+  // an unknown dot.
+  await expect(page.locator('.truth-table .bit-x')).toHaveCount(0);
   await page.screenshot({ path: 'test-results/smoke-ch2-level28-run.png' });
 });
 

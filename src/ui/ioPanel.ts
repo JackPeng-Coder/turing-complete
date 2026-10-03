@@ -169,7 +169,9 @@ function group(
     name.textContent = pinName === String(position + 1) ? `${position + 1}` : `${position + 1}. ${pinName}`;
     const readout = document.createElement('div');
     readout.className = 'io-value';
-    readout.textContent = value === undefined ? '???' : String(value);
+    // A dash, not `???`: the dots above already say the bits are unknown, and a
+    // blank is what an instrument shows for a reading it does not have.
+    readout.textContent = value === undefined ? '—' : String(value);
     row.append(name, bits, readout);
     box.append(row);
   }

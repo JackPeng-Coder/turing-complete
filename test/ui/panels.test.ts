@@ -84,7 +84,8 @@ describe('truth table panel', () => {
     // The panel is a PLAN, not a report: the columns exist as soon as the level
     // is open, with the level's own expectations in them, exactly as the
     // original's bottom panel shows them. Nothing is marked wrong, and no output
-    // is invented -- an unrun circuit has no output, which is what `???` says.
+    // is invented: an unrun circuit has no output to show, which is a neutral dot
+    // per bit rather than a value.
     const store = makeStore('ch1-04-and-gate');
     const root = document.createElement('div');
     mountTruthTable(root, store);
@@ -94,7 +95,10 @@ describe('truth table panel', () => {
     expect(root.querySelectorAll('tr')).toHaveLength(4);
     expect(root.querySelectorAll('td')).toHaveLength(16);
     expect(root.querySelectorAll('.case-bad')).toHaveLength(0);
-    expect([...root.querySelectorAll('td')].map((td) => td.textContent)).toContain('???');
+    // One dot per case on the `当前 out` row, and not one character of text
+    // anywhere in the matrix: the cells are bits, not words.
+    expect(root.querySelectorAll('.bit-x')).toHaveLength(4);
+    expect([...root.querySelectorAll('td')].map((td) => td.textContent).join('')).toBe('');
   });
 
   it('reports a pass with the level’s own heading', () => {
@@ -164,7 +168,7 @@ describe('truth table panel', () => {
     let live: Record<string, number> | null = { out: 1 };
     mountTruthTable(root, store, { live: () => live, active: () => active });
 
-    /** Each row as its cells read: a bare bit, or the arrow's own class. */
+    /** Each row as its cells read: a value, or `x` for a bit nothing has read. */
     const rows = (): string[][] =>
       [...root.querySelectorAll('tr')].map((tr) =>
         [...tr.querySelectorAll('td')].map((td) =>
@@ -174,7 +178,7 @@ describe('truth table panel', () => {
 
     // The AND level's own rows: 00, 01, 10, 11 -> 0, 0, 0, 1.
     // Rows are 输入 a, 输入 b, 预期 out, 当前 out.
-    expect(rows()[3]).toEqual(['1', '', '', '']);
+    expect(rows()[3]).toEqual(['1', 'x', 'x', 'x']);
     // ...and the live 1 disagrees with that case's expected 0.
     expect(root.querySelectorAll('.case-bad')).toHaveLength(1);
     // One cell per row wears the highlight.
@@ -184,7 +188,7 @@ describe('truth table panel', () => {
     live = { out: 0 };
     active = 1;
     store.set({});
-    expect(rows()[3]).toEqual(['', '0', '', '']);
+    expect(rows()[3]).toEqual(['x', '0', 'x', 'x']);
     // A 0 where the second case expects 0: nothing is marked wrong.
     expect(root.querySelectorAll('.case-bad')).toHaveLength(0);
     expect(root.querySelector('h2')?.textContent).toBe('正在测试 用例 2 / 4');
@@ -546,7 +550,10 @@ describe('io readout panel', () => {
   it('leaves outputs unknown until something has run', () => {
     const { root } = mount(wideStore());
     const output = root.querySelectorAll('.io-pin')[1]!;
-    expect(output.querySelector('.io-value')?.textContent).toBe('???');
+    // A blank reading, and a dot per bit. Not `???`: the dots already say the
+    // bits are unknown, and a dash is what an instrument shows for a number it
+    // does not have.
+    expect(output.querySelector('.io-value')?.textContent).toBe('—');
     expect(output.querySelectorAll('.bit-x')).toHaveLength(8);
   });
 
