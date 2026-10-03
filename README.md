@@ -31,7 +31,9 @@ towards a working CPU.
 - **Chapter 3 — 9 levels (39–47)**: the ALU and the machine around it — registers and buses, the
   opcode decoder, the program counter and its RAM, and a capstone that runs an assembled program
   against the machine you built.
-- A **canvas wiring board**: place parts, drag wires, pan and zoom.
+- A **canvas wiring board**: place parts, drag wires, pan and zoom. Wires are routed, not just drawn:
+  a run is chosen against every part and every wire already on the board, so it goes *around* a gate
+  rather than through it, and two nets never settle into the same lane and read as one wire.
 - **A live board**: every wire and pin shows the value it is carrying, the level's input bits are
   clickable so you can drive a half-built circuit and watch it work, and the clock can be stepped,
   run or reset.

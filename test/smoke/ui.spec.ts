@@ -58,7 +58,9 @@ async function boardCentre(page: Page): Promise<{ cx: number; cy: number }> {
 
 /** Arms a palette part by its localised name, then drops it at a page point. */
 async function place(page: Page, name: string, x: number, y: number): Promise<void> {
-  await page.getByRole('button', { name }).click();
+  // `exact` because palette labels contain each other: a plain `与门` also
+  // matches `三路与门`, and Playwright resolves a role by substring by default.
+  await page.getByRole('button', { name, exact: true }).click();
   await page.mouse.click(x, y);
 }
 
@@ -276,6 +278,87 @@ test('level 12 lays its sixteen cases out as columns, then plays them', async ({
   await expect(page.locator('.truth-table p')).toHaveCount(0);
   await expect(page.locator('.case-bad')).not.toHaveCount(0);
   await page.screenshot({ path: 'test-results/smoke-ch1-level12-failed.png' });
+});
+
+/**
+ * The strongest green in a band of the board, as `G - R`.
+ *
+ * A live wire is `#00ff9c`, which scores 255; bare paper (`#070d18`) scores 6,
+ * an unlit part body (`#101b2c`) 28 and a red part body is negative. `G - max(R,
+ * B)` would look tighter but is not: the wire's own blue is 156, so the wire
+ * itself only scores 99 and the threshold would sit inside its own halo. It is
+ * how these tests ask the canvas a question -- "is there a wire here" -- without
+ * an image comparison that would fail on any other change.
+ */
+async function peakGreen(
+  page: Page,
+  x: number,
+  y: number,
+  width: number,
+  height = 3,
+): Promise<number> {
+  return page.evaluate(
+    ({ x, y, width, height }) => {
+      const canvas = document.querySelector('canvas.board') as HTMLCanvasElement | null;
+      const ctx = canvas?.getContext('2d');
+      if (!canvas || !ctx) return 0;
+      const dpr = globalThis.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const data = ctx.getImageData(
+        Math.round((x - rect.left) * dpr),
+        Math.round((y - rect.top) * dpr),
+        Math.max(1, Math.round(width * dpr)),
+        Math.max(1, Math.round(height * dpr)),
+      ).data;
+      let peak = -255;
+      for (let i = 0; i < data.length; i += 4) {
+        peak = Math.max(peak, data[i + 1]! - data[i]!);
+      }
+      return peak;
+    },
+    { x, y, width, height },
+  );
+}
+
+/**
+ * THE WIRE THAT WENT THROUGH A GATE.
+ *
+ * Reported from a real board: a source sitting to the RIGHT of the gate it feeds
+ * took the shortest path -- out past both pins and back left -- and that run went
+ * straight through the gate's body. The source here is placed to the right and
+ * one row up, which is exactly that shape, and the gate is dropped in the way.
+ *
+ * The probe is the band of board immediately right of the gate at the target
+ * pin's row: it is outside the body, so the painter cannot be hiding anything
+ * there, and it is the one place the crossing route always passed through.
+ */
+test('a wire is routed around a gate, not through it', async ({ page }) => {
+  await seedProgress(page, 11);
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('二进制速算');
+
+  const { cx, cy } = await boardCentre(page);
+  // A part dropped at a point is centred on it, so these four numbers are the
+  // whole geometry: the source's output pin, and the gate's upper input pin.
+  const sourcePin = { x: cx + 200 + 72, y: cy - 140 };
+  const gate = { x: cx - 40, y: cy - 100 };
+  const inputPin = { x: gate.x, y: gate.y - 12 };
+
+  await place(page, '高电平', cx + 200, cy - 140);
+  await place(page, '与门', gate.x, gate.y);
+  await dragWire(page, sourcePin.x, sourcePin.y, inputPin.x, inputPin.y);
+  await page.screenshot({ path: 'test-results/smoke-routing-around-gate.png' });
+
+  // The wire exists: the box immediately left of the gate holds its elbow and
+  // the stub that enters the pin, and nothing else is drawn there.
+  const reached = await peakGreen(page, inputPin.x - 40, inputPin.y - 20, 36, 40);
+  expect(reached, 'no wire arrives at the gate at all').toBeGreaterThan(150);
+  // ...and it is NOT on the far side of the gate at the same row, which is where
+  // the shortest path put it. The band clears the body (so the painter cannot be
+  // hiding a crossing underneath) and clears the gate's own output pin.
+  const beyond = await peakGreen(page, inputPin.x + 78, inputPin.y - 7, 52, 9);
+  expect(beyond, 'the wire ran through the gate').toBeLessThan(60);
 });
 
 test('chapter 2 is reachable: level 13 opens once chapter 1 is passed', async ({ page }) => {

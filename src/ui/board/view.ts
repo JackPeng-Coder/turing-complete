@@ -2,19 +2,25 @@
  * The board's viewport transform: camera position in world units (the pan
  * offset, screen pixels at zoom 1) plus the zoom factor.
  *
- * This module is the board's geometry: the world/screen conversions, grid
- * snapping, part rectangles, pin layout and hit testing. Everything in here is
- * a pure function of its arguments -- no DOM, no store -- which is why it is
- * the one board file with unit tests that run without a browser.
+ * This module is the board's viewport and its hit testing. The geometry that hit
+ * testing shares with the wire router -- part rectangles, pin layout, grid
+ * snapping -- lives in `geometry.ts` and is re-exported here, so the board's
+ * public geometry still arrives from one module. Everything in here is a pure
+ * function of its arguments -- no DOM, no store -- which is why it is the one
+ * board file with unit tests that run without a browser.
  */
-import type { ComponentDef, Registry } from '../../core/registry';
-import type { Graph, Instance } from '../../core/graph';
-import { GRID, INSTANCE_HEIGHT, INSTANCE_WIDTH, PIN_RADIUS, PIN_SPACING } from '../theme';
-import { distanceToPath, routeWire, type Point } from './routing';
+import type { Registry } from '../../core/registry';
+import type { Graph } from '../../core/graph';
+import { PIN_RADIUS } from '../theme';
+import { distanceToPath, type Point } from './routing';
+import { instanceRect, pinPosition, snap } from './geometry';
+import { planRoutes } from './routes';
 
-// `Point` is defined next to the routing it is used by, and re-exported here so
-// that the board's public geometry keeps arriving from one module.
+// `Point` is defined next to the routing it is used by, and `instanceRect` /
+// `pinPosition` / `snap` now live in `geometry.ts`. All four are re-exported
+// here, so the board's public geometry still arrives from one module.
 export type { Point };
+export { instanceRect, pinPosition, snap };
 
 export interface Camera {
   x: number;
@@ -28,39 +34,6 @@ export function worldToScreen(camera: Camera, p: Point): Point {
 
 export function screenToWorld(camera: Camera, p: Point): Point {
   return { x: p.x / camera.zoom - camera.x, y: p.y / camera.zoom - camera.y };
-}
-
-/**
- * Rounds to the 8 pixel grid.
- *
- * The `=== 0` branch normalises `-0` to `0`. `Math.round(-0.375)` is `-0` and
- * `-0 * 8` stays `-0`, so without it a part dropped just left of the origin
- * would store `-0` as its coordinate: `Object.is(-0, 0)` is false, which makes
- * every position comparison in the editor (and in tests) disagree about two
- * coordinates that are the same grid cell.
- */
-export function snap(v: number): number {
-  const snapped = Math.round(v / GRID) * GRID;
-  return snapped === 0 ? 0 : snapped;
-}
-
-export function instanceRect(inst: Instance): { x: number; y: number; w: number; h: number } {
-  return { x: inst.x, y: inst.y, w: INSTANCE_WIDTH, h: INSTANCE_HEIGHT };
-}
-
-/** Pin layout: inputs along the left edge, outputs along the right edge. */
-export function pinPosition(
-  inst: Instance,
-  def: ComponentDef,
-  pinId: string,
-  isInput: boolean,
-): Point {
-  const pins = isInput ? def.inputs : def.outputs;
-  const index = pins.findIndex((p) => p.id === pinId);
-  const count = Math.max(1, pins.length);
-  const y = inst.y + INSTANCE_HEIGHT / 2 + (index - (count - 1) / 2) * PIN_SPACING;
-  const x = isInput ? inst.x : inst.x + INSTANCE_WIDTH;
-  return { x, y };
 }
 
 export type Hit =
@@ -95,20 +68,14 @@ export function hitTest(graph: Graph, registry: Registry, world: Point): Hit {
     }
   }
 
-  const byId = new Map(graph.instances.map((i) => [i.id, i]));
+  // The polyline the board DRAWS, from the same planner the painter uses: the
+  // router moves a wire around the parts in its way, so a hit test against the
+  // shortest path instead would leave a player clicking a line that is not there
+  // and missing the line that is.
+  const plan = planRoutes(graph, registry);
   for (const wire of graph.wires) {
-    const from = byId.get(wire.from.inst);
-    const to = byId.get(wire.to.inst);
-    if (!from || !to) continue;
-    const fromDef = registry.has(from.def) ? registry.get(from.def) : null;
-    const toDef = registry.has(to.def) ? registry.get(to.def) : null;
-    if (!fromDef || !toDef) continue;
-    const a = pinPosition(from, fromDef, wire.from.port, false);
-    const b = pinPosition(to, toDef, wire.to.port, true);
-    // The polyline the board draws, not the straight chord under it: the two
-    // differ by up to half the wire's span, and a player clicking a wire aims at
-    // the line they can see.
-    if (distanceToPath(world, routeWire(a, b)) <= 4) return { kind: 'wire', id: wire.id };
+    const points = plan.get(wire.id);
+    if (points && distanceToPath(world, points) <= 4) return { kind: 'wire', id: wire.id };
   }
 
   for (let i = graph.instances.length - 1; i >= 0; i -= 1) {

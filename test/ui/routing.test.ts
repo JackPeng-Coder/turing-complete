@@ -10,6 +10,7 @@ import {
   type Point,
 } from '../../src/ui/board/routing';
 import { hitTest, pinPosition } from '../../src/ui/board/view';
+import { planRoutes } from '../../src/ui/board/routes';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { addInstance, connect, emptyGraph } from '../../src/core/graph';
@@ -144,10 +145,13 @@ describe('distanceToPath', () => {
  * player could click 50 units of empty paper and delete a wire -- or click the
  * wire they could see and select nothing.
  *
- * The probe points are derived from `pinPosition` and `routeWire` rather than
- * written down as numbers. They used to be numbers, and they silently stopped
- * testing anything the day the parts changed size: a hit test that had reverted
- * to the chord still missed the hard-coded point, so the test still passed.
+ * THE PROBES COME FROM THE PLAN, not from numbers and not from `routeWire`. The
+ * router CHOOSES a shape now, and it may legitimately pick the straight-ish one:
+ * an earlier version of this file probed the chord midpoint and passed only
+ * because the old router hooked wide around the source. What the contract
+ * actually says is "the hit test follows whatever the painter was given", so
+ * that is what is tested -- and if the plan ever does run along the chord, the
+ * test says so instead of quietly passing.
  */
 describe('hit testing follows the routed wire', () => {
   function boardWithFeedbackWire() {
@@ -160,21 +164,38 @@ describe('hit testing follows the routed wire', () => {
     return { g, a, b };
   }
 
-  it('hits the wire on the segment it actually runs along', () => {
-    const { g, a, b } = boardWithFeedbackWire();
-    // `to` is behind `from`, so the route hooks out past both pins; its first
-    // corner marks the vertical run the chord never touches.
-    const corner = routeWire(a, b)[1]!;
-    expect(hitTest(g, registry, { x: corner.x, y: (a.y + b.y) / 2 })).toEqual({
-      kind: 'wire',
-      id: 'w1',
-    });
+  it('hits the wire on every corner the plan runs through', () => {
+    const { g } = boardWithFeedbackWire();
+    const plan = planRoutes(g, registry);
+    const points = plan.get('w1')!;
+    expect(points.length).toBeGreaterThan(2);
+    // Interior vertices only: the two ends are the pins themselves, and a pin is
+    // a smaller target than the wire that reaches it.
+    for (const p of points.slice(1, -1)) {
+      expect(hitTest(g, registry, p), `corner ${p.x},${p.y}`).toEqual({
+        kind: 'wire',
+        id: 'w1',
+      });
+    }
   });
 
   it('does not hit the wire where only the straight chord passes', () => {
     const { g, a, b } = boardWithFeedbackWire();
-    const midpoint = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    // Guard the premise: the midpoint has to be bare board, not inside a part.
-    expect(hitTest(g, registry, midpoint)).toBeNull();
+    const points = planRoutes(g, registry).get('w1')!;
+    // A point ON the chord that is well off the route, found rather than
+    // assumed: if the router ever draws the chord itself there is no such point,
+    // and this fails rather than testing nothing.
+    let probe: Point | null = null;
+    for (let t = 0; t <= 1; t += 0.01) {
+      const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      if (distanceToPath(p, points) > 12) {
+        probe = p;
+        break;
+      }
+    }
+    expect(probe, 'the route never leaves the chord: nothing to test').not.toBeNull();
+    // Not the wire. It may be a part -- the chord spends most of its length
+    // inside the source's own body -- but it must not be the wire.
+    expect(hitTest(g, registry, probe!)).not.toEqual({ kind: 'wire', id: 'w1' });
   });
 });

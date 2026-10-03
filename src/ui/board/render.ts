@@ -32,6 +32,7 @@ import {
 import type { AppState, Store } from '../../app/store';
 import { instanceRect, pinPosition, worldToScreen, type Camera, type Point } from './view';
 import { CORNER_RADIUS, cornerRadii, longestSegment, routeWire } from './routing';
+import { planRoutes } from './routes';
 import type { Graph, Instance } from '../../core/graph';
 import type { ComponentDef, PinDef, Registry } from '../../core/registry';
 
@@ -659,6 +660,9 @@ function drawWires(
   view: BoardView | null | undefined,
 ): void {
   const byId = new Map(graph.instances.map((i) => [i.id, i]));
+  // One plan for the whole board, so a wire is routed against the wires already
+  // placed rather than against nothing: see `routes.ts`.
+  const plan = planRoutes(graph, registry);
   for (const wire of graph.wires) {
     const from = byId.get(wire.from.inst);
     const to = byId.get(wire.to.inst);
@@ -667,9 +671,12 @@ function drawWires(
     const toDef = registry.get(to.def);
     const outPin = fromDef.outputs.find((p) => p.id === wire.from.port);
     if (!outPin) continue;
-    const a = pinPosition(from, fromDef, wire.from.port, false);
-    const b = pinPosition(to, toDef, wire.to.port, true);
-    const points = routeWire(a, b);
+    const points =
+      plan.get(wire.id) ??
+      routeWire(
+        pinPosition(from, fromDef, wire.from.port, false),
+        pinPosition(to, toDef, wire.to.port, true),
+      );
     const width = effectiveWidth(from, outPin);
     const value = outputValue(view, from.id, wire.from.port);
     drawWire(ctx, points, width, value, camera);
