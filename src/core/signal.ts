@@ -42,6 +42,48 @@ function fitsWidth(v: number, width: number): boolean {
   return v >= 0 && v < 2 ** width;
 }
 
+/**
+ * Low-`width`-bit mask, as a NON-NEGATIVE number.
+ *
+ * `2 ** width - 1`, not `(1 << width) - 1`: `<<` converts through int32, so at
+ * the top of the admitted range it produces a negative mask -- `1 << 31` is
+ * `-2 ** 31`, and `(1 << 31) - 1` is `-2147483649` rather than `0x7fff_ffff`.
+ * That negative number is not a mask at all: `x & -2147483649` is
+ * `x & 0x7fff_ffff` by luck, but an operation that RETURNS the mask instead of
+ * ANDing with it (`div8` by zero, `ashr8`'s sign fill) hands it straight to a
+ * port, where `assertWidth` rejects it and `runChecks` turns a correct circuit
+ * into an 'invalid' failure.
+ *
+ * `2 ** width - 1` is exact for every width up to 32 (doubles stay exact well
+ * past `2 ** 32`), so no width needs a special case. What bounds the top of the
+ * range is `MAX_WIDE_WIDTH` = 32 together with the `number` carrier this
+ * returns: `maskOf(32)` is `0xffff_ffff`, the widest mask any caller asks for,
+ * and `width > 32` is the `Uint8Array` path's business.
+ *
+ * This began as `core/defs/wide.ts`'s private helper, written with a paragraph
+ * of justification after a 31-bit port was found unstageable. It is exported
+ * here because every layer needs a mask and each one had written its own: the
+ * `(1 << width) - 1` form had survived in five other modules, where it is wrong
+ * at width 31 and meaningless above it. One definition, imported everywhere, is
+ * the only version of that fix that stays fixed.
+ */
+export function maskOf(width: number): number {
+  return 2 ** width - 1;
+}
+
+/**
+ * The low `width` bits of a non-negative `value`, at any width.
+ *
+ * This is what a mask is usually written for, and it is deliberately NOT
+ * `value & maskOf(width)`: `&` converts both operands through int32, so the mask
+ * is itself mangled at the top of the range (`maskOf(32)` is `0xffff_ffff`,
+ * which `&` reads as `-1`) and a value at or above `2 ** 31` comes back
+ * negative. `%` is exact for every width a `number` can carry.
+ */
+export function maskInto(value: number, width: number): number {
+  return value % 2 ** width;
+}
+
 export function assertWidth(v: PortValue, width: number): void {
   if (typeof v === 'number') {
     if (!Number.isInteger(v)) {
@@ -170,11 +212,22 @@ function numberToBytes(v: number): Uint8Array {
   return out;
 }
 
+/**
+ * A `PortValue` as one number. Byte arrays are read little-endian, low byte
+ * first, which is the order `setPort`'s byte-array branch writes them in.
+ *
+ * Past 32 bits this loses precision, and that is the caller's business: the
+ * widths that need those values keep them as a `Uint8Array`.
+ */
+export function portValueToNumber(v: PortValue): number {
+  if (typeof v === 'number') return v;
+  let total = 0;
+  for (let i = 0; i < v.length; i += 1) total += v[i]! * 2 ** (8 * i);
+  return total;
+}
+
 export function formatPort(v: PortValue, width: number, radix: 2 | 10 | 16): string {
-  const n =
-    typeof v === 'number'
-      ? v
-      : Array.from(v).reduce((acc, byte, i) => acc + byte * 2 ** (8 * i), 0);
+  const n = portValueToNumber(v);
   // Binary output is exactly `width` characters, so bits above the port width
   // are dropped: a 1-bit port showing 0b101 renders '1'. `% 2 ** width` is used
   // instead of `& ((1 << width) - 1)` so wide (byte-array) values past the

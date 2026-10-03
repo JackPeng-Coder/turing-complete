@@ -94,8 +94,12 @@ export interface Netlist {
  * `validateGraph` has already rejected a `params.width` that is not a positive
  * integer, so `alloc`'s own width guard can never fire from a width resolved
  * here.
+ *
+ * Exported for `ui/board/render.ts`, which sizes a part from the same rule and
+ * used to keep its own copy of it: a renderer that disagreed with the compiler
+ * would draw a wire as one bit wide and route a byte through it.
  */
-function effectiveWidth(inst: Instance, pin: PinDef): number {
+export function effectiveWidth(inst: Instance, pin: PinDef): number {
   return inst.params.width ?? pin.width;
 }
 

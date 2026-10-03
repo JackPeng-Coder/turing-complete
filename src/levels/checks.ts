@@ -3,7 +3,7 @@ import { CircuitValidationError, UnstableCircuitError } from '../core/errors';
 import type { Graph } from '../core/graph';
 import { Simulation, compile, type Netlist } from '../core/net';
 import type { Registry } from '../core/registry';
-import { assertWidth, formatPort, type PortValue } from '../core/signal';
+import { assertWidth, formatPort, maskInto, portValueToNumber } from '../core/signal';
 import { getCustomCheck } from './custom/index';
 import { FAILURE_REASONS } from './spec';
 import type {
@@ -139,11 +139,6 @@ export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): Lev
     }
   }
 
-  const toNumber = (v: PortValue): number => {
-    if (typeof v === 'number') return v;
-    return Array.from(v).reduce((acc, byte, i) => acc + byte * 2 ** (8 * i), 0);
-  };
-
   const io: LevelIo = {
     sim,
     reset: () => sim.reset(),
@@ -167,7 +162,7 @@ export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): Lev
     readOutput(name: string): number {
       const slot = outputSlots.get(name);
       if (!slot) return 0;
-      return toNumber(sim.read(slot.base, slot.width));
+      return portValueToNumber(sim.read(slot.base, slot.width));
     },
   };
 
@@ -185,8 +180,7 @@ function enumerateInputs(spec: LevelSpec): Array<Record<string, number>> {
     const row: Record<string, number> = {};
     let offset = 0;
     for (const pin of spec.io.inputs) {
-      const mask = (1 << pin.width) - 1;
-      row[pin.id] = (n >>> offset) & mask;
+      row[pin.id] = maskInto(n >>> offset, pin.width);
       offset += pin.width;
     }
     combos.push(row);
@@ -208,8 +202,7 @@ export function generateRows(
     const outputs: Record<string, number> = {};
     let offset = 0;
     for (const pin of alwaysOn.io.outputs) {
-      const mask = (1 << pin.width) - 1;
-      outputs[pin.id] = (value >>> offset) & mask;
+      outputs[pin.id] = maskInto(value >>> offset, pin.width);
       offset += pin.width;
     }
     return { inputs, outputs };

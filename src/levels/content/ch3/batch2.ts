@@ -1,4 +1,5 @@
 import { OVERTURE_ISA } from '../../../asm/index';
+import { maskInto } from '../../../core/signal';
 import type { FieldRange } from '../../../asm/index';
 // `LevelIo` -- the pin shape -- is `tables.ts`'s; `checks.ts` exports an
 // unrelated runtime interface of the same name (the bound simulation).
@@ -105,7 +106,7 @@ function isaField(modeId: string, fieldId: string): FieldRange {
 
 /** `word`'s bits under `field`, as a value of that field's own width. */
 function sliceOf(field: FieldRange, word: number): number {
-  return (word >>> field.offset) & ((1 << field.width) - 1);
+  return maskInto(word >>> field.offset, field.width);
 }
 
 /**

@@ -18,12 +18,12 @@
  * rather than an exception: the board is also the editor, and the state a player
  * types through on the way to a working circuit is usually not runnable.
  */
-import { Simulation, compile, type Netlist } from '../../core/net';
+import { Simulation, compile } from '../../core/net';
 import { bindLevelIo, type LevelIo } from '../../levels/checks';
 import type { LevelSpec } from '../../levels/spec';
 import type { Graph } from '../../core/graph';
 import type { Registry } from '../../core/registry';
-import type { PortValue } from '../../core/signal';
+import { maskInto, portValueToNumber } from '../../core/signal';
 
 /** Every value the board and the readout panels need, read in one pass. */
 export interface SignalSnapshot {
@@ -131,7 +131,7 @@ export function createDisplay(
       if (!stable) return { ...UNSTABLE, tick };
       const outputs = new Map<string, number>();
       for (const region of regions) {
-        outputs.set(region.key, toNumber(sim.read(region.base, region.width)));
+        outputs.set(region.key, portValueToNumber(sim.read(region.base, region.width)));
       }
       const levelOutputs = new Map<string, number>();
       for (const pin of level.io.outputs) levelOutputs.set(pin.id, io.readOutput(pin.id));
@@ -163,16 +163,7 @@ export function createDisplay(
 
 /** A value reduced into a pin's width, so a stale vector cannot be rejected. */
 function within(value: number, width: number): number {
-  if (width >= 31) return value % 2 ** width;
-  return value & ((1 << width) - 1);
-}
-
-/** `PortValue` as one number, the way `levels/checks.ts` reads a wide pin back. */
-function toNumber(value: PortValue): number {
-  if (typeof value === 'number') return value;
-  let total = 0;
-  for (let i = 0; i < value.length; i += 1) total += value[i]! * 2 ** (8 * i);
-  return total;
+  return maskInto(value, width);
 }
 
 /** The snapshot before anything has run, for callers with no display at all. */

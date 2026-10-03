@@ -1,5 +1,5 @@
 import type { ComponentCategory, ComponentDef, PinDef } from '../registry';
-import type { PortValue } from '../signal';
+import { maskOf, type PortValue } from '../signal';
 
 /**
  * The wide (8-bit) family: bitwise, arithmetic, shift, compare and the two bit
@@ -106,38 +106,6 @@ export const MAX_WIDE_WIDTH = 32;
 export function clampWidth(width: number | undefined): number {
   if (width === undefined || Number.isNaN(width)) return DEFAULT_WIDE_WIDTH;
   return Math.min(MAX_WIDE_WIDTH, Math.max(1, Math.trunc(width)));
-}
-
-/**
- * Low-`w`-bit mask, as a NON-NEGATIVE number.
- *
- * `2 ** w - 1`, not `(1 << w) - 1`: `<<` converts through int32, so at the top of
- * the admitted range it produces a negative mask -- `1 << 31` is `-2 ** 31`, and
- * `(1 << 31) - 1` is `-2147483649` rather than `0x7fff_ffff`. That negative number
- * is not a mask at all: `x & -2147483649` is `x & 0x7fff_ffff` by luck, but the
- * two operators that RETURN the mask instead of ANDing with it (`div8` by zero,
- * `ashr8`'s sign fill) hand it straight to a port, where `assertWidth` rejects it
- * and `runChecks` turns a correct circuit into an 'invalid' failure.
- *
- * `2 ** w - 1` is exact for every `w` up to 32 (doubles stay exact well past
- * `2 ** 32`), so no width needs a special case.
- *
- * The form is required, not stylistic: `(1 << w) - 1` goes negative at `w = 31`
- * (`1 << 31` is `-2 ** 31`), and a negative mask is exactly what made a 31-bit port
- * unstageable while `fitsWidth` (`core/signal.ts`) still bounded a narrow value with
- * `v < 1 << width`. That matching guard was fixed in the same phase (`c830f50`: it now
- * reads `v >= 0 && v < 2 ** width`), so width 31 stages these masks normally -- the
- * limitation this paragraph used to record is resolved, and `2 ** w - 1` is still the
- * required form. What still bounds the top of the admitted range is `MAX_WIDE_WIDTH` =
- * 32 together with the `number` carrier `maskOf` returns: `maskOf(32)` is
- * `0xffff_ffff`, the widest mask any caller here asks for and the widest value
- * `fitsWidth` admits, so `w > 32` is the `Uint8Array` path's business (the old
- * `(1 << width) - 1` form also survives in `core/fields.ts`'s `extractField` /
- * `insertField`, a dormant pair with no `src/` caller that is recorded here and not
- * touched).
- */
-function maskOf(w: number): number {
-  return 2 ** w - 1;
 }
 
 // ---------------------------------------------------------------------------

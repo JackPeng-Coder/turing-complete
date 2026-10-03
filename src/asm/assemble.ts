@@ -1,4 +1,5 @@
 import { insertField } from '../core/fields';
+import { maskOf } from '../core/signal';
 import type { FieldRange, Isa, ModeDef } from './isa';
 
 /**
@@ -115,7 +116,7 @@ function fieldOf(mode: ModeDef, id: string): FieldRange | undefined {
 }
 
 function maxValue(field: FieldRange): number {
-  return (1 << field.width) - 1;
+  return maskOf(field.width);
 }
 
 /** A field's limit, in words: `6-bit "imm" field (0-63)`. */

@@ -1,3 +1,4 @@
+import { maskInto } from '../core/signal';
 import type { PinSpec, TruthRow, TruthTableCheck } from './spec';
 
 export interface LevelIo {
@@ -12,7 +13,7 @@ function enumerateInputs(io: LevelIo): Array<Record<string, number>> {
     const row: Record<string, number> = {};
     let offset = 0;
     for (const pin of io.inputs) {
-      row[pin.id] = (n >>> offset) & ((1 << pin.width) - 1);
+      row[pin.id] = maskInto(n >>> offset, pin.width);
       offset += pin.width;
     }
     combos.push(row);
@@ -42,7 +43,7 @@ export function truthTable(
   const rows: TruthRow[] = enumerateInputs(io).map((inputs) => {
     const outputs: Record<string, number> = {};
     for (const pin of io.outputs) {
-      outputs[pin.id] = expected[pin.id]!(inputs) & ((1 << pin.width) - 1);
+      outputs[pin.id] = maskInto(expected[pin.id]!(inputs), pin.width);
     }
     return { inputs, outputs };
   });

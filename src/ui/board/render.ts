@@ -37,7 +37,11 @@ import { CORNER_RADIUS, cornerRadii, longestSegment, routeWire } from './routing
 import { planRoutes } from './routes';
 import { partCodeOf } from './markings';
 import type { Graph, Instance } from '../../core/graph';
-import type { ComponentDef, PinDef, Registry } from '../../core/registry';
+import type { ComponentDef, Registry } from '../../core/registry';
+// The pin-width rule is the compiler's, not a copy of it: a renderer that
+// disagreed with `core/net.ts` would draw a wire as one bit wide and route a
+// byte through it.
+import { effectiveWidth } from '../../core/net';
 
 /**
  * Everything the board paints that the store does not hold.
@@ -61,18 +65,6 @@ export interface BoardView {
    * ghost of the part armed in the palette.
    */
   readonly ghost: Point | null;
-}
-
-/**
- * A pin's width: `params.width` when the instance sets one, the pin's own
- * otherwise.
- *
- * Deliberately the same rule as `core/net.ts`'s own `effectiveWidth`, because a
- * renderer that disagreed with the compiler would draw a wire as one bit wide
- * and route a byte through it.
- */
-function effectiveWidth(inst: Instance, pin: PinDef): number {
-  return inst.params.width ?? pin.width;
 }
 
 /**
