@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { THEME, bodyColourOf, glowColourOf, partStateOf } from '../../src/ui/theme';
-import { gateLookOf } from '../../src/ui/board/render';
+import { gateLookOf, traceLevelArrow } from '../../src/ui/board/render';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
 
@@ -103,5 +103,61 @@ describe('gate silhouettes', () => {
     for (const id of ['level_input', 'level_output', 'const_on', 'mem1', 'delay_line']) {
       expect(gateLookOf(registry.get(id)).shape, id).toBe('box');
     }
+  });
+});
+
+/**
+ * A level input is not one of `gateLookOf`'s silhouettes -- it is the original's
+ * arrow, drawn from its own path -- and that path had a defect a screenshot
+ * showed and nothing else would have caught: it was TWO fills, a rounded bar and
+ * a triangle, laid side by side.
+ *
+ * Two antialiased edges that merely touch never quite cover the pixel between
+ * them, so the joint carried a hairline seam; and because the bar was rounded on
+ * its right as well, its corners cut a notch out of the arrow's shoulder. Both
+ * are structural, so this records the drawing calls and asserts on the structure:
+ * one subpath, rounded on the left only, apex on the output pin.
+ */
+describe('the level input arrow', () => {
+  /** A canvas context that records every call instead of drawing. */
+  function recorder(): { ctx: CanvasRenderingContext2D; calls: string[] } {
+    const calls: string[] = [];
+    const ctx = new Proxy(
+      {},
+      {
+        get: (_target, key) =>
+          (...args: unknown[]) =>
+            calls.push(`${String(key)}(${args.join(',')})`),
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    return { ctx, calls };
+  }
+
+  const trace = (): string[] => {
+    const { ctx, calls } = recorder();
+    traceLevelArrow(ctx, { x: 0, y: 0 }, 72, 72, 1);
+    return calls;
+  };
+
+  it('is a single subpath, not a bar next to a triangle', () => {
+    const calls = trace();
+    expect(calls.filter((call) => call === 'beginPath()')).toHaveLength(1);
+    expect(calls[0]).toBe('beginPath()');
+    expect(calls[calls.length - 1]).toBe('closePath()');
+    // No second shape: a `rect` or `roundRect` would be the bar drawn again.
+    expect(calls.filter((call) => call.startsWith('rect(') || call.startsWith('roundRect('))).toEqual(
+      [],
+    );
+  });
+
+  it('puts the apex on the output pin, where the wires leave', () => {
+    expect(trace()).toContain('lineTo(72,36)');
+  });
+
+  it('rounds the left corners only, so the shoulder has no notch', () => {
+    const arcs = trace().filter((call) => call.startsWith('arcTo('));
+    expect(arcs).toHaveLength(2);
+    // Both corners are on the back edge, at x = 0.
+    for (const arc of arcs) expect(arc.startsWith('arcTo(0,')).toBe(true);
   });
 });

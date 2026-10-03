@@ -540,18 +540,6 @@ function drawValueLabel(
 }
 
 /**
- * Text painted on a part.
- *
- * Level IO parts show their instance id instead of their type name: the id
- * (`IN_a`, `OUT`, `OUT_out3`) is what binds the part to the level, and level 12
- * puts four visually identical outputs on the board.
- */
-function labelOf(inst: Instance, def: ComponentDef): string {
-  if (def.category === 'level' && /^(IN_|OUT)/.test(inst.id)) return inst.id;
-  return def.name.zh;
-}
-
-/**
  * Bold white text with a dark outline: readable on every body colour.
  *
  * `maxWidth` shrinks the type until the label fits the body it sits on. Canvas
@@ -771,36 +759,43 @@ function drivenInputs(
 }
 
 /**
- * A level input, drawn as the original's arrow: a bar the signal arrives at, and
- * a triangle whose apex sits exactly on the output pins -- so the wires leave the
- * point of the arrow instead of the middle of a box.
+ * A level input's silhouette: the original's arrow, a bar the signal arrives at
+ * and a triangle whose apex sits exactly on the output pin -- so the wires leave
+ * the point of the arrow instead of the middle of a box.
  *
- * It has no body of its own. Drawing the usual rounded rect underneath left a
- * disc with a faint triangle inside it, which reads as a button rather than as a
- * connector. The arrow takes the part's state colour like every other body.
+ * ONE PATH, and that is the whole point of it being a path rather than a pair of
+ * fills. It used to be a rounded bar and a triangle filled one after the other,
+ * which left two artefacts at the joint: a hairline SEAM, because two
+ * antialiased edges that merely touch never quite cover the pixel between them,
+ * and a NOTCH in the shoulder, because the bar's right corners were rounded and
+ * the triangle's edge slopes away from them. Rounded on the LEFT only, closed in
+ * one subpath, and traced here so the body can be filled, stroked, haloed and
+ * bevelled from the same outline every other part uses.
+ * Exported for `appearance.test.ts`, which records the calls it makes: the defect
+ * it fixes was structural -- a shape drawn as two subpaths -- and structure is
+ * what a test can hold on to. A screenshot cannot.
  */
-function drawLevelInput(
+export function traceLevelArrow(
   ctx: CanvasRenderingContext2D,
   p: Point,
   w: number,
   h: number,
   zoom: number,
-  fill: string,
-): void {
-  const bar = 12 * zoom;
+): void {  const bar = 12 * zoom;
   const inset = 10 * zoom;
+  const top = p.y + inset;
+  const bottom = p.y + h - inset;
   const base = p.x + bar;
-  ctx.fillStyle = fill;
+  const radius = Math.max(0, Math.min(4 * zoom, bar / 2, (bottom - top) / 2));
   ctx.beginPath();
-  ctx.moveTo(base, p.y + inset);
+  ctx.moveTo(base, top);
   ctx.lineTo(p.x + w, p.y + h / 2);
-  ctx.lineTo(base, p.y + h - inset);
+  ctx.lineTo(base, bottom);
+  ctx.lineTo(p.x + radius, bottom);
+  ctx.arcTo(p.x, bottom, p.x, bottom - radius, radius);
+  ctx.lineTo(p.x, top + radius);
+  ctx.arcTo(p.x, top, p.x + radius, top, radius);
   ctx.closePath();
-  ctx.fill();
-  ctx.beginPath();
-  ctx.roundRect?.(p.x, p.y + inset, bar, h - inset * 2, 4 * zoom);
-  if (!ctx.roundRect) ctx.rect(p.x, p.y + inset, bar, h - inset * 2);
-  ctx.fill();
 }
 
 /**
@@ -851,59 +846,66 @@ function drawInstance(
   const gate = gateLookOf(def);
   const { colour, glow } = partAppearance(def, inst, view, driven);
 
-  if (isLevelInput) {
-    drawLevelInput(ctx, p, w, h, camera.zoom, colour);
-  } else {
-    // A lit part is haloed by a wide translucent stroke of its own body path,
-    // the same two-pass glow a lit wire gets: one reading, everywhere.
-    if (glow) {
-      ctx.save();
-      ctx.globalAlpha = 0.28;
-      ctx.strokeStyle = glow;
-      ctx.lineWidth = 7 * camera.zoom;
-      traceBody(ctx, gate, p.x, p.y, w, h, camera.zoom, box);
-      ctx.stroke();
-      ctx.restore();
-    }
-    ctx.fillStyle = colour;
-    ctx.strokeStyle = isSelected ? THEME.selection : THEME.idleEdge;
-    ctx.lineWidth = isSelected ? 3 : 1.5 * camera.zoom;
-    traceBody(ctx, gate, p.x, p.y, w, h, camera.zoom, box);
-    ctx.fill();
-    ctx.stroke();
-    // A light bevel along the top: the original's parts are lit from above, and
-    // it is what keeps a flat fill from reading as a placeholder.
+  // Whichever silhouette this part has, it is painted the same way: one path,
+  // haloed when lit, filled, outlined, and bevelled along the top. A level input
+  // used to be the exception -- two flat fills and nothing else -- which is why
+  // it looked like a sticker next to the gates it feeds.
+  const trace = (): void => {
+    if (isLevelInput) traceLevelArrow(ctx, p, w, h, camera.zoom);
+    else traceBody(ctx, gate, p.x, p.y, w, h, camera.zoom, box);
+  };
+
+  // A lit part is haloed by a wide translucent stroke of its own body path, the
+  // same two-pass glow a lit wire gets: one reading, everywhere.
+  if (glow) {
     ctx.save();
-    traceBody(ctx, gate, p.x, p.y, w, h, camera.zoom, box);
-    ctx.clip();
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-    ctx.fillRect(p.x, p.y, w, h * 0.45);
+    ctx.globalAlpha = 0.28;
+    ctx.strokeStyle = glow;
+    ctx.lineWidth = 7 * camera.zoom;
+    trace();
+    ctx.stroke();
     ctx.restore();
-    paintMarks(ctx, gate, p.x, p.y, w, h, camera.zoom);
   }
+  ctx.fillStyle = colour;
+  ctx.strokeStyle = isSelected ? THEME.selection : THEME.idleEdge;
+  ctx.lineWidth = isSelected ? 3 : 1.5 * camera.zoom;
+  trace();
+  ctx.fill();
+  ctx.stroke();
+  // A light bevel along the top: the original's parts are lit from above, and it
+  // is what keeps a flat fill from reading as a placeholder.
+  ctx.save();
+  trace();
+  ctx.clip();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+  ctx.fillRect(p.x, p.y, w, h * 0.45);
+  ctx.restore();
+  if (!isLevelInput) paintMarks(ctx, gate, p.x, p.y, w, h, camera.zoom);
 
   const outputWidth = def.outputs[0] ? effectiveWidth(inst, def.outputs[0]) : 1;
   const value = def.outputs[0] ? outputValue(view, inst.id, def.outputs[0].id) : undefined;
 
-  if (isLevelInput) {
-    if (isSelected) {
-      ctx.strokeStyle = THEME.selection;
-      ctx.lineWidth = 3;
-      roundedRect(ctx, p.x, p.y, w, h, 6 * camera.zoom);
-      ctx.stroke();
+  // A level connector is NAMED by its badge and CARRIES a value; it is not
+  // labelled. Its body used to print the instance id (`IN_b3`, `OUT_out3`),
+  // which is the string that binds the part to the level -- the app's own
+  // bookkeeping, drawn on the board for the player to read, and a duplicate of
+  // the badge above it. The output keeps its number, because a number in a disc
+  // is what the disc is for.
+  const bound = def.category === 'level' && /^(IN_|OUT)/.test(inst.id);
+  if (bound) {
+    if (!isLevelInput && value !== undefined) {
+      outlinedText(
+        ctx,
+        String(value),
+        p.x + w / 2,
+        p.y + h / 2,
+        Math.max(12, 20 * camera.zoom),
+        camera.zoom,
+        w - 10 * camera.zoom,
+      );
     }
-  } else if (def.category === 'level' && value !== undefined) {
-    outlinedText(
-      ctx,
-      String(value),
-      p.x + w / 2,
-      p.y + h / 2,
-      Math.max(12, 20 * camera.zoom),
-      camera.zoom,
-      w - 10 * camera.zoom,
-    );
   } else {
-    const label = labelOf(inst, def);
+    const label = def.name.zh;
     const size = Math.max(10, Math.min(16, 15 * camera.zoom));
     const centre = LABEL_CENTRE[gate.shape];
     outlinedText(
