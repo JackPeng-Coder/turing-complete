@@ -22,7 +22,7 @@ import type { Registry } from '../core/registry';
 import type { GradeResult, Metrics } from '../levels/grader';
 import type { LevelSpec } from '../levels/spec';
 import type { Progress } from './progress';
-import type { Camera, Point } from '../ui/board/view';
+import type { Camera, Point } from './viewport';
 
 /** What the pointer is currently doing on the board. */
 export type DragState =

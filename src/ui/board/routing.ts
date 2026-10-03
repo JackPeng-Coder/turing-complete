@@ -12,14 +12,14 @@
  *   * where a value label may sit, which is the longest segment.
  *
  * Pure geometry: no canvas, no store, no DOM. That is what makes it testable
- * without a browser, and it is why `Point` lives here rather than in `view.ts`
- * (`view.ts` re-exports it, so existing importers are unaffected).
+ * without a browser. `Point` arrives as a *type-only* import from
+ * `app/viewport.ts`, which costs this module nothing at runtime: the application
+ * state is what holds a camera and a drag endpoint, so the shared value types
+ * are declared in `app/` and read downwards from here.
  */
+import type { Point } from '../../app/viewport';
 
-export interface Point {
-  readonly x: number;
-  readonly y: number;
-}
+export type { Point };
 
 /**
  * How far a wire runs straight out of a pin before it is allowed to turn.

@@ -11,23 +11,18 @@
  */
 import type { Registry } from '../../core/registry';
 import type { Graph } from '../../core/graph';
+import type { Camera } from '../../app/viewport';
 import { PIN_RADIUS } from '../theme';
 import { distanceToPath, type Point } from './routing';
 import { instanceRect, pinPosition, placementAt, snap } from './geometry';
 import { planRoutes } from './routes';
 
-// `Point` is defined next to the routing it is used by, and `instanceRect` /
-// `pinPosition` / `snap` / `placementAt` now live in `geometry.ts`. All of them
-// are re-exported here, so the board's public geometry still arrives from one
-// module.
-export type { Point };
+// Cameras and points are declared in `app/viewport.ts`, because the application
+// state is what holds them; `instanceRect` / `pinPosition` / `snap` /
+// `placementAt` live in `geometry.ts`. All of them are re-exported here, so the
+// board's public geometry still arrives from one module.
+export type { Point, Camera };
 export { instanceRect, pinPosition, placementAt, snap };
-
-export interface Camera {
-  x: number;
-  y: number;
-  zoom: number;
-}
 
 export function worldToScreen(camera: Camera, p: Point): Point {
   return { x: (p.x + camera.x) * camera.zoom, y: (p.y + camera.y) * camera.zoom };
