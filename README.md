@@ -55,7 +55,9 @@ the sandbox) are planned but not built yet.
 
 The chrome is styled as bench instrumentation, not as a page with cards on it: flat slabs separated
 by 1px hairlines, **no shadows anywhere** — not one `box-shadow` or `text-shadow` in the stylesheet —
-and no rounded corners except the bit arrows, whose roundness carries the value.
+and no rounded corners except the bit arrows, whose roundness carries the value, and the result
+medal, which is a stamped disc rather than a glowing orb. `test/conventions.test.ts` asserts both
+halves of that — no shadow property anywhere, and no radius outside those two.
 
 Two colour axes, kept apart on purpose:
 
@@ -114,8 +116,14 @@ $PNPM = "C:\Users\ME\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin
 & $NODE $PNPM smoke   # Playwright end-to-end smoke test
 ```
 
-`pnpm <task>` is the portable form and the one to copy into CI or documentation; the `& $NODE $PNPM`
+`pnpm <task>` is the portable form and the one to put in a script or a document; the `& $NODE $PNPM`
 form is only the workaround for this machine.
+
+`pnpm-workspace.yaml` exists for one reason and carries one thing: a `minimumReleaseAgeExclude`
+list. This host's pnpm refuses packages published inside a supply-chain cutoff window, the four
+pinned versions are younger than that window, and without the exemption a clean
+`pnpm install --frozen-lockfile` fails with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. Every entry is
+a devDependency; nothing is exempted on the runtime side, because there is nothing there to exempt.
 
 ### Smoke test prerequisites
 
@@ -145,14 +153,22 @@ bring it back.
 ```
 src/
   core/     simulator: signals, component registry + definitions, graph/netlist, settle & tick
+  asm/      the assembler and its ISA: field ranges, addressing modes, operands, program images
   levels/   LevelSpec types, checks, grader, and content/ (47 levels: chapters 1–3)
-  app/      application state, command/undo stack, progress
+  app/      application state, command/undo stack, progress, and the shared viewport types
   ui/       the board's chrome: top bar, palette, clock + I/O readout, tool grid, test cases,
             chapter map, and the Canvas board (see ui/board/)
   ui/board/ the board itself: camera and hit testing, wire routing, painting, live signals
   persist/  localStorage save and load
-test/       Vitest unit/level tests and the Playwright smoke specs
+test/       Vitest unit and level tests, the convention assertions, and the Playwright smoke spec
+tools/      the SDD PowerShell helpers that build a phase workspace and its briefs
+docs/       the design spec, the phase plans, and the per-chapter level provenance
 ```
+
+Dependencies run one way: `core` ← `asm` ← `levels` ← `app` ← `ui`, with `persist` reading `app` to
+build an empty save. Nothing imports upwards, and `test/conventions.test.ts` fails the build if
+anything starts to — that file is this project's linter, because no linter is pinned (see
+`AGENTS.md` for why, along with the four rules that shape everything else).
 
 ## Contributing / scope
 
@@ -160,11 +176,17 @@ Phases 0–2 cover chapters 1–3 (47 of the plan's 82 levels). The full plan �
 CPU and assembly challenges — is in [`docs/superpowers/plans/`](docs/superpowers/plans/); the design
 spec it follows is in [`docs/superpowers/specs/`](docs/superpowers/specs/).
 
-The record of how it was built is committed too: each phase's ledger under
-[`.superpowers/sdd/`](.superpowers/sdd/) carries every task's brief, its implementer's report, its
-review verdicts, and each ruling the agent made on the owner's behalf, together with the test
-evidence behind them. The session transcripts — the full conversation, including 68 subagent
-traces — are archived in [`docs/session-archive/`](docs/session-archive/).
+The record of how it was built is committed too. [`.superpowers/sdd/`](.superpowers/sdd/) holds one
+directory per phase: phases 0 and 1 carry every task's brief, its implementer's report, and the
+review diffs behind each verdict — phase 0 is missing the briefs for tasks 9 and 11, which were
+written before the workspace convention settled — and phase 2 carries the decision ledger and the
+ALU handoff rather than per-task reports, because it ran as fewer and larger tasks. `tools/sdd/`
+holds the three PowerShell helpers that resolve such a workspace, write a task brief, and stage a
+review package.
+
+`docs/session-archive/` used to hold the raw session transcripts behind those ledgers, 47 MB of
+them. They were dropped from the working tree rather than carried forward; the commits that added
+them still contain them, and `git log --all -- docs/session-archive` finds them.
 
 ## License
 

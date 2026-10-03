@@ -19,3 +19,21 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+NOTICE -- what the license above does and does not cover.
+
+This repository is an independent, unofficial implementation of the game
+*Turing Complete*. It is not affiliated with, endorsed by, or produced by
+LevelHead, it is not an official product, and it is not intended for commercial
+distribution. The design spec makes this a hard constraint on the project, and
+README.md carries the full statement, including exactly what was and was not
+copied from the original.
+
+The MIT license above covers this project's source code and the game's own
+in-game text. It does NOT cover `GAME_REFERENCE.md` at the repository root: that
+is a third-party research compendium about the game, it reproduces passages of
+the original's text, and it is committed here as provenance for this replica's
+design rather than as content the game ships. Nothing under `src/` reads it.
+That document remains the property of its authors.

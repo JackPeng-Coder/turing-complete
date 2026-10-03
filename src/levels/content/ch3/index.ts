@@ -28,10 +28,13 @@ import { CH3_BATCH3 } from './batch3';
  *
  * THE PROGRAM CONSTANTS ARE NOT RE-EXPORTED. `batch2.ts` and `batch3.ts` each
  * export the assembler source their `program` check runs (`PROGRAM_43`,
- * `PROGRAM_45`-`PROGRAM_47`) because a test asserts those bytes directly. They
- * stay next to the levels that use them: a chapter index is a placement list,
- * and re-exporting them here would invite a second import path to the same
- * string, which is how one of them ends up edited in only one place.
+ * `PROGRAM_45`-`PROGRAM_47`) so those bytes are readable from outside the
+ * module. No test reads them today, which is a gap rather than a design:
+ * asserting them is why they are exported, and it is the obvious next thing to
+ * write. They stay next to the levels that use them: a chapter index is a
+ * placement list, and re-exporting them here would invite a second import path
+ * to the same string, which is how one of them ends up edited in only one
+ * place.
  */
 export const CH3_LEVELS: readonly LevelSpec[] = [
   ...CH3_BATCH1,
