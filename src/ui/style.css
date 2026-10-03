@@ -1,7 +1,8 @@
 /* Literal colours are the one accepted exception to "colours come from
    theme.ts": a stylesheet cannot import a TypeScript constant without a build
-   step. The values mirror `src/ui/theme.ts`, which records where each one was
-   sampled from in the original.
+   step. The values mirror `src/ui/theme.ts`, which states the rule they obey:
+   GREEN is 1, RED is 0, BLUE is wider than one bit, and NEUTRAL SLATE is
+   "nothing has been simulated yet".
 
    THE BOARD IS FULL BLEED. The canvas fills the whole stage and every panel
    floats over it as an overlay, which is how the original composes its board:
@@ -12,24 +13,37 @@
 :root {
   color-scheme: dark;
   font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
-  --backdrop: #182432;
-  --board: #364765;
-  --chrome: #2e2b3c;
-  --panel: #353245;
-  --panel-hover: #413c58;
-  --panel-edge: #4a4560;
-  --title: #d1425e;
-  --label: #e8a33d;
-  --text: #ffffff;
-  --text-muted: #a49fbb;
-  --bit-off: #f82256;
-  --bit-on: #04a02c;
-  --bit-unknown: #82816f;
-  --accent: #ef9a23;
+  --backdrop: #05070f;
+  --board: #0a1526;
+  --chrome: #080c16;
+  --panel: #101a2e;
+  --panel-hover: #17263f;
+  --panel-edge: #1f3a5c;
+  --title: #00e5ff;
+  --label: #4dd8ff;
+  --text: #e6f0fb;
+  --text-muted: #7b93b0;
+  --on: #00ff9c;
+  --off: #ff2b4e;
+  --bus: #0a84ff;
+  --idle: #1e2c44;
+  --bit-unknown: #3d4d66;
+  /* The one colour that is not a value: selection, the armed pin, the rubber
+     band, and the pressed ring on a tool button. */
+  --accent: #ffd60a;
   --radius: 10px;
   /* Height of the bottom test panel. The parts panel above it has to leave
-     exactly this much room, so both read it from here rather than guessing. */
-  --test-h: clamp(150px, 21vh, 220px);
+     exactly this much room, so both read it from here rather than guessing.
+     A level with six pins by six cases runs to six rows plus the `1 != 0` lines
+     under them, and those lines are the most useful thing on a failure -- worth
+     a quarter of the board rather than an eighth. The panel scrolls when a
+     level has more pins than this holds. */
+  --test-h: clamp(150px, 25vh, 250px);
+  /* The halo a lit thing sits in. One place, so a wire, a bit cell and a title
+     glow by the same amount instead of three guesses. */
+  --glow-on: 0 0 9px rgba(0, 255, 156, 0.5);
+  --glow-bus: 0 0 9px rgba(10, 132, 255, 0.5);
+  --glow-accent: 0 0 12px rgba(0, 229, 255, 0.45);
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--text); }
@@ -72,6 +86,7 @@ html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--
   font-weight: 600;
   letter-spacing: 0.02em;
   white-space: nowrap;
+  text-shadow: var(--glow-accent);
 }
 /* Icon-only buttons: the icon is an SVG child, so the button's text content --
    which the panel tests read as the part's name -- stays empty here. */
@@ -183,12 +198,20 @@ html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--
 .io-bits { display: flex; justify-content: center; gap: 3px; margin: 3px 0 1px; }
 .io-value { font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
 .io-empty { font-size: 12px; color: var(--text-muted); text-align: center; }
-/* The bit cell. Shape carries the value as well as colour: a 1 is the same
-   square with its point on the other corner, so the two states stay apart for a
-   player who cannot separate the red from the green. */
-.bit { width: 15px; height: 15px; display: inline-block; border-radius: 2px 50% 50% 50%; }
-.bit-1 { background: var(--bit-on); border-radius: 50% 2px 50% 50%; }
-.bit-0 { background: var(--bit-off); }
+/* The bit cell: a round arrow whose point carries the value.
+
+   A 1 is a round body with its point at the UPPER RIGHT, a 0 the same body with
+   its point at the LOWER LEFT, and an unknown value a plain dot -- no point at
+   all, which is the honest shape for "no direction known yet". Shape carries the
+   value alongside colour, so the two states stay apart for a player who cannot
+   separate the red from the green. */
+.bit { width: 15px; height: 15px; display: inline-block; background: var(--bit-unknown); border-radius: 50%; }
+.bit-1 {
+  background: var(--on);
+  border-radius: 50% 0 50% 50%;
+  box-shadow: var(--glow-on);
+}
+.bit-0 { background: var(--off); border-radius: 50% 50% 50% 0; }
 .bit-x { background: var(--bit-unknown); border-radius: 50%; }
 .io-bits .bit { cursor: pointer; }
 .io-bits .bit:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -237,7 +260,7 @@ html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--
 .palette-item {
   padding: 7px 10px;
   text-align: left;
-  background: #2b2940;
+  background: #0d1730;
   border: 1px solid transparent;
   border-radius: 7px;
   cursor: pointer;
@@ -271,12 +294,12 @@ html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--
 }
 .case-cells { display: flex; gap: 14px; }
 .case-cell { display: flex; gap: 2px; }
-.case-cell .bit { width: 18px; height: 18px; }
+.case-cell .bit { width: 16px; height: 16px; }
 .case-note { color: var(--text-muted); font-size: 13px; }
-.case-bad { outline: 2px solid var(--bit-off); outline-offset: 2px; border-radius: 4px; }
-.case-detail { color: var(--bit-off); font-size: 13px; margin: 2px 0; }
-.case-pass { color: var(--bit-on); font-size: 14px; margin: 0 0 6px; }
-.case-error { color: var(--bit-off); font-size: 14px; margin: 0 0 6px; }
+.case-bad { outline: 2px solid var(--off); outline-offset: 2px; border-radius: 4px; }
+.case-detail { color: var(--off); font-size: 13px; margin: 2px 0; }
+.case-pass { color: var(--on); font-size: 14px; margin: 0 0 6px; }
+.case-error { color: var(--off); font-size: 14px; margin: 0 0 6px; }
 /* The failing-vector table is still a table: `panels.test.ts` reads its cells to
    prove that a failure which drove no vector fabricates no `0`. */
 .truth-table table { margin: 0 auto; border-collapse: collapse; font-variant-numeric: tabular-nums; }
@@ -311,7 +334,7 @@ html, body { margin: 0; height: 100%; background: var(--backdrop); color: var(--
   align-items: center;
   justify-content: center;
   gap: 24px;
-  background: rgba(24, 36, 50, 0.94);
+  background: rgba(5, 7, 15, 0.94);
   z-index: 10;
   padding: 40px;
   text-align: center;

@@ -24,12 +24,16 @@ import {
   PIN_RADIUS,
   THEME,
   WIRE_WIDTH,
+  bodyColourOf,
+  glowColourOf,
+  partStateOf,
+  type PartState,
 } from '../theme';
 import type { AppState, Store } from '../../app/store';
 import { instanceRect, pinPosition, worldToScreen, type Camera, type Point } from './view';
 import { CORNER_RADIUS, cornerRadii, longestSegment, routeWire } from './routing';
 import type { Graph, Instance } from '../../core/graph';
-import type { ComponentCategory, ComponentDef, PinDef, Registry } from '../../core/registry';
+import type { ComponentDef, PinDef, Registry } from '../../core/registry';
 
 /**
  * Everything the board paints that the store does not hold.
@@ -59,25 +63,36 @@ function effectiveWidth(inst: Instance, pin: PinDef): number {
   return inst.params.width ?? pin.width;
 }
 
-/** The body colour of a part, by the family it was registered in. */
-function bodyColor(category: ComponentCategory): string {
-  switch (category) {
-    case 'logic1':
-      return THEME.gateBoolean;
-    case 'wide':
-    case 'cpu':
-    case 'display':
-      return THEME.gateInteger;
-    case 'memory1':
-      return THEME.gateStorage;
-    case 'level':
-      return THEME.levelIo;
-    case 'io':
-    case 'probe':
-      return THEME.gateBoolean;
-    default:
-      return THEME.gateBoolean;
-  }
+/**
+ * A part's body is its own state, not its family.
+ *
+ * It used to be keyed on `def.category` -- blue for the primitive gates, green
+ * for the wide ones -- which said what a part IS. The board now says what a part
+ * is DOING: green while it produces a 1, red while it produces a 0, blue for a
+ * word, slate until something has run. The family is still legible from the
+ * silhouette (`bodyShape`), so nothing was lost by spending the colour on state.
+ */
+function partAppearance(
+  def: ComponentDef,
+  inst: Instance,
+  view: BoardView | null | undefined,
+  driven: ReadonlyMap<string, number>,
+): { state: PartState; colour: string; glow: string | null } {
+  // A sink has no output to report, so it reports what it is being fed.
+  const out = def.outputs[0];
+  const sink = def.inputs[0];
+  const width = out
+    ? effectiveWidth(inst, out)
+    : sink
+      ? effectiveWidth(inst, sink)
+      : 1;
+  const value = out
+    ? outputValue(view, inst.id, out.id)
+    : sink
+      ? driven.get(`${inst.id}.${sink.id}`)
+      : undefined;
+  const state = partStateOf(width, value);
+  return { state, colour: bodyColourOf(state), glow: glowColourOf(state) };
 }
 
 function roundedRect(
@@ -144,6 +159,12 @@ const WEAVE_TILE = 24;
 const WEAVE_INNER = 3;
 const WEAVE_OUTER = 13;
 
+/** `#rrggbb` as `r, g, b`, for the stops that fade a band out to nothing. */
+function rgbTriplet(hex: string): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `${(n >> 16) & 0xff}, ${(n >> 8) & 0xff}, ${n & 0xff}`;
+}
+
 function weaveFor(ctx: CanvasRenderingContext2D): CanvasPattern | null {
   const cached = weavePatterns.get(ctx);
   if (cached) return cached;
@@ -161,9 +182,10 @@ function weaveFor(ctx: CanvasRenderingContext2D): CanvasPattern | null {
       WEAVE_OUTER / 2,
       WEAVE_OUTER / 2,
     );
-    ramp.addColorStop(0, 'rgba(54, 77, 108, 0)');
+    const rgb = rgbTriplet(THEME.boardHatch);
+    ramp.addColorStop(0, `rgba(${rgb}, 0)`);
     ramp.addColorStop(0.5, THEME.boardHatch);
-    ramp.addColorStop(1, 'rgba(54, 77, 108, 0)');
+    ramp.addColorStop(1, `rgba(${rgb}, 0)`);
     tctx.fillStyle = ramp;
     tctx.beginPath();
     tctx.moveTo(WEAVE_INNER, 0);
@@ -250,11 +272,16 @@ function outputValue(
 }
 
 /**
- * Paints one wire: a bus (any width above one bit) as a cable with a bright core,
- * a single bit as a plain line in its value's colour.
+ * Paints one wire in the board's value colours: green for a live bit, a dark red
+ * trace for a bit at 0, a blue cable with a bright core for a word.
  *
- * `value === undefined` is drawn as a bus rather than guessed at: a value the app
- * has not simulated must not be painted as a confident 0.
+ * LIT WIRES GLOW, and the glow is a second wide stroke under the solid one
+ * rather than a canvas shadow: `shadowBlur` re-renders the path through a blur
+ * pass per stroke, and a board is hundreds of strokes. Two passes at one alpha
+ * cost a stroke each and read the same.
+ *
+ * `value === undefined` is the neutral colour, not red: a value the app has not
+ * simulated must not be painted as a confident 0.
  */
 function drawWire(
   ctx: CanvasRenderingContext2D,
@@ -263,21 +290,44 @@ function drawWire(
   value: number | undefined,
   camera: Camera,
 ): void {
+  ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  tracePath(ctx, points, camera);
+  const zoom = camera.zoom;
+
   if (width > 1) {
+    const body = BUS_WIDTH * zoom;
+    tracePath(ctx, points, camera);
     ctx.strokeStyle = THEME.bus;
-    ctx.lineWidth = BUS_WIDTH * camera.zoom;
+    ctx.globalAlpha = 0.16;
+    ctx.lineWidth = body * 2;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = body;
     ctx.stroke();
     ctx.strokeStyle = THEME.busCore;
-    ctx.lineWidth = Math.max(1, BUS_WIDTH * camera.zoom * 0.34);
+    ctx.lineWidth = Math.max(1, body * 0.34);
     ctx.stroke();
+    ctx.restore();
     return;
   }
-  ctx.strokeStyle = value === 1 ? THEME.wireOn : THEME.wireOff;
-  ctx.lineWidth = WIRE_WIDTH * camera.zoom;
-  ctx.stroke();
+
+  const body = WIRE_WIDTH * zoom;
+  tracePath(ctx, points, camera);
+  if (value === 1) {
+    ctx.strokeStyle = THEME.on;
+    ctx.globalAlpha = 0.18;
+    ctx.lineWidth = body * 2.4;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = body;
+    ctx.stroke();
+  } else {
+    ctx.strokeStyle = value === 0 ? THEME.offWire : THEME.idle;
+    ctx.lineWidth = body;
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 /**
@@ -363,7 +413,12 @@ function outlinedText(
   ctx.fillText(text, x, y);
 }
 
-/** The bit width of a part's pins, printed in a corner badge. */
+/**
+ * The bit width of a part's pins, printed in a corner badge.
+ *
+ * Cyan rather than one of the three value colours: a width is not a value, and a
+ * green or red badge on a part would be read as one.
+ */
 function drawWidthBadge(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -379,10 +434,10 @@ function drawWidthBadge(
   const padX = 3 * zoom;
   const boxW = ctx.measureText(text).width + padX * 2;
   const boxH = size + 3 * zoom;
-  ctx.fillStyle = THEME.levelIoBadge;
+  ctx.fillStyle = THEME.accent;
   roundedRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 2 * zoom);
   ctx.fill();
-  ctx.fillStyle = THEME.gateBoolean;
+  ctx.fillStyle = THEME.backdrop;
   ctx.fillText(text, x, y + 0.5 * zoom);
 }
 
@@ -421,10 +476,10 @@ function drawWires(
  * -- which is the original's own split, and the reason a wide pin is legible at
  * a glance in a circuit full of thin ones.
  *
- * Colour carries the value, in the board's wire vocabulary so that one reading
- * covers the whole circuit: orange is a 1, the dark wire colour is a 0, the bus
- * colour is a byte, and a pin nothing is driving is crimson -- the original's
- * socket colour, and the one state that is not a value.
+ * Colour carries the value, in the board's own three: green a live bit, red a
+ * bit at 0, blue a word, slate a pin nothing is driving. A lit pin also gets the
+ * same halo a lit wire does, so a signal reads as one continuous thing from the
+ * part that produced it to the pin that received it.
  */
 function drawPin(
   ctx: CanvasRenderingContext2D,
@@ -438,30 +493,33 @@ function drawPin(
   const wide = width > 1;
   const fill =
     value === undefined
-      ? wide
-        ? THEME.bus
-        : THEME.levelIo
+      ? THEME.idle
       : wide
         ? THEME.bus
         : value === 1
-          ? THEME.wireOn
-          : THEME.wireOff;
+          ? THEME.on
+          : THEME.off;
+  const lit = value === 1 || wide;
 
-  ctx.beginPath();
-  if (wide) ctx.arc(pos.x, pos.y, r + 1.5 * zoom, 0, Math.PI * 2);
-  else {
-    const s = r + 1 * zoom;
-    ctx.rect(pos.x - s, pos.y - s, s * 2, s * 2);
+  const shape = (radius: number): void => {
+    ctx.beginPath();
+    if (wide) ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    else ctx.rect(pos.x - radius, pos.y - radius, radius * 2, radius * 2);
+  };
+
+  if (lit) {
+    shape(r + 4 * zoom);
+    ctx.fillStyle = wide ? THEME.bus : THEME.on;
+    ctx.globalAlpha = 0.22;
+    ctx.fill();
+    ctx.globalAlpha = 1;
   }
+
+  shape(r + 1 * zoom);
   ctx.fillStyle = wide ? THEME.text : THEME.backdrop;
   ctx.fill();
 
-  ctx.beginPath();
-  if (wide) ctx.arc(pos.x, pos.y, r - 0.5 * zoom, 0, Math.PI * 2);
-  else {
-    const s = r - 0.5 * zoom;
-    ctx.rect(pos.x - s, pos.y - s, s * 2, s * 2);
-  }
+  shape(r - 0.5 * zoom);
   ctx.fillStyle = fill;
   ctx.fill();
 
@@ -501,8 +559,8 @@ function drivenInputs(
  * point of the arrow instead of the middle of a box.
  *
  * It has no body of its own. Drawing the usual rounded rect underneath left a
- * crimson disc with a faint triangle inside it, which reads as a button rather
- * than as a connector.
+ * disc with a faint triangle inside it, which reads as a button rather than as a
+ * connector. The arrow takes the part's state colour like every other body.
  */
 function drawLevelInput(
   ctx: CanvasRenderingContext2D,
@@ -510,11 +568,12 @@ function drawLevelInput(
   w: number,
   h: number,
   zoom: number,
+  fill: string,
 ): void {
   const bar = 12 * zoom;
   const inset = 10 * zoom;
   const base = p.x + bar;
-  ctx.fillStyle = THEME.levelIoHighlight;
+  ctx.fillStyle = fill;
   ctx.beginPath();
   ctx.moveTo(base, p.y + inset);
   ctx.lineTo(p.x + w, p.y + h / 2);
@@ -572,12 +631,24 @@ function drawInstance(
   const isSelected = selected.includes(inst.id);
   const isLevelInput = def.category === 'level' && inst.id.startsWith('IN_');
   const radius = bodyShape(def, w, h, camera.zoom);
+  const look = partAppearance(def, inst, view, driven);
 
   if (isLevelInput) {
-    drawLevelInput(ctx, p, w, h, camera.zoom);
+    drawLevelInput(ctx, p, w, h, camera.zoom, look.colour);
   } else {
-    ctx.fillStyle = bodyColor(def.category);
-    ctx.strokeStyle = isSelected ? THEME.selection : 'rgba(0, 0, 0, 0.35)';
+    // A lit part is haloed by a wide translucent stroke of its own body path,
+    // the same two-pass glow a lit wire gets: one reading, everywhere.
+    if (look.glow) {
+      ctx.save();
+      ctx.globalAlpha = 0.28;
+      ctx.strokeStyle = look.glow;
+      ctx.lineWidth = 7 * camera.zoom;
+      roundedRect(ctx, p.x, p.y, w, h, radius);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.fillStyle = look.colour;
+    ctx.strokeStyle = isSelected ? THEME.selection : THEME.idleEdge;
     ctx.lineWidth = isSelected ? 3 : 1.5 * camera.zoom;
     roundedRect(ctx, p.x, p.y, w, h, radius);
     ctx.fill();
