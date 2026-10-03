@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { THEME, bodyColourOf, glowColourOf, partStateOf } from '../../src/ui/theme';
 import { gateLookOf, traceLevelArrow } from '../../src/ui/board/render';
+import { partCodeOf } from '../../src/ui/board/markings';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
 
@@ -159,5 +160,41 @@ describe('the level input arrow', () => {
     expect(arcs).toHaveLength(2);
     // Both corners are on the back edge, at x = 0.
     for (const arc of arcs) expect(arc.startsWith('arcTo(0,')).toBe(true);
+  });
+});
+
+/**
+ * THE MARKING, which is the original's own convention: a component is labelled
+ * the way a chip is -- `NAND`, `MUX`, `ADD` -- and never with its name. The width
+ * travels in the corner badge instead, so `and` and `and8` share a marking.
+ *
+ * Walked over the whole registry, because the failure mode is a part added later
+ * with nothing to say for itself: it would fall back to its id and paint
+ * `FULL_ADDER` across a box, or `8 位算术右移` across a shield.
+ */
+describe('part markings', () => {
+  it('marks every registered part with a short uppercase legend', () => {
+    for (const def of registry.all()) {
+      expect(partCodeOf(def), `${def.id} has no marking of its own`).toMatch(/^[A-Z0-9]{1,6}$/);
+    }
+  });
+
+  it('uses the mnemonics the original uses', () => {
+    // Straight off the reference screenshots: the AND level's two gates read
+    // `NAND`, and the ALU's parts read `NOT`, `NAND`, `MUX` and `ADD`.
+    const code = (id: string) => partCodeOf(registry.get(id));
+    expect(code('nand')).toBe('NAND');
+    expect(code('not')).toBe('NOT');
+    expect(code('mux8')).toBe('MUX');
+    expect(code('add8')).toBe('ADD');
+  });
+
+  it('leaves the width to the corner badge', () => {
+    // One operation at two widths is one marking: the `8` badge is what says
+    // which. The full adder is a different part and keeps its own.
+    const code = (id: string) => partCodeOf(registry.get(id));
+    expect(code('and8')).toBe(code('and'));
+    expect(code('xor8')).toBe(code('xor'));
+    expect(code('add8')).not.toBe(code('full_adder'));
   });
 });

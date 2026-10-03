@@ -69,6 +69,11 @@ Two colour axes, kept apart on purpose:
 A scale of 1px ticks finishes the two edges where something is *measured* — the cost readout in the
 top bar and the case matrix along the bottom — and appears nowhere else.
 
+A part is marked the way a chip is: a short uppercase mnemonic (`NAND`, `MUX`, `ADD`) with its width
+in a corner badge, so `and` and `and8` share a marking and the `8` tells them apart. The palette keeps
+the Chinese name, because that is what you read when *choosing* a part; the tooltip carries the English
+name and the board marking, which is where the two vocabularies meet.
+
 ## Running it
 
 On any normal machine with Node and pnpm on `PATH`:

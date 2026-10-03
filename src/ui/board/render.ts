@@ -33,6 +33,7 @@ import type { AppState, Store } from '../../app/store';
 import { instanceRect, pinPosition, worldToScreen, type Camera, type Point } from './view';
 import { CORNER_RADIUS, cornerRadii, longestSegment, routeWire } from './routing';
 import { planRoutes } from './routes';
+import { partCodeOf } from './markings';
 import type { Graph, Instance } from '../../core/graph';
 import type { ComponentDef, PinDef, Registry } from '../../core/registry';
 
@@ -123,6 +124,15 @@ export function gateLookOf(def: ComponentDef): GateLook {
 const BUBBLE_ROOM = 13;
 /** How far an XOR's body sits behind its extra arc, in world pixels. */
 const XOR_BACK = 9;
+
+/**
+ * The face every marking and readout on the board is drawn in.
+ *
+ * The same stack `style.css` gives the chrome, so a `NAND` on a gate and the
+ * `门 4 个` in the top bar are visibly the same instrument's lettering. Chinese
+ * never reaches this: a part's marking is Latin, and the numbers are numbers.
+ */
+const MONO = 'ui-monospace, "Cascadia Mono", Consolas, monospace';
 
 /**
  * Where a label sits in a body, as a fraction of its width.
@@ -545,6 +555,11 @@ function drawValueLabel(
  * `maxWidth` shrinks the type until the label fits the body it sits on. Canvas
  * would squash a too-long string into the width instead, and a horizontally
  * compressed `8 位非门` is harder to read than a smaller one.
+ *
+ * `family` is the interface's monospace by default, because a part's marking is
+ * a chip legend and the numbers in a level connector are a readout -- both are
+ * measurements, and the instrument face is what the rest of the chrome uses.
+ * A caller with prose to draw passes `THEME`'s reading face instead.
  */
 function outlinedText(
   ctx: CanvasRenderingContext2D,
@@ -555,8 +570,8 @@ function outlinedText(
   zoom: number,
   maxWidth: number,
   fill = THEME.text,
+  family = MONO,
 ): void {
-  const family = '"Segoe UI", system-ui, "Microsoft YaHei", sans-serif';
   let px = size;
   ctx.font = `600 ${px}px ${family}`;
   while (px > 8 && ctx.measureText(text).width > maxWidth) {
@@ -905,7 +920,9 @@ function drawInstance(
       );
     }
   } else {
-    const label = def.name.zh;
+    // The marking, not the name: `NAND` where the palette says 与非门. See
+    // `markings.ts` for why the two vocabularies live apart.
+    const label = partCodeOf(def);
     const size = Math.max(10, Math.min(16, 15 * camera.zoom));
     const centre = LABEL_CENTRE[gate.shape];
     outlinedText(
@@ -918,6 +935,8 @@ function drawInstance(
       // A silhouette is not a rectangle: a triangle has room for about half the
       // width a box does, and a shield's point takes the rest.
       w * (gate.shape === 'triangle' ? 0.46 : gate.shape === 'box' ? 0.84 : 0.66),
+      THEME.text,
+      MONO,
     );
   }
 

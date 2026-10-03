@@ -2,6 +2,7 @@ import type { AppState, Store } from '../app/store';
 import { paletteDefsFor } from '../app/progress';
 import { LEVELS } from '../levels/index';
 import type { ComponentCategory } from '../core/registry';
+import { partCodeOf } from './board/markings';
 import { THEME } from './theme';
 
 /**
@@ -80,7 +81,11 @@ export function mountPalette(
       button.type = 'button';
       button.className = 'palette-item';
       button.textContent = def.name.zh;
-      button.title = `${def.name.en} — 点击后在画板上放置`;
+      // The tooltip is where the two vocabularies meet: the tray says 与非门, the
+      // board says NAND, and a player who needs to connect them finds the
+      // connection here rather than by guessing. Not in the button's own text --
+      // the panel tests read that as the part's name.
+      button.title = `${def.name.en} · 画板标记 ${partCodeOf(def)} — 点击后在画板上放置`;
       button.addEventListener('click', () => onPick(defId));
       list.append(button);
     }
