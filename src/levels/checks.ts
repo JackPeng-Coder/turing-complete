@@ -16,7 +16,6 @@ import type {
   FuzzVector,
   LevelCheck,
   LevelSpec,
-  ProgramCheck,
   ProgramStep,
   ScriptStep,
 } from './spec';
@@ -24,6 +23,28 @@ import type {
 export interface LevelIo {
   reset(): void;
   writeInput(name: string, value: number): void;
+  /**
+   * Runs the circuit to a fixed point, so a value just written is the one the
+   * next edge samples.
+   *
+   * PART OF THE LEVEL VOCABULARY, not an escape hatch to `io.sim`. `tick` samples
+   * the signal TABLE (`Simulation.tick` reads every storage element's inputs
+   * before it applies the edge), and a value written by `writeInput` only reaches
+   * a storage element's input through a `settle` -- so a caller that writes and
+   * ticks now clocks whatever the last settle left, which is the PREVIOUS input
+   * vector. On the OVERTURE board that is not a corner case: the level's input
+   * reaches the register file through `srcData` -> `d1` -> `data`, three
+   * combinational parts, so a checker that does not settle reads the byte it
+   * wrote one tick ago. Both of the kernel's own drivers settle for exactly this
+   * reason (`driveSteps` between a step's inputs and its edge, `runRow` after
+   * `writeInput`), and a closed-loop checker has to do the same.
+   *
+   * It is on the interface rather than reached through `io.sim` so that the
+   * write -> settle -> tick protocol is visible to a scripted stub: a test can
+   * record the call and pin the order, which is what keeps the protocol from
+   * being an implementation detail of the kernel.
+   */
+  settle(): void;
   readOutput(name: string): number;
   tick(): void;
   readonly sim: Simulation;
@@ -56,6 +77,22 @@ export const DEFAULT_FUZZ_ROUNDS = 64;
  * that is not a positive integer is not clamped but refused -- see `fuzzIssue`.)
  */
 export const FUZZ_ROUNDS_CAP = 4096;
+
+/**
+ * Hard ceiling on a closed-loop `custom` check's `budget`, in its own units.
+ *
+ * THE SAME RULE AS `FUZZ_ROUNDS_CAP`, and for the same reason: `grade()` runs on
+ * every board edit, and one budget unit is a full settle of the circuit (`lock`
+ * spends one on each wrong guess, `maze` one on every move), so a level that asks
+ * for 10^9 units must not be able to hang the editor. The number matches both
+ * checkers' own defaults (`DEFAULT_LOCK_BUDGET`, `DEFAULT_MAZE_BUDGET`), because
+ * those defaults are already the longest run the board is willing to pay for on a
+ * keystroke: a check that asks for more is clamped to the cap rather than
+ * refused, exactly as an over-cap `rounds` is -- the value is usable, it just
+ * cannot be afforded. A budget that is not a positive integer is a different
+ * thing (a defect in the level) and is refused with `invalid`, never clamped.
+ */
+export const CUSTOM_BUDGET_CAP = 4096;
 
 /**
  * True when `value` is representable on a `width`-bit pin.
@@ -142,6 +179,11 @@ export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): Lev
   const io: LevelIo = {
     sim,
     reset: () => sim.reset(),
+    settle: () => {
+      // Routed through `io` rather than left to `io.sim`, so a scripted stub can
+      // stand in for the circuit and still see the protocol (see `LevelIo`).
+      sim.settle();
+    },
     tick: () => {
       sim.tick();
     },
@@ -252,8 +294,17 @@ function fitsPin(value: unknown, width: number): value is number {
   return typeof value === 'number' && fitsPort(value, width);
 }
 
-/** A safe, short description of an untrusted value, for a failure's `detail`. */
-function describeValue(value: unknown): string {
+/**
+ * A safe, short description of an untrusted value, for a failure's `detail`.
+ *
+ * EXPORTED FOR THE CUSTOM CHECKERS, which validate their own `params` and owe a
+ * player the same sentence the kernel writes when it validates a fuzz vector:
+ * `String(value)` alone is not safe here, because an object's own `toString` is
+ * as untrusted as the value it describes, and one that throws would escape the
+ * checker as "the custom check threw" -- a failure that names the checker
+ * instead of the level data that is actually wrong.
+ */
+export function describeValue(value: unknown): string {
   if (value === null) return 'null';
   if (Array.isArray(value)) return `an array of ${value.length}`;
   if (typeof value === 'string') return JSON.stringify(value);
@@ -1049,13 +1100,10 @@ export function runChecks(
         // An absent `player`, or one whose `text` is not a string, is an empty
         // text rather than a `TypeError`: `runChecks` runs on every board edit,
         // and the app calls it with no buffer at all while a level is still being
-        // opened.
+        // opened. `playerProgramText` is that rule, shared with the closed-loop
+        // checkers that drive the same buffer (`lock`, `maze`).
         const fromPlayer = source.value === 'player';
-        const text = fromPlayer
-          ? typeof player?.text === 'string'
-            ? player.text
-            : ''
-          : check.source;
+        const text = fromPlayer ? playerProgramText(player) : check.source;
         if (typeof text !== 'string') {
           // Level data reaches the kernel untyped, and the assembler is handed
           // this value directly: refusing it here keeps a `TypeError` out of the
@@ -1244,27 +1292,26 @@ function programOption<T extends string>(
 }
 
 /**
- * The channel rule: `from: 'player'` reads the caller's buffer, otherwise the
- * level's own text.
+ * The player's program text for the level being graded, or `''` when nothing has
+ * been typed.
  *
- * ONE READER FOR A RULE TWO CALLERS DEPEND ON. `runChecks` grades a check
- * through it, and a custom checker that drives a program of its own reads the
- * same text the same way -- chapter 4's code lock hands the player's program to
- * the CPU before it starts guessing, so it needs exactly this decision and must
- * not make it differently. The rule itself is `program`'s, argued in the branch
- * that calls this: the channel is chosen by `from` rather than by which text
- * happens to be present, so a level that grades the player's program never falls
- * back to shipping one of its own.
+ * THE PLAYER CHANNEL, READ THE SAME WAY EVERYWHERE. `program`'s branch reads it
+ * for `from: 'player'`, and a `custom` checker that drives a program of its own
+ * reads it for the same reason: chapter 4's code lock and maze hand the player's
+ * program to the CPU before they start driving it, so both must agree on what
+ * "the player's program" means -- including the two cases that are not text at
+ * all. An absent `player`, or one whose `text` is not a string, is an EMPTY text
+ * rather than a `TypeError`, because `runChecks` runs on every board edit and the
+ * app calls it with no buffer while a level is still being opened; and a level
+ * that grades the player's program never falls back to a program of its own,
+ * because the channel is chosen by the caller rather than by which text happens
+ * to be present.
  *
- * An absent `player`, or one whose `text` is not a string, is an empty text
- * rather than a `TypeError`: `runChecks` runs on every board edit, and the app
- * calls it with no buffer at all while a level is still being opened. A
- * non-string `source` on the level channel is passed through as it is -- it is
- * untrusted level data, and the branch that reads it owes the level author the
- * failure that names it rather than a silent empty program.
+ * The level's own `source` is deliberately NOT read here: that channel belongs to
+ * `program`'s `from` option, and a checker that took it would grade text the
+ * player never wrote.
  */
-export function resolveProgramText(check: ProgramCheck, player?: PlayerProgram): string {
-  if (check.from !== 'player') return check.source as string;
+export function playerProgramText(player?: PlayerProgram): string {
   return typeof player?.text === 'string' ? player.text : '';
 }
 
@@ -1402,8 +1449,15 @@ function imageOfBytes(text: string): { readonly bytes: readonly number[] } | { r
  *
  * Returning an empty list is not an option: a check that has nowhere to put its
  * program is a `missing-io` failure, not a check that quietly runs nothing.
+ *
+ * EXPORTED FOR THE IDE AND THE DEBUGGER (the phase plan's Task 9). They load the
+ * same image into the same `ram_prog` instances to show a program running on the
+ * board, and "which instances hold a program" is the one rule they must not
+ * answer differently from the checkers: a second copy of it would drift, and the
+ * drift would be invisible from both sides -- the check would grade into the RAM
+ * the debugger does not read, or the other way round.
  */
-function programTargets(
+export function programTargets(
   ram: string | undefined,
   net: Netlist,
 ): { readonly ids: readonly string[] } | { readonly detail: string } {

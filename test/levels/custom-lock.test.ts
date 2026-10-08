@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { CheckOutcome, CustomCheck, LevelSpec } from '../../src/levels/spec';
+import { Simulation, compile } from '../../src/core/net';
+import { graphFromBoard } from '../../src/levels/board';
+import { overtureBoard } from '../../src/levels/boards/overture';
+import { bindLevelIo, loadProgramImage } from '../../src/levels/checks';
 import { customCheckIds } from '../../src/levels/custom/index';
 import { DEFAULT_LOCK_BUDGET, callLock } from '../../src/levels/custom/lock';
+import type { LevelIo } from '../../src/levels/checks';
+import { registry } from '../fixtures/build';
 import { scriptedIo } from '../fixtures/level-io';
 
 /**
@@ -214,5 +220,94 @@ describe('lock', () => {
     expect(outcome.passed).toBe(true);
     // Nothing in the log is anything but the four level methods.
     expect(new Set(script.log.map((c) => c.method))).toEqual(new Set(['readOutput', 'writeInput', 'tick']));
+  });
+});
+
+/**
+ * THE WRITE -> SETTLE -> TICK PROTOCOL, SEEN FROM THE CIRCUIT SIDE.
+ *
+ * `Simulation.tick` samples the signal table (net.ts), and a value written to a
+ * level input only reaches a storage element through the combinational parts
+ * between them -- on the OVERTURE board the level input is three parts away from
+ * the register file (`srcData` -> `d1` -> `data`). A caller that writes and ticks
+ * without settling therefore clocks the PREVIOUS input vector, which no
+ * combinational stub can show and no assertion about a checker's method log can
+ * prove. This block proves it against the real board, with a program that copies
+ * the level's input into a register and publishes it one instruction later.
+ */
+describe('the level input path on the reference board', () => {
+  /**
+   * `move|inp|d1` / `move|s1|out` / `loadi|0` / `j`: the level's byte into REG1,
+   * REG1 onto `out`, then a jump back to the read, so the exchange repeats every
+   * four ticks. The machine must NOT halt -- `move|s1|out` is in the loop -- which
+   * is why the board is built with `halt: false`.
+   */
+  const ECHO = ['move|inp|d1', 'move|s1|out', 'loadi|0', 'j'].join('\n');
+
+  /** The lock's level io, on the chapter-4 board wired to `match`. */
+  function lockBoard(): LevelIo {
+    const graph = graphFromBoard('lock', overtureBoard({ inputId: 'match', halt: false }));
+    const net = compile(graph, registry);
+    const sim = new Simulation(net, registry);
+    const io = bindLevelIo(sim, net, LOCK_LEVEL);
+    io.reset();
+    const image = loadProgramImage(io, ECHO, 'asm');
+    if (image.errors.length > 0) throw new Error(`the echo program does not load: ${image.errors[0]}`);
+    return io;
+  }
+
+  /**
+   * Writes `values` on `match`, one per tick, and returns what `try` published
+   * after each edge. `settle` is the whole experiment: with it the board is run
+   * to a fixed point between the write and the edge, without it the edge samples
+   * whatever the last settle left.
+   */
+  function driveEcho(settle: boolean, values: readonly number[]): number[] {
+    const io = lockBoard();
+    const published: number[] = [];
+    for (const value of values) {
+      io.writeInput('match', value);
+      if (settle) io.settle();
+      io.tick();
+      published.push(io.readOutput('try'));
+    }
+    return published;
+  }
+
+  it('publishes the byte written in the same tick once the write has settled', () => {
+    // The register captures on the tick whose instruction is `move|inp|d1` (the
+    // first of the four) and `out` publishes it on the next, so every fourth
+    // published byte is the byte written on the tick before it. The values are
+    // distinct and non-zero, so a board that quietly published its reset value
+    // could not satisfy this.
+    const values = [0x2a, 0x11, 0x22, 0x33, 0x5c, 0x44, 0x55, 0x66];
+    const published = driveEcho(true, values);
+    expect(published.filter((_, index) => index % 4 === 0)).toEqual([0x2a, 0x5c]);
+  });
+
+  it('clocks the previous byte instead when the write is not settled', () => {
+    // THE HAZARD THE PROTOCOL EXISTS FOR. Without a settle the register samples
+    // the table as the last sweep committed it, so the byte that arrives is the
+    // one written on the PREVIOUS tick -- one input vector behind, exactly as
+    // `Simulation.tick` documents. The first capture sees the reset value,
+    // because nothing had been written when the first sweep committed; the second
+    // sees `values[3]` where the settled run saw `values[4]`. A checker that
+    // wrote and ticked would hand the player's program that board.
+    const values = [0x2a, 0x11, 0x22, 0x33, 0x5c, 0x44, 0x55, 0x66];
+    const published = driveEcho(false, values);
+    expect(published.filter((_, index) => index % 4 === 0)).toEqual([0, values[3]]);
+  });
+
+  it('is the same board the checkers drive', () => {
+    // The lock's input pin is named `match` and its output `try`, so the level's
+    // own io binds to this circuit: a board wired for another pin id would leave
+    // `io.mismatch` unset (the pin is simply absent) and every read would be a
+    // fabricated zero -- which is why the acceptance tests below drive the same
+    // board through `runChecks`.
+    const io = lockBoard();
+    io.writeInput('match', 1);
+    io.settle();
+    io.tick();
+    expect(io.mismatch).toBeUndefined();
   });
 });
