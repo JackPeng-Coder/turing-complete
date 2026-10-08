@@ -620,10 +620,13 @@ function outcomeIssue(outcome: unknown, spec: LevelSpec): string | undefined {
 /**
  * The player's program text for the level being graded, as the app holds it.
  *
- * A WRAPPER RATHER THAN A BARE `string` because the channel will grow: chapter 4
- * adds the debugger and the breakpoints that go with it, and a second field here
- * is a change at the one seam the app and the kernel share rather than a new
- * argument threaded through `grade` and every caller.
+ * WHY A WRAPPER AND NOT A BARE `string`. It is the one seam every program-taking
+ * check funnels through -- `runChecks`, the level's own `program` steps, and the
+ * closed-loop checkers (`lock`, `maze`) all read the text from here -- so the
+ * shape of "the player's program" can grow without a new argument threaded
+ * through `grade` and each caller. It has exactly one field today: the debugger
+ * arrived reading the same text through `ProgramRun`, and breakpoints are
+ * deferred by ruling, so neither added one.
  */
 export interface PlayerProgram {
   readonly text: string;
