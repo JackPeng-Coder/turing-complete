@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { OVERTURE_ISA, assemble } from '../../src/asm';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { validateGraph } from '../../src/core/graph';
 import { Simulation, compile } from '../../src/core/net';
@@ -35,14 +36,41 @@ import { overtureMachine } from '../fixtures/ch3-references';
  * does not have, so the bank publishes 0. Chapter 3 never notices -- its
  * programs are straight lines and loops over the registers -- but every
  * chapter-4 level reads its input, so `overtureBoard({ inputId })` carries the
- * connector and the select that make that read real. The acceptance for it is
- * behavioural: one program, two boards, and only the wired one publishes the
- * byte the level wrote.
+ * connector and the mux that make that read real, on both paths a `move`'s
+ * source byte travels: the register file's write data and the `out` switch.
+ * The acceptance is behavioural: one program, two boards, and only the wired one
+ * publishes the byte the level wrote -- asserted for the register-routed
+ * `move|inp|dN` / `move|sN|out` pair and for the register-free `move|inp|out`.
  */
 
 /**
- * Runs `move|inp|d1` / `move|s1|out` against a board and returns the byte `OUT`
- * presents once the machine has halted.
+ * The image of `source`, from the project's own assembler.
+ *
+ * `asm/isa.ts` is the single authority on the instruction encoding, so a
+ * behavioural test that hand-encoded its own words could agree with a machine
+ * that had the field order wrong. A program that will not assemble is a broken
+ * test rather than a failing board, so it throws here instead of running.
+ */
+function image(source: string): readonly number[] {
+  const result = assemble(source, OVERTURE_ISA);
+  const first = result.errors[0];
+  if (first !== undefined) throw new Error(`the test program does not assemble: ${first.reason}`);
+  return result.bytes;
+}
+
+/** `move|inp|d1` / `move|s1|out`: the level's byte routed through REG1. */
+const VIA_REGISTER = image('move|inp|d1\nmove|s1|out');
+
+/** `move|inp|out`: the level's byte published with no register in between. */
+const STRAIGHT_OUT = image('move|inp|out');
+
+/** `loadi|42` / `move|s0|out`: a byte loaded into REG0 and published from there. */
+const FROM_REGISTER = image('loadi|42\nmove|s0|out');
+
+/**
+ * Runs `program` against a board, with `input` driven onto the board's level
+ * input pin where it has one, and returns the byte `OUT` presents once the
+ * machine has halted.
  *
  * IT DRIVES THE BOARD THE WAY A CHECK DOES (`bindLevelIo` in
  * `levels/checks.ts`): a level input is written at its own OUTPUT pin
@@ -52,10 +80,10 @@ import { overtureMachine } from '../fixtures/ch3-references';
  * clears it -- the ordering `runChecks` documents at its own program branch.
  *
  * The plain board has no `IN_in` pin to drive, so that write is skipped: the two
- * runs then differ in exactly one thing, which is what the pair of tests below
+ * runs then differ in exactly one thing, which is what each pair of tests below
  * claims.
  */
-function publishThroughOut(board: BoardInit, input: number): number {
+function publishThroughOut(board: BoardInit, program: readonly number[], input: number): number {
   const graph = graphFromBoard('x', board);
   const net = compile(graph, registry);
   const sim = new Simulation(net, registry);
@@ -64,14 +92,13 @@ function publishThroughOut(board: BoardInit, input: number): number {
     throw new Error('the OVERTURE board has no ram_prog to load a program into');
   }
   sim.reset();
-  // 0xB1 is `move|inp|d1` and 0x8F is `move|s1|out`, hand-encoded from ruling 5's
-  // `10 sss ddd`: 0b10_110_001 and 0b10_001_111.
-  sim.loadImage(ram.id, [0xb1, 0x8f]);
+  sim.loadImage(ram.id, program);
   if (net.outputKeys().includes('IN_in.out')) sim.write(net.outputBase('IN_in.out'), 8, input);
   sim.settle();
-  // Two edges are enough -- the first writes REG1, the second publishes it and
-  // halts the counter -- and four leave the answer visibly HELD rather than
-  // caught on the edge that produced it.
+  // Two edges are enough for a two-instruction program -- the first executes the
+  // instruction that produces the byte, the second publishes it and halts the
+  // counter -- and four leave the answer visibly HELD rather than caught on the
+  // edge that produced it.
   for (let tick = 0; tick < 4; tick += 1) sim.tick();
   return portValueToNumber(sim.read(net.inputBase('OUT.in'), 8));
 }
@@ -162,24 +189,26 @@ describe('the OVERTURE board with a level input', () => {
     expect(graph.instances.map((inst) => inst.id)).not.toContain('IN_in');
   });
 
-  it('carries the level input pin, and the three parts that put it on the source path', () => {
-    const plain = overtureBoard();
+  it('carries the level input pin, and the one part that puts it on the source path', () => {
     const wired = overtureBoard({ inputId: 'in' });
-    // FOUR more parts, and each one is named, because "the board gained a part"
-    // is only checkable if the count and the reason are stated together: the
-    // level's own connector (`IN_in`), the `maker` holding the byte 6, the
-    // `equal8` asking whether the instruction's [5:3] field is that byte, and
-    // the `mux8` that chooses between the register file and the input. The
-    // connector is the part a level author sees; the other three are what make
-    // it reach the register file at all.
-    expect(wired.parts).toHaveLength(plain.parts.length + 4);
-    // THIRTEEN MORE WIRES, and the arithmetic is the point: fourteen join the
-    // four new parts -- eight for the byte constant, two into the comparator, and
-    // four for the value mux and its select -- and one is REPLACED, because
-    // `d1`'s `a` now reads the mux instead of the register file. Pinned so a part
-    // added without a wire, or a wire that landed on the wrong pin, is visible
-    // here and not only in the behaviour at the end of this block.
-    expect(wired.wires).toHaveLength(plain.wires.length + 13);
+    // TWO more parts than the plain board's 42, and each one is named, because
+    // "the board gained a part" is only checkable if the count and the reason are
+    // stated together: the level's own connector (`IN_in`) and the `mux8` that
+    // chooses between the register file's byte and the level's. The connector is
+    // the part a level author sees; the mux is what makes it reach the register
+    // file's write path (and the `out` switch) at all. Nothing else is bought:
+    // the select is the machine's own condition decode, which the board already
+    // carries.
+    expect(wired.parts).toHaveLength(44);
+    // THREE MORE WIRES than the plain board's 95, and the arithmetic is the
+    // point: of the five wires that join the two new parts -- the two data inputs
+    // into the value mux (`RF.a` and `IN.out`), its select from the condition
+    // decoder's `b6` line, and its output into both `d1` and the `out` switch --
+    // two REPLACE a wire each, because `d1`'s `a` and `out_pin`'s `a` now read
+    // that mux instead of the register file directly. Pinned so a part added
+    // without a wire, or a wire that landed on the wrong pin, is visible here and
+    // not only in the behaviour at the end of this block.
+    expect(wired.wires).toHaveLength(98);
 
     const graph = graphFromBoard('x', wired);
     // The clock connector survives the option, and the input joins it: both are
@@ -215,12 +244,35 @@ describe('the OVERTURE board with a level input', () => {
       wire.to.inst === inputMux?.id &&
       wire.to.port === 'a';
     expect(graph.wires.some(fedByRegisterFile)).toBe(true);
-    // And the select is a field test: an `equal8`, whose answer is 1 exactly when
-    // the source field is the constant the board holds.
+    // And the select is the machine's own field decode, not a second reading of
+    // the instruction word: the wire into the mux's `sel` is the `b6` line of the
+    // splitter on the CONDITION decoder. That decoder is the `decoder3` the
+    // jump's `jz`/`jnz` lines come from, and it decodes `DEC.op` -- the very
+    // [5:3] slice `DEC.src` names -- so its `b6` line IS "the source field is 6",
+    // computed for the jump glue already. A comparator here would say the same
+    // thing for 54 NAND equivalents more: the wired board's whole gate metric is
+    // 675 with this line and was 729 with a comparator. The delay metric does not
+    // move either way, because the comparator stood at the same depth as the
+    // decode it duplicated.
     const select = graph.wires.find(
       (wire) => wire.to.inst === inputMux?.id && wire.to.port === 'sel',
     );
-    expect(graph.instances.find((inst) => inst.id === select?.from.inst)?.def).toBe('equal8');
+    expect(select?.from.port).toBe('b6');
+    const conditionBits = graph.instances.find((inst) => inst.id === select?.from.inst);
+    expect(conditionBits?.def).toBe('splitter');
+    const decoded = graph.wires.find(
+      (wire) => wire.to.inst === conditionBits?.id && wire.to.port === 'in',
+    );
+    expect(graph.instances.find((inst) => inst.id === decoded?.from.inst)?.def).toBe('decoder3');
+    const field = graph.wires.find(
+      (wire) => wire.to.inst === decoded?.from.inst && wire.to.port === 'sel',
+    );
+    expect(field?.from.port).toBe('op');
+    expect(graph.instances.find((inst) => inst.id === field?.from.inst)?.def).toBe('instr_decoder');
+    // And nothing was bought to say it: the wired board holds exactly the one
+    // `equal8` the plain board's jump glue already had, so the option adds no
+    // comparator anywhere.
+    expect(graph.instances.filter((inst) => inst.def === 'equal8')).toHaveLength(1);
   });
 
   it('reports no structural error and compiles', () => {
@@ -230,17 +282,66 @@ describe('the OVERTURE board with a level input', () => {
   });
 
   it('publishes the level input through the machine', () => {
-    // THE ACCEPTANCE. `move|inp|d1` copies the level's byte into REG1 and
-    // `move|s1|out` publishes it, so a chapter-4 level's `program` check sees the
-    // value it wrote on its own `in` pin.
-    expect(publishThroughOut(overtureBoard({ inputId: 'in' }), 0x2a)).toBe(0x2a);
+    // THE ACCEPTANCE FOR THE WRITE PATH. `move|inp|d1` copies the level's byte
+    // into REG1 and `move|s1|out` publishes it, so a chapter-4 level's `program`
+    // check sees the value it wrote on its own `in` pin.
+    expect(publishThroughOut(overtureBoard({ inputId: 'in' }), VIA_REGISTER, 0x2a)).toBe(0x2a);
   });
 
   it('publishes zero for the same program on the plain board', () => {
-    // The negative control, and the reason the test above is evidence: without
-    // the input path the same two instructions read code 6 out of the register
-    // file, which publishes 0 for a register it does not have. A machine that
-    // always answered 0x2a -- or one whose `out` never rose -- would fail here.
-    expect(publishThroughOut(overtureBoard(), 0x2a)).toBe(0);
+    // The negative control, and the reason the tests above are evidence: without
+    // the input path these instructions read code 6 out of the register file,
+    // which publishes 0 for a register it does not have. A machine that always
+    // answered 0x2a -- or one whose `out` never rose -- would fail here.
+    expect(publishThroughOut(overtureBoard(), VIA_REGISTER, 0x2a)).toBe(0);
+  });
+
+  it('encodes the programs this block drives the way the machine reads them', () => {
+    // The three images, pinned as bytes as well as through the assembler above:
+    // `move` is mode 10, `inp` is source code 6, `out` is destination code 7 and
+    // `d1` is destination code 1, so `move|inp|out` is 0b10_110_111 = 0xB7,
+    // `move|inp|d1` is 0xB1 and `move|s1|out` is 0x8F. `loadi|42` is its
+    // immediate (0x2A, mode 00) and `move|s0|out` is 0x87.
+    expect(STRAIGHT_OUT).toEqual([0xb7]);
+    expect(VIA_REGISTER).toEqual([0xb1, 0x8f]);
+    expect(FROM_REGISTER).toEqual([0x2a, 0x87]);
+  });
+
+  it('publishes the level input with no register in between', () => {
+    // THE ACCEPTANCE FOR THE `out` PATH, and the first instruction a player is
+    // likely to write on a level whose job is to echo its input: `move|inp|out`
+    // copies the level's byte straight to the port, through no register at all.
+    // A board whose `out` switch read the register file directly published 0 for
+    // that correct-looking program, which is the trap this test keeps shut.
+    expect(publishThroughOut(overtureBoard({ inputId: 'in' }), STRAIGHT_OUT, 0x5c)).toBe(0x5c);
+  });
+
+  it('publishes zero for `move|inp|out` on the plain board', () => {
+    // The same negative control, and it is not redundant with the register-routed
+    // pair: this program never touches a register, so the only thing that can put
+    // 0x5c on `out` is a board that carries the input path.
+    expect(publishThroughOut(overtureBoard(), STRAIGHT_OUT, 0x5c)).toBe(0);
+  });
+
+  it('still publishes a register through `move|sX|out`', () => {
+    // The other direction, and what keeps the `out` path honest: this instruction
+    // names REG0 in its source field, so the byte that reaches the port is the
+    // one `loadi|42` wrote -- the level's input pin holds something else, and a
+    // board whose `out` switch had been wired to the input rather than to the
+    // source mux, or whose select ignored the field, would answer 0x5c.
+    expect(publishThroughOut(overtureBoard({ inputId: 'in' }), FROM_REGISTER, 0x5c)).toBe(42);
+  });
+
+  it('leaves a `loadi` alone even when its immediate looks like the source field 6', () => {
+    // THE SELECT CANNOT REACH AN IMMEDIATE, which is the reserved reading the
+    // source path's comment depends on. `loadi|50` is 0x32: mode 00, and an
+    // immediate whose [5:3] bits are 110 -- field 6 -- so the mux really does
+    // pass the level's byte while this instruction is being looked at. The write
+    // data is chosen downstream at `data`, where `is_loadi` takes the immediate,
+    // so REG0 gets 50 and `move|s0|out` publishes 50 rather than the input pin's
+    // 0x5c.
+    const immediate = image('loadi|50\nmove|s0|out');
+    expect(immediate).toEqual([0x32, 0x87]);
+    expect(publishThroughOut(overtureBoard({ inputId: 'in' }), immediate, 0x5c)).toBe(50);
   });
 });
