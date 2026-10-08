@@ -1,6 +1,18 @@
+import {
+  effectiveBudget,
+  invalidOutcome,
+  ioIssue,
+  registerCustomCheck,
+  type CheckerIo,
+} from './index';
+import {
+  describeValue,
+  loadProgramImage,
+  playerProgramText,
+  type LevelIo,
+  type PlayerProgram,
+} from '../checks';
 import type { CheckFailure, CheckOutcome, CustomCheck, LevelSpec } from '../spec';
-import type { LevelIo, PlayerProgram } from '../checks';
-import { registerCustomCheck } from './index';
 
 /**
  * `maze` -- 路在脚下 / The Maze, chapter 4's closed-loop navigation checker.
@@ -9,15 +21,18 @@ import { registerCustomCheck } from './index';
  * the level declares. The CPU sees three bits -- a wall directly ahead, one to
  * the left, one to the right, all relative to where the robot is facing -- and
  * answers with a move code. The checker applies the move, publishes the sensors
- * for the state the robot is now in, advances the clock, and asks again. The
- * robot wins by standing on the goal.
+ * for the state the robot is now in, settles, advances the clock, and asks again.
+ * The robot wins by standing on the goal.
  *
  * WHY THE CHECKER TICKS THE BOARD ITSELF. The sensors are a function of the
  * robot's own history: a step list cannot say "the byte you see now depends on
  * the moves you have made", which is the whole puzzle. `LevelIo` is the whole
- * vocabulary used here -- `readOutput`, `writeInput`, `tick` -- and `io.sim` is
- * never touched, so a scripted stub can drive the checker in a test and the
- * verdict never depends on the kernel's internals.
+ * vocabulary used here -- `reset`, `readOutput`, `writeInput`, `settle`, `tick`
+ * -- and `io.sim` is never touched, so a scripted stub can drive the checker in a
+ * test and the verdict never depends on the kernel's internals. The player's
+ * program is loaded through `loadProgramImage`, the same helper the `program`
+ * branch loads with, so the parse, the target lookup and the reset-then-load
+ * ordering exist once.
  *
  * DETERMINISM. No clock, no randomness, no hidden state: the grid, the start and
  * the facing all come from level data, and the move sequence comes from the
@@ -30,10 +45,30 @@ import { registerCustomCheck } from './index';
  * stated here as well as in the brief because this file is what the checker
  * actually implements, and a brief that drifted from it would teach a program
  * that cannot pass.
+ *
+ * ONE BUDGET UNIT IS ONE EXCHANGE, the same unit `lock` uses: read the move code
+ * the circuit publishes, apply it, publish the sensors of the state it produced,
+ * settle, apply one edge. A run of `budget` units therefore reads `move` `budget`
+ * times and applies `budget` edges, and the arrival it reports after the last
+ * edge is charged the edge that reached it.
  */
 
 /** Ticks a `maze` check runs before it gives up, when the check declares none. */
 export const DEFAULT_MAZE_BUDGET = 4096;
+
+/**
+ * THE PINS THIS CHECKER DRIVES, and the narrowest widths that can carry what it
+ * moves: three sensor bits in, a two-bit move code out.
+ *
+ * Validated before anything else, because the checker addresses the board by
+ * name -- see `ioIssue`. A level whose `io` names them differently has to hear
+ * about it from the level's own failure, not from a robot that walked a board the
+ * checker never reached.
+ */
+const MAZE_PINS: CheckerIo = {
+  inputs: [{ id: 'sensors', width: 3 }],
+  outputs: [{ id: 'move', width: 2 }],
+};
 
 /** The four facings, clockwise: turning right is `+1` and left is `+3`, mod 4. */
 const FACINGS = ['north', 'east', 'south', 'west'] as const;
@@ -63,23 +98,23 @@ interface MazeGrid {
 }
 
 /**
- * The outcome that fails a check whose own `params` cannot be played.
+ * The failure a program that will not load produces: keyed by nothing, because
+ * no pin was ever driven, and carrying the loader's own sentence.
  *
- * Level data is untrusted -- `params` included -- so a malformed grid, a facing
- * that is not a compass point, or a budget that is not a positive integer is an
- * `invalid` failure naming the field, never a throw: `grade()` runs on every
- * board edit, and "the custom check threw" is not a sentence a player can act
- * on.
+ * `emptyProgram` is the one case that is not a refusal at all -- a text both
+ * readers accept as zero bytes -- and it gets the wording the `program` branch
+ * gives the player's buffer, because to the circuit "nothing typed" and "a
+ * comment" are the same nothing.
  */
-function invalid(detail: string): CheckOutcome {
+function programFailure(error: string, reason: NonNullable<CheckFailure['reason']>): CheckOutcome {
   const failure: CheckFailure = {
     check: 'custom',
     inputs: {},
     expected: {},
     actual: {},
     tick: 0,
-    reason: 'invalid',
-    detail,
+    reason,
+    detail: error,
   };
   return { passed: false, failures: [failure], ticksUsed: 0 };
 }
@@ -124,7 +159,7 @@ function parseGrid(value: unknown): MazeGrid | null {
 
 /** Why `value` is not a walkable grid, for the failure that refuses it. */
 function gridIssue(value: unknown): string {
-  if (!Array.isArray(value)) return `maze check declares grid=${describe(value)}, expected an array of row strings`;
+  if (!Array.isArray(value)) return `maze check declares grid=${describeValue(value)}, expected an array of row strings`;
   if (value.length === 0) return 'maze check declares an empty grid: there is no S to start on';
   if (!value.every((row) => typeof row === 'string')) {
     return 'maze check declares a grid with a row that is not a string';
@@ -183,57 +218,76 @@ function sensorsFor(grid: MazeGrid, x: number, y: number, facing: Facing): numbe
  * Walks the maze `check.params` describes against the board `io` drives.
  *
  * ONE TICK, ONE MOVE, in that order: read the code the circuit publishes, apply
- * it, publish the sensors of the state the move produced, then advance the clock.
- * The sensor byte the circuit reads at tick N therefore describes where the robot
- * IS after N moves, and a program that plans from it is answering a question
- * about the present rather than about one move ago.
+ * it, publish the sensors of the state the move produced, settle so the byte
+ * reaches the circuit, then advance the clock. The sensor byte the circuit reads
+ * at tick N therefore describes where the robot IS after N moves, and a program
+ * that plans from it is answering a question about the present rather than about
+ * one move ago.
  *
  * THE RUN ENDS ONE OF THREE WAYS. The robot stands on `G` -- pass, with the ticks
  * it actually spent. It drives forward into a wall -- an immediate `mismatch`
  * naming the cell and the facing, because a robot that walks through walls is
  * not solving a maze and continuing would report a success the grid never
  * allowed. Or the budget runs out -- the other `mismatch`, naming the cell it
- * gave up in, which is the only thing that ends a robot that never arrives.
+ * gave up in and the move it last applied, which is the only thing that ends a
+ * robot that never arrives.
  *
- * `_spec` AND `_player` ARE NAMED, NOT DROPPED, and they are unused on purpose:
- * every checker is called with all four arguments (see `CustomChecker`), and this
- * one reads the grid from its own `params` and the moves from the board, so it
- * needs neither the level object nor the text in the player's buffer.
+ * `spec` IS READ, FOR THE PINS, and `player` for the program: a level whose `io`
+ * does not declare `sensors` and `move` cannot be played at all, and the robot's
+ * moves have to come from the text the player wrote -- an empty buffer is a
+ * refusal, never a board that quietly reads zeros.
  */
 export const callMaze = (
   io: LevelIo,
-  _spec: LevelSpec,
+  spec: LevelSpec,
   check: CustomCheck,
-  _player?: PlayerProgram,
+  player?: PlayerProgram,
 ): CheckOutcome => {
+  const pins = ioIssue(spec, 'maze', MAZE_PINS);
+  if (pins !== undefined) return invalidOutcome(pins);
+
   const params: Record<string, unknown> = isRecord(check.params) ? check.params : {};
   const grid = parseGrid(params.grid);
-  if (grid === null) return invalid(gridIssue(params.grid));
+  if (grid === null) return invalidOutcome(gridIssue(params.grid));
 
   const facing = params.facing === undefined ? 'east' : params.facing;
   if (typeof facing !== 'string' || !FACINGS.includes(facing as Facing)) {
-    return invalid(
-      `maze check declares facing=${describe(params.facing)}, expected one of ${FACINGS.join(', ')}`,
+    return invalidOutcome(
+      `maze check declares facing=${describeValue(params.facing)}, expected one of ${FACINGS.join(', ')}`,
     );
   }
-  const budget = params.budget === undefined ? DEFAULT_MAZE_BUDGET : params.budget;
-  if (typeof budget !== 'number' || !Number.isInteger(budget) || budget <= 0) {
-    return invalid(
-      `maze check declares budget=${describe(params.budget)}, which is not a positive integer`,
+  const budget = effectiveBudget(params.budget, DEFAULT_MAZE_BUDGET);
+  if (budget === null) {
+    return invalidOutcome(
+      `maze check declares budget=${describeValue(params.budget)}, which is not a positive integer`,
     );
+  }
+
+  // RESET FIRST, THEN LOAD THE PLAYER'S PROGRAM, for the reasons `lock` states:
+  // `runChecks` compiled this circuit for this check alone but never settled it,
+  // so a read before the reset is a fabricated zero, and the program the moves
+  // come from has to be in the circuit before the first of them is read. The
+  // helper resets again on its own way in, which is harmless and is not something
+  // this checker relies on.
+  io.reset();
+  const image = loadProgramImage(io, playerProgramText(player), 'asm');
+  if (image.errors.length > 0) {
+    if (image.emptyProgram) {
+      return programFailure(
+        "the player's program buffer is empty: there is nothing to load, so no instruction would ever execute",
+        'missing-program',
+      );
+    }
+    return programFailure(image.errors[0]!, image.reason);
   }
 
   let x = grid.start.x;
   let y = grid.start.y;
   let heading = facing as Facing;
-  // The move just read but not yet applied, kept across the loop so the failure
-  // records can name it: the circuit's own code is the `actual` of a failure.
+  // The move just read and applied, kept across the loop so the failure records
+  // can name it: the circuit's own code is the `actual` of a failure.
   let pending = STAY;
 
-  // NO RESET HERE: `runChecks` compiled this circuit for this check alone and
-  // nothing has driven it, so it stands at its zero state -- a reset in the
-  // middle of a checker's own run would be a second, invisible source of state.
-  //
   // THE GOAL IS TESTED AFTER EVERY MOVE, NOT BEFORE THE FIRST ONE. `parseGrid`
   // guarantees `G` is a different cell from the `S` the robot starts on, so a
   // test before the loop could never be true -- and the test after each move is
@@ -267,10 +321,13 @@ export const callMaze = (
     }
 
     // The sensors describe the state the move produced, and they are published
-    // before the edge for the reason `lock`'s write is: the edge samples the
-    // pins as the last settle left them, so a tick that came first would show
-    // the circuit the previous state's sensors.
+    // and SETTLED before the edge for the reason `lock`'s answer is: an edge
+    // samples the storage elements' inputs out of the signal table, and this byte
+    // only arrives there through the combinational parts between the level's pin
+    // and the CPU's register file. Tick without settling and the machine steers
+    // by the sensors of the position it was in one move ago.
     io.writeInput('sensors', sensorsFor(grid, x, y, heading));
+    io.settle();
     io.tick();
 
     // The arrival, and the stay: both are states the robot is IN after the edge,
@@ -323,21 +380,18 @@ function driveFailure(
     detail:
       why === 'wall'
         ? `the robot drove forward into a wall at ${at}`
-        : `the budget ran out with the robot still at ${at} and the move ${move} unapplied`,
+        : // THE LAST MOVE WAS APPLIED, and the sentence says so. It was read,
+          // applied, published and clocked before the goal was tested -- that is
+          // the loop -- so calling it "unapplied" would describe a run that never
+          // happened and hide the turn the robot really made from the player
+          // reading the failure. What ended the run is the budget, not the move.
+          `the budget of ${tick} tick(s) ran out with the robot still at ${at} after applying move ${move}`,
   };
 }
 
 /** `params` is level data: an object or nothing, never a `TypeError`. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** A short, safe description of an untrusted value, for a failure's `detail`. */
-function describe(value: unknown): string {
-  if (typeof value === 'string') return JSON.stringify(value);
-  if (Array.isArray(value)) return `an array of ${value.length}`;
-  if (value === undefined) return 'undefined';
-  return String(value);
 }
 
 /** Registers this checker under the id a `custom` check names. */

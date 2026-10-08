@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import type { CustomCheck, LevelSpec } from '../../src/levels/spec';
+import { emptyGraph } from '../../src/core/graph';
+import { Simulation, compile } from '../../src/core/net';
+import { graphFromBoard } from '../../src/levels/board';
+import { overtureBoard } from '../../src/levels/boards/overture';
+import {
+  CUSTOM_BUDGET_CAP,
+  bindLevelIo,
+  runChecks,
+  type LevelIo,
+} from '../../src/levels/checks';
 import { customCheckIds } from '../../src/levels/custom/index';
 import { callMaze } from '../../src/levels/custom/maze';
+import type { CustomCheck, LevelSpec } from '../../src/levels/spec';
+import { registry } from '../fixtures/build';
 import { scriptedIo } from '../fixtures/level-io';
 
 /**
@@ -11,8 +22,8 @@ import { scriptedIo } from '../fixtures/level-io';
  * the level declares. The CPU sees three bits -- a wall directly ahead, one to
  * the left, one to the right, all relative to where the robot is facing -- and
  * answers with a move code. The checker applies the move, publishes the sensors
- * for the state the robot is now in, ticks, and asks again. The robot wins by
- * standing on the goal.
+ * for the state the robot is now in, settles, advances the clock, and asks again.
+ * The robot wins by standing on the goal.
  *
  * THE SENSOR BITS ARE THE LEVEL'S BRIEF: bit0 (1) a wall directly ahead, bit1
  * (2) a wall to the left, bit2 (4) a wall to the right, relative to the current
@@ -25,7 +36,94 @@ import { scriptedIo } from '../fixtures/level-io';
  * assertions then compare every published byte against the byte the brief says
  * that state must publish, so a checker that published the pre-move state, or
  * that moved somewhere other than it said, fails on the byte it sent.
+ *
+ * THE BUDGET'S UNIT IS ONE EXCHANGE, the same unit `lock` uses: one read of
+ * `move`, one applied move, one published sensor byte and one clock edge. A run
+ * of `budget` units therefore reads `move` `budget` times and applies `budget`
+ * edges, which is why the failure it reports when the robot never arrives sits
+ * at tick `budget`.
  */
+
+/**
+ * The reference program for this puzzle, verbatim from
+ * `.superpowers/sdd/2026-10-08-turing-complete-phase3/reference-programs.md`
+ * (ch4-56): read the sensors into REG4, then loop -- left open, turn left;
+ * otherwise ahead open, go forward; otherwise turn right.
+ *
+ * READ THE JUMP TARGETS: every loop-back is `loadi|1` / `j`, so the loop head is
+ * address 1 and REG4 is loaded ONCE, at address 0. The program is a wall
+ * follower only for a maze its first decision already solves; on any maze needing
+ * a second look at the sensors it walks its stale byte into a wall (measured, and
+ * pinned below). The corrected variant one screen down jumps back to 0.
+ */
+const REFERENCE_PROGRAM = [
+  'move|inp|d4',
+  'move|s4|d1',
+  'loadi|2',
+  'move|s0|d2',
+  'and',
+  'loadi|19',
+  'jz',
+  'move|s4|d1',
+  'loadi|1',
+  'move|s0|d2',
+  'and',
+  'loadi|23',
+  'jz',
+  'loadi|3',
+  'move|s0|out',
+  'loadi|1',
+  'j',
+  'loadi|1',
+  'j',
+  'loadi|2',
+  'move|s0|out',
+  'loadi|1',
+  'j',
+  'loadi|1',
+  'move|s0|out',
+  'loadi|1',
+  'j',
+].join('\n');
+
+/**
+ * The mirror of the reference program: right open, turn right; otherwise ahead
+ * open, go forward; otherwise turn left -- and every loop-back goes to address 0,
+ * so the sensors are read again on every pass. This is the program the checker's
+ * brief actually asks for, and the one that solves a maze worth walking.
+ */
+const RIGHT_HAND_PROGRAM = [
+  'move|inp|d4',
+  'move|s4|d1',
+  'loadi|4',
+  'move|s0|d2',
+  'and',
+  'loadi|19',
+  'jz',
+  'move|s4|d1',
+  'loadi|1',
+  'move|s0|d2',
+  'and',
+  'loadi|23',
+  'jz',
+  'loadi|2',
+  'move|s0|out',
+  'loadi|0',
+  'j',
+  'loadi|1',
+  'j',
+  'loadi|3',
+  'move|s0|out',
+  'loadi|0',
+  'j',
+  'loadi|1',
+  'move|s0|out',
+  'loadi|0',
+  'j',
+].join('\n');
+
+/** The player's buffer, as `runChecks` receives it. */
+const PLAYER = { text: REFERENCE_PROGRAM };
 
 /** The four facings, clockwise: turning right is `+1` and left is `+3`, mod 4. */
 const DIRS = [
@@ -130,12 +228,17 @@ interface Run {
  * stands in for uses the byte alone. Each published byte is logged WITH the byte
  * the model says the state it moved into must publish, so a divergence shows up
  * as a pair of unequal arrays rather than as a verdict nobody can check.
+ *
+ * The checker gets the reference program as the player's text: it loads a program
+ * before it drives anything, and an empty buffer would be a `missing-program`
+ * refusal rather than the geometry these tests are about.
  */
 function runMaze(
   grid: readonly string[],
   start: Robot,
   follower: (sensors: number, robot: Robot) => number,
   budget = 64,
+  text: string = REFERENCE_PROGRAM,
 ): Run {
   let robot = start;
   let chosen = STAY;
@@ -164,11 +267,16 @@ function runMaze(
     },
   };
 
-  const outcome = callMaze(io, MAZE_LEVEL, {
-    kind: 'custom',
-    id: 'maze',
-    params: { grid, facing: FACINGS[start.facing] as string, budget },
-  });
+  const outcome = callMaze(
+    io,
+    MAZE_LEVEL,
+    {
+      kind: 'custom',
+      id: 'maze',
+      params: { grid, facing: FACINGS[start.facing] as string, budget },
+    },
+    { text },
+  );
 
   return { outcome, published, expected, robot };
 }
@@ -299,6 +407,14 @@ describe('maze', () => {
     expect(outcome.failures[0]?.reason).toBe('mismatch');
     expect(outcome.failures[0]?.detail).toContain('budget');
     expect(outcome.failures[0]?.detail).toContain('(1,1)');
+    // THE LAST MOVE WAS APPLIED, and the record has to say so: the checker read
+    // the code, applied it, published the sensors it produced and clocked the
+    // edge before it tested for the goal, so a detail calling the move
+    // "unapplied" would describe a run that never happened -- and hide the turn
+    // the robot really took from the player reading it.
+    expect(outcome.failures[0]?.actual).toEqual({ move: TURN_RIGHT });
+    expect(outcome.failures[0]?.detail).toContain(`after applying move ${TURN_RIGHT}`);
+    expect(outcome.failures[0]?.detail).not.toContain('unapplied');
     expect(published).toHaveLength(10);
     // Ten right turns is two and a half full turns: the model ends facing west,
     // on the cell it started from.
@@ -442,7 +558,7 @@ describe('maze', () => {
     // forward, so the robot stays where it is and the run ends on the budget.
     const grid = ['#####', '#S.G#'];
     const script = scriptedIo({ known: ['sensors', 'move'] });
-    const outcome = callMaze(script.io, MAZE_LEVEL, MAZE(grid, undefined, 4));
+    const outcome = callMaze(script.io, MAZE_LEVEL, MAZE(grid, undefined, 4), PLAYER);
     expect(outcome.passed).toBe(false);
     expect(outcome.ticksUsed).toBe(4);
     expect(script.readUnknown()).toBe(false);
@@ -452,6 +568,125 @@ describe('maze', () => {
     expect(new Set(script.log.filter((c) => c.method === 'writeInput').map((c) => c.name))).toEqual(
       new Set(['sensors']),
     );
+    // The protocol the log records: four exchanges, each one a read of `move`, an
+    // answer on `sensors`, a settle and an edge -- with the reset and the load
+    // before the first read.
+    const firstRead = script.log.findIndex((call) => call.method === 'readOutput');
+    expect(script.log.slice(0, firstRead).some((call) => call.method === 'reset')).toBe(true);
+    expect(script.log.slice(firstRead).map((call) => call.method)).toEqual([
+      'readOutput', 'writeInput', 'settle', 'tick',
+      'readOutput', 'writeInput', 'settle', 'tick',
+      'readOutput', 'writeInput', 'settle', 'tick',
+      'readOutput', 'writeInput', 'settle', 'tick',
+    ]);
+    expect(script.settles()).toBe(4);
+  });
+
+  it('refuses to run at all when the player has typed nothing', () => {
+    // The same rule `lock` keeps: the checker drives the player's program, so an
+    // empty buffer is a refusal naming the buffer rather than a robot driven by a
+    // board that is reading zeros.
+    for (const text of ['', '  \n']) {
+      const script = scriptedIo({ known: ['sensors', 'move'] });
+      const outcome = callMaze(script.io, MAZE_LEVEL, MAZE(['#####', '#S.G#']), { text });
+      expect(outcome.passed).toBe(false);
+      expect(outcome.failures[0]?.reason).toBe('missing-program');
+      expect(outcome.failures[0]?.detail).toContain('empty');
+      expect(script.ticks()).toBe(0);
+    }
+  });
+
+  it('refuses a program the assembler rejects, naming the line', () => {
+    const outcome = callMaze(scriptedIo({ known: ['sensors', 'move'] }).io, MAZE_LEVEL, MAZE(['#####', '#S.G#']), {
+      text: 'move|nowhere|d1',
+    });
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures[0]?.reason).toBe('invalid');
+    expect(outcome.failures[0]?.detail).toContain('line 1');
+  });
+
+  it('refuses a board with nowhere to put the program', () => {
+    const script = scriptedIo({ known: ['sensors', 'move'], programRam: false });
+    const outcome = callMaze(script.io, MAZE_LEVEL, MAZE(['#####', '#S.G#']), PLAYER);
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures[0]?.reason).toBe('missing-io');
+    expect(outcome.failures[0]?.detail).toContain('ram_prog');
+    expect(script.ticks()).toBe(0);
+  });
+
+  it('describes untrusted params whose own toString throws without throwing itself', () => {
+    // Level data is untrusted all the way down: an object where a grid belongs
+    // must become a sentence naming the field, not an exception `runChecks`
+    // reports as "the custom check threw".
+    const grid = {
+      toString(): string {
+        throw new TypeError('grid exploded');
+      },
+    };
+    const check = { kind: 'custom', id: 'maze', params: { grid } } as unknown as CustomCheck;
+    const outcome = callMaze(scriptedIo().io, MAZE_LEVEL, check);
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures[0]?.reason).toBe('invalid');
+    expect(outcome.failures[0]?.detail).toContain('grid');
+    expect(outcome.failures[0]?.detail).toContain('object');
+  });
+
+  it('clamps an over-cap budget to the ceiling instead of hanging the editor', () => {
+    // The same ceiling `lock` applies, and the same rule `FUZZ_ROUNDS_CAP`
+    // states: `grade()` runs on every board edit, so a level asking for a
+    // billion moves gets the most the editor can afford.
+    expect(CUSTOM_BUDGET_CAP).toBe(4096);
+    const script = scriptedIo({ known: ['sensors', 'move'] });
+    const outcome = callMaze(
+      script.io,
+      MAZE_LEVEL,
+      MAZE(['#####', '#S.G#'], undefined, CUSTOM_BUDGET_CAP + 10_000),
+      PLAYER,
+    );
+    expect(outcome.passed).toBe(false);
+    expect(outcome.ticksUsed).toBe(CUSTOM_BUDGET_CAP);
+    expect(script.ticks()).toBe(CUSTOM_BUDGET_CAP);
+  });
+
+  it('blames the level when its io does not name the pins this checker drives', () => {
+    // I4, for the maze: `sensors` in and `move` out are what the checker drives,
+    // and a level that names them differently -- or declares a pin the checker
+    // never plays with -- hears about it from the level's own failure rather than
+    // from a robot that walked a board nobody wired.
+    const missingPin: LevelSpec = {
+      ...MAZE_LEVEL,
+      io: { inputs: [{ id: 'walls', width: 8 }], outputs: [{ id: 'move', width: 8 }] },
+    };
+    const unexpectedPin: LevelSpec = {
+      ...MAZE_LEVEL,
+      io: {
+        inputs: [{ id: 'sensors', width: 8 }],
+        outputs: [
+          { id: 'move', width: 8 },
+          { id: 'spare', width: 8 },
+        ],
+      },
+    };
+    const narrowInput: LevelSpec = {
+      ...MAZE_LEVEL,
+      io: { inputs: [{ id: 'sensors', width: 2 }], outputs: [{ id: 'move', width: 8 }] },
+    };
+
+    const cases: ReadonlyArray<readonly [LevelSpec, string]> = [
+      [missingPin, 'sensors'],
+      [unexpectedPin, 'spare'],
+      [narrowInput, 'sensors'],
+    ];
+    for (const [level, named] of cases) {
+      const script = scriptedIo({ known: ['sensors', 'move'] });
+      const outcome = callMaze(script.io, level, MAZE(['#####', '#S.G#']), PLAYER);
+      expect(outcome.passed).toBe(false);
+      expect(outcome.failures).toHaveLength(1);
+      expect(outcome.failures[0]?.reason).toBe('invalid');
+      expect(outcome.failures[0]?.detail).toContain(named);
+      expect(script.ticks()).toBe(0);
+      expect(script.resets()).toBe(0);
+    }
   });
 
   it('starts on S facing east by default', () => {
@@ -465,5 +700,184 @@ describe('maze', () => {
     expect(outcome.passed).toBe(true);
     expect(outcome.ticksUsed).toBe(1);
     expect(robot).toEqual({ x: 2, y: 1, facing: 1 });
+  });
+});
+
+/**
+ * THE ACCEPTANCE ON A REAL BOARD: the level `runChecks` would grade, with the
+ * player's program loaded into the OVERTURE's `ram_prog`, so the moves the
+ * checker applies are the ones a program actually published.
+ *
+ * THE STUB ABOVE PROVES THE GEOMETRY; this proves the wiring. A checker that
+ * loaded nothing would drive a robot with an all-zero program, and a checker that
+ * did not settle would feed the CPU the previous sensor byte -- neither of which
+ * a scripted `LevelIo` can show.
+ *
+ * `halt: false` IS A FACT ABOUT THE LEVEL. The OVERTURE's halt line freezes the
+ * counter on the `move|sN|out` instruction, and both of these programs write
+ * `out` inside their loop, so on the halting board the machine stops after one
+ * move. Measured: the reference program never leaves its first decision.
+ */
+describe('maze on the reference board', () => {
+  const board = (): ReturnType<typeof graphFromBoard> =>
+    graphFromBoard('maze', overtureBoard({ inputId: 'sensors', halt: false }));
+
+  /** The maze level with one check, out of the same spec the stub tests use. */
+  const withGrid = (
+    grid: readonly string[],
+    budget?: number,
+    level: LevelSpec = MAZE_LEVEL,
+  ): LevelSpec => ({
+    ...level,
+    checks: [budget === undefined ? MAZE(grid) : MAZE(grid, undefined, budget)],
+  });
+
+  /** A one-cell-wide corridor with the goal two cells east of the start. */
+  const CORRIDOR = ['#####', '#S.G#'];
+  /** The corridor with a wall where the second forward step would land. */
+  const DEAD_END = ['######', '#S.#G#'];
+  /** The start's left is open, so the reference rule turns left forever. */
+  const TURN_ONLY = ['#####', '#.G.#', '#S..#', '#####'];
+
+  it('walks the reference program to the goal and reports the ticks it spent', () => {
+    // THE C1 ACCEPTANCE FOR THE MAZE. The program reads the sensors at address 0,
+    // decides forward and publishes `move = 1`, then jumps back to 1 with the
+    // sensor byte it already has; the corridor's second decision is the same one,
+    // so it reaches `G`. 31 ticks is the measured cost -- 27 instructions of
+    // loop, two moves -- and proves the program RAN: an all-zero image would
+    // publish move 0 and exhaust the budget instead.
+    const outcome = runChecks(board(), registry, withGrid(CORRIDOR), {
+      text: REFERENCE_PROGRAM,
+    });
+    expect(outcome.failures).toEqual([]);
+    expect(outcome.passed).toBe(true);
+    expect(outcome.ticksUsed).toBe(31);
+  });
+
+  it('fails a player who has typed nothing rather than driving zeros', () => {
+    const outcome = runChecks(board(), registry, withGrid(CORRIDOR), { text: '' });
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures).toHaveLength(1);
+    expect(outcome.failures[0]?.reason).toBe('missing-program');
+    expect(outcome.ticksUsed).toBe(0);
+  });
+
+  it('cannot pass a board with no CPU and no pins at all', () => {
+    // The maze's half of the C2 fail-open: an empty board has no `ram_prog` for
+    // the player's program, and that is reported instead of a robot driven by a
+    // zeroed image -- which would walk forward on every tick and reach a goal
+    // placed to the east.
+    const outcome = runChecks(emptyGraph('maze'), registry, withGrid(['#####', '#SG.#']), {
+      text: RIGHT_HAND_PROGRAM,
+    });
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures[0]?.reason).toBe('missing-io');
+    expect(outcome.failures[0]?.detail).toContain('ram_prog');
+    expect(outcome.ticksUsed).toBe(0);
+  });
+
+  it('fails the run when the program drives into a wall, naming the cell', () => {
+    // The stale-sensor program decides "ahead is open" once and keeps going, so
+    // the wall two cells along is a collision rather than a wrong turn. The
+    // failure names the cell and the facing, which is what a player needs to find
+    // the line of their program that walked into it.
+    const outcome = runChecks(board(), registry, withGrid(DEAD_END), {
+      text: REFERENCE_PROGRAM,
+    });
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures).toHaveLength(1);
+    const failure = outcome.failures[0]!;
+    expect(failure.reason).toBe('mismatch');
+    expect(failure.detail).toContain('wall');
+    expect(failure.detail).toContain('(2,1)');
+    expect(failure.detail).toContain('east');
+    expect(failure.actual).toEqual({ move: FORWARD });
+  });
+
+  it('gives up at the budget on a real board when the program only turns', () => {
+    // The start's left is open, so the reference rule answers `move = 2` on every
+    // pass: a legal robot that never arrives. The record carries the sensors the
+    // circuit was reading, the move it answered with and the cell it gave up in,
+    // and its detail says the last move WAS applied -- which it was, before the
+    // goal test. The code on that last tick is 0, and 0 is the documented `stay`:
+    // the CPU publishes a move only while the instruction that writes `out` is
+    // decoded, and every other tick of its 27-instruction loop reads as stay.
+    const outcome = runChecks(board(), registry, withGrid(TURN_ONLY, 64), {
+      text: REFERENCE_PROGRAM,
+    });
+    expect(outcome.passed).toBe(false);
+    expect(outcome.ticksUsed).toBe(64);
+    const failure = outcome.failures[0]!;
+    expect(failure.reason).toBe('mismatch');
+    expect(failure.actual).toEqual({ move: STAY });
+    expect(failure.detail).toContain('budget');
+    expect(failure.detail).toContain('(1,2)');
+    expect(failure.detail).toContain(`after applying move ${STAY}`);
+  });
+
+  it('walks a wall-following program through a maze worth walking', () => {
+    // A maze whose corridors are one cell wide, and the mirrored program that
+    // reads the sensors on EVERY pass (its loop-backs go to address 0). This is
+    // the route the stub test's independent model takes, driven here by a real
+    // CPU: east to the right-hand wall, then north to the goal. 168 ticks is the
+    // measured cost of the ten moves -- the program's own loop is 27
+    // instructions, and the branch that turns reaches its `out` sooner.
+    const grid = ['########', '#....#G#', '#.##.#.#', '#.#..#.#', '#.#.##.#', '#S.....#', '########'];
+    const outcome = runChecks(board(), registry, withGrid(grid), {
+      text: RIGHT_HAND_PROGRAM,
+    });
+    expect(outcome.failures).toEqual([]);
+    expect(outcome.passed).toBe(true);
+    expect(outcome.ticksUsed).toBe(168);
+  });
+
+  it('drives the board in the documented order: reset, load, then read-write-settle-tick', () => {
+    // I1's protocol for the maze, on the real circuit. The order matters twice
+    // over here: the sensor byte written at tick N is what the CPU samples at the
+    // next edge, and the move the CPU answers with is what the checker applies
+    // before it publishes again.
+    const calls: string[] = [];
+    const net = compile(board(), registry);
+    const bound = bindLevelIo(new Simulation(net, registry), net, MAZE_LEVEL);
+    const io: LevelIo = {
+      ...bound,
+      reset: () => {
+        calls.push('reset');
+        bound.reset();
+      },
+      writeInput: (name) => {
+        calls.push(`writeInput:${name}`);
+        bound.writeInput(name, 0);
+      },
+      settle: () => {
+        calls.push('settle');
+        bound.settle();
+      },
+      readOutput: (name) => {
+        calls.push(`readOutput:${name}`);
+        return bound.readOutput(name);
+      },
+      tick: () => {
+        calls.push('tick');
+        bound.tick();
+      },
+    };
+
+    const outcome = callMaze(io, MAZE_LEVEL, MAZE(CORRIDOR, undefined, 2), PLAYER);
+    expect(outcome.passed).toBe(false);
+
+    const firstRead = calls.indexOf('readOutput:move');
+    expect(firstRead).toBeGreaterThan(0);
+    expect(calls.slice(0, firstRead)).toContain('reset');
+    expect(calls.slice(firstRead)).toEqual([
+      'readOutput:move',
+      'writeInput:sensors',
+      'settle',
+      'tick',
+      'readOutput:move',
+      'writeInput:sensors',
+      'settle',
+      'tick',
+    ]);
   });
 });

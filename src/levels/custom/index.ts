@@ -1,5 +1,5 @@
+import { CUSTOM_BUDGET_CAP, type LevelIo, type PlayerProgram } from '../checks';
 import type { CheckOutcome, CustomCheck, LevelSpec } from '../spec';
-import type { LevelIo, PlayerProgram } from '../checks';
 
 /**
  * A level-specific checker: the escape hatch for puzzles no declarative check
@@ -167,4 +167,43 @@ export function ioIssue(spec: LevelSpec, checker: string, io: CheckerIo): string
     }
   }
   return undefined;
+}
+
+/**
+ * The outcome that fails a check whose own data cannot be played: one `invalid`
+ * record, keyed by nothing, with the sentence that names what is wrong.
+ *
+ * ONE SHAPE FOR BOTH CLOSED-LOOP CHECKERS, because a failure record is a thing
+ * the panel renders and a reviewer reads: `inputs`/`expected`/`actual` are empty
+ * because a refused check drives no pin, and the empty maps are the honest
+ * statement of that -- the level's pin ids are checked by `runChecks`, so a
+ * record keyed by a pin this check never touched would be a lie the kernel
+ * cannot catch.
+ */
+export function invalidOutcome(detail: string): CheckOutcome {
+  return {
+    passed: false,
+    failures: [
+      { check: 'custom', inputs: {}, expected: {}, actual: {}, tick: 0, reason: 'invalid', detail },
+    ],
+    ticksUsed: 0,
+  };
+}
+
+/**
+ * The budget a closed-loop check actually runs, or `null` when the declared one
+ * is unusable.
+ *
+ * AN OVER-CAP BUDGET IS CLAMPED, NOT REFUSED, following `FUZZ_ROUNDS_CAP`: it is
+ * a usable request for more work than `grade()` can afford on a board edit (one
+ * unit is a full settle of the circuit), so the check gets the most it can have.
+ * A budget that is not a positive integer is a different thing -- a defect in the
+ * level, with no sensible interpretation -- and the caller refuses it as
+ * `invalid` like every other bad field. `fallback` is the checker's own default,
+ * which is the same ceiling, so a check that declares nothing is already at it.
+ */
+export function effectiveBudget(declared: unknown, fallback: number): number | null {
+  if (declared === undefined) return fallback;
+  if (typeof declared !== 'number' || !Number.isInteger(declared) || declared <= 0) return null;
+  return Math.min(declared, CUSTOM_BUDGET_CAP);
 }
