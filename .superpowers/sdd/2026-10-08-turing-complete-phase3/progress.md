@@ -25,9 +25,9 @@ Started: 2026-10-08（Asia/Shanghai），基线 `pnpm test` 37 文件 / 1227 用
 | 任务 | 内容 | 状态 | 证据 |
 |---|---|---|---|
 | T1 | 起始电路 `board` | **已完成**（含两次修正） | `9c92d0c` + `b62c4f5` + `8972931`；`pnpm test` 38 文件 / **1246 通过**；`pnpm build` 干净；`pnpm smoke` **20 通过（22.5s）** |
-| T2 | 玩家程序通路 + 存档 | 未开始 | |
-| T3 | `src/asm/image.ts` 机器码格式 | 未开始 | |
-| T4 | `lock` / `maze` 两个闭环检查器 | 未开始 | |
+| T2 | 玩家程序通路 + 存档（并入 T3） | **已完成**（评审：APPROVED WITH MINOR ISSUES，遗留已并入 T4 的 Part A） | `3fac5ed` + `53d28b6` + `417b76f`；`pnpm test` 39 文件 / **1279 通过**；`build` 干净；`smoke` 20 通过 |
+| T3 | `src/asm/image.ts` 机器码格式（并入 T2） | **已完成** | `53d28b6`；`test/levels/image.test.ts` 10 个用例 |
+| T4 | `lock` / `maze` 两个闭环检查器（并入 T2 评审遗留） | **已完成**（评审进行中） | `5601acc` + `e9dee5b` + `ef3b47f` + `e8b9fb5`；`pnpm test` 41 文件 / **1331 通过**；`build` 干净；`smoke` 20 通过 |
 | T5 | `Simulation.readState` + `src/levels/run.ts` | 未开始 | |
 | T6 | 汇编 IDE + 调试面板 | 未开始 | |
 | T7 | 第 50–52 关 | 未开始 | |
@@ -114,6 +114,113 @@ Started: 2026-10-08（Asia/Shanghai），基线 `pnpm test` 37 文件 / 1227 用
 
 **遗留（不阻塞）**：`calc` 的保留 op 6/7 只有 `defs-cpu` 测试与注释覆盖，
 没有板级行为测试（已并入上面第 2 条待办）。
+
+### T2 + T3 玩家程序通路与机器码格式 — 已完成（评审：APPROVED WITH MINOR ISSUES）
+
+**执行裁决（成本）**：把原计划的 T3（`src/asm/image.ts`）并入 T2 同一次派发，减少一轮实现者与
+评审的往返。T3 以独立提交 `53d28b6` 落地，评审覆盖两次提交。
+
+**提交**：`3fac5ed`（T1 评审的五条遗留）、`53d28b6`（`parseImage`）、`417b76f`（通路 + 存档）。
+
+**实测**：`pnpm test` 39 文件 / 1279 用例全绿；`pnpm build` 干净；`pnpm smoke` 20 通过。
+`53d28b6` 另用 stash 单独验证过（1259 用例、tsc 0）。
+
+**评审确认**：通道解析无泄漏（缺第四参 / `''` / 纯空白 → `missing-program`；关卡通道与玩家通道
+互不串用、各有测试）；`Progress` 只有 `emptyProgress`/`migrate`/`applyGrade` 三个构造点，
+三者都带上 `programs`（实现者自己发现：不改 `applyGrade` 会让每次通关静默删掉玩家程序——
+这是本阶段最有价值的一处自查）；`stripComment` 共享后汇编器行为未变。
+
+**评审遗留 → 已并入 T4 Part A**：`grade()` 第四参转发缺覆盖（0/100 调用点）；未知
+`from`/`format` 静默回退（`from:'players'` 会静默评关卡自己的文本）；`parseImage` 只认 U+0020
+作分隔符（制表符会报引号里看不见的字符）。
+
+**实现者的两个判断（已接受）**：「空字段」定义为连续两个空白（字面规则会*接受* `1011  0101`，
+只有这个读法才产出错误）；`parseImage` 的规则同时写进模块头部，便于 IDE 帮助面板引用。
+
+### T4 闭环检查器（lock / maze）— 已完成（评审进行中）
+
+**提交**：`5601acc`（空白分隔）、`e9dee5b`（`params` + 玩家程序 + 通路因子化）、
+`ef3b47f`（lock）、`e8b9fb5`（maze）。
+
+**实测**：`pnpm test` 41 文件 / 1331 用例全绿；`pnpm build` 干净；`pnpm smoke` 20 通过。
+
+**落地形态**：`resolveProgramText`（通道规则）、`loadProgramImage`（解析 + 定位 ram_prog +
+`reset()` 后载入）从程序分支因子化并导出，程序分支的失败记录保持逐字节不变；
+`CustomChecker(io, spec, check, player?)` 让检查器拿到自己的 `params` 与玩家程序；
+两个检查器只用 `io.reset/writeInput/readOutput/tick`（不碰 `io.sim`），因此可以用
+`test/fixtures/level-io.ts` 的脚本化 stub 直接做单元测试（18 + 26 个用例）。
+
+**实现者的偏差（评审需复核）**：
+1. `loadProgramImage` **没有** `spec` 参数（`noUnusedParameters` 会拒绝未用参数，且该函数不从
+   关卡取任何东西，唯一关卡来源是 `check.ram`）。
+2. 简介里「右手沿墙解 L 形迷宫」不可满足：右手法则解不了普通 L 形走廊（右侧敞开会被转回去），
+   测试改为「单格宽闭环迷宫 + 参考算法 10 拍到达终点并断言路线」。
+3. `test/fixtures/level-io.ts` 的 stub 带一处有注释的 cast（`sim`）。
+
+### T4 闭环检查器（lock / maze）— 评审 **CHANGES REQUIRED**，修复中（T4b）
+
+**评审实测**：`pnpm test` 41 文件 / 1331、`build`、`smoke` 20 全绿——**但绿的门禁掩盖了两个真缺陷**，
+因为两个检查器的单元测试走的是脚本化 stub，stub 只模仿接口、不模仿内核时序。
+
+**Critical（必须修）**
+- **C1 玩家程序根本没进电路。** `callLock(io, _spec, _check, _player)` 忽略玩家参数、什么都没载入；
+  `loadProgramImage` 的唯一调用者是 `program` 分支，而每个 check 各自一个 `Simulation`，
+  兄弟 check 帮不上忙。按计划第 54 关只有 `custom: lock` 一个检查器 ⇒ `ram_prog` 全 0、
+  玩家的程序从不执行、**关卡无解**（除非 secret 为 0）。
+- **C2 没有任何检查器复位电路，第一次 `readOutput` 读到的是伪造的 0。** `createSim` 只编译绑定，
+  custom 分支不复位；于是 `lock` 在 `secret: 0` 时会**在任意板子上通过**（包括没有 CPU、
+  连 `IN_match`/`OUT` 都没有的板子），`ticksUsed: 0`——这是一个 fail-open 的通过。
+
+**Important**：I1 写输入后不 settle 直接 tick，会锁存**上一拍**的字节（内核注释写明），
+而第 4 章参考板把输入脚经组合逻辑接到 CPU，两个检查器的注释却断言相反；
+I2 `params.budget` 没有上限（1e9 会让每次编辑都跑十亿次 settle，`FUZZ_ROUNDS_CAP` 就是为这类事存在的）；
+I3 两处记录与事实不符（maze 说最后一拍「未施加」其实已施加并已锁存；lock 的 budget 单位是拍、
+maze 的是步，注释与测试互相矛盾）；I4 检查器硬编码引脚名却忽略 `spec`，关卡换了引脚名就会
+把 `invalid` 的锅甩给检查器而不是关卡数据。
+
+**修复（T4b）**：检查器自己载入玩家程序（共享 helper）、开头 `io.reset()`、
+给 `LevelIo` 加 `settle()` 并把协议改成「读输出 → 写输入 → settle → tick」、
+给 budget 加上限常量、改正失实记录、开头上前校验关卡引脚；
+**并要求用真实电路（`overtureBoard` + 内核 `compile`/`bindLevelIo` + `runChecks` + 参考程序）
+写验收测试**——这三条缺陷正是因为测试只走 stub 才活下来的。
+
+**评审也确认了做对的部分**：通道解析无泄漏、失败记录契约（除 I3）、迷宫四向与边界几何正确、
+机器人不会走出网格、`ticksUsed` 语义与 `Math.max` 合并正确、没有重复计数或漏掉最后一拍、
+未触碰 `src/levels/content/**` 与 `testcases.test.ts`。
+
+### T4b 修复（评审 CHANGES REQUIRED 的回应）— 已完成
+
+**提交**：`0300bcd`（`LevelIo.settle()` + 协议）、`1f654d9`（检查器载入玩家程序 + 复位 + budget 上限 +
+记录改正 + 引脚校验）。**实测**：`pnpm test` 41 文件 / **1360 通过**（+29）；
+`pnpm build` 干净；`pnpm smoke` 20 通过。
+
+**逐条缺陷的红→绿证据**
+- **C1**：真实电路验收测试先红（检查器对着全 0 的 `ram_prog` 读了 4096 拍）；修后参考程序 +
+  `{secret: 42}` **在第 590 拍通过**，空文本 → `missing-program`，载入的镜像与参考字节一致。
+- **C2**：`emptyGraph` + `{secret: 0}` 修前**在第 0 拍通过**（fail-open）；修后 `missing-io` 并点名 `ram_prog`。
+- **I1**：协议日志修前没有 reset/settle；修后为 `reset … readOutput → writeInput → settle → tick`。
+  机器级证据：有 settle 时板子发布**刚写入**的字节（`0x2a`/`0x5c`），没有 settle 时发布**上一拍**的
+  字节（`0x33` vs 应有 `0x5c`）——正是内核注释里的那个陷阱。
+- **I2**：上限测试修前跑了 **14 096** 次交换；修后恰好 **4096**（`CUSTOM_BUDGET_CAP`，超限钳制，
+  非整数/0/负数仍 `invalid`）。
+- **I3**：maze 的「未施加」改为「after applying move 3」；lock 改为恰好 budget 次交换，
+  测试里那句注释现在字面为真并被断言。
+- **I4**：引脚名不符的关卡修前照跑；修后一条 `invalid` 点名缺失/多余/过窄的引脚，什么都不驱动。
+
+**只有真实电路才能暴露的六件事（评审从代码看不出来，实现者测出来了）**
+1. **闭环关卡必须 `halt: false`**：默认板会在第一次 `move|sN|out` 冻住 PC（实测锁卡在 PC=2、
+   `try` 恒 0），第 54/56 关将无解。已写进计划与 `reference-programs.md`。
+2. **参考迷宫程序原本只读一次传感器**：三个回边都跳到地址 1，而读 `inp` 在地址 0。
+   已修正为跳回 0（字节 15/21/25 由 `01` 改 `00`），并用汇编器复核了 27 字节。
+3. **锁的 `match` 在现行机器语义下不可观测**：`out` 是组合输出、只在写它的那条指令期间发布，
+   读 `match` 是另一条指令，那一拍 `out` 已回落为 0 ⇒ 程序采样到的 match 恒 0，
+   参考程序的「找到就自旋」分支实际不执行。**本阶段不改机器**（给 `out` 加寄存会推翻第 3 章的
+   `halt` 教学设计），而是把局限如实写进关卡 brief 与最终报告。
+4. **关卡 io 必须 8 位**：板的连接器是 8 位，`match:1`/`sensors:3` 会在 `bindLevelIo` 就宽度不符。
+5. **`secret: 0` 在真实板上第一拍即通过**（板子在任何指令发布前读到的就是 0）⇒ 关卡数据取 42，并留一条测试钉住这个行为。
+6. `custom/index.ts` 现在从 `checks.ts` 取 `CUSTOM_BUDGET_CAP`，而 `checks.ts` 又从
+   `custom/index.ts` 取 `getCustomCheck`——模块图上多了一条边（两种导入顺序都有测试覆盖，无 TDZ 问题，
+   但属于可以消掉的坏味道，已列入 T6 的清理项）。
 
 ## 延后项（本阶段结束时汇总给用户）
 

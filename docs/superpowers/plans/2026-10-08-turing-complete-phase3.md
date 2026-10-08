@@ -132,9 +132,23 @@ spec §6.3 的清单里，`断点` 需要一个常驻执行循环与断点命中
 | 51 | `ch4-51-assembly-programming` | 汇编程序 / Assembly Programming | `in:8` → `out:8` | `program`（player, asm） | `out = (in + 3) & 0xff` |
 | 52 | `ch4-52-circumference` | 三番两次 / Circumference | `r:8` → `out:8` | `program`（player, asm） | `out = (6 * r) & 0xff` |
 | 53 | `ch4-53-conditional-jumps` | 条件跳转 / Conditional Jumps | `n:8` → `out:8` | `program`（player, asm） | `out = (n + (n-1) + … + 1) & 0xff`（计数到 0 的循环） |
-| 54 | `ch4-54-code-breaker` | 道破心机 / Code Breaker | `match:1` → `try:8` | `custom: lock` | 逐值试探，直到 `match` 读到 1 |
+| 54 | `ch4-54-code-breaker` | 道破心机 / Code Breaker | `match:8` → `try:8` | `custom: lock` | 逐值试探；检查器读到 `try == secret` 的那一拍通过 |
 | 55 | `ch4-55-mod-4` | 高速掩码 / Mod 4 | `in:8` → `out:8` | `program`（player, asm） | `out = in & 3` |
-| 56 | `ch4-56-the-maze` | 路在脚下 / The Maze | `sensors:3` → `move:2` | `custom: maze` | 沿墙走：左空则左转，否则直行，否则右转 |
+| 56 | `ch4-56-the-maze` | 路在脚下 / The Maze | `sensors:8` → `move:8` | `custom: maze` | 沿墙走：左空则左转，否则直行，否则右转 |
+
+**board 设置（T4b 用真实电路测出，2026-10-08 补记）**：直线关卡（50–53、55）用
+`overtureBoard({ inputId })` 的默认 `halt: true`——程序最后一条 `move|sN|out` 会让 PC 停在
+`out` 指令上，输出保持住，这正是第 3 章的设计。**闭环关卡（54、56）必须用 `halt: false`**：
+否则第一次写 `out` 就把 PC 冻住（实测锁在第 2 条指令、`try` 恒为 0），关卡无解。
+所以第 4 章只有两种板：`halt` 默认真 / `halt: false`。
+
+**关卡 54 的已知局限（记录在案，报告给用户）**：`out` 是组合输出，只在
+`move|sN|out` 那条指令执行期间发布（这是第 3 章 `halt` 语义的基础，不能改），
+而 CPU 读 `match` 用的是另一条指令 `move|inp|dN`——那一拍 `out` 已经回落到 0，
+所以程序采样到的 `match` 恒为 0，参考程序里「找到就自旋」的分支实际不会被执行。
+关卡仍然可解、且检查器的判据是「在预算内发布了 secret 这个字节」，
+但**「对 match 作出反应」这件事在当前的机器语义下不可观测**。真正的闭环需要给
+`out` 加一级寄存（会推翻第 3 章的教学设计），因此本阶段不改，只如实写进 brief 与报告。
 
 `sensors` 位序：bit0 = 正前方有墙，bit1 = 左侧有墙，bit2 = 右侧有墙（墙为 1）。
 `move` 编码：0 = 原地，1 = 前进，2 = 左转，3 = 右转。二者都由参考 CPU 的 `inp`/`out` 端口
