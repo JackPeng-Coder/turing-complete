@@ -38,6 +38,18 @@ import type { BoardInit, BoardPart, BoardWire } from '../spec';
  * `calc` and REG3 for a `jump` (the condition value). The mux chain is what makes
  * one pair of ports serve all three modes.
  *
+ * THE INPUT PORT IS CHAPTER 4'S ADDITION, AND CHAPTER 3'S MACHINE DOES NOT HAVE
+ * IT. Chapter 3's programs are straight lines and loops over the register file,
+ * so what `move|inp|dN` reads there is code 6 -- `inp` in the ISA's operand
+ * names, and a register the six-register file does not have, which it publishes
+ * as 0 (see `regfile6`). Nothing chapter 3 asserts notices. Every chapter-4 level
+ * reads its input, so `inputId` adds a `level_input` instance named
+ * `IN_<inputId>` and the select that puts it on the source-VALUE path: the byte a
+ * `move` copies is the register file's `a` unless the instruction's [5:3] field
+ * is 6, in which case it is the level's byte. One builder, two shapes -- the
+ * chapter-3 board is this one with the option absent, which is what keeps the
+ * three-star targets chapter 3 measured where they were measured.
+ *
  * `out` IS COMBINATIONAL AND `halt` IS WHAT MAKES THAT HONEST. `out` publishes
  * the `move` source while the instruction being looked at is `move|sX|out`;
  * without the halt the counter would walk on and `out` would fall back to zero,
@@ -78,6 +90,13 @@ export interface OvertureBoardOptions {
    * combinational: the byte is right for one edge and gone the next.
    */
   readonly halt?: boolean;
+  /**
+   * Level input pin id: when given, the board carries a `level_input` instance
+   * `IN_<inputId>` (8 bits) and wires it into the CPU's source path, so
+   * `move|inp|dN` copies the level's input. Absent means the chapter-3 machine,
+   * exactly as it is today.
+   */
+  readonly inputId?: string;
 }
 
 /**
@@ -117,10 +136,21 @@ const at = (col: number, row: number): { x: number; y: number } => ({
  * instance ids follow: the level's clock connector is named (a level binds it as
  * `IN_clk`), the rest come out `i1`, `i2`, ... exactly as the editor would have
  * named them.
+ *
+ * `inputId` is the one thing that changes the list: a board asked for a level
+ * input carries the connector, the byte-constant and the two parts that put it
+ * on the source path, and nothing else about the machine moves. When it is
+ * absent the parts below are exactly the chapter-3 machine, in the same order.
  */
-function placedParts(fiveBits: boolean): readonly Placed[] {
+function placedParts(fiveBits: boolean, inputId: string | undefined): readonly Placed[] {
   return [
     { role: 'clk', def: 'level_input', id: 'IN_clk', ...at(0, 0) },
+    // The level's input pin, next to the clock: both are pins the LEVEL owns
+    // rather than parts of the machine, and `levels/checks.ts` binds them by the
+    // ids `IN_<pin>` / `OUT`.
+    ...(inputId === undefined
+      ? []
+      : [{ role: 'IN', def: 'level_input', id: `IN_${inputId}`, width: 8, ...at(0, 1) }]),
     { role: 'on', def: 'const_on', ...at(0, 2) },
     { role: 'off', def: 'const_off', ...at(0, 3) },
 
@@ -154,6 +184,10 @@ function placedParts(fiveBits: boolean): readonly Placed[] {
     { role: 'ONE', def: 'maker', ...at(4, 6) },
     { role: 'TWO', def: 'maker', ...at(4, 9) },
     { role: 'THREE', def: 'maker', ...at(4, 12) },
+    // The byte 6 -- the operand code `inp` -- is one more constant in the same
+    // column, and only a board that carries a level input needs it: it is what
+    // the source field is compared against (see the `srcData` wires).
+    ...(inputId === undefined ? [] : [{ role: 'SIX', def: 'maker', ...at(4, 15) }]),
 
     // The two read addresses, the write address, and the register file they
     // address.
@@ -165,6 +199,16 @@ function placedParts(fiveBits: boolean): readonly Placed[] {
     // The ALU and the write data: d1 is "the ALU's byte for a calc, the register
     // file's for a move", and `data` is that byte or the immediate.
     { role: 'ALU', def: 'alu8', ...at(9, 2) },
+    // The source byte a `move` copies, and the two parts that make it "the
+    // register file's byte, or the level's input when the instruction says so".
+    // `SRC_IS_INP` sits with the constants it is read against; the mux sits
+    // between `RF` and `d1`, which is the path it interrupts.
+    ...(inputId === undefined
+      ? []
+      : [
+          { role: 'SRC_IS_INP', def: 'equal8', ...at(5, 15) },
+          { role: 'srcData', def: 'mux8', ...at(9, 3) },
+        ]),
     { role: 'd1', def: 'mux8', ...at(10, 2) },
     // The five-bit variant slices the immediate before it reaches the mux: the
     // counterexample for level 47, where 63 would arrive as 31.
@@ -213,12 +257,14 @@ function placedParts(fiveBits: boolean): readonly Placed[] {
  */
 export function overtureBoard(options: OvertureBoardOptions = {}): BoardInit {
   const fiveBits = options.immediate === 'fiveBits';
+  /** The level's own input pin, when the board was asked to carry one. */
+  const inputId = options.inputId;
   /** What carries the immediate into the write data: the field, or its five-bit slice. */
   const immediate = fiveBits ? { part: 'IMM5', port: 'out' } : { part: 'DEC', port: 'imm' };
   /** What the counter's load pin listens to besides the halt line: the jump glue. */
   const jumpSignal =
     options.jump === 'never' ? 'off' : options.jump === 'always' ? 'is_jump' : 'taken';
-  const layout = placedParts(fiveBits);
+  const layout = placedParts(fiveBits, inputId);
   const index = new Map(layout.map((part, position) => [part.role, position]));
 
   const part = (role: string): number => {
@@ -236,9 +282,11 @@ export function overtureBoard(options: OvertureBoardOptions = {}): BoardInit {
     to: { part: part(to), port: toPort },
   });
   /**
-   * The eight pins of a `maker`, least significant bit first: the constant byte
-   * REG1 / REG2 / REG3 are built from. Only the low three bits reach the
-   * register file's address pins, and a `maker` reads them all.
+   * The eight pins of a `maker`, least significant bit first: the constant bytes
+   * this machine needs -- REG1 / REG2 / REG3, whose low three bits address the
+   * register file, and the byte 6 the source field is compared against. Every pin
+   * is wired either way: an unwired input reads 0 just the same, and wiring it
+   * says on the page which bits of the constant are zero.
    */
   const byte = (role: string, value: number): readonly BoardWire[] =>
     Array.from({ length: 8 }, (_, bit) =>
@@ -287,6 +335,10 @@ export function overtureBoard(options: OvertureBoardOptions = {}): BoardInit {
     ...byte('ONE', 1),
     ...byte('TWO', 2),
     ...byte('THREE', 3),
+    // The byte 6, which is what `inp` is coded as (`OPERAND_NAMES` in
+    // `asm/isa.ts`): only a board with a level input has anything to compare it
+    // against, and only such a board builds it.
+    ...(inputId === undefined ? [] : byte('SIX', 6)),
     // addrA = move ? src : REG1; a jump reads REG0, because `we` is low then and
     // the switch zeroes the one-hot REG1 selection.
     wire('ONE', 'out', 'addrA1', 'a'),
@@ -308,7 +360,46 @@ export function overtureBoard(options: OvertureBoardOptions = {}): BoardInit {
     wire('RF', 'a', 'ALU', 'a'),
     wire('RF', 'b', 'ALU', 'b'),
     wire('DEC', 'op', 'ALU', 'op'),
-    wire('RF', 'a', 'd1', 'a'),
+    // THE SOURCE-VALUE PATH, AND WHY THE LEVEL INPUT GOES IN HERE RATHER THAN
+    // INTO `addrA`. A `move` copies a VALUE: the byte the register file's `a`
+    // port publishes, which `d1` passes on. A level input wired into `addrA`
+    // instead would be read as a REGISTER NUMBER -- the level's data spent as an
+    // address -- and `move|inp|dN` would copy whichever register that number
+    // happened to name. So the mux stands in front of `d1`, where the byte is a
+    // byte, and the register file keeps its two read ports.
+    //
+    // THE SELECT IS THE FIELD TEST ALONE, WITH NO `is_move` BESIDE IT. The byte
+    // this mux passes reaches the register file only through `d1` and `data`, and
+    // each mode already decides those: `calc` makes `d1` pass the ALU's byte
+    // whatever the source field says, `loadi` makes `data` pass the immediate,
+    // and a `jump` writes nothing at all because `we` is low. So the only
+    // instruction whose written byte is this mux's output IS a `move`, and in a
+    // `move` the field 6 is `inp`. The reserved codes agree with that reading
+    // rather than needing an exception: a `calc` with [5:3] = 6 or 7 publishes 0
+    // from the ALU (`alu8`'s reserved rows), and a jump's condition field is 0-2.
+    // One gate testing `is_move` here would be a second copy of what the mode
+    // decode already says, free to disagree with it.
+    //
+    // `DEC.src` IS THE DECODER'S OWN NAME FOR BITS [5:3] -- the same slice the
+    // jump's glue reads as `op` and decodes into `COND`. The test is a comparison
+    // against the constant 6 rather than one of `COND`'s one-hot lines on
+    // purpose: `COND` is the CONDITION decode, its lines drive `jz`/`jnz`, and a
+    // source path wired to a line the jump's own logic owns would break the day
+    // that decode changed. The rule belongs to the source path, so the source
+    // path states it, in the field's own terms.
+    ...(inputId === undefined
+      ? [wire('RF', 'a', 'd1', 'a')]
+      : [
+          // "the instruction's [5:3] field is 6": `DEC.src` zero-extends into
+          // `equal8`'s eight-bit `a` pin, exactly as it does at `addrA1`.
+          wire('DEC', 'src', 'SRC_IS_INP', 'a'),
+          wire('SIX', 'out', 'SRC_IS_INP', 'b'),
+          // The value path itself: the register file's byte, or the level's.
+          wire('RF', 'a', 'srcData', 'a'),
+          wire('IN', 'out', 'srcData', 'b'),
+          wire('SRC_IS_INP', 'out', 'srcData', 'sel'),
+          wire('srcData', 'out', 'd1', 'a'),
+        ]),
     wire('ALU', 'out', 'd1', 'b'),
     wire('is_calc', 'out', 'd1', 'sel'),
 
