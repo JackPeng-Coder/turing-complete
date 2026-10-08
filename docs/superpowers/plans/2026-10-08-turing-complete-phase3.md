@@ -108,7 +108,7 @@ spec §6.3 的清单里，`断点` 需要一个常驻执行循环与断点命中
 |---|---|---|
 | 1 | `src/levels/spec.ts` | `BoardInit`/`BoardPart`/`BoardWire`；`ProgramCheck.from/format`；`CustomCheck.params` |
 | 2 | `src/levels/board.ts` | `graphFromBoard(levelId, board): Graph` |
-| 3 | `src/levels/boards/overture.ts` | `overtureBoard(): BoardInit`（参考 CPU 的单一来源） |
+| 3 | `src/levels/boards/overture.ts` | `overtureBoard({ inputId }): BoardInit`（第 4 章参考 CPU = 第 3 章机器 + 输入端口通路） |
 | 4 | `src/asm/image.ts` | `parseImage(text)`：逐行 8 位二进制 → 字节 + 行号错误 |
 | 5 | `src/levels/checks.ts` | 程序来源双通路；`programTargets` 导出；`custom` 传参 |
 | 6 | `src/levels/grader.ts` | `grade()` 转发玩家程序 |
@@ -150,7 +150,6 @@ spec §6.3 的清单里，`断点` 需要一个常驻执行循环与断点命中
 - Create: `src/levels/board.ts`（`graphFromBoard`）
 - Create: `src/levels/boards/overture.ts`（`overtureBoard()`）
 - Modify: `src/main.ts:34-47` 与 `:514-523`（开局建图）
-- Modify: `test/fixtures/ch3-references.ts`（`overtureMachine` 改为复用 `overtureBoard()`）
 - Create: `test/levels/boards.test.ts`
 
 **Steps:**
@@ -161,9 +160,23 @@ spec §6.3 的清单里，`断点` 需要一个常驻执行循环与断点命中
 3. 在 `spec.ts` 加类型，在 `board.ts` 实现：`BoardWire` 按**下标**引用 parts
    （`{ part: number; port: string }`），建图时 `i<n>` 实例 id 由下标生成（`i1`, `i2`, …，
    与 `nextId` 同规则），坐标按 `parts[i].x/y` 写入。
-4. `overtureBoard()` 按 `test/fixtures/ch3-references.ts` 的 `overtureMachine` 布局产出
-   `BoardInit`（同一批元件与连线），并把 fixture 改为 `graphFromBoard('ref', overtureBoard())`，
-   确保两份不会漂移。
+4. **（2026-10-08 执行中修正）** `overtureBoard()` **不是** `overtureMachine()` 的副本：
+   第 3 章那台机器**没有输入端口通路**（它的程序是直线/计数程序，从不读 `inp`，
+   `move|inp|dN` 在那里读到的寄存器 6 被寄存器堆发布为 0），而第 4 章每一关都要读输入。
+   因此第 4 章的参考板 = 第 3 章的 CPU 核心（同样的 `ram_prog`/`pc8`/`instr_decoder`/
+   `regfile6`/`alu8`/`halt` 与模式、目的、条件、跳转粘合逻辑）**加上一条输入端口通路**：
+   当指令的 `src` 字段为 6（`inp`）时，`move` 复制的是 `IN_<inputId>` 的值而不是 A 端口。
+   插入点是**源值**通路（`d1` 之前），不是目的索引通路；`equal8` + `mux8`/`switch8` 足够。
+   第 4 章的关卡 io 统一为 **8 位输入 + 8 位输出**（`lock` 的 0/1 与 `maze` 的 3 位传感器
+   都按 8 位承载，位含义写在关卡 brief 里），所以一块板服务全部 7 关：
+   `level_input` 实例 `IN_<inputId>`（8 位）+ `level_output` 实例 `OUT`（8 位）。
+   `overtureMachine()` 的实现**最终改为复用 builder**（`graphFromBoard('ref', overtureBoard(options))`，
+   计划原本禁止、执行后按裁决接受）：理由是它把第 3 章的三组反例旋钮（`jump`/`immediate`/`halt`）
+   留在同一张电路的唯一来源里，避免两份接线漂移；代价是测试专用旋钮进了生产代码，已在文件里
+   注明来源。第 3 章的逐批测试未做任何削弱（评审已核：`git show --name-only` 显示四个提交都没有
+   触碰 `test/levels/ch3-*.test.ts`，第 49 关的 `threeStar {643, 6, 95}` 与逐拍断言仍原样通过）。
+   T1 的验收因此是**行为**而非结构：装载 `B1 8F`（`move|inp|d1` / `move|s1|out`）、
+   写入输入 `0x2A`、跑若干拍后断言 `OUT` 的输入引脚读到 `0x2A`。
 5. `main.ts`：初始状态与 `openLevel` 都改为
    `level.board ? graphFromBoard(level.id, level.board) : emptyGraph(level.id)`。
 6. `pnpm test` + `tsc --noEmit` 全绿；提交 `feat(levels): let a level ship its starting circuit`。
