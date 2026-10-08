@@ -198,6 +198,19 @@ export interface CustomCheck {
   readonly kind: 'custom';
   /** Key into the custom check registry; an unregistered id is `missing-check`. */
   readonly id: string;
+  /**
+   * Plain data for the level-specific checker: numbers, strings and arrays of
+   * them. Absent when the puzzle needs none.
+   *
+   * IT STAYS SERIALISABLE, which is the whole reason a checker is looked up by
+   * id rather than written into the level: what a checker needs to know about a
+   * PUZZLE -- a secret byte, a maze's grid, a budget -- belongs in the level
+   * file next to the brief, and everything a checker needs to know about the
+   * CIRCUIT it reads from `io`. Functions and class instances are therefore not
+   * in this type, and a checker that wants one has to keep it in code, not in
+   * level data.
+   */
+  readonly params?: Readonly<Record<string, number | string | readonly number[] | readonly string[]>>;
 }
 
 export type LevelCheck =

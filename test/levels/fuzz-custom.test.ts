@@ -492,8 +492,15 @@ afterEach(() => {
   for (const id of registered.splice(0)) unregisterCustomCheck(id);
 });
 
-/** A checker that drives the level's own pins and reports what it saw. */
-const sweepAnd: CustomChecker = (io, _spec) => {
+/**
+ * A checker that drives the level's own pins and reports what it saw.
+ *
+ * The two trailing arguments of the widened `CustomChecker` contract (the
+ * `custom` check itself, with its `params`, and the player's program) are
+ * ignored here: this fixture reads the circuit through `io` and nothing else,
+ * which is still a legal checker.
+ */
+const sweepAnd: CustomChecker = (io, _spec, _check, _player) => {
   const failures: CheckFailure[] = [];
   for (const [a, b] of [
     [0x0f, 0x33],
@@ -523,8 +530,20 @@ const sweepAnd: CustomChecker = (io, _spec) => {
 };
 
 describe('runChecks / custom', () => {
-  const customSpec = (id: string, level: LevelSpec = andLevel): LevelSpec =>
-    withChecks(level, [{ kind: 'custom', id }]);
+  /**
+   * The check under test, with room for a `params` record.
+   *
+   * `params` is what a level says about its PUZZLE -- a secret byte, a maze grid
+   * -- and the checker reads it from the check it was called with. It defaults to
+   * absent here, because a checker that needs no puzzle data must keep working
+   * without one.
+   */
+  const customSpec = (
+    id: string,
+    level: LevelSpec = andLevel,
+    params?: Readonly<Record<string, number | string | readonly number[] | readonly string[]>>,
+  ): LevelSpec =>
+    withChecks(level, [params === undefined ? { kind: 'custom', id } : { kind: 'custom', id, params }]);
 
   it('ships no custom checks of its own', () => {
     expect(customCheckIds()).toEqual([]);
@@ -535,7 +554,9 @@ describe('runChecks / custom', () => {
     useChecker('sweep-and', (io, spec) => {
       calls += 1;
       expect(spec.id).toBe('test-fuzz-and8');
-      return sweepAnd(io, spec);
+      // `sweepAnd` is a `CustomChecker`, so its two trailing parameters exist
+      // even though this fixture reads neither of them.
+      return sweepAnd(io, spec, { kind: 'custom', id: 'sweep-and' });
     });
 
     const outcome = runChecks(andCircuit(), registry, customSpec('sweep-and'));
@@ -547,6 +568,25 @@ describe('runChecks / custom', () => {
     const result = grade(andCircuit(), registry, customSpec('sweep-and'));
     expect(result.passed).toBe(true);
     expect(result.metrics.tick).toBe(2);
+  });
+
+  it('hands the checker its own `params`, and nothing when the check declares none', () => {
+    // `params` is where a level says what its PUZZLE is -- a secret byte, a maze
+    // grid -- so a checker that could not read it would have to hard-code one
+    // level into code and stop being reusable. Absent stays absent rather than
+    // becoming `{}`: the two are different statements about the puzzle, and the
+    // shipped checkers test for the field they need.
+    const seen: unknown[] = [];
+    useChecker('reads-params', (io, spec, check) => {
+      seen.push(check.params);
+      return sweepAnd(io, spec, check);
+    });
+
+    expect(
+      runChecks(andCircuit(), registry, customSpec('reads-params', andLevel, { secret: 42 })).passed,
+    ).toBe(true);
+    expect(runChecks(andCircuit(), registry, customSpec('reads-params')).passed).toBe(true);
+    expect(seen).toEqual([{ secret: 42 }, undefined]);
   });
 
   it('adopts the failure records of a registered checker verbatim', () => {

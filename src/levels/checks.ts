@@ -858,7 +858,13 @@ export function runChecks(
         let outcome: unknown;
         let issue: string | undefined;
         try {
-          outcome = checker(io, spec);
+          // The check itself is handed over as well as the level, because a
+          // checker's `params` live on the check -- that is what keeps a puzzle's
+          // data (a secret byte, a maze grid) in the level file rather than in
+          // the checker's code -- and `player` is forwarded for the same reason
+          // `program` reads it: the closed-loop checkers drive a program the
+          // player wrote, not one the level ships.
+          outcome = checker(io, spec, check, player);
           // Read inside the same `try` as the call: an outcome whose `passed`,
           // `failures` or `ticksUsed` accessor throws is a hostile return value,
           // not kernel code, and the outer `catch` rethrows everything that is
@@ -999,11 +1005,52 @@ export function runChecks(
         // shipping one of its own, or an empty buffer would be graded as a pass
         // against text the player never wrote.
         //
+        // A THIRD SPELLING IS REFUSED RATHER THAN DEFAULTED, and that is the same
+        // rule one step further out. Both fields select by equality, so a typo
+        // (`from: 'players'`) would otherwise fall through to the default -- and
+        // a level that ships a `source` beside a misspelled `from` would grade
+        // the level's text while the author believed they were grading the
+        // player's, which is precisely the silent fallback the paragraph above
+        // exists to prevent. Naming the value and the field is what makes the
+        // typo findable, because nothing else in the run preserves the spelling.
+        const source = programOption(check.from, ['level', 'player']);
+        if (source.kind === 'invalid') {
+          failures.push(
+            failure(
+              check,
+              {},
+              {},
+              {},
+              0,
+              'invalid',
+              null,
+              `program check declares from=${describeValue(source.value)}; it must be "level" or "player"`,
+            ),
+          );
+          continue;
+        }
+        const reader = programOption(check.format, ['asm', 'bytes']);
+        if (reader.kind === 'invalid') {
+          failures.push(
+            failure(
+              check,
+              {},
+              {},
+              {},
+              0,
+              'invalid',
+              null,
+              `program check declares format=${describeValue(reader.value)}; it must be "asm" or "bytes"`,
+            ),
+          );
+          continue;
+        }
+
         // An absent `player`, or one whose `text` is not a string, is an empty
         // text rather than a `TypeError`: `runChecks` runs on every board edit,
         // and the app calls it with no buffer at all while a level is still being
         // opened.
-        const fromPlayer = check.from === 'player';
+        const fromPlayer = source.value === 'player';
         const text = fromPlayer
           ? typeof player?.text === 'string'
             ? player.text
@@ -1053,49 +1100,44 @@ export function runChecks(
         // programming chapter, assembly otherwise. Neither parser throws, so a
         // refusal is a failure record here rather than an exception on the
         // board-edit path.
-        const image = check.format === 'bytes' ? imageOfBytes(text) : imageOfAssembly(text);
-        if ('detail' in image) {
-          failures.push(failure(check, {}, {}, {}, 0, 'invalid', null, image.detail));
-          continue;
-        }
-        if (image.bytes.length === 0) {
-          // An empty or comment-only text is a legal zero-byte program to both
-          // readers; loading it would exercise no instruction at all, which is
-          // the same hazard as an empty `steps` array.
+        //
+        // The parse, the targets and the load are one helper (`loadProgramImage`)
+        // rather than three steps here, because a custom checker that drives a
+        // program of its own -- chapter 4's code lock is the first -- has to do
+        // exactly these three things, and a second copy of the reset-then-load
+        // ordering is a second place to get that ordering wrong. Everything it
+        // reports is the same three sentences the branch used to build inline:
+        // the reader's line-numbered refusal, "there is no `ram_prog`", and the
+        // kernel's own `RangeError` for an oversized image or a `ram` id this
+        // netlist does not have, which the `catch` below absorbs as `invalid` --
+        // neither reader enforces `ram_prog`'s capacity, so a 257-byte program
+        // still reaches the kernel and is refused there.
+        const image = loadProgramImage(io, text, reader.value, check.ram);
+        if (image.errors.length > 0) {
+          // A ZERO-BYTE PROGRAM IS A DIFFERENT FAILURE FROM A REFUSAL, and the
+          // helper says which one it is. An empty or comment-only text is a legal
+          // program to both readers -- nothing here parses badly -- yet it
+          // exercises no instruction at all, which is the same hazard as an empty
+          // `steps` array: that keeps the `missing-program` reason and the
+          // `bytes: 0` record the branch wrote before the helper existed. A
+          // reader's refusal is `invalid`, and a circuit with no `ram_prog` is
+          // `missing-io`; both carry the same sentence they always did.
+          const empty = image.emptyProgram;
           failures.push(
             failure(
               check,
               {},
-              { bytes: 1 },
-              { bytes: 0 },
+              empty ? { bytes: 1 } : {},
+              empty ? { bytes: 0 } : {},
               0,
-              'missing-program',
+              empty ? 'missing-program' : image.reason,
               null,
-              `${fromPlayer ? 'the player' : 'the program source'} compiles to zero bytes: no instruction would ever execute`,
+              image.errors[0]!,
             ),
           );
           continue;
         }
 
-        const targets = programTargets(check, graph);
-        if ('detail' in targets) {
-          failures.push(failure(check, {}, {}, {}, 0, 'missing-io', null, targets.detail));
-          continue;
-        }
-
-        // The image is loaded after the reset, and that ordering is the whole
-        // point: `reset()` clears every storage byte, and `runChecks` compiled
-        // this circuit before any branch ran, so an image written earlier would
-        // be gone before the first step read it.
-        //
-        // An image longer than the instance's state, or a `ram` id this netlist
-        // does not have, is `Simulation.loadImage`'s `RangeError` -- absorbed by
-        // the `catch` below as an `invalid` failure, never thrown out of
-        // `runChecks`. Neither reader enforces `ram_prog`'s capacity, so a
-        // 257-byte program reaches the kernel and is refused there.
-        io.reset();
-        for (const id of targets.ids) io.sim.loadImage(id, image.bytes);
-        io.sim.settle();
         ticksUsed = Math.max(ticksUsed, driveSteps(io, spec, check, steps, failures));
         continue;
       }
@@ -1172,6 +1214,146 @@ function stepAsserts(step: unknown): boolean {
 }
 
 /**
+ * One of a `program` check's two enumerated options: the value to use, or the
+ * value to refuse.
+ *
+ * WHY AN UNKNOWN VALUE IS NOT A DEFAULT. `from` and `format` are each read to
+ * choose between two readers, and the code that reads them is an equality test,
+ * so `'players'` or `'byte'` would silently select the default -- the level's own
+ * text, read as assembly -- and a level that ships a `source` would grade THAT
+ * while its author believed otherwise. The misspelling is reported instead, with
+ * the value and the field named, because the failure record is the only place it
+ * survives.
+ *
+ * ABSENT IS NOT UNKNOWN: an omitted field keeps the documented default, which is
+ * what every level written before the options existed relies on. Level data
+ * reaches the kernel untyped, so `null` is treated as absent too rather than
+ * reported as a misspelling nobody could have typed.
+ */
+function programOption<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): { readonly kind: 'value'; readonly value: T } | { readonly kind: 'invalid'; readonly value: unknown } {
+  if (value === undefined || value === null) {
+    return { kind: 'value', value: allowed[0]! };
+  }
+  if (typeof value === 'string' && allowed.includes(value as T)) {
+    return { kind: 'value', value: value as T };
+  }
+  return { kind: 'invalid', value };
+}
+
+/**
+ * The channel rule: `from: 'player'` reads the caller's buffer, otherwise the
+ * level's own text.
+ *
+ * ONE READER FOR A RULE TWO CALLERS DEPEND ON. `runChecks` grades a check
+ * through it, and a custom checker that drives a program of its own reads the
+ * same text the same way -- chapter 4's code lock hands the player's program to
+ * the CPU before it starts guessing, so it needs exactly this decision and must
+ * not make it differently. The rule itself is `program`'s, argued in the branch
+ * that calls this: the channel is chosen by `from` rather than by which text
+ * happens to be present, so a level that grades the player's program never falls
+ * back to shipping one of its own.
+ *
+ * An absent `player`, or one whose `text` is not a string, is an empty text
+ * rather than a `TypeError`: `runChecks` runs on every board edit, and the app
+ * calls it with no buffer at all while a level is still being opened. A
+ * non-string `source` on the level channel is passed through as it is -- it is
+ * untrusted level data, and the branch that reads it owes the level author the
+ * failure that names it rather than a silent empty program.
+ */
+export function resolveProgramText(check: ProgramCheck, player?: PlayerProgram): string {
+  if (check.from !== 'player') return check.source as string;
+  return typeof player?.text === 'string' ? player.text : '';
+}
+
+/**
+ * Parse/assemble `text` and load it into the circuit's program RAM(s). Never
+ * throws.
+ *
+ * THE THREE STEPS EVERY PROGRAM-TAKING CHECK NEEDS, in the one order that works:
+ * read the text into bytes, decide which `ram_prog` instances those bytes go
+ * into, and reset the circuit BEFORE loading -- `reset()` clears every storage
+ * byte, so an image written before it would be gone before anything could read
+ * it. `runChecks` compiled the circuit before calling this, and the reset is
+ * therefore the last thing that happens to the state before the image lands.
+ *
+ * `bytes` is filled only on success; when `errors` is not empty the load did not
+ * happen at all. Both are returned rather than a discriminated union because the
+ * caller reports the two together: an image that parsed to zero bytes is a
+ * `missing-program` failure whose record says `bytes: 0`, so the caller needs to
+ * know the byte count and the reason in one place.
+ *
+ * `errors` carries the same line-numbered sentences the `program` branch turns
+ * into `detail` today, and `reason` says which failure they belong to: a reader's
+ * refusal is `invalid`, while "there is no `ram_prog` instance to load into" is
+ * `missing-io`. `emptyProgram` marks the one case that is not a refusal at all --
+ * a text both readers accept as zero bytes, which the branch reports as
+ * `missing-program` because it would execute nothing. A `ram` id this netlist
+ * does not have, or an image longer than the instance's state, is
+ * `Simulation.loadImage`'s own `RangeError` and is deliberately NOT caught here:
+ * `runChecks` absorbs it into an `invalid` failure (the same shape it would take
+ * anywhere else in the branch), and a custom checker that calls this gets the
+ * same treatment from the loop around it.
+ *
+ * THE UNNAMED `ram` CASE comes with no extra argument: the ids of every
+ * `ram_prog` instance are read from the COMPILED NETLIST (`io.sim.net`), whose
+ * instance ids `compile` sets from the document ids -- so "every `ram_prog` in
+ * the circuit" means what it always did, and the helper needs no document of its
+ * own. See `programTargets` for why an unnamed `ram` loads all of them and why an
+ * empty list is an error rather than a quiet no-op.
+ *
+ * `spec` IS NOT AN ARGUMENT, and that is a fact about what the load needs rather
+ * than a narrowing of the brief's signature: nothing between the text and the
+ * image is level data. The only level-shaped thing involved is the OPTIONAL
+ * `ram` the caller passes through, which is a name from the check, not from the
+ * level -- so `spec` here would be an argument every caller had to look up and
+ * no line could read.
+ */
+export function loadProgramImage(
+  io: LevelIo,
+  text: string,
+  format: 'asm' | 'bytes',
+  ram?: string,
+): {
+  readonly bytes: readonly number[];
+  readonly errors: readonly string[];
+  /** Which failure reason `errors` belongs to; see the doc comment above. */
+  readonly reason: 'invalid' | 'missing-io';
+  /** True when the text is a legal program of zero bytes rather than a refusal. */
+  readonly emptyProgram: boolean;
+} {
+  const image = format === 'bytes' ? imageOfBytes(text) : imageOfAssembly(text);
+  if ('detail' in image) {
+    return { bytes: [], errors: [image.detail], reason: 'invalid', emptyProgram: false };
+  }
+  if (image.bytes.length === 0) {
+    // An empty or comment-only text is a legal zero-byte program to both
+    // readers; loading it would exercise no instruction at all, which is the
+    // same hazard as an empty `steps` array. `emptyProgram` is what lets the
+    // caller say `missing-program` and print `bytes: 0` instead of reporting a
+    // parse refusal it never saw.
+    return {
+      bytes: [],
+      errors: ['the program compiles to zero bytes: no instruction would ever execute'],
+      reason: 'invalid',
+      emptyProgram: true,
+    };
+  }
+
+  const targets = programTargets(ram, io.sim.net);
+  if ('detail' in targets) {
+    return { bytes: [], errors: [targets.detail], reason: 'missing-io', emptyProgram: false };
+  }
+
+  io.reset();
+  for (const id of targets.ids) io.sim.loadImage(id, image.bytes);
+  io.sim.settle();
+  return { bytes: image.bytes, errors: [], reason: 'invalid', emptyProgram: false };
+}
+
+/**
  * The image an assembly text denotes, or the sentence a failure should carry.
  *
  * ONE SHAPE FOR BOTH READERS. Assembly and the hand-written byte format refuse
@@ -1210,21 +1392,24 @@ function imageOfBytes(text: string): { readonly bytes: readonly number[] } | { r
  * `Simulation.loadImage`'s `RangeError`, which `runChecks` reports as `invalid`,
  * so the check does not second-guess the name here.
  *
- * The list is read from the DOCUMENT (`graph.instances`), because that is where
- * an instance's def id is readable by name; `Simulation.loadImage` resolves each
- * id through `CompiledInstance.key`, which `compile` sets from the same document
- * id. Returning an empty list is not an option: a check that has nowhere to put
- * its program is a `missing-io` failure, not a check that quietly runs nothing.
+ * The list is read from the COMPILED NETLIST, whose `instanceIds()` and
+ * `instanceDefs()` are parallel arrays in evaluation order: an id and its def in
+ * one place, which is what "every `ram_prog` instance" needs. `compile` sets
+ * each `CompiledInstance.key` from the document instance id, so the ids this
+ * returns are the ids `Simulation.loadImage` resolves -- the same ones the
+ * document would give, without the helper having to be handed a `Graph` it does
+ * not otherwise read.
+ *
+ * Returning an empty list is not an option: a check that has nowhere to put its
+ * program is a `missing-io` failure, not a check that quietly runs nothing.
  */
 function programTargets(
-  check: ProgramCheck,
-  graph: Graph,
+  ram: string | undefined,
+  net: Netlist,
 ): { readonly ids: readonly string[] } | { readonly detail: string } {
-  const named = typeof check.ram === 'string' && check.ram !== '' ? check.ram : undefined;
+  const named = typeof ram === 'string' && ram !== '' ? ram : undefined;
   if (named !== undefined) return { ids: [named] };
-  const ids = graph.instances
-    .filter((inst) => inst.def === 'ram_prog')
-    .map((inst) => inst.id);
+  const ids = net.instanceIds().filter((_, index) => net.instanceDefs()[index] === 'ram_prog');
   if (ids.length === 0) {
     return {
       detail:

@@ -1,16 +1,25 @@
-import type { CheckOutcome, LevelSpec } from '../spec';
-import type { LevelIo } from '../checks';
+import type { CheckOutcome, CustomCheck, LevelSpec } from '../spec';
+import type { LevelIo, PlayerProgram } from '../checks';
 
 /**
  * A level-specific checker: the escape hatch for puzzles no declarative check
  * can express (spec §5.2 -- mazes, dance machines, AI duels, space invaders).
  *
- * It receives the kernel's public level interface and the level's own spec, and
- * returns a complete `CheckOutcome`, so it decides its own ticks and its own
- * failure records. Two contracts come with that:
+ * It receives the kernel's public level interface, the level's own spec, the
+ * `custom` check being run (which is where its own `params` live) and the
+ * player's program when one was handed in, and returns a complete
+ * `CheckOutcome`, so it decides its own ticks and its own failure records. Three
+ * contracts come with that:
  *
- *  * `io`/`spec` and nothing else. No network, no real time, no DOM: a custom
- *    checker has to run offline, in the same process, while the player edits.
+ *  * `io`/`spec`/`check`/`player` and nothing else. No network, no real time, no
+ *    DOM: a custom checker has to run offline, in the same process, while the
+ *    player edits. The four arguments are the whole world a checker is allowed
+ *    to read, which is what makes one reviewable in isolation.
+ *  * Only `io.reset` / `io.writeInput` / `io.readOutput` / `io.tick`. Those four
+ *    are the level's whole vocabulary: `io.sim` is reachable for its `tickCount`
+ *    and its `loadImage`, but a checker that settles or reads slots through it
+ *    is driving the board behind `bindLevelIo`'s back -- and, for the same
+ *    reason, behind a test's scripted stub.
  *  * failure records must follow `CheckFailure`'s shape and key their
  *    `inputs` / `expected` / `actual` by the level's own pin ids, with finite
  *    numbers as values, because that is what the failure table renders. A record
@@ -26,17 +35,24 @@ import type { LevelIo } from '../checks';
  * contract: it is reviewed together with the checker, like the verdicts are.
  */
 
-export type CustomChecker = (io: LevelIo, spec: LevelSpec) => CheckOutcome;
+export type CustomChecker = (
+  io: LevelIo,
+  spec: LevelSpec,
+  check: CustomCheck,
+  player?: PlayerProgram,
+) => CheckOutcome;
 
 /**
  * The live registry, keyed by the id a `CustomCheck` names.
  *
- * EMPTY BY DESIGN in phase 1: chapter 2's arithmetic is checked by `fuzz`, and
- * shipping a checker nobody calls would be dead code. Chapter 3 (CPU levels)
- * registers its own by importing a module that calls `registerCustomCheck`, for
- * its side effect, before anything grades a level. A `Map` rather than a frozen
- * object literal because registration is what the mechanism is *for*; nothing
- * here is reachable from level data, which carries ids only.
+ * POPULATED BY IMPORT, not by a list here: each checker module calls
+ * `registerCustomCheck` for its own id when it is first evaluated, and whatever
+ * reads the registry imports the modules it needs. `levels/checks.ts` does NOT
+ * import them -- it only looks ids up -- so a checker that nothing imports is
+ * not silently loaded and cannot be graded; the level set that uses it names the
+ * import, which is where "which checkers ship" is decided. A `Map` rather than a
+ * frozen object literal because registration is what the mechanism is *for*;
+ * nothing here is reachable from level data, which carries ids only.
  */
 const checkers = new Map<string, CustomChecker>();
 
