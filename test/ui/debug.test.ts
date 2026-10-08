@@ -166,7 +166,89 @@ describe('debug panel', () => {
     const { root } = mount({ ticks: () => 7 });
     expect(root.querySelector('.debug-ticks')?.textContent).toContain('7');
   });
+
+  /**
+   * A RE-RENDER THAT CHANGES NOTHING REBUILDS NOTHING.
+   *
+   * `main.ts` renders this panel on every store change, and a pan or a zoom is a
+   * store change: the window is 64 cells and the register block seven rows, so
+   * rebuilding either for a camera move is work done for nothing. The readers in
+   * `levels/run.ts` hand back a FRESH array every call -- `Simulation.readState`
+   * copies -- so the panel cannot ask whether the array is the same one; it has to
+   * ask whether the bytes are.
+   */
+  it('leaves the window and the registers standing when nothing has moved', () => {
+    const image = ramImage();
+    const registers = [0, 0x2a, 0, 0, 0, 0];
+    const { root, render } = mount({
+      ram: () => image.slice(),
+      pc: () => 1,
+      registers: () => registers.slice(),
+      ticks: () => 3,
+      halt: () => false,
+    });
+    // Every reading is a new array with the same contents -- what `ProgramRun`
+    // does -- and nothing else has moved.
+    const before = {
+      bytes: [...root.querySelectorAll('.debug-byte')],
+      regs: [...root.querySelectorAll('.debug-reg')],
+      pc: root.querySelector('.debug-pc'),
+      ticks: node(root.querySelector('.debug-ticks')!.firstChild),
+      halt: node(root.querySelector('.debug-halt')!.firstChild),
+    };
+    render();
+    render();
+    expect([...root.querySelectorAll('.debug-byte')].every((cell, i) => cell === before.bytes[i])).toBe(
+      true,
+    );
+    expect([...root.querySelectorAll('.debug-reg')].every((row, i) => row === before.regs[i])).toBe(
+      true,
+    );
+    expect(root.querySelector('.debug-pc')).toBe(before.pc);
+    // The two text readouts count too: assigning `textContent` replaces the text
+    // node even when the string is identical.
+    expect(node(root.querySelector('.debug-ticks')!.firstChild)).toBe(before.ticks);
+    expect(node(root.querySelector('.debug-halt')!.firstChild)).toBe(before.halt);
+  });
+
+  it('rebuilds the window when the bytes under it actually change', () => {
+    // The guard above must not be a cache that never lets go: the program image
+    // changes when the player edits their program, and the page has to follow.
+    const image = ramImage();
+    const registers = [0, 0x2a, 0, 0, 0, 0];
+    const { root, render } = mount({
+      ram: () => image.slice(),
+      pc: () => 1,
+      registers: () => registers.slice(),
+    });
+    const bytesOf = (): string[] =>
+      [...root.querySelectorAll('.debug-byte')].map((cell) => cell.textContent ?? '');
+    const before = bytesOf();
+    image[1] = 0x99;
+    registers[1] = 0x07;
+    render();
+    const after = bytesOf();
+    expect(after[1]).toBe('99');
+    expect(after).not.toEqual(before);
+    // The registers are rebuilt on the same rule.
+    expect(rows(root)[1]).toContain('0x07');
+  });
 });
+
+/**
+ * A byte per address, distinct enough that a row proves which addresses it shows.
+ *
+ * A FUNCTION rather than one shared array, because the tests that compare two
+ * renders need each mount to own its bytes.
+ */
+function ramImage(): number[] {
+  return Array.from({ length: 256 }, (_, addr) => (addr * 7 + 1) & 0xff);
+}
+
+/** The node itself: identity is what the rebuild guard is about. */
+function node(value: ChildNode | null): ChildNode | null {
+  return value;
+}
 
 /** jsdom reports an inline colour normalised, so a theme colour is compared in kind. */
 function rgbOf(hex: string): string {

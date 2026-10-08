@@ -42,6 +42,17 @@ const PAGE_ROWS = 8;
 const ROW_BYTES = 8;
 const PAGE_BYTES = PAGE_ROWS * ROW_BYTES;
 
+/**
+ * "Nothing has been built yet", which is not the same answer as "there is
+ * nothing to read".
+ *
+ * A reader answering `null` is a READING -- the circuit has no register file, or
+ * the program was refused -- and it has to build the dash rows the first time it
+ * is seen. A plain `null` starting value would make that first build look like an
+ * unchanged re-render.
+ */
+const UNBUILT = Symbol('unbuilt');
+
 /** The six registers `regfile6` keeps, in the order its state stores them. */
 const REGISTERS = ['REG0', 'REG1', 'REG2', 'REG3', 'REG4', 'REG5'] as const;
 
@@ -105,16 +116,30 @@ export function mountDebug(root: HTMLElement, options: DebugOptions): { render()
    */
   let followed = -1;
   /**
-   * What the RAM window was last built from.
+   * What the panel was last built from, so a pan does not rebuild it.
    *
-   * The window is 64 cells, and `main.ts` re-renders the panel on every store
-   * change -- a pan or a click costs the same as a step, and rebuilding eight rows
-   * for either would be work done for nothing. The image (an array the run owns,
-   * so identity is the honest test), the page and the counter's address are what
-   * decide whether any cell would look different.
+   * `main.ts` re-renders this panel on EVERY store change, and a pan or a click
+   * costs the same as a step. The window is 64 cells and the register block seven
+   * rows, and rebuilding either for a camera move is work done for nothing.
+   *
+   * IDENTITY CANNOT DECIDE THAT. `ProgramRun.readRam` and `readRegisters` build a
+   * fresh array out of `Simulation.readState` -- which itself copies -- on every
+   * call, so the array is new even when not one byte has moved, and an identity
+   * test would rebuild every time. What is compared here is therefore the BYTES,
+   * the page, and the addressed byte: what actually decides whether a cell would
+   * look different.
    */
-  let shownRam: { image: readonly number[] | null; first: number; counter: number | null } | null =
-    null;
+  let shownRam: { image: readonly number[]; first: number; counter: number | null } | null = null;
+  /**
+   * The registers and the counter the block was last built from.
+   *
+   * `UNBUILT` rather than `null` as the starting value, and that distinction is
+   * the whole reason the sentinel exists: `null` is a READING -- the run had no
+   * register file to read -- so starting there would make the first render look
+   * like an unchanged one and leave the panel empty.
+   */
+  let shownRegisters: readonly number[] | null | typeof UNBUILT = UNBUILT;
+  let shownPc: number | null | typeof UNBUILT = UNBUILT;
 
   const pageOf = (address: number): number => Math.floor(address / PAGE_BYTES);
 
@@ -130,10 +155,16 @@ export function mountDebug(root: HTMLElement, options: DebugOptions): { render()
   const render = (): void => {
     const image = options.ram();
     const counter = options.pc();
-    ticks.textContent = `${options.ticks()} 拍`;
-
+    const tick = options.ticks();
     const halted = options.halt();
-    halt.textContent = halted === null ? '—' : halted ? '停机' : '运行';
+    // The text is assigned only when the reading actually moved: writing it every
+    // render throws the text node away and builds a new one, and `main.ts` renders
+    // this panel on every store change, pans included.
+    const tickText = `${tick} 拍`;
+    if (ticks.textContent !== tickText) ticks.textContent = tickText;
+
+    const haltText = halted === null ? '—' : halted ? '停机' : '运行';
+    if (halt.textContent !== haltText) halt.textContent = haltText;
     // The instrument's own voice, and never one of the board's value colours: a
     // state is not a signal, and green here would read as the halt pin carrying 1.
     halt.style.color = halted === true ? THEME.title : THEME.textMuted;
@@ -145,14 +176,16 @@ export function mountDebug(root: HTMLElement, options: DebugOptions): { render()
           : '运行：计数器每拍前进';
 
     const registers = options.registers();
-    regs.replaceChildren(
-      ...REGISTERS.map((name, index) => registerRow(name, registers?.[index] ?? null)),
-    );
-    pcRow.replaceChildren(
-      named('PC'),
-      hexCell(counter),
-      decimalCell(counter),
-    );
+    if (shownRegisters === UNBUILT || !sameBytes(registers, shownRegisters)) {
+      shownRegisters = registers;
+      regs.replaceChildren(
+        ...REGISTERS.map((name, index) => registerRow(name, registers?.[index] ?? null)),
+      );
+    }
+    if (shownPc === UNBUILT || counter !== shownPc) {
+      shownPc = counter;
+      pcRow.replaceChildren(named('PC'), hexCell(counter), decimalCell(counter));
+    }
 
     // Follow the counter, but only when it moves to another page: paging by hand
     // while the machine sits still has to stick.
@@ -176,17 +209,32 @@ export function mountDebug(root: HTMLElement, options: DebugOptions): { render()
 
     if (
       shownRam === null ||
-      shownRam.image !== image ||
       shownRam.first !== first ||
-      shownRam.counter !== counter
+      shownRam.counter !== counter ||
+      !sameBytes(image, shownRam.image)
     ) {
-      shownRam = { image, first, counter };
+      shownRam = { image: image ?? [], first, counter };
       ram.replaceChildren(...(image === null ? [emptyRam()] : ramRows(image, first, counter)));
     }
   };
 
   render();
   return { render };
+}
+
+/**
+ * Whether two readings render as the same thing.
+ *
+ * `null` means the run had nothing to say -- no such part, or a program that was
+ * refused -- and is equal only to itself, because the empty state is a different
+ * panel from a page of zeros. Two arrays are compared byte by byte: the readers in
+ * `levels/run.ts` copy out of `Simulation.readState` on every call, so identity
+ * says "changed" every time and only the contents can answer the question the
+ * guard is asking.
+ */
+function sameBytes(a: readonly number[] | null, b: readonly number[] | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 /** One `REGn 0xNN NN` row: the name, the byte in hex, and the same byte in decimal. */
