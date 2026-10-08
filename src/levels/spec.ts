@@ -174,6 +174,64 @@ export type LevelCheck =
   | FuzzCheck
   | CustomCheck;
 
+/**
+ * One component placed on a board a level ships.
+ *
+ * `x` and `y` are canvas world units -- the same coordinates an `Instance`
+ * carries once the board has been read into a graph -- and `width` is that
+ * instance's `params.width`, which a level's own connectors need because
+ * `level_input` and `level_output` declare one-bit pins whatever width the level
+ * gives them.
+ */
+export interface BoardPart {
+  readonly def: string;
+  readonly x: number;
+  readonly y: number;
+  /**
+   * Explicit instance id. Only a level's connectors normally need one, because
+   * `levels/checks.ts` binds a level's pins BY INSTANCE ID (`IN_<pin>` and
+   * `OUT`); every other part is named `i1`, `i2`, ... when the board is read,
+   * exactly as the editor would have named it.
+   */
+  readonly id?: string;
+  readonly width?: number;
+}
+
+/**
+ * One wire of a board. Both ends name a part BY INDEX into `BoardInit.parts`,
+ * plus the pin id on that part.
+ *
+ * By index rather than by instance id because the ids do not exist yet: they are
+ * minted when the board is read into a graph, and a level author writing a board
+ * has nothing to name. The index is as stable as the part list it points into,
+ * which is the same reason a board is written as one flat list rather than as
+ * parts that reference each other.
+ */
+export interface BoardWire {
+  readonly from: { readonly part: number; readonly port: string };
+  readonly to: { readonly part: number; readonly port: string };
+}
+
+/**
+ * A circuit a level opens on, as plain data.
+ *
+ * It exists for the programming chapters: the machine there is one the player
+ * has already built, and rebuilding it before writing a single line of assembly
+ * would be a chapter of the same wiring repeated. It is a STARTING POINT and not
+ * a built-in CPU (Global Constraint 11) -- `graphFromBoard` produces an ordinary
+ * editable `Graph`, so every part and wire of it can be moved or deleted.
+ *
+ * SERIALISABLE ON PURPOSE. Numbers, strings and arrays, no functions and no
+ * class instances, because this lives in a `LevelSpec` and level data is data:
+ * the type does not even reach for `core/graph`, so a board can be written,
+ * compared and stored without building a document out of it first.
+ * `graphFromBoard` in `levels/board.ts` is the one reader.
+ */
+export interface BoardInit {
+  readonly parts: readonly BoardPart[];
+  readonly wires: readonly BoardWire[];
+}
+
 export interface LevelSpec {
   readonly id: string;
   readonly chapter: number;
@@ -187,6 +245,12 @@ export interface LevelSpec {
     readonly outputs: readonly PinSpec[];
   };
   readonly checks: readonly LevelCheck[];
+  /**
+   * The circuit the level opens on. Absent -- as it is on every level of
+   * chapters 1 to 3 -- means an empty board, which is the level where the player
+   * builds the machine in the first place.
+   */
+  readonly board?: BoardInit;
   readonly threeStar?: {
     readonly gate?: number;
     readonly delay?: number;

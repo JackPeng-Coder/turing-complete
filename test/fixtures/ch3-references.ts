@@ -1,5 +1,7 @@
 import type { Graph } from '../../src/core/graph';
 import { addInstance, connect, emptyGraph } from '../../src/core/graph';
+import { graphFromBoard } from '../../src/levels/board';
+import { overtureBoard, type OvertureBoardOptions } from '../../src/levels/boards/overture';
 import { build } from './build';
 
 /** Sets a level `level_output` instance's pin width (`params.width`). */
@@ -617,10 +619,17 @@ export const CH3_BATCH2_REFERENCES: Record<string, () => Graph> = {
 // ---------------------------------------------------------------------------
 
 /**
- * The OVERTURE machine levels 45, 46 and 47 are graded on: one program RAM
- * addressed by the program counter, the decoder, the six-register file, the ALU,
- * the write path, the conditional jump's glue, and the halt line that freezes the
- * counter once the program has put its answer on `out`.
+ * The OVERTURE machine levels 45, 46 and 47 are graded on.
+ *
+ * THE CIRCUIT IS NOT WRITTEN OUT HERE ANY MORE. It is `overtureBoard()` in
+ * `src/levels/boards/overture.ts`, which is also what a chapter-4 level ships as
+ * its starting circuit, and this wrapper exists so that there is exactly ONE of
+ * it. Two copies -- the reference the levels' three-star targets were measured
+ * from, and the board a player is handed -- would be free to drift, and the
+ * drift would read as a pass: the reference would keep grading green against a
+ * machine the levels no longer ship. Read the board module for what the machine
+ * is and why, including the halt line that keeps the answer on `out` and the
+ * instruction-per-edge timing the chapter's walks are written against.
  *
  * ONE BUILDER, THREE LEVELS, and the same graph for all three: 45's straight-line
  * program and 47's loop differ only in the image the check assembles, which is
@@ -628,128 +637,16 @@ export const CH3_BATCH2_REFERENCES: Record<string, () => Graph> = {
  * also builds this machine with the conditional jump short-circuited
  * (`jump: 'never'` and `jump: 'always'`) and asserts the loop program fails both.
  *
- * THE INSTRUCTION IS EXECUTED BY THE EDGE THAT ADVANCES PAST IT. The program RAM
- * is combinational from `PC`, so at the start of a tick the machine is looking at
- * `ram[PC]`; every storage element samples that same decode on the edge -- the
- * register file writes, the counter takes the jump target or its successor -- and
- * the settle that follows publishes the new state. One edge, one instruction.
- *
- * THE READ PORTS. `addrA` is the `move` source, REG1 for a `calc` and REG0 for a
- * `jump` (the jump target, per the compendium's §6.4); `addrB` is REG2 for a
- * `calc` and REG3 for a `jump` (the condition value). The mux chain is what makes
- * one pair of ports serve all three modes.
- *
- * `out` IS COMBINATIONAL AND `halt` IS WHAT MAKES THAT HONEST. `out` publishes
- * the `move` source while the instruction being looked at is `move|sX|out`;
- * without the halt the counter would walk on and `out` would fall back to zero,
- * so the halt line freezes the counter on the `out` instruction's own address and
- * the answer stays put. A player who instead registers the `out` byte passes the
- * same checks (the byte they publish is the same byte), and both are accepted:
- * what the level asserts is the value, not the spelling.
+ * WHY THE OPTIONS ARE STILL DECLARED HERE as a type: they are the batch test's
+ * vocabulary for "this machine, wrong in one named way", and the same three
+ * options are what `overtureBoard()` takes to build one. Re-exporting the board
+ * module's own type rather than restating the fields is what keeps a variant
+ * reaching the board instead of being silently dropped on the floor.
  */
-export interface OvertureOptions {
-  /**
-   * What the counter's load signal does with a jump: this machine's conditional
-   * glue, never (the jump path is short-circuited low), or always (a jump is
-   * taken whatever the condition says).
-   */
-  readonly jump?: 'conditional' | 'never' | 'always';
-  /**
-   * How the immediate reaches the register file: the full six-bit field, a
-   * five-bit slice of it (bit 5 dropped, the classic off-by-one-wire), or not at
-   * all (the `loadi` select tied low, so the write data is always the move
-   * source).
-   */
-  readonly immediate?: 'sixBits' | 'fiveBits' | 'never';
-  /**
-   * Whether writing `out` freezes the counter. `false` ties the halt line low,
-   * which is the machine a player builds when they forget that `out` is
-   * combinational: the byte is right for one edge and gone the next.
-   */
-  readonly halt?: boolean;
-}
+export type OvertureOptions = OvertureBoardOptions;
 
 export function overtureMachine(options: OvertureOptions = {}): Graph {
-  const off = ['off', 'off', 'off', 'off', 'off', 'off', 'off', 'off'] as const;
-  const jumpSignal =
-    options.jump === 'never' ? 'off' : options.jump === 'always' ? 'is_jump' : 'taken';
-  return build([
-    { kind: 'input', name: 'clk' },
-    { kind: 'part', def: 'const_on', id: 'on', from: [] },
-    { kind: 'part', def: 'const_off', id: 'off', from: [] },
-    { kind: 'part', def: 'ram_prog', id: 'RAM', from: ['PC'] },
-    { kind: 'part', def: 'pc8', id: 'PC', from: ['pc_load', 'pc_in'] },
-    { kind: 'part', def: 'instr_decoder', id: 'DEC', from: ['RAM'] },
-    { kind: 'part', def: 'splitter', id: 'MODE', from: ['DEC.mode'] },
-    { kind: 'part', def: 'not', id: 'n_m1', from: ['MODE.b1'] },
-    { kind: 'part', def: 'not', id: 'n_m0', from: ['MODE.b0'] },
-    // 00 loadi, 01 calc, 10 move; `we` is "not 11" and `is_jump` is 11 itself.
-    { kind: 'part', def: 'nor', id: 'is_loadi', from: ['MODE.b1', 'MODE.b0'] },
-    { kind: 'part', def: 'and', id: 'is_calc', from: ['n_m1', 'MODE.b0'] },
-    { kind: 'part', def: 'and', id: 'is_move', from: ['MODE.b1', 'n_m0'] },
-    { kind: 'part', def: 'and', id: 'is_jump', from: ['MODE.b1', 'MODE.b0'] },
-    { kind: 'part', def: 'nand', id: 'we', from: ['MODE.b1', 'MODE.b0'] },
-    { kind: 'part', def: 'decoder3', id: 'DST', from: ['DEC.dst'] },
-    { kind: 'part', def: 'splitter', id: 'DST_BITS', from: ['DST'] },
-    // The condition field is bits [5:3], the same slice the decoder calls `op`.
-    { kind: 'part', def: 'decoder3', id: 'COND', from: ['DEC.op'] },
-    { kind: 'part', def: 'splitter', id: 'COND_BITS', from: ['COND'] },
-    // REG1 / REG2 / REG3 as 8-bit makers: only the low three bits reach `addrA`/`addrB`.
-    { kind: 'part', def: 'maker', id: 'ONE', from: ['on', ...off.slice(1)] },
-    { kind: 'part', def: 'maker', id: 'TWO', from: ['off', 'on', ...off.slice(2)] },
-    { kind: 'part', def: 'maker', id: 'THREE', from: ['on', 'on', ...off.slice(2)] },
-    // addrA = move ? src : REG1; a jump reads REG0 (we is low, so the switch zeroes it).
-    { kind: 'part', def: 'mux8', id: 'addrA1', from: ['ONE', 'DEC.src', 'is_move'] },
-    { kind: 'part', def: 'switch8', id: 'addrA', from: ['addrA1', 'we'] },
-    // addrB = jump ? REG3 : REG2: the condition value, or the ALU's second operand.
-    { kind: 'part', def: 'mux8', id: 'addrB', from: ['TWO', 'THREE', 'is_jump'] },
-    { kind: 'part', def: 'regfile6', id: 'RF', from: ['addrA', 'addrB', 'waddr_final', 'data', 'we'] },
-    { kind: 'part', def: 'alu8', id: 'ALU', from: ['RF.a', 'RF.b', 'DEC.op'] },
-    { kind: 'part', def: 'mux8', id: 'd1', from: ['RF.a', 'ALU', 'is_calc'] },
-    // The five-bit variant slices the immediate before it reaches the mux: the
-    // counterexample for level 46, where 63 would arrive as 31.
-    ...(options.immediate === 'fiveBits'
-      ? ([
-          { kind: 'part', def: 'splitter', id: 'SPIMM', from: ['DEC.imm'] },
-          {
-            kind: 'part',
-            def: 'maker',
-            id: 'IMM5',
-            from: ['SPIMM.b0', 'SPIMM.b1', 'SPIMM.b2', 'SPIMM.b3', 'SPIMM.b4', 'off', 'off', 'off'],
-          },
-        ] as const)
-      : []),
-    {
-      kind: 'part',
-      def: 'mux8',
-      id: 'data',
-      from: [
-        'd1',
-        options.immediate === 'fiveBits' ? 'IMM5' : 'DEC.imm',
-        options.immediate === 'never' ? 'off' : 'is_loadi',
-      ],
-    },
-    // WHERE AN INSTRUCTION WRITES, which is not one field: `loadi` writes REG0
-    // (its six bits ARE the value), `calc` writes REG3 -- its [2:0] slice is
-    // RESERVED and the assembler leaves it zero -- and `move` writes the
-    // destination field it carries.
-    { kind: 'part', def: 'switch8', id: 'waddr', from: ['DEC.dst', 'is_move'] },
-    { kind: 'part', def: 'mux8', id: 'waddr_final', from: ['waddr', 'THREE', 'is_calc'] },
-    // The condition value is REG3, which `addrB` publishes during a jump.
-    { kind: 'part', def: 'equal8', id: 'ZERO', from: ['RF.b', 'off'] },
-    { kind: 'part', def: 'and', id: 'g_jz', from: ['COND_BITS.b1', 'ZERO'] },
-    { kind: 'part', def: 'not', id: 'n_zero', from: ['ZERO'] },
-    { kind: 'part', def: 'and', id: 'g_jnz', from: ['COND_BITS.b2', 'n_zero'] },
-    { kind: 'part', def: 'or3', id: 'inner', from: ['COND_BITS.b0', 'g_jz', 'g_jnz'] },
-    { kind: 'part', def: 'and', id: 'taken', from: ['is_jump', 'inner'] },
-    // Writing `out` is what ends the program: the halt line holds the counter.
-    { kind: 'part', def: 'and', id: 'out_load', from: ['is_move', 'DST_BITS.b7'] },
-    { kind: 'part', def: 'halt', id: 'HALT', from: [options.halt === false ? 'off' : 'out_load'] },
-    { kind: 'part', def: 'mux8', id: 'pc_in', from: ['RF.a', 'PC', 'HALT'] },
-    { kind: 'part', def: 'or', id: 'pc_load', from: [jumpSignal, 'HALT'] },
-    { kind: 'part', def: 'switch8', id: 'out_pin', from: ['RF.a', 'out_load'] },
-    { kind: 'output', from: 'out_pin', width: 8 },
-  ]);
+  return graphFromBoard('ref', overtureBoard(options));
 }
 
 /** Levels 45-47's reference: the machine above. */

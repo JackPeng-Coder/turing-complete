@@ -3,6 +3,7 @@ import { createRegistry } from './core/registry';
 import { BASE_DEFS } from './core/defs/index';
 import { emptyGraph } from './core/graph';
 import { getLevel, LEVEL_ORDER } from './levels/index';
+import { graphFromBoard } from './levels/board';
 import { createStore, type AppState, type Store } from './app/store';
 import { CommandStack } from './app/commands';
 import { grade } from './levels/grader';
@@ -33,7 +34,11 @@ let dev = devModeFrom(globalThis.location.search);
 
 const store: Store<AppState> = createStore<AppState>({
   level,
-  graph: emptyGraph(level.id),
+  // A level that ships a starting circuit opens on it; every other level opens on
+  // an empty board. Either way what the player gets is an ordinary editable
+  // `Graph` -- a starting circuit is a head start, not a fixture nobody can
+  // touch, which is what keeps it a board rather than a built-in CPU.
+  graph: level.board ? graphFromBoard(level.id, level.board) : emptyGraph(level.id),
   registry,
   progress,
   camera: { x: 40, y: 40, zoom: 1 },
@@ -510,10 +515,13 @@ if (app) {
     testResults = [];
     ghost = null;
     // The display is rebuilt from the store's *new* graph, so the store has to
-    // be told about the level change first.
+    // be told about the level change first. The board, when the level ships one,
+    // is read into that new graph the same way the initial one is: reopening a
+    // level is a fresh attempt at its starting circuit, never a resume of what
+    // was on the board before.
     store.set({
       level: next,
-      graph: emptyGraph(next.id),
+      graph: next.board ? graphFromBoard(next.id, next.board) : emptyGraph(next.id),
       selected: [],
       armed: null,
       lastGrade: null,
