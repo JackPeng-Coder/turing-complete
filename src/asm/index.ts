@@ -12,5 +12,7 @@
  */
 export { assemble } from './assemble';
 export type { AssembleError, AssembleResult } from './assemble';
+export { parseImage } from './image';
+export type { ImageParseError, ImageParseResult } from './image';
 export { DEST_CODES, OPERAND_NAMES, OVERTURE_ISA, SOURCE_CODES } from './isa';
 export type { FieldRange, Isa, ModeDef, ModeId, OperandDef, OperandKind } from './isa';

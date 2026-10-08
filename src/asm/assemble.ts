@@ -441,8 +441,15 @@ export function assemble(source: string, isa: Isa): AssembleResult {
   };
 }
 
-/** Everything before the first `#`; the grammar has no strings or escapes. */
-function stripComment(text: string): string {
+/**
+ * Everything before the first `#`; the grammar has no strings or escapes.
+ *
+ * Exported because `image.ts` -- the hand-written machine-code format of the
+ * programming chapter -- has the same comment rule on purpose: a player moving
+ * between the two spellings should not have to learn two. One implementation is
+ * what keeps them the same rule rather than two that agree today.
+ */
+export function stripComment(text: string): string {
   const hash = text.indexOf('#');
   return hash === -1 ? text : text.slice(0, hash);
 }
