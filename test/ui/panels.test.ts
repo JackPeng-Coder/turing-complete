@@ -37,6 +37,7 @@ function makeStore(levelId: string): Store<AppState> {
     dragging: null,
     armed: null,
     dev: false,
+    programs: {},
     metrics: null,
     lastGrade: null,
     status: null,
@@ -507,6 +508,7 @@ describe('level io placement', () => {
       dragging: null,
       armed: null,
       dev: false,
+      programs: {},
       metrics: null,
       lastGrade: null,
       status: null,
@@ -548,6 +550,7 @@ describe('io readout panel', () => {
       dragging: null,
       armed: null,
       dev: false,
+      programs: {},
       metrics: null,
       lastGrade: null,
       status: null,
@@ -774,6 +777,7 @@ describe('chapter map', () => {
         stars: 3,
       },
     },
+    programs: {},
   };
 
   it('shows one tile per level and disables the ones still locked', () => {

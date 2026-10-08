@@ -72,6 +72,24 @@ export interface AppState {
    */
   armed: string | null;
   /**
+   * The player's program text, keyed by level id. `''` for a level never typed
+   * into.
+   *
+   * APP STATE AND NOT A FIELD ON THE GRAPH, because a program is not part of the
+   * circuit: it is what the player is writing, it survives every board edit, and
+   * it is saved per level (`Progress.programs`) so reopening a level restores it.
+   * It is read HERE rather than passed around at the call sites because two
+   * different paths grade a circuit -- the test run (`finishTest`) and the
+   * measurement after every edit (`measure`) -- and both have to hand the program
+   * channel the same text, or a level would pass one and fail the other.
+   *
+   * A `Record` with `''` for the untyped case rather than an optional entry: the
+   * checker already reads an empty text as `missing-program`, so "never typed
+   * here" needs no separate representation -- and one text per level id means the
+   * map cannot disagree with itself.
+   */
+  programs: Record<string, string>;
+  /**
    * What the circuit on the board costs, measured as it is edited.
    *
    * A MEASUREMENT, NOT A VERDICT, and it is a separate field from `lastGrade`

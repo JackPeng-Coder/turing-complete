@@ -46,6 +46,11 @@ const store: Store<AppState> = createStore<AppState>({
   dragging: null,
   armed: null,
   dev,
+  // The programs come out of the loaded save, so reopening the app restores the
+  // text the player left on each level. Nothing writes them yet -- the IDE is a
+  // later task -- but the channel is wired end to end so that the day the editor
+  // arrives it has somewhere to type into.
+  programs: progress.programs,
   metrics: null,
   lastGrade: null,
   status: null,
@@ -257,8 +262,13 @@ if (app) {
     activeCase = null;
     plan = null;
 
-    const { graph, level: current, progress: current0 } = store.get();
-    const result = grade(graph, registry, current);
+    const { graph, level: current, progress: current0, programs } = store.get();
+    // The player's program goes into the verdict: a `program` check that reads the
+    // player's buffer grades the text as it stands at the moment of the run, from
+    // the same snapshot as the circuit. A level that has never been typed into
+    // hands over an empty string, which the checker reports as `missing-program`
+    // rather than running nothing.
+    const result = grade(graph, registry, current, { text: programs[current.id] ?? '' });
     // One state change covers all three readers: the panel takes its verdict,
     // the bar takes the stars, and the board keeps the last case's vector.
     store.set({ lastGrade: result, metrics: result.metrics });
@@ -555,8 +565,18 @@ if (app) {
    * that is no longer on the board.
    */
   const measure = (): void => {
-    const { graph, level: current } = store.get();
-    store.set({ metrics: grade(graph, registry, current).metrics, lastGrade: null });
+    const { graph, level: current, programs } = store.get();
+    // The same program text `finishTest` grades with, because the TICK metric is
+    // read out of the checks: a `program` check that reads the player's buffer
+    // walks the player's program, so measuring it against a different text -- or
+    // against none -- would put a tick count on the bar that the test run could
+    // never reproduce. What is measured is still only gate, delay and tick; the
+    // verdict itself stays `finishTest`'s business.
+    const player = { text: programs[current.id] ?? '' };
+    store.set({
+      metrics: grade(graph, registry, current, player).metrics,
+      lastGrade: null,
+    });
   };
 
   /** Every board edit: the circuit changed, so the display and the measurement did too. */

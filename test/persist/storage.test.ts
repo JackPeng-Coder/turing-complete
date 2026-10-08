@@ -12,6 +12,7 @@ import type { GradeResult } from '../../src/levels/grader';
 import { LEGACY_LEVEL_IDS, RETIRED_LEVEL_IDS } from '../../src/levels/id-map';
 import { LEVEL_ORDER } from '../../src/levels/index';
 import type { LevelSpec } from '../../src/levels/spec';
+import type { Progress } from '../../src/app/progress';
 
 const level: LevelSpec = {
   id: 'ch1-01',
@@ -66,12 +67,83 @@ describe('migrate', () => {
   it('drops a stale top-level unlockedComponents field', () => {
     // the unlocked set is derived now; an old save must not resurrect it
     const migrated = migrate({ version: 1, levels: {}, unlockedComponents: ['nand'] });
-    expect(migrated).toEqual({ version: 1, levels: {} });
+    expect(migrated).toEqual({ version: 1, levels: {}, programs: {} });
   });
 
   it('throws for unknown shapes', () => {
     expect(() => migrate(null)).toThrow(/progress/i);
     expect(() => migrate({ version: 'one' })).toThrow(/progress/i);
+  });
+});
+
+/**
+ * The player's programs, per level.
+ *
+ * A program is the whole of the player's work on a programming level: the board
+ * is given, so losing the text on refresh would lose the level. That is why it
+ * lives in the save at all, and why `migrate` treats it exactly as strictly as it
+ * treats `levels` -- only strings survive, and the keys go through the same id
+ * translation, so a program cannot be attached to a level that no longer exists.
+ */
+describe('migrate / programs', () => {
+  it('keeps the programs and translates their level ids', () => {
+    const migrated = migrate({
+      version: 1,
+      levels: {},
+      programs: {
+        'ch2-13-odd-number-of-signals': 'move|inp|out',
+        'ch1-01-humble-beginnings': '# the echo program\nmove|inp|out',
+      },
+    });
+    expect(migrated.programs).toEqual({
+      'ch2-16-odd-number-of-signals': 'move|inp|out',
+      'ch1-01-humble-beginnings': '# the echo program\nmove|inp|out',
+    });
+  });
+
+  it('drops a program whose value is not a string', () => {
+    // Level ids are player data as much as program text is: a hand-edited or
+    // truncated save must not put a number where the IDE will call `.split()`.
+    const migrated = migrate({
+      version: 1,
+      levels: {},
+      programs: {
+        'ch1-01-humble-beginnings': 'move|inp|out',
+        'ch1-02-nand-gate': 42,
+        'ch1-03-not-gate': null,
+        'ch1-04-and-gate': { text: 'move|inp|out' },
+      },
+    });
+    expect(migrated.programs).toEqual({ 'ch1-01-humble-beginnings': 'move|inp|out' });
+  });
+
+  it('drops the program of a retired level, keeping the ones that still exist', () => {
+    const migrated = migrate({
+      version: 1,
+      levels: {},
+      programs: {
+        'ch2-27-logic-engine': 'move|inp|out',
+        'ch1-02-nand-gate': 'move|inp|out',
+      },
+    });
+    expect(Object.keys(migrated.programs)).toEqual(['ch1-02-nand-gate']);
+  });
+
+  it('reads a save written before programs existed as having none', () => {
+    // The shape the previous build wrote: `version` and `levels` only. It has to
+    // load, with an empty program table, or every existing player's stars would
+    // be thrown away by an upgrade.
+    const migrated = migrate({ version: 1, levels: {} });
+    expect(migrated.programs).toEqual({});
+    expect(migrated).toEqual(emptyProgress());
+  });
+
+  it('survives the export / import round trip with the rest of the save', () => {
+    const p: Progress = {
+      ...emptyProgress(),
+      programs: { 'ch1-01-humble-beginnings': 'move|inp|out' },
+    };
+    expect(importProgress(exportProgress(p))).toEqual(p);
   });
 });
 

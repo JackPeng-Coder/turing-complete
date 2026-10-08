@@ -20,16 +20,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Validates and repairs an untrusted progress payload.
  *
- * Returns a FRESH object holding only `version` and `levels`: a save written by
- * an older build may carry fields that no longer have meaning (the stored
- * `unlockedComponents` set, now derived from level rewards), and copying it
- * through would resurrect them.
+ * Returns a FRESH object holding only `version`, `levels` and `programs`: a save
+ * written by an older build may carry fields that no longer have meaning (the
+ * stored `unlockedComponents` set, now derived from level rewards), and copying it
+ * through would resurrect them. The three fields it keeps are exactly the three
+ * `Progress` declares, so an absent `programs` -- the shape every save written
+ * before the programming chapter has -- reads as an empty program table rather
+ * than as a corrupt one.
  *
  * Level keys are translated through `levels/id-map.ts`. The 2.x realignment
  * changed the id of 37 levels and removed three, and a save is keyed by id -- so
  * without this the player's stars would silently belong to levels that no longer
  * exist. A key that is already current passes through untouched, and one that
  * names a retired level is dropped: there is no level left for it to describe.
+ *
+ * PROGRAM KEYS GET THE SAME TREATMENT, for the same reason and by the same rule:
+ * a program is keyed by the level it was written for, so a retired level's
+ * program is dropped rather than left to be restored onto whatever level
+ * inherits its position. Only string values survive -- level ids are player data
+ * as much as program text is, and a hand-edited save must not put a number where
+ * the IDE will call `.split()`.
  */
 export function migrate(raw: unknown): Progress {
   if (!isRecord(raw)) {
@@ -45,7 +55,14 @@ export function migrate(raw: unknown): Progress {
       if (current !== null) levels[current] = record as LevelRecord;
     }
   }
-  return { version: 1, levels };
+  const programs: Record<string, string> = {};
+  if (isRecord(raw.programs)) {
+    for (const [id, text] of Object.entries(raw.programs)) {
+      const current = currentIdOf(id);
+      if (current !== null && typeof text === 'string') programs[current] = text;
+    }
+  }
+  return { version: 1, levels, programs };
 }
 
 /** Best-effort load; an absent or corrupt store reads as a fresh save. */

@@ -11,6 +11,20 @@ export interface LevelRecord {
 export interface Progress {
   readonly version: 1;
   readonly levels: Record<string, LevelRecord>;
+  /**
+   * The player's program text, keyed by level id.
+   *
+   * SAVED WITH THE STARS because on a programming level the text IS the work:
+   * the board is handed to the player already built (`LevelSpec.board`), so a
+   * refresh that dropped the program would drop the level. Keys are level ids and
+   * go through the same translation as `levels` (`persist/storage.ts`), so a
+   * program cannot outlive the level it was written for.
+   *
+   * Not every level has an entry: the map is sparse, and a level that has never
+   * been typed into simply has no key. `AppState.programs` is the reader's view
+   * of it, with `''` for the missing case.
+   */
+  readonly programs: Record<string, string>;
 }
 
 /**
@@ -44,7 +58,7 @@ export const STARTER_COMPONENTS = [
 export { SCORE_WEIGHTS } from '../levels/grader';
 
 export function emptyProgress(): Progress {
-  return { version: 1, levels: {} };
+  return { version: 1, levels: {}, programs: {} };
 }
 
 /**
@@ -161,6 +175,13 @@ export function paletteDefsFor(
  * checks, so a failed attempt is rejected before anything is written. The
  * comparison is against the grader's own `scoreOf`, not a local re-derivation:
  * one formula, one place to change it.
+ *
+ * `programs` IS CARRIED THROUGH, with the same reference. This function returns a
+ * fresh record holding only the fields it knows about, so a field it forgets is
+ * deleted rather than left stale -- and the moment a level is passed is the worst
+ * moment to lose the player's program, because the run that proves it works is
+ * the run that would erase it. Nothing here edits a program, so the map is shared
+ * rather than copied.
  */
 export function applyGrade(
   progress: Progress,
@@ -183,5 +204,6 @@ export function applyGrade(
         stars: Math.max(previous?.stars ?? 0, result.stars) as 0 | 1 | 3,
       },
     },
+    programs: progress.programs,
   };
 }

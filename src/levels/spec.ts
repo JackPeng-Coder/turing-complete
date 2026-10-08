@@ -56,25 +56,59 @@ export interface ProgramStep {
 }
 
 /**
- * Assembles `source` and drives the circuit through a program, offline.
+ * Compiles a program into an image and drives the circuit through it, offline.
  *
- * The image is compiled from the text below by the assembler and from nothing
- * else: no real time, no network, no `Math.random()`, so the same level always
- * grades the same way. The checker puts the bytes into the circuit's program RAM
- * and then drives the steps, and what it compares is the CIRCUIT's output, never
- * the assembler's.
+ * TWO CHANNELS, ONE CHECK KIND. Chapters 1-3 grade a circuit against a program
+ * the LEVEL wrote: the player builds the machine, and the level's own `source` is
+ * what proves it runs. Chapter 4 turns that around -- the machine is given and
+ * the player writes the program -- so `from: 'player'` reads the text from the
+ * buffer the app hands `runChecks` instead. Everything after the image is loaded
+ * is identical either way: the same `ram_prog`, the same steps, the same driver
+ * as `script`. A second kind would be a second set of tick semantics to keep in
+ * agreement.
+ *
+ * The image is compiled from that text by the assembler -- or, with
+ * `format: 'bytes'`, by the hand-written machine-code reader (`asm/image.ts`) --
+ * and from nothing else: no real time, no network, no `Math.random()`, so the
+ * same level always grades the same way. The checker puts the bytes into the
+ * circuit's program RAM and then drives the steps, and what it compares is the
+ * CIRCUIT's output, never the compiler's.
  *
  * Omitting `steps`, declaring it empty, or declaring steps that assert nothing
  * is a hard `missing-program` failure -- NOT "just run it". A check that compares
  * no output would pass every circuit ever built, which is the `missing-rows`
  * lesson one kind over.
  *
- * Assembly errors are an `invalid` failure carrying the first error's line.
+ * AN EMPTY PROGRAM IS A FAILURE ON BOTH CHANNELS, and that is deliberate rather
+ * than inherited: with `from: 'player'` the empty text is the ordinary state of a
+ * level the player has not typed into yet, and reporting `missing-program` there
+ * is what tells them the check has nothing to run. "The level forgot its
+ * program" and "you have not written one" are the same defect to the circuit.
+ *
+ * A text that will not parse -- assembly or image -- is an `invalid` failure
+ * carrying the first error's line, in the wording of the parser that refused it.
  */
 export interface ProgramCheck {
   readonly kind: 'program';
-  /** Assembly source, compiled inside the checker; never pre-compiled in level data. */
-  readonly source: string;
+  /**
+   * The text for a LEVEL-authored program, compiled inside the checker; never
+   * pre-compiled in level data. Required unless `from` is `'player'`, where the
+   * text is the player's and a `source` here -- if one is present at all -- is
+   * not run.
+   */
+  readonly source?: string;
+  /**
+   * Where the program comes from: the level's own `source`, or the player's
+   * buffer. Default `'level'`, so every check written before this option existed
+   * reads its own text and nothing else.
+   */
+  readonly from?: 'level' | 'player';
+  /**
+   * How the text is read: the assembler (`'asm'`, the default), or the
+   * hand-written one-byte-per-line format of the programming chapter
+   * (`'bytes'`, see `asm/image.ts`).
+   */
+  readonly format?: 'asm' | 'bytes';
   readonly steps: readonly ProgramStep[];
   /**
    * Id of the `ram_prog` instance to load.

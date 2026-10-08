@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assemble, OVERTURE_ISA } from '../../src/asm/index';
+import { OVERTURE_ISA, assemble, parseImage } from '../../src/asm/index';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
 import { Simulation, compile, type Netlist } from '../../src/core/net';
@@ -486,5 +486,204 @@ describe('runChecks / program', () => {
       programSpec([programCheck({ source: broken })]),
     );
     expect(outcome.failures.map((f) => f.reason)).toEqual(['invalid']);
+  });
+});
+
+/**
+ * The second channel: the program text arrives from the PLAYER, not from level
+ * data.
+ *
+ * WHY BOTH CHANNELS EXIST. Chapters 1-3 grade a circuit against a program the
+ * LEVEL wrote -- the player builds the machine, and the level's own image is what
+ * proves it runs. Chapter 4 turns that around: the machine is given, and the
+ * player writes the program. The check kind does not change, because everything
+ * after the image is loaded is identical -- the same RAM, the same steps, the
+ * same driver -- so a second kind would be a second set of tick semantics to keep
+ * in agreement. Only the SOURCE of the text and the FORMAT it is written in are
+ * new, and `from`/`format` are those two choices.
+ *
+ * WHAT MUST NOT CHANGE. An empty program is still a hard `missing-program`
+ * whichever channel it came from: a check that loads nothing executes nothing
+ * and compares nothing, which would pass every circuit ever built -- the
+ * `missing-rows` lesson. A text that will not parse is still `invalid`, with the
+ * line in the detail. And a check with no `from` still reads its own `source`
+ * even when a player program is handed in beside it, which is what keeps every
+ * shipped level exactly as it was.
+ */
+describe('runChecks / program from the player', () => {
+  /** The same program, spelled as bytes: one line per instruction of `IMAGE`. */
+  const BYTES = [
+    '00000101',
+    '10000001',
+    '00001001',
+    '10000010',
+    '01000000',
+    '10010111',
+  ].join('\n');
+
+  /** The check a chapter-4 level ships: no `source` of its own, the text is the player's. */
+  function playerCheck(overrides: Partial<ProgramCheck> = {}): LevelCheck {
+    return { kind: 'program', from: 'player', steps: STEPS, ...overrides };
+  }
+
+  /**
+   * A check whose text is read as hand-written bytes rather than as assembly.
+   *
+   * No `source` by default, so the same helper builds the level-authored image
+   * and the player-authored one -- the two differ only in which of those two the
+   * test supplies.
+   */
+  function bytesCheck(overrides: Partial<ProgramCheck> = {}): LevelCheck {
+    return { kind: 'program', format: 'bytes', steps: STEPS, ...overrides };
+  }
+
+  it('spells the fixture program the same way the assembler does', () => {
+    // The bytes above are the SOURCE program in the machine-code format, and this
+    // is that claim rather than an assumption: if the two spellings disagreed,
+    // every test below would be grading a different program from the one the rest
+    // of this file pins. It is also the cross-check between `asm/image.ts` and
+    // `asm/isa.ts` -- two readers of one encoding, neither of which is allowed to
+    // drift.
+    expect(parseImage(BYTES).errors).toEqual([]);
+    expect(parseImage(BYTES).bytes).toEqual([...IMAGE]);
+  });
+
+  it('runs the program the player handed in', () => {
+    const outcome = runChecks(fetcher(), registry, programSpec([playerCheck()]), {
+      text: SOURCE,
+    });
+    expect(outcome.failures).toEqual([]);
+    expect(outcome.passed).toBe(true);
+    // The same tick accounting as the level-authored channel: the program does
+    // not change what a step means, only where the bytes came from.
+    expect(outcome.ticksUsed).toBe(5);
+  });
+
+  it('refuses a player check when no program was handed in at all', () => {
+    // The board-edit path calls `runChecks` with no fourth argument, and every
+    // chapter-4 level's check is a player check: "the player has not typed
+    // anything yet" must be a failure of the check, not a crash and not a pass.
+    const outcome = runChecks(fetcher(), registry, programSpec([playerCheck()]));
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures.map((f) => f.reason)).toEqual(['missing-program']);
+    expect(outcome.failures[0]?.detail).toContain('empty');
+  });
+
+  it('refuses an empty or whitespace-only player buffer', () => {
+    // Whitespace is nothing to run, exactly as it is for the assembler. The
+    // detail says which buffer was empty, because "the level ships no source" and
+    // "you have not typed anything" are different problems for different people.
+    for (const text of ['', '   ', '\n\t\n', '  \n  ']) {
+      const outcome = runChecks(fetcher(), registry, programSpec([playerCheck()]), { text });
+      expect(outcome.passed, JSON.stringify(text)).toBe(false);
+      expect(outcome.failures.map((f) => f.reason), JSON.stringify(text)).toEqual([
+        'missing-program',
+      ]);
+      expect(outcome.failures[0]?.detail).toContain('player');
+    }
+  });
+
+  it('reports an assembly error in the player text as invalid, naming the line', () => {
+    const broken = ['# a comment', 'loadi|5', 'bogus'].join('\n');
+    const outcome = runChecks(fetcher(), registry, programSpec([playerCheck()]), {
+      text: broken,
+    });
+    expect(outcome.passed).toBe(false);
+    const first = outcome.failures[0];
+    expect(first?.reason).toBe('invalid');
+    // The wording is the level channel's own, because the assembler is the same
+    // assembler: the line is the player's line either way.
+    expect(first?.detail).toContain('program assembly failed at line 3');
+  });
+
+  it('ignores the level text when the check asks for the player buffer', () => {
+    // `from` chooses the CHANNEL, it does not merely permit one. A check that
+    // named a `source` and still ran whatever the player had typed would grade a
+    // different program depending on state the level never declared -- and here
+    // the level's text would pass, so an implementation that fell back to it
+    // whenever the buffer was empty would report a pass for an empty buffer.
+    const outcome = runChecks(
+      fetcher(),
+      registry,
+      programSpec([playerCheck({ source: SOURCE })]),
+      { text: '' },
+    );
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures.map((f) => f.reason)).toEqual(['missing-program']);
+  });
+
+  it('keeps reading the level text when a player program is handed in beside it', () => {
+    // The regression that matters for every shipped level: 49 of them declare a
+    // `source` and no `from`, and the app now passes the player's buffer to
+    // `grade()` on every level. A channel that leaked would grade chapter 3
+    // against a program the player had typed for a chapter-4 level.
+    const outcome = runChecks(fetcher(), registry, programSpec([programCheck()]), {
+      text: 'bogus',
+    });
+    expect(outcome.passed).toBe(true);
+    expect(outcome.failures).toEqual([]);
+  });
+
+  it('still refuses a level text that is not a string', () => {
+    // Untrusted level data reaches the assembler directly, so the type is checked
+    // before it is handed over -- and it stays `invalid` on the level channel
+    // rather than becoming an empty player buffer, which would report the wrong
+    // defect to the level author.
+    const notText = { kind: 'program', source: 42, steps: STEPS } as unknown as LevelCheck;
+    const outcome = runChecks(fetcher(), registry, programSpec([notText]));
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures[0]?.reason).toBe('invalid');
+    expect(outcome.failures[0]?.detail).toContain('source');
+  });
+
+  it('reads a level-authored image written as bytes', () => {
+    const outcome = runChecks(fetcher(), registry, programSpec([bytesCheck({ source: BYTES })]));
+    expect(outcome.failures).toEqual([]);
+    expect(outcome.passed).toBe(true);
+    expect(outcome.ticksUsed).toBe(5);
+  });
+
+  it('reads a player-authored image written as bytes', () => {
+    const outcome = runChecks(fetcher(), registry, programSpec([bytesCheck({ from: 'player' })]), {
+      text: BYTES,
+    });
+    expect(outcome.passed).toBe(true);
+  });
+
+  it('reports a bad image line as invalid, naming the line and the field', () => {
+    // The image failure is worded in parallel with the assembler's, so a player
+    // who moves between the two formats reads the same sentence shape. The line
+    // is the image's own: the second line here, not a constant.
+    const broken = ['00000101', '100000011'].join('\n');
+    const outcome = runChecks(fetcher(), registry, programSpec([bytesCheck({ source: broken })]));
+    expect(outcome.passed).toBe(false);
+    const first = outcome.failures[0];
+    expect(first?.reason).toBe('invalid');
+    expect(first?.detail).toContain('program image failed at line 2');
+  });
+
+  it('refuses an image that parses to zero bytes', () => {
+    // A comment-only image is legal to the parser -- zero bytes, zero errors --
+    // and vacuous to the checker, which is the same hazard as an empty table.
+    const outcome = runChecks(
+      fetcher(),
+      registry,
+      programSpec([bytesCheck({ source: '# nothing yet\n' })]),
+    );
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures[0]?.reason).toBe('missing-program');
+    expect(outcome.failures[0]?.detail).toContain('zero bytes');
+  });
+
+  it('refuses an empty player image before it reaches the parser', () => {
+    const outcome = runChecks(
+      fetcher(),
+      registry,
+      programSpec([bytesCheck({ from: 'player' })]),
+      { text: '' },
+    );
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures.map((f) => f.reason)).toEqual(['missing-program']);
+    expect(outcome.failures[0]?.detail).toContain('player');
   });
 });

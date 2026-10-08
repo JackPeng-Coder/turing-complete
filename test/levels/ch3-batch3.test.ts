@@ -42,6 +42,24 @@ function programOf(spec: LevelSpec): ProgramCheck {
   return check;
 }
 
+/**
+ * The LEVEL-AUTHORED program text of a level's program check, or a loud failure.
+ *
+ * `ProgramCheck.source` became optional when chapter 4 added the player channel
+ * (`from: 'player'` reads the player's buffer instead), so the field is now
+ * `string | undefined` and every reader has to say which channel it means. These
+ * three levels are level-authored -- that is what this file grades -- so a check
+ * without a source is a defect here, and saying so once is better than a `?? ''`
+ * at each call site that would assemble an empty program instead.
+ */
+function sourceOf(spec: LevelSpec): string {
+  const check = programOf(spec);
+  if (typeof check.source !== 'string') {
+    throw new Error(`${spec.id} declares no source of its own`);
+  }
+  return check.source;
+}
+
 /** The byte the walk demands on `out` at this tick, or `undefined`. */
 function expectedAt(spec: LevelSpec, tick: number): number | undefined {
   const step = programOf(spec).steps.find((entry) => entry.tick === tick);
@@ -118,7 +136,7 @@ describe('chapter 3 batch 3 - reference solutions', () => {
       ],
     };
     for (const spec of CH3_BATCH3) {
-      const assembled = assemble(programOf(spec).source, OVERTURE_ISA);
+      const assembled = assemble(sourceOf(spec), OVERTURE_ISA);
       expect(assembled.errors, spec.id).toEqual([]);
       expect(assembled.bytes, spec.id).toEqual([...(expected[spec.id] ?? [])]);
     }
@@ -129,9 +147,9 @@ describe('chapter 3 batch 3 - reference solutions', () => {
     // data depends on where the assembler puts each label: 47's is the index of
     // the instruction after the six-instruction program, and 49's two are the
     // loop head and the instruction after the loop.
-    const labels47 = assemble(programOf(level('ch3-47-immediate-values')).source, OVERTURE_ISA).labels;
+    const labels47 = assemble(sourceOf(level('ch3-47-immediate-values')), OVERTURE_ISA).labels;
     expect(labels47).toEqual({ finish: 6 });
-    const labels49 = assemble(programOf(level('ch3-49-turing-complete')).source, OVERTURE_ISA).labels;
+    const labels49 = assemble(sourceOf(level('ch3-49-turing-complete')), OVERTURE_ISA).labels;
     expect(labels49).toEqual({ loop: 2, done: 16 });
   });
 

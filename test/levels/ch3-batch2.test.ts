@@ -53,6 +53,24 @@ function programOf(spec: LevelSpec): ProgramCheck {
   return check;
 }
 
+/**
+ * The LEVEL-AUTHORED program text of a level's program check, or a loud failure.
+ *
+ * `ProgramCheck.source` became optional when chapter 4 added the player channel
+ * (`from: 'player'` reads the player's buffer instead), so the field is now
+ * `string | undefined` and every reader has to say which channel it means.
+ * Chapter 3's levels are level-authored -- that is what this file grades -- so a
+ * check here without a source is a defect, and saying so once is better than a
+ * `?? ''` at each call site that would assemble an empty program instead.
+ */
+function sourceOf(spec: LevelSpec): string {
+  const check = programOf(spec);
+  if (typeof check.source !== 'string') {
+    throw new Error(`${spec.id} declares no source of its own`);
+  }
+  return check.source;
+}
+
 /** Level 45's script check, or a loud failure. */
 function scriptOf(spec: LevelSpec): ScriptCheck {
   const check = spec.checks[0];
@@ -146,7 +164,7 @@ describe('chapter 3 batch 2 - reference solutions', () => {
     // The level's machine executes these bytes; the test's copy is hand-encoded
     // from the ISA table, so an encoding change cannot pass by moving both sides.
     const check = programOf(level('ch3-46-alu'));
-    const assembled = assemble(check.source, OVERTURE_ISA);
+    const assembled = assemble(sourceOf(level('ch3-46-alu')), OVERTURE_ISA);
     expect(assembled.errors).toEqual([]);
     expect(assembled.bytes).toEqual([0x05, 0xb1, 0x82, 0x40, 0x9c, 0x48, 0x9f, 0x68, 0x9d, 0xa3]);
     // One instruction per step, one address each, and no step re-reads a byte

@@ -119,6 +119,7 @@ describe('AppState through createStore', () => {
     dragging: null,
     armed: null,
     dev: false,
+    programs: {},
     metrics: null,
     lastGrade: null,
     status: null,
@@ -178,5 +179,22 @@ describe('AppState through createStore', () => {
       store.set({ dragging });
       expect(store.get().dragging).toBe(dragging);
     }
+  });
+
+  it('carries the per-level program buffers through a set', () => {
+    // The player's text for a level lives HERE rather than on the graph, because
+    // it is not part of the circuit: it is what the player is typing, it survives
+    // board edits, and `finishTest` reads it out of the store to hand to
+    // `grade()`. The field is a plain map so a level that has never been typed
+    // into answers `undefined` -- the checker turns that into `missing-program`.
+    const store = createStore<AppState>(appState());
+    expect(store.get().programs['ch1-01-humble-beginnings']).toBeUndefined();
+
+    store.set({ programs: { ...store.get().programs, 'ch1-01-humble-beginnings': 'move|inp|out' } });
+
+    expect(store.get().programs['ch1-01-humble-beginnings']).toBe('move|inp|out');
+    // Other levels keep whatever they had: the map is keyed by level id, so one
+    // level's text is never written over another's.
+    expect(store.get().programs['ch1-02-nand-gate']).toBeUndefined();
   });
 });

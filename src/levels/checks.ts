@@ -1,4 +1,4 @@
-import { assemble, OVERTURE_ISA } from '../asm/index';
+import { assemble, OVERTURE_ISA, parseImage } from '../asm/index';
 import { CircuitValidationError, UnstableCircuitError } from '../core/errors';
 import type { Graph } from '../core/graph';
 import { Simulation, compile, type Netlist } from '../core/net';
@@ -582,7 +582,32 @@ function outcomeIssue(outcome: unknown, spec: LevelSpec): string | undefined {
   return undefined;
 }
 
-export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): CheckOutcome {
+/**
+ * The player's program text for the level being graded, as the app holds it.
+ *
+ * A WRAPPER RATHER THAN A BARE `string` because the channel will grow: chapter 4
+ * adds the debugger and the breakpoints that go with it, and a second field here
+ * is a change at the one seam the app and the kernel share rather than a new
+ * argument threaded through `grade` and every caller.
+ */
+export interface PlayerProgram {
+  readonly text: string;
+}
+
+/**
+ * Runs every check a level declares against a circuit.
+ *
+ * `player` is the player's program text, and it is read ONLY by a `program` check
+ * whose `from` is `'player'`. Every existing caller passes nothing, and every
+ * level-authored check keeps reading its own `source`, so the fourth argument is
+ * invisible to the shipped levels.
+ */
+export function runChecks(
+  graph: Graph,
+  registry: Registry,
+  spec: LevelSpec,
+  player?: PlayerProgram,
+): CheckOutcome {
   const failures: CheckFailure[] = [];
   let ticksUsed = 0;
 
@@ -923,11 +948,12 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
       }
 
       if (check.kind === 'program') {
-        // program: assemble the authored source, put the bytes into the
-        // circuit's program RAM, then drive the steps through the SAME driver
-        // `script` uses (`driveSteps`: `io.writeInput`, `io.sim.settle`,
-        // `io.tick`, `io.readOutput`, `compare`, `failure`). Only what happens
-        // before the first step differs between the two kinds.
+        // program: take the program TEXT -- the level's own `source`, or the
+        // player's buffer when the check asks for it -- compile it into an image,
+        // put the bytes into the circuit's program RAM, then drive the steps
+        // through the SAME driver `script` uses (`driveSteps`: `io.writeInput`,
+        // `io.sim.settle`, `io.tick`, `io.readOutput`, `compare`, `failure`).
+        // Only what happens before the first step differs between the two kinds.
         //
         // Vacuity comes first, as it does for every kind: a check that executes
         // nothing, or executes something and compares nothing, would pass every
@@ -965,7 +991,25 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
           continue;
         }
 
-        if (typeof check.source !== 'string') {
+        // WHICH CHANNEL THE TEXT COMES FROM. `from` defaults to `'level'`, so
+        // every check written before the option existed reads its own `source`
+        // and nothing else; `'player'` reads the fourth argument instead. The
+        // channel is chosen by `from` rather than by which text happens to be
+        // present: a level that grades the player's program must not fall back to
+        // shipping one of its own, or an empty buffer would be graded as a pass
+        // against text the player never wrote.
+        //
+        // An absent `player`, or one whose `text` is not a string, is an empty
+        // text rather than a `TypeError`: `runChecks` runs on every board edit,
+        // and the app calls it with no buffer at all while a level is still being
+        // opened.
+        const fromPlayer = check.from === 'player';
+        const text = fromPlayer
+          ? typeof player?.text === 'string'
+            ? player.text
+            : ''
+          : check.source;
+        if (typeof text !== 'string') {
           // Level data reaches the kernel untyped, and the assembler is handed
           // this value directly: refusing it here keeps a `TypeError` out of the
           // board-edit path rather than out of the kernel's own `catch`.
@@ -983,34 +1027,40 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
           );
           continue;
         }
-
-        // The image is loaded after the reset, and that ordering is the whole
-        // point: `reset()` clears every storage byte, and `runChecks` compiled
-        // this circuit before any branch ran, so an image written earlier would
-        // be gone before the first step read it.
-        io.reset();
-        const assembled = assemble(check.source, OVERTURE_ISA);
-        if (assembled.errors.length > 0) {
-          // The assembler never throws; it reports. The first error is the one
-          // to show, with its line, exactly as it located it.
-          const first = assembled.errors[0]!;
+        if (text.trim() === '') {
+          // Nothing to run, whichever channel it came from and whichever format
+          // it is written in -- the same lesson as an empty table. The detail
+          // names the buffer, because "the level ships no program" and "you have
+          // not typed one" are the same defect to the circuit and different
+          // problems for different people.
           failures.push(
             failure(
               check,
               {},
-              {},
-              {},
+              { bytes: 1 },
+              { bytes: 0 },
               0,
-              'invalid',
+              'missing-program',
               null,
-              `program assembly failed at line ${first.line}: ${first.reason}`,
+              `${fromPlayer ? "the player's program buffer" : 'the program source'} is empty: there is nothing to load, so no instruction would ever execute`,
             ),
           );
           continue;
         }
-        if (assembled.bytes.length === 0) {
-          // An empty or comment-only source is a legal zero-byte program to the
-          // assembler; loading it would exercise no instruction at all, which is
+
+        // HOW THE TEXT IS READ, and the two readers report in one shape: `format`
+        // is `'bytes'` for the hand-written machine-code format of the
+        // programming chapter, assembly otherwise. Neither parser throws, so a
+        // refusal is a failure record here rather than an exception on the
+        // board-edit path.
+        const image = check.format === 'bytes' ? imageOfBytes(text) : imageOfAssembly(text);
+        if ('detail' in image) {
+          failures.push(failure(check, {}, {}, {}, 0, 'invalid', null, image.detail));
+          continue;
+        }
+        if (image.bytes.length === 0) {
+          // An empty or comment-only text is a legal zero-byte program to both
+          // readers; loading it would exercise no instruction at all, which is
           // the same hazard as an empty `steps` array.
           failures.push(
             failure(
@@ -1021,7 +1071,7 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
               0,
               'missing-program',
               null,
-              'the program source assembles to zero bytes: no instruction would ever execute',
+              `${fromPlayer ? 'the player' : 'the program source'} compiles to zero bytes: no instruction would ever execute`,
             ),
           );
           continue;
@@ -1033,13 +1083,18 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
           continue;
         }
 
+        // The image is loaded after the reset, and that ordering is the whole
+        // point: `reset()` clears every storage byte, and `runChecks` compiled
+        // this circuit before any branch ran, so an image written earlier would
+        // be gone before the first step read it.
+        //
         // An image longer than the instance's state, or a `ram` id this netlist
         // does not have, is `Simulation.loadImage`'s `RangeError` -- absorbed by
         // the `catch` below as an `invalid` failure, never thrown out of
-        // `runChecks`. The assembler deliberately does not enforce `ram_prog`'s
-        // capacity, so a 257-byte program reaches the kernel and is refused
-        // there.
-        for (const id of targets.ids) io.sim.loadImage(id, assembled.bytes);
+        // `runChecks`. Neither reader enforces `ram_prog`'s capacity, so a
+        // 257-byte program reaches the kernel and is refused there.
+        io.reset();
+        for (const id of targets.ids) io.sim.loadImage(id, image.bytes);
         io.sim.settle();
         ticksUsed = Math.max(ticksUsed, driveSteps(io, spec, check, steps, failures));
         continue;
@@ -1114,6 +1169,34 @@ export function runChecks(graph: Graph, registry: Registry, spec: LevelSpec): Ch
  */
 function stepAsserts(step: unknown): boolean {
   return isRecord(step) && isRecord(step.expect) && Object.keys(step.expect).length > 0;
+}
+
+/**
+ * The image an assembly text denotes, or the sentence a failure should carry.
+ *
+ * ONE SHAPE FOR BOTH READERS. Assembly and the hand-written byte format refuse
+ * different things but report in the same shape -- a line, the text, a reason --
+ * so the branch that uses them records an `invalid` failure the same way for
+ * either, and only the wording below differs. The line is the reader's own, and
+ * the parser never throws: a refusal is data, not an exception.
+ */
+function imageOfAssembly(text: string): { readonly bytes: readonly number[] } | { readonly detail: string } {
+  const assembled = assemble(text, OVERTURE_ISA);
+  const first = assembled.errors[0];
+  if (first !== undefined) {
+    return { detail: `program assembly failed at line ${first.line}: ${first.reason}` };
+  }
+  return { bytes: assembled.bytes };
+}
+
+/** The bytes `parseImage` reads out of a hand-written machine-code text. */
+function imageOfBytes(text: string): { readonly bytes: readonly number[] } | { readonly detail: string } {
+  const parsed = parseImage(text);
+  const first = parsed.errors[0];
+  if (first !== undefined) {
+    return { detail: `program image failed at line ${first.line}: ${first.reason}` };
+  }
+  return { bytes: parsed.bytes };
 }
 
 /**

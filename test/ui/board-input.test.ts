@@ -38,6 +38,7 @@ function board(): { store: Store<AppState>; stack: CommandStack; graph: Graph } 
     dragging: null,
     armed: null,
     dev: false,
+    programs: {},
     metrics: null,
     lastGrade: null,
     status: null,

@@ -2,7 +2,7 @@ import type { Graph, GraphIssue } from '../core/graph';
 import { validateGraph } from '../core/graph';
 import { delayOf } from '../core/net';
 import type { Registry } from '../core/registry';
-import { runChecks } from './checks';
+import { runChecks, type PlayerProgram } from './checks';
 import type { CheckFailure, LevelSpec } from './spec';
 
 export interface Metrics {
@@ -62,7 +62,20 @@ export function starsOf(m: Metrics, spec: LevelSpec, passed: boolean): 0 | 1 | 3
   return ok ? 3 : 1;
 }
 
-export function grade(graph: Graph, registry: Registry, spec: LevelSpec): GradeResult {
+/**
+ * Grades a circuit against a level.
+ *
+ * `player` is the player's program text for `program` checks that read it
+ * (`from: 'player'`), forwarded untouched: the grader measures and scores, and
+ * what counts as a program is the checker's business. Callers that grade a level
+ * whose checks are all level-authored pass nothing, exactly as before.
+ */
+export function grade(
+  graph: Graph,
+  registry: Registry,
+  spec: LevelSpec,
+  player?: PlayerProgram,
+): GradeResult {
   const issues = validateGraph(graph, registry);
   const fatal = issues.filter((i) => i.severity === 'error');
   if (fatal.length > 0) {
@@ -77,7 +90,7 @@ export function grade(graph: Graph, registry: Registry, spec: LevelSpec): GradeR
     };
   }
 
-  const outcome = runChecks(graph, registry, spec);
+  const outcome = runChecks(graph, registry, spec, player);
   const metrics: Metrics = {
     gate: gateCost(graph, registry),
     delay: delayOf(graph, registry),

@@ -7,6 +7,7 @@ import {
   resumePointOf,
   unlockedComponents,
 } from '../../src/app/progress';
+import type { Progress } from '../../src/app/progress';
 import type { GradeResult } from '../../src/levels/grader';
 import type { LevelSpec } from '../../src/levels/spec';
 
@@ -249,5 +250,22 @@ describe('applyGrade', () => {
     const failed: GradeResult = { ...pass, passed: false, stars: 0, score: 0 };
     const p = applyGrade(emptyProgress(), level, failed);
     expect(p.levels[level.id]).toBeUndefined();
+  });
+
+  it('keeps the player programs when a level is passed', () => {
+    // `applyGrade` returns a FRESH object holding only the fields it knows about,
+    // so a field it forgets is not merely stale -- it is deleted, in memory and
+    // in the save the caller writes next. Losing the player's program on the edge
+    // of a pass would be the worst possible moment for it: the run that proves
+    // the program works is the run that erases it.
+    const before: Progress = {
+      ...emptyProgress(),
+      programs: { 'ch1-01-humble-beginnings': 'move|inp|out' },
+    };
+    const after = applyGrade(before, level, pass);
+    expect(after.programs).toEqual(before.programs);
+    // The same reference is fine and deliberate: nothing here edits a program,
+    // and copying a map per grade would be work on every pass for no gain.
+    expect(after.programs).toBe(before.programs);
   });
 });
