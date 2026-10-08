@@ -670,6 +670,40 @@ export class Simulation {
   }
 
   /**
+   * A COPY of an instance's storage bytes, or `null` when no such instance is in
+   * this netlist.
+   *
+   * THE ONE READER THE KERNEL DID NOT HAVE. Everything else a caller can read out
+   * of a simulation comes through a PIN, which is a value the circuit itself
+   * publishes; what a storage element is HOLDING is private state with no pin of
+   * its own -- a program image has no output that shows all 256 bytes, and the six
+   * registers behind `regfile6`'s two read ports are not addressable from
+   * outside. A debugger needs exactly that: `readState('RF')` is the six bytes
+   * REG0..REG5, `readState('PC')` the one address, `readState('RAM')` the program
+   * as it stands.
+   *
+   * The layout is the DEF's (`ComponentDef.stateBytes`, allocated by the
+   * `Simulation` constructor and filled by `reset` / `clockEdge` / `loadImage`),
+   * so this method knows no layout of its own -- the same rule `#publishState`
+   * states for the publish path. A part with no state returns an empty array,
+   * which is the honest answer to "what does this hold".
+   *
+   * A COPY, ALWAYS. The array is the simulation's own storage: a panel that wrote
+   * into what it was handed would edit the machine it is showing, and the write
+   * would be invisible to every other reader. `null` rather than a throw for an
+   * unknown id, because a debugger asks on every board edit and a board
+   * mid-build is not an error.
+   *
+   * `instanceId` is the DOCUMENT id, resolved the way `loadImage` resolves it
+   * (`CompiledInstance.key`, which `compile` sets from `instance.id`).
+   */
+  readState(instanceId: string): Uint8Array | null {
+    const index = this.#instances.findIndex((inst) => inst.key === instanceId);
+    if (index < 0) return null;
+    return new Uint8Array(this.#state[index]!);
+  }
+
+  /**
    * Loads a byte image into an instance's private state, out of band.
    *
    * The path a program takes into a circuit. `ram_prog` has no write pin, so its

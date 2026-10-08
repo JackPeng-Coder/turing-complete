@@ -310,6 +310,111 @@ describe('Simulation', () => {
 });
 
 /**
+ * `Simulation.readState`: the debugger's window onto an instance's private state.
+ *
+ * THE ONE READER THE KERNEL DID NOT HAVE. Every other reading in the game goes
+ * through a PIN -- a value the circuit itself publishes -- while a register panel
+ * and a program-RAM window need what a part is HOLDING, and that is not on any
+ * pin: `regfile6` keeps six bytes, `pc8` one and `ram_prog` 256, and the program
+ * image is written into them out of band by `loadImage`. Nothing about the values
+ * is new here; what is new is that a caller outside the kernel can see them, so
+ * the tests below pin the three properties a panel depends on: the layout is the
+ * def's own `stateBytes`, the id selects the instance, and the array handed back
+ * is a copy -- a panel that mutated it would be editing the machine it is
+ * showing.
+ */
+describe('Simulation.readState', () => {
+  /** A circuit with one program RAM, so the state has something in it to read. */
+  function ramFixture(): { sim: Simulation; net: Netlist } {
+    const g = emptyGraph();
+    // `addr` stays unwired, so the RAM publishes byte 0 -- which is what makes
+    // the pin and the state reader comparable below.
+    addInstance(g, 'ram_prog', 0, 0, 'RAM');
+    const net = compile(g, registry);
+    const sim = new Simulation(net, registry);
+    sim.reset();
+    return { sim, net };
+  }
+
+  it('reads back a loaded image, byte for byte', () => {
+    const { sim, net } = ramFixture();
+    sim.loadImage('RAM', [0x11, 0x22, 0x33]);
+    sim.settle();
+    const state = sim.readState('RAM');
+    expect(state).toBeInstanceOf(Uint8Array);
+    // The WHOLE image, not just the bytes written: a RAM window has to be able to
+    // show the empty tail, and `ram_prog`'s state is its 256 addresses.
+    expect(state).toHaveLength(256);
+    expect(Array.from(state!.subarray(0, 4))).toEqual([0x11, 0x22, 0x33, 0x00]);
+    // The two readers agree about byte 0: the pin publishes it, the state holds
+    // it. A reader that disagreed with the circuit would be worse than none.
+    expect(sim.read(net.outputBase('RAM.out'), 8)).toBe(0x11);
+    expect(state![0]).toBe(0x11);
+    // `255`, not `state.length`: the address the tail is read at is the machine's
+    // own last address, and it is empty.
+    expect(state![255]).toBe(0x00);
+  });
+
+  it('is null for an id this netlist does not have', () => {
+    const { sim } = ramFixture();
+    // Not a throw: the debugger asks on every board edit, and a panel with no
+    // `ram_prog` on the board is the ordinary state of a half-built circuit.
+    expect(sim.readState('NO_SUCH_INSTANCE')).toBeNull();
+    expect(sim.readState('')).toBeNull();
+    // ...and the id that IS there still reads, so `null` is about the id.
+    expect(sim.readState('RAM')).not.toBeNull();
+  });
+
+  it('hands back a copy, so a panel cannot edit the machine it is showing', () => {
+    const { sim, net } = ramFixture();
+    sim.loadImage('RAM', [0x11, 0x22]);
+    sim.settle();
+    const state = sim.readState('RAM')!;
+    state[0] = 0xff;
+    state[1] = 0xff;
+    // The simulation is untouched: both its own state and the pin read what was
+    // loaded, not what the caller wrote into the array it was handed.
+    expect(sim.readState('RAM')![0]).toBe(0x11);
+    expect(sim.readState('RAM')![1]).toBe(0x22);
+    expect(sim.read(net.outputBase('RAM.out'), 8)).toBe(0x11);
+  });
+
+  it('reports the state layout of the parts the debugger reads', () => {
+    // THE LAYOUT IS THE DEF'S, NOT THIS METHOD'S: `regfile6` is six bytes, one
+    // per register, and `pc8` is one address. The sizes are asserted against the
+    // registered defs so a def that grew a byte cannot leave the panel reading
+    // the wrong number of them.
+    const g = emptyGraph();
+    addInstance(g, 'regfile6', 0, 0, 'RF');
+    addInstance(g, 'pc8', 120, 0, 'PC');
+    const one = addInstance(g, 'const_on', 0, 120);
+    const data = addInstance(g, 'level_input', 0, 200, 'IN_data');
+    data.params.width = 8;
+    // `we` and `waddr` are both the one constant: bit 0 of the three-bit address
+    // is high and its other two bits are unwired, so the edge writes REG1.
+    connect(g, { inst: one.id, port: 'out' }, { inst: 'RF', port: 'we' });
+    connect(g, { inst: one.id, port: 'out' }, { inst: 'RF', port: 'waddr' });
+    connect(g, { inst: data.id, port: 'out' }, { inst: 'RF', port: 'data' });
+    const net = compile(g, registry);
+    const sim = new Simulation(net, registry);
+    sim.reset();
+
+    expect(sim.readState('RF')).toHaveLength(registry.get('regfile6').stateBytes);
+    expect(sim.readState('PC')).toHaveLength(registry.get('pc8').stateBytes);
+    expect(Array.from(sim.readState('RF')!)).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(Array.from(sim.readState('PC')!)).toEqual([0]);
+
+    sim.write(net.outputBase('IN_data.out'), 8, 0x2a);
+    sim.settle();
+    sim.tick();
+    // The edge wrote the byte into REG1, and the counter's `load` pin is unwired
+    // (reads 0), so it advanced by one -- `pc8`'s documented successor.
+    expect(Array.from(sim.readState('RF')!)).toEqual([0, 0x2a, 0, 0, 0, 0]);
+    expect(Array.from(sim.readState('PC')!)).toEqual([1]);
+  });
+});
+
+/**
  * Slot-addressed accessors for the storage tests, in the two directions a test
  * needs: `out` reads a pin as an unsigned number, `set` drives one the way a
  * level drives a `level_input`'s output slot.
