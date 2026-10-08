@@ -47,7 +47,12 @@ export default defineConfig({
     viewport: { width: 1280, height: 800 },
   },
   webServer: {
-    command: `${PNPM_COMMAND} build && ${PNPM_COMMAND} preview --port 4173 --strictPort`,
+    // `--host 127.0.0.1` is not decoration: Vite 8 binds `preview` to whatever
+    // `localhost` resolves to first, and on a host whose resolver prefers IPv6
+    // that is `::1` alone. The probe below is an IPv4 literal, so without this
+    // the server came up, the URL was refused, and the gate sat here until the
+    // 180-second timeout expired with the suite never starting.
+    command: `${PNPM_COMMAND} build && ${PNPM_COMMAND} preview --host 127.0.0.1 --port 4173 --strictPort`,
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
