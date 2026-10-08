@@ -79,22 +79,6 @@ export const DEFAULT_FUZZ_ROUNDS = 64;
 export const FUZZ_ROUNDS_CAP = 4096;
 
 /**
- * Hard ceiling on a closed-loop `custom` check's `budget`, in its own units.
- *
- * THE SAME RULE AS `FUZZ_ROUNDS_CAP`, and for the same reason: `grade()` runs on
- * every board edit, and one budget unit is a full settle of the circuit (`lock`
- * spends one on each wrong guess, `maze` one on every move), so a level that asks
- * for 10^9 units must not be able to hang the editor. The number matches both
- * checkers' own defaults (`DEFAULT_LOCK_BUDGET`, `DEFAULT_MAZE_BUDGET`), because
- * those defaults are already the longest run the board is willing to pay for on a
- * keystroke: a check that asks for more is clamped to the cap rather than
- * refused, exactly as an over-cap `rounds` is -- the value is usable, it just
- * cannot be afforded. A budget that is not a positive integer is a different
- * thing (a defect in the level) and is refused with `invalid`, never clamped.
- */
-export const CUSTOM_BUDGET_CAP = 4096;
-
-/**
  * True when `value` is representable on a `width`-bit pin.
  *
  * Delegates to the kernel's own `assertWidth` instead of duplicating its bounds,
@@ -1160,7 +1144,7 @@ export function runChecks(
         // netlist does not have, which the `catch` below absorbs as `invalid` --
         // neither reader enforces `ram_prog`'s capacity, so a 257-byte program
         // still reaches the kernel and is refused there.
-        const image = loadProgramImage(io, text, reader.value, check.ram);
+        const image = loadProgramImage(io, text, reader.value, source.value, check.ram);
         if (image.errors.length > 0) {
           // A ZERO-BYTE PROGRAM IS A DIFFERENT FAILURE FROM A REFUSAL, and the
           // helper says which one it is. An empty or comment-only text is a legal
@@ -1316,61 +1300,60 @@ export function playerProgramText(player?: PlayerProgram): string {
 }
 
 /**
- * Parse/assemble `text` and load it into the circuit's program RAM(s). Never
- * throws.
+ * A parsed program text: the bytes it denotes, or the sentences explaining why it
+ * denotes none.
  *
- * THE THREE STEPS EVERY PROGRAM-TAKING CHECK NEEDS, in the one order that works:
- * read the text into bytes, decide which `ram_prog` instances those bytes go
- * into, and reset the circuit BEFORE loading -- `reset()` clears every storage
- * byte, so an image written before it would be gone before anything could read
- * it. `runChecks` compiled the circuit before calling this, and the reset is
- * therefore the last thing that happens to the state before the image lands.
- *
- * `bytes` is filled only on success; when `errors` is not empty the load did not
- * happen at all. Both are returned rather than a discriminated union because the
- * caller reports the two together: an image that parsed to zero bytes is a
- * `missing-program` failure whose record says `bytes: 0`, so the caller needs to
- * know the byte count and the reason in one place.
+ * ONE SHAPE FOR BOTH READERS AND BOTH CHANNELS. Assembly and the hand-written
+ * byte format refuse different things but report in the same shape -- a line, the
+ * text, a reason -- so a caller records one failure the same way for either, and
+ * only the wording differs. The line is the reader's own, and neither parser
+ * throws: a refusal is data, not an exception.
  *
  * `errors` carries the same line-numbered sentences the `program` branch turns
- * into `detail` today, and `reason` says which failure they belong to: a reader's
+ * into `detail`, and `reason` says which failure they belong to: a reader's
  * refusal is `invalid`, while "there is no `ram_prog` instance to load into" is
  * `missing-io`. `emptyProgram` marks the one case that is not a refusal at all --
- * a text both readers accept as zero bytes, which the branch reports as
- * `missing-program` because it would execute nothing. A `ram` id this netlist
- * does not have, or an image longer than the instance's state, is
- * `Simulation.loadImage`'s own `RangeError` and is deliberately NOT caught here:
- * `runChecks` absorbs it into an `invalid` failure (the same shape it would take
- * anywhere else in the branch), and a custom checker that calls this gets the
- * same treatment from the loop around it.
+ * a text both readers accept as zero bytes, which the caller reports as
+ * `missing-program` because it would execute nothing.
  *
- * THE UNNAMED `ram` CASE comes with no extra argument: the ids of every
- * `ram_prog` instance are read from the COMPILED NETLIST (`io.sim.net`), whose
- * instance ids `compile` sets from the document ids -- so "every `ram_prog` in
- * the circuit" means what it always did, and the helper needs no document of its
- * own. See `programTargets` for why an unnamed `ram` loads all of them and why an
- * empty list is an error rather than a quiet no-op.
+ * HOW THE ZERO-BYTE SENTENCE IS WORDED IS THE CALLER'S TO SAY, through
+ * `channel`. "The player compiles to zero bytes" and "the program source
+ * compiles to zero bytes" are the same defect to the circuit and different
+ * problems for different people: one is a player who has typed nothing runnable,
+ * the other a level that shipped nothing to run. The distinction used to be made
+ * by the branch that had `from` in hand; it lives here now, because the custom
+ * checkers drive the player's buffer through the same parse and owe the player
+ * the same sentence.
  *
- * `spec` IS NOT AN ARGUMENT, and that is a fact about what the load needs rather
- * than a narrowing of the brief's signature: nothing between the text and the
- * image is level data. The only level-shaped thing involved is the OPTIONAL
- * `ram` the caller passes through, which is a name from the check, not from the
- * level -- so `spec` here would be an argument every caller had to look up and
- * no line could read.
+ * `bytes` is filled only on success; when `errors` is not empty nothing at all
+ * parses. Both are returned rather than a discriminated union because the caller
+ * reports the two together: an image that parsed to zero bytes is a
+ * `missing-program` failure whose record says `bytes: 0`, so it needs the count
+ * and the reason in one place.
  */
-export function loadProgramImage(
-  io: LevelIo,
-  text: string,
-  format: 'asm' | 'bytes',
-  ram?: string,
-): {
+export interface ProgramImage {
   readonly bytes: readonly number[];
   readonly errors: readonly string[];
   /** Which failure reason `errors` belongs to; see the doc comment above. */
   readonly reason: 'invalid' | 'missing-io';
   /** True when the text is a legal program of zero bytes rather than a refusal. */
   readonly emptyProgram: boolean;
-} {
+}
+
+/**
+ * The image `text` denotes in `format`, or the sentence a failure should carry.
+ *
+ * PURE AND CIRCUIT-FREE, so the IDE and the debugger can show a refusal -- and a
+ * byte count -- without a board to load it into, and `loadProgramImage` can parse
+ * with the same reader the panel uses. Nothing here is level data: the format is
+ * the check's own `format`, and the channel only decides how a zero-byte program
+ * is worded.
+ */
+export function programImageOf(
+  text: string,
+  format: 'asm' | 'bytes',
+  channel: 'level' | 'player' = 'level',
+): ProgramImage {
   const image = format === 'bytes' ? imageOfBytes(text) : imageOfAssembly(text);
   if ('detail' in image) {
     return { bytes: [], errors: [image.detail], reason: 'invalid', emptyProgram: false };
@@ -1383,21 +1366,73 @@ export function loadProgramImage(
     // parse refusal it never saw.
     return {
       bytes: [],
-      errors: ['the program compiles to zero bytes: no instruction would ever execute'],
+      errors: [
+        `${channel === 'player' ? 'the player' : 'the program source'} compiles to zero bytes: no instruction would ever execute`,
+      ],
       reason: 'invalid',
       emptyProgram: true,
     };
   }
+  return { bytes: image.bytes, errors: [], reason: 'invalid', emptyProgram: false };
+}
+
+/**
+ * Parse/assemble `text` and load it into the circuit's program RAM(s). Never
+ * throws.
+ *
+ * THE THREE STEPS EVERY PROGRAM-TAKING CHECK NEEDS, in the one order that works:
+ * read the text into bytes, decide which `ram_prog` instances those bytes go
+ * into, and reset the circuit BEFORE loading -- `reset()` clears every storage
+ * byte, so an image written before it would be gone before anything could read
+ * it. `runChecks` compiled the circuit before calling this, and the reset is
+ * therefore the last thing that happens to the state before the image lands.
+ *
+ * THE PARSE IS `programImageOf`'s, so a refusal is worded once for the checker,
+ * the IDE and the debugger. `channel` says whose text this is and is therefore
+ * part of the signature rather than a caller-side rewording: the level branch
+ * passes the `from` it resolved, and every checker that drives the PLAYER's
+ * buffer says `'player'`.
+ *
+ * A `ram` id this netlist does not have, or an image longer than the instance's
+ * state, is `Simulation.loadImage`'s own `RangeError` and is deliberately NOT
+ * caught here: `runChecks` absorbs it into an `invalid` failure (the same shape
+ * it would take anywhere else in the branch), and a custom checker that calls
+ * this gets the same treatment from the loop around it.
+ *
+ * THE UNNAMED `ram` CASE comes with no extra argument: the ids of every
+ * `ram_prog` instance are read from the COMPILED NETLIST (`io.sim.net`), whose
+ * instance ids `compile` sets from the document ids -- so "every `ram_prog` in
+ * the circuit" means what it always did, and the helper needs no document of its
+ * own. See `programTargets` for why an unnamed `ram` loads all of them, why a
+ * `ram` that is present and is not a string is refused rather than read as
+ * unnamed, and why an empty list is an error rather than a quiet no-op.
+ *
+ * `spec` IS NOT AN ARGUMENT, and that is a fact about what the load needs rather
+ * than a narrowing of the brief's signature: nothing between the text and the
+ * image is level data. The only level-shaped thing involved is the OPTIONAL
+ * `ram` the caller passes through, which is a name from the check, not from the
+ * level -- so `spec` here would be an argument every caller had to look up and
+ * no line could read.
+ */
+export function loadProgramImage(
+  io: LevelIo,
+  text: string,
+  format: 'asm' | 'bytes',
+  channel: 'level' | 'player' = 'level',
+  ram?: unknown,
+): ProgramImage {
+  const image = programImageOf(text, format, channel);
+  if (image.errors.length > 0) return image;
 
   const targets = programTargets(ram, io.sim.net);
   if ('detail' in targets) {
-    return { bytes: [], errors: [targets.detail], reason: 'missing-io', emptyProgram: false };
+    return { bytes: [], errors: [targets.detail], reason: targets.reason, emptyProgram: false };
   }
 
   io.reset();
   for (const id of targets.ids) io.sim.loadImage(id, image.bytes);
   io.sim.settle();
-  return { bytes: image.bytes, errors: [], reason: 'invalid', emptyProgram: false };
+  return image;
 }
 
 /**
@@ -1439,6 +1474,16 @@ function imageOfBytes(text: string): { readonly bytes: readonly number[] } | { r
  * `Simulation.loadImage`'s `RangeError`, which `runChecks` reports as `invalid`,
  * so the check does not second-guess the name here.
  *
+ * A `ram` THAT IS PRESENT AND IS NOT A STRING IS REFUSED, by the same rule `from`
+ * and `format` follow one field over: absent is not unknown. `null` is treated as
+ * absent (level data reaches the kernel untyped, and `null` is how a JSON save
+ * spells a missing key), but a number, an object or a boolean would otherwise
+ * fall through to "load every `ram_prog`" -- and a level that meant to select one
+ * RAM while its author spelled the id wrong would quietly load all of them and
+ * grade against a circuit the check never described. The sentence names the field
+ * and the value, because the failure record is the only place the bad spelling
+ * survives.
+ *
  * The list is read from the COMPILED NETLIST, whose `instanceIds()` and
  * `instanceDefs()` are parallel arrays in evaluation order: an id and its def in
  * one place, which is what "every `ram_prog` instance" needs. `compile` sets
@@ -1458,9 +1503,15 @@ function imageOfBytes(text: string): { readonly bytes: readonly number[] } | { r
  * the debugger does not read, or the other way round.
  */
 export function programTargets(
-  ram: string | undefined,
+  ram: unknown,
   net: Netlist,
-): { readonly ids: readonly string[] } | { readonly detail: string } {
+): { readonly ids: readonly string[] } | { readonly detail: string; readonly reason: 'invalid' | 'missing-io' } {
+  if (ram !== undefined && ram !== null && typeof ram !== 'string') {
+    return {
+      detail: `program check declares ram=${describeValue(ram)}; it must be the id of a ram_prog instance`,
+      reason: 'invalid',
+    };
+  }
   const named = typeof ram === 'string' && ram !== '' ? ram : undefined;
   if (named !== undefined) return { ids: [named] };
   const ids = net.instanceIds().filter((_, index) => net.instanceDefs()[index] === 'ram_prog');
@@ -1468,6 +1519,7 @@ export function programTargets(
     return {
       detail:
         'program check names no "ram" and the circuit has no ram_prog instance to load the program into',
+      reason: 'missing-io',
     };
   }
   return { ids };

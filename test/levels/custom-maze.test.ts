@@ -3,13 +3,8 @@ import { emptyGraph } from '../../src/core/graph';
 import { Simulation, compile } from '../../src/core/net';
 import { graphFromBoard } from '../../src/levels/board';
 import { overtureBoard } from '../../src/levels/boards/overture';
-import {
-  CUSTOM_BUDGET_CAP,
-  bindLevelIo,
-  runChecks,
-  type LevelIo,
-} from '../../src/levels/checks';
-import { customCheckIds } from '../../src/levels/custom/index';
+import { bindLevelIo, runChecks, type LevelIo } from '../../src/levels/checks';
+import { CUSTOM_BUDGET_CAP, customCheckIds } from '../../src/levels/custom/index';
 import { callMaze } from '../../src/levels/custom/maze';
 import type { CustomCheck, LevelSpec } from '../../src/levels/spec';
 import { registry } from '../fixtures/build';
@@ -223,11 +218,15 @@ interface Run {
 /**
  * Runs the maze with a scripted follower that answers with move codes.
  *
- * The follower sees the sensor byte the checker published; it may also read the
- * test's model of the robot, but the follower the level's reference program
- * stands in for uses the byte alone. Each published byte is logged WITH the byte
- * the model says the state it moved into must publish, so a divergence shows up
- * as a pair of unequal arrays rather than as a verdict nobody can check.
+ * The follower is handed the TEST MODEL's own sensor byte for the state the
+ * script's robot is in -- `sensorsOf(grid, robot)`, computed from the grid the
+ * test itself read -- and it may also read that robot. It does NOT see the byte
+ * the checker published; the passage from one to the other is what these tests
+ * are checking. Each published byte is logged WITH the byte the model says the
+ * state it moved into must publish, so a divergence shows up as a pair of
+ * unequal arrays rather than as a verdict nobody can check -- and the follower
+ * the level's reference program stands in for decides from the sensor byte
+ * alone, which is why `clockFace` takes nothing else.
  *
  * The checker gets the reference program as the player's text: it loads a program
  * before it drives anything, and an empty buffer would be a `missing-program`

@@ -269,8 +269,12 @@ export const callMaze = (
   // come from has to be in the circuit before the first of them is read. The
   // helper resets again on its own way in, which is harmless and is not something
   // this checker relies on.
+  //
+  // `'player'` IS THE CHANNEL, named for the same reason: a comment-only buffer
+  // has to be reported as the PLAYER having compiled nothing, not as a level that
+  // shipped nothing.
   io.reset();
-  const image = loadProgramImage(io, playerProgramText(player), 'asm');
+  const image = loadProgramImage(io, playerProgramText(player), 'asm', 'player');
   if (image.errors.length > 0) {
     if (image.emptyProgram) {
       return programFailure(

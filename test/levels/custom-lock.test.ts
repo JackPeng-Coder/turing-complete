@@ -4,13 +4,16 @@ import { Simulation, compile } from '../../src/core/net';
 import { graphFromBoard } from '../../src/levels/board';
 import { overtureBoard } from '../../src/levels/boards/overture';
 import {
-  CUSTOM_BUDGET_CAP,
   bindLevelIo,
   loadProgramImage,
   runChecks,
   type LevelIo,
 } from '../../src/levels/checks';
-import { customCheckIds } from '../../src/levels/custom/index';
+import {
+  CUSTOM_BUDGET_CAP,
+  customCheckIds,
+  effectiveBudget,
+} from '../../src/levels/custom/index';
 import { DEFAULT_LOCK_BUDGET, callLock } from '../../src/levels/custom/lock';
 import type { CustomCheck, LevelSpec } from '../../src/levels/spec';
 import { registry } from '../fixtures/build';
@@ -334,6 +337,16 @@ describe('lock', () => {
     expect(outcome.passed).toBe(false);
     expect(outcome.ticksUsed).toBe(CUSTOM_BUDGET_CAP);
     expect(script.ticks()).toBe(CUSTOM_BUDGET_CAP);
+  });
+
+  it('keeps the cap beside the rule that applies it', () => {
+    // THE CONSTANT LIVES WITH THE CUSTOM-CHECK CONTRACT (`custom/index.ts`)
+    // BECAUSE THAT IS WHAT IT BOUNDS: `effectiveBudget` is the only reader, and
+    // a constant in `checks.ts` would make the contract's own module import a
+    // value back from its caller -- a runtime cycle between the two files, for
+    // one number. This assertion pins the two together where they now sit.
+    expect(effectiveBudget(CUSTOM_BUDGET_CAP + 1, 1)).toBe(CUSTOM_BUDGET_CAP);
+    expect(effectiveBudget(undefined, CUSTOM_BUDGET_CAP)).toBe(CUSTOM_BUDGET_CAP);
   });
 
   it('blames the level when its io does not name the pins this checker drives', () => {

@@ -1,4 +1,4 @@
-import { CUSTOM_BUDGET_CAP, type LevelIo, type PlayerProgram } from '../checks';
+import type { LevelIo, PlayerProgram } from '../checks';
 import type { CheckOutcome, CustomCheck, LevelSpec } from '../spec';
 
 /**
@@ -189,6 +189,31 @@ export function invalidOutcome(detail: string): CheckOutcome {
     ticksUsed: 0,
   };
 }
+
+/**
+ * Hard ceiling on a closed-loop `custom` check's `budget`, in its own units.
+ *
+ * THE SAME RULE AS `FUZZ_ROUNDS_CAP`, and for the same reason: `grade()` runs on
+ * every board edit, and one budget unit is a full settle of the circuit (`lock`
+ * spends one on each wrong guess, `maze` one on every move), so a level that asks
+ * for 10^9 units must not be able to hang the editor. The number matches both
+ * checkers' own defaults (`DEFAULT_LOCK_BUDGET`, `DEFAULT_MAZE_BUDGET`), because
+ * those defaults are already the longest run the board is willing to pay for on a
+ * keystroke: a check that asks for more is clamped to the cap rather than
+ * refused, exactly as an over-cap `rounds` is -- the value is usable, it just
+ * cannot be afforded. A budget that is not a positive integer is a different
+ * thing (a defect in the level) and is refused with `invalid`, never clamped.
+ *
+ * IT LIVES HERE BECAUSE THIS MODULE OWNS THE CUSTOM-CHECK CONTRACT, and because
+ * `effectiveBudget` -- the rule the cap exists for -- is its only reader. Kept in
+ * `checks.ts`, where it was written, it made this module import a VALUE back from
+ * the module that calls it (`checks.ts` imports `getCustomCheck` from here), so
+ * the two files formed a runtime cycle over one number. The custom-check branch
+ * of `checks.ts` still reports everything a check declares, but the ceiling on
+ * what a checker may spend belongs beside the checkers' own vocabulary, next to
+ * the two defaults it agrees with.
+ */
+export const CUSTOM_BUDGET_CAP = 4096;
 
 /**
  * The budget a closed-loop check actually runs, or `null` when the declared one

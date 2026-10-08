@@ -157,8 +157,11 @@ export const callLock = (
   // resets again on its own way in (a load must land after a reset, see
   // `loadProgramImage`), which is harmless and is not something this checker
   // relies on: the reset above is what makes its first read honest.
+  //
+  // `'player'` IS THE CHANNEL, and it is named rather than defaulted: the text is
+  // the player's buffer, so a refusal that mentions it has to say whose it is.
   io.reset();
-  const image = loadProgramImage(io, playerProgramText(player), 'asm');
+  const image = loadProgramImage(io, playerProgramText(player), 'asm', 'player');
   if (image.errors.length > 0) {
     if (image.emptyProgram) {
       return programFailure(

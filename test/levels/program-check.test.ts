@@ -447,6 +447,12 @@ describe('runChecks / program', () => {
     expect(outcome.passed).toBe(false);
     expect(outcome.failures[0]?.reason).toBe('missing-program');
     expect(outcome.failures[0]?.detail).toContain('zero bytes');
+    // ...and it names the channel the text came from. A comment-only LEVEL
+    // source is the level shipping nothing to run, which is a different problem
+    // for a different person from the player having typed nothing runnable.
+    expect(outcome.failures[0]?.detail).toContain(
+      'the program source compiles to zero bytes',
+    );
   });
 
   it('reports an assembly error as invalid, naming the line', () => {
@@ -687,6 +693,25 @@ describe('runChecks / program from the player', () => {
     expect(outcome.failures.map((f) => f.reason)).toEqual(['missing-program']);
     expect(outcome.failures[0]?.detail).toContain('player');
   });
+
+  it('says the PLAYER compiled nothing when their text is comment-only', () => {
+    // A comment-only buffer is not the empty buffer: the empty one is refused
+    // before the readers are reached ("you have not typed anything"), while this
+    // one parses cleanly to zero bytes. The sentence therefore has to name whose
+    // zero bytes they are -- the player's, here -- or the two failures read as
+    // the same sentence written twice and neither says who has to fix it.
+    const outcome = runChecks(
+      fetcher(),
+      registry,
+      programSpec([playerCheck()]),
+      { text: '# nothing runnable yet\n' },
+    );
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures[0]?.reason).toBe('missing-program');
+    expect(outcome.failures[0]?.detail).toContain(
+      'the player compiles to zero bytes',
+    );
+  });
 });
 
 /**
@@ -747,6 +772,24 @@ describe('runChecks / program with an unknown channel or format', () => {
     const outcome = runChecks(fetcher(), registry, programSpec([programCheck()]));
     expect(outcome.failures).toEqual([]);
     expect(outcome.passed).toBe(true);
+  });
+
+  it('refuses a `ram` that is present but is not an id', () => {
+    // THE THIRD FIELD THAT NAMES A CHOICE, and the same rule one over: an absent
+    // `ram` means "every ram_prog in the circuit", so a `ram` that is present and
+    // is not a string must not be read as absent -- that would load every program
+    // RAM while the author believed they had selected one. `fetcher()` has a
+    // single `ram_prog`, so the silent fallback is exactly what would pass here.
+    const misspelled = { ...programCheck(), ram: 42 } as unknown as LevelCheck;
+    const outcome = runChecks(fetcher(), registry, programSpec([misspelled]));
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures).toHaveLength(1);
+    expect(outcome.failures[0]?.reason).toBe('invalid');
+    expect(outcome.failures[0]?.check).toBe('program');
+    // The detail names the field and the value, which is the only place the bad
+    // spelling survives.
+    expect(outcome.failures[0]?.detail).toContain('ram');
+    expect(outcome.failures[0]?.detail).toContain('42');
   });
 });
 
