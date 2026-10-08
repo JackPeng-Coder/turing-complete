@@ -65,6 +65,35 @@ describe('parseImage', () => {
     expect(parseImage('001 10101')).toEqual({ bytes: [0x35], errors: [] });
   });
 
+  it('accepts a tab between groups as the same separator a space is', () => {
+    // Whitespace GROUPS digits and carries no meaning of its own, and a tab is
+    // whitespace like any other. Accepting only U+0020 would refuse a
+    // tab-separated program with a reason that quoted a character the player
+    // cannot see, which is the least debuggable failure this parser can produce.
+    // `1011` then `0101` is `10110101`, 0xb5, and the second case is the 0x35 the
+    // space-grouped test above pins, restated under a vertical tab so the class
+    // is what is being read rather than one character's special case.
+    expect(parseImage('1011\t0101')).toEqual({ bytes: [0xb5], errors: [] });
+    expect(parseImage('0011\u000b0101')).toEqual({ bytes: [0x35], errors: [] });
+    // One whitespace character per boundary, on every line: grouping never
+    // changes how many LINES a program has.
+    expect(parseImage('0011\t0101\n0000 0001')).toEqual({ bytes: [0x35, 0x01], errors: [] });
+  });
+
+  it('still refuses a run of two whitespace characters, whatever they are', () => {
+    // The empty-field rule is deliberate (see the test above it) and is not
+    // widened by the tab: two ADJACENT whitespace characters leave a group with
+    // nothing in it, and it makes no difference whether that pair is two spaces,
+    // two tabs or one of each -- only the count is read. Folding the run away
+    // would silently accept the spelling the rule exists to refuse.
+    for (const line of ['0011\t\t0101', '0011 \t0101', '0011\t 0101', '0011  \t0101']) {
+      const parsed = parseImage(line);
+      expect(parsed.bytes, JSON.stringify(line)).toEqual([]);
+      expect(parsed.errors, JSON.stringify(line)).toHaveLength(1);
+      expect(parsed.errors[0]?.reason).toContain('empty field');
+    }
+  });
+
   it('rejects a line with fewer than eight digits, naming its line', () => {
     const source = ['10110001', '1011010'].join('\n');
     const parsed = parseImage(source);

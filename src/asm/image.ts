@@ -4,12 +4,23 @@ import { stripComment } from './assemble';
  * Hand-written machine code -> instruction bytes.
  *
  * THE FORMAT (phase-3 ruling 3). One byte per line, written as eight binary
- * digits, with spaces free to group the digits for the eye:
+ * digits, with whitespace free to group the digits for the eye:
  *
  *   `# ...`            a comment, to the end of the line
- *   (blank)            skipped, as is a line of nothing but spaces
+ *   (blank)            skipped, as is a line of nothing but whitespace
  *   `10110001`         one byte
  *   `1011 0001`        the same byte, grouped
+ *
+ * WHITESPACE IS ONLY EVER A SEPARATOR, AND ONE CHARACTER OF IT. Any whitespace
+ * character groups the digits -- a space, a tab, anything else in that class --
+ * because a player's editor decides which one lands between two groups and this
+ * parser must not care (`1011\t0001` is the byte `1011 0001` is). A RUN of two
+ * or more whitespace characters between groups is refused as an EMPTY FIELD
+ * instead: it leaves a group with nothing in it, and folding it away would make
+ * `1011  0001` and `1011 0001` the same byte while the player who typed the
+ * first one has no way to learn which spelling the machine agreed with. Leading
+ * and trailing whitespace is not an empty field -- the line is trimmed first, so
+ * indenting a program stays legal.
  *
  * WHY THIS EXISTS BESIDE THE ASSEMBLER. Chapter 4's first level is about the
  * ENCODING -- which two bits select the mode, what the other six mean -- so the
@@ -97,23 +108,32 @@ export function parseImage(source: string): ImageParseResult {
     const body = stripComment(text).trim();
     if (body === '') continue;
 
-    // Spaces GROUP digits and carry no meaning of their own, so two in a row
-    // leave a group with nothing in it. That is refused rather than folded away:
-    // accepting it would make `1011  0001` and `1011 0001` the same byte while
-    // the player who typed the first one has no way to learn which spelling the
-    // machine agreed with.
-    const fields = body.split(' ');
-    if (fields.includes('')) {
+    // Whitespace GROUPS digits and carries no meaning of its own, so a run of
+    // two or more whitespace characters leaves a group with nothing in it. That
+    // is refused rather than folded away: accepting it would make `1011  0001`
+    // and `1011 0001` the same byte while the player who typed the first one has
+    // no way to learn which spelling the machine agreed with. The separator is
+    // ANY whitespace rather than U+0020 alone, because which character an editor
+    // inserts between two groups is not the player's decision -- and a tab
+    // refused here would be reported as a character the player cannot see.
+    //
+    // The run is tested before the split, not by looking for an empty field
+    // among its results: a single separator is not an empty field, so `1011\t0001`
+    // has to come back as two fields, while a run has to be refused whichever
+    // characters it is made of. Leading and trailing whitespace never reaches
+    // here -- the line was trimmed above -- so a run can only sit between groups.
+    if (/\s{2,}/.test(body)) {
       errors.push({
         line,
         text,
         reason:
-          'an empty field: spaces separate groups of digits, and two in a row' +
-          ' leave a group with nothing in it',
+          'an empty field: whitespace separates groups of digits, and two' +
+          ' whitespace characters in a row leave a group with nothing in it',
       });
       continue;
     }
 
+    const fields = body.split(/\s/);
     const digits = fields.join('');
     const foreign = [...digits].find((digit) => digit !== '0' && digit !== '1');
     if (foreign !== undefined) {

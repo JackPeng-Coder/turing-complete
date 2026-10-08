@@ -5,6 +5,7 @@ import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/gra
 import { Simulation, compile, type Netlist } from '../../src/core/net';
 import { createRegistry } from '../../src/core/registry';
 import { runChecks } from '../../src/levels/checks';
+import { grade } from '../../src/levels/grader';
 import {
   FAILURE_REASONS,
   type LevelCheck,
@@ -685,5 +686,98 @@ describe('runChecks / program from the player', () => {
     expect(outcome.passed).toBe(false);
     expect(outcome.failures.map((f) => f.reason)).toEqual(['missing-program']);
     expect(outcome.failures[0]?.detail).toContain('player');
+  });
+});
+
+/**
+ * `from` and `format` choose between two channels and two readers, so a third
+ * value is a choice nothing can honour.
+ *
+ * WHY A TYPO HAS TO BE A HARD FAILURE. Both fields are read by equality --
+ * `from === 'player'` selects the player's buffer, `format === 'bytes'` selects
+ * the image reader -- so any other spelling falls through to the DEFAULT: the
+ * level's own text, read as assembly. A level that ships a `source` beside a
+ * misspelled `from: 'players'` would then grade the level's text and report
+ * whatever that program does, which is the one outcome the channel rule exists
+ * to prevent (see "ignores the level text when the check asks for the player
+ * buffer" above). Naming the value and the field is what makes the typo
+ * findable: the detail is the only place the bad spelling survives.
+ */
+describe('runChecks / program with an unknown channel or format', () => {
+  it('refuses a `from` that is neither level nor player', () => {
+    const misspelled = {
+      ...programCheck({ source: SOURCE }),
+      from: 'players',
+    } as unknown as LevelCheck;
+    // The level text is good and a matching player program is handed in beside
+    // it, so both fallbacks would pass: only an explicit refusal can fail here.
+    const outcome = runChecks(fetcher(), registry, programSpec([misspelled]), { text: SOURCE });
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures).toHaveLength(1);
+    expect(outcome.failures[0]?.reason).toBe('invalid');
+    expect(outcome.failures[0]?.check).toBe('program');
+    expect(outcome.failures[0]?.detail).toContain('from');
+    expect(outcome.failures[0]?.detail).toContain('players');
+  });
+
+  it('refuses a `format` that is neither asm nor bytes', () => {
+    // The bytes of the fixture program, spelled out again: `BYTES` above belongs
+    // to another `describe` block, and this level's own text has to be an image
+    // the byte reader would ACCEPT, or the refusal could come from the parser.
+    const image = ['00000101', '10000001', '00001001', '10000010', '01000000', '10010111'].join(
+      '\n',
+    );
+    const misspelled = {
+      kind: 'program',
+      format: 'byte',
+      source: image,
+      steps: STEPS,
+    } as unknown as LevelCheck;
+    const outcome = runChecks(fetcher(), registry, programSpec([misspelled]));
+    expect(outcome.passed).toBe(false);
+    expect(outcome.failures).toHaveLength(1);
+    expect(outcome.failures[0]?.reason).toBe('invalid');
+    expect(outcome.failures[0]?.detail).toContain('format');
+    expect(outcome.failures[0]?.detail).toContain('byte');
+  });
+
+  it('keeps the documented defaults when the fields are simply absent', () => {
+    // "Absent" is not "unknown": 49 shipped levels declare neither field, and
+    // every one of them must keep reading its own `source` as assembly.
+    const outcome = runChecks(fetcher(), registry, programSpec([programCheck()]));
+    expect(outcome.failures).toEqual([]);
+    expect(outcome.passed).toBe(true);
+  });
+});
+
+/**
+ * The seam the app grades through: `grade()` forwards the player's program to
+ * `runChecks`, and nothing else in this file can see that it does.
+ *
+ * WHY THIS TEST EXISTS AT ALL. Every test above calls `runChecks` directly, so
+ * deleting the fourth argument from `grade`'s `runChecks` call would leave the
+ * whole suite green while the app graded every chapter-4 level against an empty
+ * buffer -- `grade` is what the board calls, and the forwarding is the only line
+ * this test covers.
+ */
+describe('grade / the player program channel', () => {
+  // The same check as `playerCheck` in the block above, restated because that
+  // helper is scoped to it: no `source` of its own, so the ONLY text this level
+  // can run is the one `grade` hands down.
+  const spec = programSpec([{ kind: 'program', from: 'player', steps: STEPS }]);
+
+  it('grades a level whose check asks for the player program with the text it was handed', () => {
+    const result = grade(fetcher(), registry, spec, { text: SOURCE });
+    expect(result.failures).toEqual([]);
+    expect(result.passed).toBe(true);
+    expect(result.stars).toBe(1);
+  });
+
+  it('fails the same level with missing-program when no program is handed in', () => {
+    // The negative control: without it, "it passed" could be true of a grader
+    // that ignored the fourth argument and a check that compared nothing.
+    const result = grade(fetcher(), registry, spec);
+    expect(result.passed).toBe(false);
+    expect(result.failures.map((f) => f.reason)).toEqual(['missing-program']);
   });
 });
