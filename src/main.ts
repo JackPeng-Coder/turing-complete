@@ -428,10 +428,19 @@ if (app) {
    * edit: every change to the graph gets a new one, which is also why the
    * simulation is not held in the store -- it is a cache of the store's graph,
    * not part of the application's state.
+   *
+   * ONE MACHINE, NOT TWO. On a level that grades a program the player wrote, the
+   * program has to be loaded in the circuit the board paints -- otherwise the io
+   * panel's clock and its `out` row would be readings of a second compilation
+   * whose `ram_prog` is 256 zeros, disagreeing with the debugger beside them. So
+   * the run is built FIRST and its machine handed to the display. `machine` is
+   * `null` while the circuit does not compile or while the program is refused, and
+   * then the display is exactly what it always was: its own compilation of the
+   * board, which is what a mid-edit circuit gets.
    */
   const rebuild = (): void => {
     const { graph, registry: reg, level: current } = store.get();
-    display = createDisplay(graph, reg, current, vector);
+    display = createDisplay(graph, reg, current, vector, ensurePlayerRun()?.machine ?? null);
     sample();
   };
 
@@ -520,7 +529,9 @@ if (app) {
     boardScreen.hidden = which !== 'board';
     mapScreen.hidden = which !== 'map';
     // A hidden canvas has no box to draw into; repaint when it comes back, and
-    // rebuild the readout for the level that is now open.
+    // rebuild the readout for the level that is now open. Stopping the clocks is
+    // NOT done here: leaving the board for the map is the one transition that has
+    // to, and it says so where it happens (`onOpenMap`).
     if (which === 'board') {
       paint();
       refreshPanels();
@@ -558,6 +569,11 @@ if (app) {
     running = false;
     stopClock();
     stopTest();
+    // The old level's run is a circuit and a text that are no longer on screen,
+    // and it has to go BEFORE the display is rebuilt: `rebuild` hands the display
+    // whatever run exists, and a run of the previous level would paint the board
+    // the player just left.
+    dropPlayerRun();
     vector = {};
     plan = null;
     testResults = [];
@@ -756,15 +772,19 @@ if (app) {
    * WHY IT IS NOT ALWAYS MOUNTED, hidden: the board screen is what chapters 1 to 3
    * were built and tested against, and a panel that appeared on level 4 would be a
    * screen nobody designed for. `levelExpectsProgram` is the level-data question;
-   * this is where the DOM follows it. Removing the column also drops the run, so a
-   * level change cannot leave a compiled circuit of the previous level behind.
+   * this is where the DOM follows it.
+   *
+   * IT DOES NOT DROP THE RUN, and must not: on a program level `rebuild` has
+   * already built the run whose machine the display is painting, and throwing it
+   * away here would leave the panel reading a second machine -- exactly the
+   * disagreement the shared machine exists to remove. `openLevel` drops the
+   * previous level's run before the rebuild that replaces it.
    */
   const mountBench = (): void => {
     bench?.remove();
     bench = null;
     ide = null;
     debug = null;
-    dropPlayerRun();
     if (!levelExpectsProgram(store.get().level)) return;
 
     const column = document.createElement('div');
@@ -848,6 +868,17 @@ if (app) {
 
   mountShell(app, store, {
     onOpenMap: () => {
+      // LEAVING THE BOARD STOPS ITS CLOCKS. The board screen is hidden rather
+      // than unmounted, so both timers would otherwise keep stepping a circuit
+      // nobody can see: a program left running while the player reads the map
+      // comes back a hundred instructions further on, and only the pause button
+      // would ever have said so. The panel and the toolbar are told as well, so
+      // the play button does not come back pressed over a stopped clock.
+      running = false;
+      stopClock();
+      stopProgramRun();
+      paintTools();
+      refreshBench();
       showScreen('map');
       mapRender.render();
     },

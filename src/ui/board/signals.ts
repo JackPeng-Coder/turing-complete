@@ -21,6 +21,7 @@
 import { Simulation, compile } from '../../core/net';
 import { bindLevelIo, type LevelIo } from '../../levels/checks';
 import type { LevelSpec } from '../../levels/spec';
+import type { ProgramMachine } from '../../levels/run';
 import type { Graph } from '../../core/graph';
 import type { Registry } from '../../core/registry';
 import { maskInto, portValueToNumber } from '../../core/signal';
@@ -72,20 +73,36 @@ interface OutputRegion {
  * input vector, and every pin it does not name is driven as 0 -- an input does
  * not remember what it was last driven with, which is the same rule the level
  * checks follow.
+ *
+ * `machine` IS THE ONE THING THAT MAKES THE BOARD AND A RUN AGREE. When a level
+ * grades a program the player wrote, that program is already loaded in a machine
+ * the `ProgramRun` owns -- and a display that compiled its own would paint a
+ * second circuit whose `ram_prog` is 256 zeros, so the board's clock card and its
+ * `out` row would describe a different machine from the debugger's counter. Given
+ * a machine, this paints exactly it: the netlist is immutable and the simulation
+ * is shared, so a step taken here is the step the run reports and a write to an
+ * input is visible to the program. The caller owns the machine, so this does not
+ * reset it -- the run's own `reset` is what puts it at tick 0 with its image
+ * loaded. With no machine the display compiles its own, which is every board in
+ * chapters 1 to 3 and an empty one on a program level whose circuit does not
+ * compile yet.
  */
 export function createDisplay(
   graph: Graph,
   registry: Registry,
   level: LevelSpec,
   vector: Readonly<Record<string, number>>,
+  machine?: ProgramMachine | null,
 ): DisplaySimulation | null {
   const regions: OutputRegion[] = [];
   // Compiled in one block so that a refusal anywhere -- an unallocated pin, a
   // graph `compile` will not accept -- leaves through the same door.
   const ready = ((): { sim: Simulation; io: LevelIo } | null => {
     try {
-      const net = compile(graph, registry);
-      const sim = new Simulation(net, registry);
+      // A machine the caller prepared is used whole, netlist included: its
+      // compiled pin bases are what `regions` below has to address.
+      const net = machine?.net ?? compile(graph, registry);
+      const sim = machine?.sim ?? new Simulation(net, registry);
       const io = bindLevelIo(sim, net, level);
       for (const inst of graph.instances) {
         if (!registry.has(inst.def)) continue;
@@ -150,14 +167,21 @@ export function createDisplay(
     },
     reset(): void {
       // `reset` clears the inputs along with the storage, so the vector has to be
-      // driven again afterwards, not before.
+      // driven again afterwards, not before. On a machine the caller prepared this
+      // clears the run's storage too -- the same objects -- and the run says so
+      // through its own `ticks`, which is the counter this paints.
       sim.reset();
       driveVector(vector);
       settleNow();
     },
   };
 
-  display.reset();
+  // A display that compiled its own circuit is the one that starts it: reset
+  // clears every storage byte, which for a program level would wipe the image the
+  // run just loaded. A machine handed in is already at its starting state -- the
+  // run resets and loads before it hands the machine over -- so it is painted as
+  // it stands.
+  if (!machine) display.reset();
   return display;
 }
 

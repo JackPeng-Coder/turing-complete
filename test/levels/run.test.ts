@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { addInstance, emptyGraph } from '../../src/core/graph';
+import { Simulation, compile } from '../../src/core/net';
 import { graphFromBoard } from '../../src/levels/board';
 import { overtureBoard } from '../../src/levels/boards/overture';
+import { bindLevelIo, loadProgramImage, programTargets } from '../../src/levels/checks';
 import { createProgramRun } from '../../src/levels/run';
 import type { LevelSpec } from '../../src/levels/spec';
 import { registry } from '../fixtures/build';
-
 /**
  * `createProgramRun`: one program, one board, stepped by hand.
  *
@@ -131,22 +132,34 @@ describe('createProgramRun', () => {
     expect(run.readOutputs()).toEqual({ out: 0x11 });
   });
 
-  it('refuses a bad program with a line number and steps nothing', () => {
+  it('refuses a bad program with a line number, and reports no machine at all', () => {
     // A refusal is what the panel shows INSTEAD of a run: nothing is loaded, so
     // a step has to leave the clock alone rather than clock a board with no
     // program in it.
+    //
+    // NOTHING WAS SETTLED, SO NOTHING IS READABLE. The circuit compiles and the
+    // constructor leaves a zero table behind, but the refusal means `reset` was
+    // never reached -- so a reader that handed those zeros out would have the
+    // debugger print a counter at 0x00 and six empty registers for a machine that
+    // was never started. Every state reader says `null` here, which the panel
+    // draws as a dash, and `machine` is `null` with them.
     const broken = ['# a comment', 'move|inp|d1', 'bogus'].join('\n');
     const run = createProgramRun(board(), registry, RUN_LEVEL, broken, 'asm');
     expect(run.errors).toHaveLength(1);
     expect(run.errors[0]).toContain('line 3');
     expect(run.bytes).toEqual([]);
+    expect(run.machine).toBeNull();
+    expect(run.readPc()).toBeNull();
+    expect(run.readRegisters()).toBeNull();
+    expect(run.readRam()).toBeNull();
+    expect(run.readHalt()).toBeNull();
 
     run.step();
     expect(run.ticks).toBe(0);
     run.setInput('in', 0x2a);
     run.step();
     expect(run.ticks).toBe(0);
-    expect(run.readPc()).toBe(0);
+    expect(run.readPc()).toBeNull();
   });
 
   it('says the PLAYER compiled nothing when their text is comment-only', () => {
@@ -222,6 +235,59 @@ describe('createProgramRun', () => {
     expect(run.errors[0]).toContain('ram_prog');
     run.step();
     expect(run.ticks).toBe(0);
+  });
+
+  /**
+   * THE CONTRACT `bytes` HAS TO KEEP, whichever way the run went: a non-empty
+   * `bytes` IS the image in `ram_prog`, and an empty one means nothing was
+   * loaded. The mis-sized pin is the case that used to break it -- the sentence
+   * was appended after the load, so the RAM held the player's image while the IDE
+   * hid the byte view for it -- so the invariant is pinned on that path rather
+   * than on the happy one.
+   */
+  it('loads nothing, and says so, when a level pin is the wrong width', () => {
+    // The reference board with its level input declared one bit wide, which is
+    // the mismatch `bindLevelIo` reports and the checkers grade as `missing-io`.
+    const g = board();
+    const input = g.instances.find((inst) => inst.id === 'IN_in')!;
+    input.params.width = 1;
+
+    const run = createProgramRun(g, registry, RUN_LEVEL, ECHO, 'asm');
+    expect(run.errors).toHaveLength(1);
+    expect(run.errors[0]).toContain('IN_in.out');
+    // Non-empty `errors` and empty `bytes` together, which is what a caller that
+    // shows the byte view exactly when `bytes` is non-empty relies on.
+    expect(run.bytes).toEqual([]);
+    expect(run.readRam()).toBeNull();
+
+    // The load was SKIPPED rather than undone, which the run's own RAM cannot
+    // show -- an inert run reads `null`, deliberately. So the same graph is
+    // compiled a second time and the same image loaded into IT: that memory is
+    // what the player's program looks like when it lands. The untouched memory is
+    // also read, and the two differ, so this is a comparison with teeth.
+    const probe = compile(g, registry);
+    const probeIo = bindLevelIo(new Simulation(probe, registry), probe, RUN_LEVEL);
+    const targets = programTargets(undefined, probe);
+    if (!('ids' in targets)) throw new Error('the reference board has no program RAM');
+    const ramOf = (): number[] => [...probeIo.sim.readState(targets.ids[0]!)!];
+    const untouched = ramOf();
+    loadProgramImage(probeIo, ECHO, 'asm', 'player');
+    const loaded = ramOf();
+    expect(loaded.slice(0, 2)).toEqual([...ECHO_IMAGE]);
+    expect(loaded).not.toEqual(untouched);
+    // ...and the run's own state is the untouched kind: the load never happened.
+    expect(run.readRam()).toBeNull();
+    expect(run.ticks).toBe(0);
+    run.step();
+    expect(run.ticks).toBe(0);
+  });
+
+  it('has the loaded image in RAM whenever it reports bytes', () => {
+    // The other half of the same invariant, on the path that does load.
+    const run = createProgramRun(board(), registry, RUN_LEVEL, ECHO, 'asm');
+    expect(run.errors).toEqual([]);
+    expect(run.bytes).toEqual([...ECHO_IMAGE]);
+    expect(run.readRam()!.slice(0, 2)).toEqual([...ECHO_IMAGE]);
   });
 
   it('reports a circuit that will not compile instead of throwing', () => {

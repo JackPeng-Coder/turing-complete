@@ -1,5 +1,6 @@
 import { CircuitValidationError, UnstableCircuitError } from '../core/errors';
 import type { Graph } from '../core/graph';
+import type { Netlist } from '../core/net';
 import { Simulation, compile } from '../core/net';
 import type { Registry } from '../core/registry';
 import { portValueToNumber } from '../core/signal';
@@ -40,12 +41,40 @@ export interface ProgramRun {
    * follow -- "the circuit does not compile", "there is no `ram_prog` to load
    * into", "the circuit does not settle" -- because there is no other channel a
    * panel could show it on and a control that looks live and does nothing is
-   * worse than a sentence. Non-empty means nothing was loaded, so `step` is a
-   * no-op that leaves `ticks` alone.
+   * worse than a sentence.
+   *
+   * NON-EMPTY MEANS THE RUN IS INERT AND NOTHING WAS EVER LOADED. Every reader
+   * answers as if the machine had not been started -- `step` and `setInput` are
+   * no-ops that leave `ticks` alone, `bytes` is empty, and the state readers
+   * (`readRam`, `readRegisters`, `readPc`, `readHalt`) answer `null` rather than
+   * the zeros the constructor's tables hold -- so a panel facing a refusal prints
+   * dashes instead of describing a machine that was never settled. `checks.ts`'s
+   * `loadProgramImage` is where that holds for a program the READER refuses; the
+   * other four sentences arise before or instead of a load, and the load is
+   * skipped whenever one of them is already standing, which is what keeps a
+   * circuit-level refusal from resetting the machine under the player's feet.
    */
   readonly errors: readonly string[];
-  /** The assembled image, or `[]` when the text is not a program. */
+  /**
+   * The assembled image, or `[]` when the text is not a program.
+   *
+   * The same rule as `errors`: `[]` means nothing was loaded, and every non-empty
+   * `bytes` is in `ram_prog` -- so a caller that shows the byte view exactly when
+   * this is non-empty cannot print the image of a program that never landed.
+   */
   readonly bytes: readonly number[];
+  /**
+   * The circuit this run drives, or `null` when there is nothing to paint.
+   *
+   * THE DISPLAY PAINTS THIS, so what a player sees on the board is the machine
+   * the program is running on rather than a second compilation of the same graph
+   * -- the io panel's clock, its `out` row and the debugger's counter all read
+   * one simulation, which is what stops the board and the run from disagreeing.
+   * `null` exactly when the run is inert (see `errors`: no circuit, or a refusal
+   * before anything was loaded). The `net` is immutable once compiled; the `sim`
+   * is live and belongs to this run.
+   */
+  readonly machine: ProgramMachine | null;
   /** Edges clocked since the last `reset`. */
   readonly ticks: number;
   /** Reset, load the image, settle: the run starts over. */
@@ -75,8 +104,23 @@ export interface ProgramRun {
   readRam(): readonly number[] | null;
 }
 
+/**
+ * One compiled circuit with its storage: the thing a run steps and the board
+ * paints.
+ *
+ * A NAMED TYPE RATHER THAN AN INLINE SHAPE, because two layers hand it to each
+ * other -- `levels/run.ts` builds it and `ui/board/signals.ts` paints it -- and
+ * `core`'s own `Netlist`/`Simulation` pair is what both sides need to see whole.
+ * Nothing here is a copy: the same objects are shared deliberately.
+ */
+export interface ProgramMachine {
+  readonly net: Netlist;
+  readonly sim: Simulation;
+}
+
 /** A circuit the run can drive: a compiled simulation with the level's pins bound. */
 interface Ready {
+  readonly net: Netlist;
   readonly sim: Simulation;
   readonly io: LevelIo;
 }
@@ -131,7 +175,7 @@ export function createProgramRun(
     const net = compile(graph, registry);
     const sim = new Simulation(net, registry);
     const io = bindLevelIo(sim, net, spec);
-    ready = { sim, io };
+    ready = { net, sim, io };
     // A level pin that is present at the wrong width binds nothing, so every
     // value the run would show or drive crosses that pin wrongly. The checkers
     // refuse such a circuit as `missing-io`; here it is a sentence, because a
@@ -143,21 +187,34 @@ export function createProgramRun(
 
   if (ready === null) {
     // No circuit, so the text is read on its own: the panel's first job is to
-    // tell the player about their program, and a typo is not the board's fault.
+    // tell the player about their program, and a typo is not the board's fault
+    // -- and the circuit's own refusal follows, because a panel that could only
+    // say "line 3" would leave a board with a part the registry does not know
+    // looking like a typo.
     errors.push(...programImageOf(text, format, 'player').errors);
+    if (circuitIssue !== null) errors.push(circuitIssue);
   } else {
-    try {
-      // THE ONE WAY AN IMAGE LANDS: `loadProgramImage` resets, loads every
-      // `ram_prog` and settles, in that order -- see its own comment for why the
-      // reset has to come first.
-      const image = loadProgramImage(ready.io, text, format, 'player');
-      if (image.errors.length > 0) errors.push(...image.errors);
-      else bytes = image.bytes;
-    } catch (error) {
-      circuitIssue ??= issue(error);
+    // A CIRCUIT REFUSAL IS RECORDED BEFORE THE LOAD, NOT AFTER IT. The load
+    // resets the machine and writes the image into `ram_prog`, so appending the
+    // sentence afterwards would leave an image in RAM under a non-empty `errors`
+    // -- the one combination `errors` and `bytes` both promise cannot happen, and
+    // the one that made the IDE hide the byte view of a program that had loaded.
+    // Standing here it also keeps a refusal from resetting the machine under the
+    // player's feet on every keystroke, which is what a board mid-edit needs.
+    if (circuitIssue !== null) errors.push(circuitIssue);
+    else {
+      try {
+        // THE ONE WAY AN IMAGE LANDS: `loadProgramImage` resets, loads every
+        // `ram_prog` and settles, in that order -- see its own comment for why the
+        // reset has to come first.
+        const image = loadProgramImage(ready.io, text, format, 'player');
+        if (image.errors.length > 0) errors.push(...image.errors);
+        else bytes = image.bytes;
+      } catch (error) {
+        errors.push(issue(error));
+      }
     }
   }
-  if (circuitIssue !== null) errors.push(circuitIssue);
 
   const instanceOfDef = (def: string): string | null => {
     if (ready === null) return null;
@@ -170,7 +227,11 @@ export function createProgramRun(
   };
 
   const stateOf = (id: string | null): readonly number[] | null => {
-    if (ready === null || id === null) return null;
+    // A RUN THAT IS INERT HAS NOTHING TO REPORT. A refused program never reached
+    // the machine, so the state tables still hold the zeros the constructor left
+    // there -- and reading them out would print a counter at 0x00 and six empty
+    // registers, which is a machine nobody started. See `errors`.
+    if (ready === null || idle() || id === null) return null;
     const state = ready.sim.readState(id);
     return state === null ? null : Array.from(state);
   };
@@ -178,6 +239,13 @@ export function createProgramRun(
   return {
     errors,
     bytes,
+    get machine(): ProgramMachine | null {
+      // The same gate as every other reader: a circuit that refused the program is
+      // not handed out to be painted, because a board showing the zero program
+      // under a panel saying the program did not load is the disagreement this
+      // field exists to prevent. See `errors`.
+      return ready === null || idle() ? null : { net: ready.net, sim: ready.sim };
+    },
     get ticks(): number {
       return ready?.sim.tickCount ?? 0;
     },
@@ -244,7 +312,10 @@ export function createProgramRun(
     },
 
     readHalt(): boolean | null {
-      if (ready === null) return null;
+      // Same gate as `stateOf`: before anything was settled the pin is a
+      // constructor zero, and "运行" is not a reading a machine that never ran is
+      // entitled to. See `errors`.
+      if (idle() || ready === null) return null;
       const id = instanceOfDef('halt');
       if (id === null) return null;
       // A pin, not state: `halt` publishes `out = in` (see `defs/cpu.ts`), so the
@@ -256,7 +327,9 @@ export function createProgramRun(
     },
 
     readRam(): readonly number[] | null {
-      if (ready === null) return null;
+      // Inert means the zeros that were already in the table, which is not a
+      // memory anything was loaded into. See `stateOf` and `errors`.
+      if (idle() || ready === null) return null;
       // WHICH RAM: the same rule the checker loads by (`programTargets`), so the
       // window cannot show a different memory from the one the image went into. A
       // circuit with several program RAMs gets the first of them here; every one

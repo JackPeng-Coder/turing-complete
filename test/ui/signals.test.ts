@@ -3,9 +3,40 @@ import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { addInstance, connect, emptyGraph } from '../../src/core/graph';
 import { getLevel } from '../../src/levels/index';
+import { graphFromBoard } from '../../src/levels/board';
+import { overtureBoard } from '../../src/levels/boards/overture';
+import { createProgramRun } from '../../src/levels/run';
+import type { LevelSpec } from '../../src/levels/spec';
 import { createDisplay } from '../../src/ui/board/signals';
 
 const registry = createRegistry(BASE_DEFS);
+
+/**
+ * The chapter-4 machine the board is painted from when the level grades a
+ * program the player wrote: one byte in, one byte out, on the reference CPU.
+ */
+const PROGRAM_LEVEL: LevelSpec = {
+  id: 'test-display-machine',
+  chapter: 4,
+  index: 1,
+  name: { zh: '测试显示', en: 'Test Display' },
+  brief: { zh: '', en: '' },
+  hint: { zh: '', en: '' },
+  allowedComponents: ['level_input', 'level_output'],
+  io: {
+    inputs: [{ id: 'in', width: 8 }],
+    outputs: [{ id: 'out', width: 8 }],
+  },
+  checks: [],
+};
+
+/** `move|inp|d1` / `move|s1|out`: the level's byte into REG1, REG1 onto `out`. */
+const ECHO = ['move|inp|d1', 'move|s1|out'].join('\n');
+
+/** The reference board, with `PROGRAM_LEVEL`'s pins wired to it. */
+function programBoard() {
+  return graphFromBoard(PROGRAM_LEVEL.id, overtureBoard({ inputId: 'in' }));
+}
 
 /**
  * The live display is what makes the board a readout instead of a drawing: the
@@ -95,5 +126,63 @@ describe('the board display', () => {
     const g = emptyGraph(level.id);
     addInstance(g, 'nand', 0, 0);
     expect(createDisplay(g, registry, level, {})).not.toBeNull();
+  });
+
+  /**
+   * THE DISPLAY AND THE RUN ARE ONE MACHINE.
+   *
+   * A program level hands the board the run's own compiled circuit, because the
+   * two must not be able to disagree: the board's clock card, the io panel's `out`
+   * row and the debugger's counter are all readouts of the machine a step
+   * advanced, and a display that compiled its own would paint a zero program --
+   * 256 zeros in `ram_prog` -- under a debugger counting the player's.
+   */
+  it('paints the machine a program run is driving when it is handed one', () => {
+    const run = createProgramRun(programBoard(), registry, PROGRAM_LEVEL, ECHO, 'asm');
+    expect(run.errors).toEqual([]);
+    const machine = run.machine;
+    expect(machine).not.toBeNull();
+
+    const display = createDisplay(programBoard(), registry, PROGRAM_LEVEL, {}, machine);
+    expect(display).not.toBeNull();
+    // The machine's own storage, not a copy: the image the run loaded into
+    // `ram_prog` is what the board is painted from.
+    expect(display!.io.sim).toBe(machine!.sim);
+
+    // FIVE STEPS, THE NUMBER THE REVIEW COUNTED. `main.ts` drives its clock
+    // through the display, so the display is what advances the machine here.
+    const INPUT = 0x2a;
+    run.setInput('in', INPUT);
+    for (let i = 0; i < 5; i += 1) display!.tick();
+
+    // The clock card's reading and the debugger's tick are the same simulation's
+    // counter: before this fix the run said 5 while the display said 0.
+    expect(display!.read().tick).toBe(5);
+    expect(run.ticks).toBe(5);
+    // ...and the level's `out` row carries what the player's program drove. The
+    // zero program could never produce this byte.
+    expect(display!.read().levelOutputs.get('out')).toBe(INPUT);
+    expect(run.readOutputs()).toEqual({ out: INPUT });
+  });
+
+  it('compiles its own circuit when no machine is handed to it, as before', () => {
+    // THE CHANGED SIGNATURE'S OTHER HALF, and the reason chapters 1 to 3 are
+    // untouched: with no machine the display does exactly what it always did --
+    // compiles the graph and owns the storage. Two separate simulations of one
+    // graph are what those levels have always had, since nothing there is loaded
+    // with a program and there is no second reader to disagree with.
+    const run = createProgramRun(programBoard(), registry, PROGRAM_LEVEL, ECHO, 'asm');
+    // The run IS driving a machine here -- the display was simply not given it.
+    const own = createDisplay(programBoard(), registry, PROGRAM_LEVEL, {}, null);
+    expect(own).not.toBeNull();
+    expect(run.machine).not.toBeNull();
+    expect(own!.io.sim).not.toBe(run.machine!.sim);
+
+    // ...so the two really are independent machines: the display's own never had
+    // the program, and stepping one leaves the other's clock where it was.
+    own!.tick();
+    expect(own!.read().tick).toBe(1);
+    expect(run.ticks).toBe(0);
+    expect(own!.read().levelOutputs.get('out')).toBe(0);
   });
 });
