@@ -24,8 +24,12 @@ import type { BoardInit, BoardPart, BoardWire } from '../spec';
  * THE MACHINE. One program RAM addressed by the program counter, the instruction
  * decoder, the six-register file, the ALU, the write path, the conditional
  * jump's glue, and the halt line that freezes the counter once the program has
- * put its answer on `out`. It is level 49's measured machine (643 gates, 6
- * deep), which is what chapter 4's targets are measured from.
+ * put its answer on `out`. Chapter 3 grades it at 643 gates and 6 deep, which is
+ * level 49's measured machine and what chapter 3's three-star targets quote.
+ * CHAPTER 4 DOES NOT SHIP THAT BOARD: its levels open on the `inputId` shape
+ * below, whose own measured metric is 675 gates and 6 deep -- the same machine
+ * plus the source mux and its connector -- and 675 is therefore what chapter 4's
+ * targets have to be measured against. Do not copy 643 into a chapter-4 level.
  *
  * THE INSTRUCTION IS EXECUTED BY THE EDGE THAT ADVANCES PAST IT. The program RAM
  * is combinational from `PC`, so at the start of a tick the machine is looking at
@@ -370,19 +374,22 @@ export function overtureBoard(options: OvertureBoardOptions = {}): BoardInit {
     // register that number happened to name. So the mux stands in front of `d1`,
     // where the byte is a byte, and the register file keeps its two read ports.
     //
-    // THE SELECT IS THE MACHINE'S OWN FIELD DECODE, AND IT COSTS NOTHING.
+    // THE SELECT COSTS NOTHING TO COMPUTE, AND THE OPTION COSTS ONE MUX.
     // `COND_BITS.b6` is the one-hot line for field value 6 of the decoder the
     // jump's glue already reads: `COND` decodes `DEC.op`, and `DEC.op` is the very
     // [5:3] slice `DEC.src` names -- `instr_decoder` publishes one field under two
     // names -- so that line IS "the instruction's source field is 6". It is
-    // computed already, and it arrives through pins that are wires: 0 gates from
-    // this option and 0 delay. A comparator against a constant byte would say the
-    // same thing for 54 NAND equivalents -- eight XNORs and a seven-AND tree --
-    // and that is the whole gate cost of the option, measured: the wired board's
-    // gate metric is 675 with this line and was 729 with the comparator. (Its
-    // delay metric is 6 either way, because the comparator stood at the same depth
-    // as the decode it duplicated.) The machine should not spend 54 gates
-    // repeating a line it holds.
+    // computed already, and it arrives through pins that are wires: 0 gates and 0
+    // delay for the select itself. What the option DOES buy is the part it
+    // inserts: the `mux8` is 32 NAND equivalents (the `level_input` connector is
+    // 0), which is the whole of the difference between the plain board's measured
+    // 643 gates and the wired board's 675, and `test/levels/boards.test.ts` pins
+    // both numbers. A comparator against a constant byte would have said the same
+    // thing for 54 MORE -- eight XNORs and a seven-AND tree -- so the wired board
+    // measured 729 while it stood there; it was withdrawn, not kept beside the
+    // decode for company. (The delay metric is 6 either way, because the
+    // comparator stood at the same depth as the decode it duplicated.) The
+    // machine should not spend 54 gates on a line it already holds.
     //
     // AND THE SELECT IS SAFE IN EVERY MODE BECAUSE EACH MODE ALREADY DECIDES THE
     // BYTE. A `calc`'s [5:3] is its OPERATION, where codes 6 and 7 are reserved
