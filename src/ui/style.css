@@ -251,6 +251,20 @@ button { font-family: inherit; }
 /* The chevron rides just above the test panel. Because its `bottom` is measured
    from `--test-h`, collapsing the panel carries the button down with it. */
 .overlay-toggle { left: 14px; bottom: calc(var(--test-h) + 6px); }
+/* The programming bench: the assembly editor and the debugger, right of centre.
+   It clears the parts tray instead of covering it, and stops above the test panel
+   exactly as the tray does. Mounted only while the level grades a program the
+   player wrote -- see the panel rules near the end of this file. */
+.overlay-bench {
+  top: 12px;
+  right: 244px;
+  bottom: calc(var(--test-h) + 12px);
+  width: min(430px, 38vw);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+}
 .board-stage.collapsed { --test-h: 0px; }
 /* `box-sizing: border-box` floors a zero height at the padding, so a collapsed
    panel would still show a strip of itself. The padding has to go with the
@@ -559,6 +573,158 @@ button { font-family: inherit; }
 .truth-table table { margin: 0 auto; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .truth-table td, .truth-table th { padding: 2px 10px; text-align: left; }
 .truth-table th { color: var(--text-muted); font-weight: 500; font-size: 12px; }
+
+/* ------------------------------------------------------ programming bench -- */
+/* THE EDITOR AND THE DEBUGGER, in one column over the board's right half.
+
+   The role of the `汇编 IDE` row in the spec's UI table, and the reason it is a
+   column of its own: the board screen is where a program is watched, so the text
+   and the machine's state sit over the circuit rather than on a screen of their
+   own. It is mounted only while the level grades a program the player wrote
+   (`levelExpectsProgram`), so levels 1-49 keep the board they have always had.
+
+   The column's own geometry is at `.overlay-bench` with the other overlays; what
+   follows is the two cards it holds. */
+.ide, .debug {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hair);
+  background: var(--slab-lit);
+}
+.ide-gap, .debug-gap { flex: 1 1 auto; }
+
+/* -- the editor ------------------------------------------------------------ */
+/* The gutter is a SECOND COLUMN OF THE SAME TEXT: one number per line, the same
+   size and the same leading as the textarea beside it, and never a scrollbar of
+   its own -- the panel copies the textarea's `scrollTop` into it, which is what
+   keeps a number on the line it names. */
+.ide-editor { display: flex; min-height: 0; background: var(--void); }
+.ide-gutter {
+  flex: 0 0 auto;
+  overflow: hidden;
+  padding: 8px 6px 8px 10px;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+  user-select: none;
+}
+.ide-line { white-space: pre; }
+/* Monospace, and no wrapping: a program's columns line up, and a long line is
+   read by scrolling rather than by reflowing the instruction into two. */
+.ide-code {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 148px;
+  padding: 8px 10px;
+  border: 0;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--face-ui);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre;
+  tab-size: 2;
+}
+.ide-code::placeholder { color: var(--text-muted); opacity: 0.55; }
+
+/* The status line: the byte count, or the first refusal in the reader's own
+   words. `anywhere` because a sentence about a line is longer than the column. */
+.ide-status {
+  padding: 6px 10px;
+  border-top: 1px solid var(--hair);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
+}
+
+/* The assembled image: one boxed byte per instruction, wrapped. Hidden until the
+   player asks for it -- a hex dump halfway through typing is noise -- and
+   `[hidden]` has to beat the `display: flex` below (the same fight `.screen`
+   documents). */
+.ide-bytes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--hair);
+  background: var(--void);
+  font-variant-numeric: tabular-nums;
+}
+.ide-bytes[hidden] { display: none; }
+.ide-byte {
+  min-width: 2.6em;
+  padding: 1px 5px;
+  border: 1px solid var(--hair);
+  background: var(--slab);
+  color: var(--text);
+  font-size: 12px;
+  text-align: center;
+}
+
+.ide-actions { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--hair); }
+
+/* -- the debugger ---------------------------------------------------------- */
+.debug-regs { display: flex; flex-direction: column; padding: 2px 0; }
+.debug-reg, .debug-pc {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.debug-pc { border-top: 1px solid var(--hair); }
+.debug-name { flex: 0 0 4.4em; color: var(--text-muted); letter-spacing: 0.06em; }
+.debug-hex { flex: 0 0 4em; color: var(--text); }
+.debug-dec { color: var(--text); }
+.debug-ticks { color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.debug-halt { font-size: 11.5px; letter-spacing: 0.1em; }
+
+/* The RAM window's head: which addresses are on screen, which page, and the two
+   buttons that move it. */
+.debug-ram-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--hair);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.debug-ram-head[hidden] { display: none; }
+.debug-page-prev, .debug-page-next {
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--hot-dim);
+  background: transparent;
+  color: var(--hot);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.debug-page-prev:hover:not(:disabled), .debug-page-next:hover:not(:disabled) { border-color: var(--hot); }
+.debug-page-prev:disabled, .debug-page-next:disabled { color: var(--text-muted); border-color: var(--hair); cursor: not-allowed; }
+
+.debug-ram { padding: 4px 10px 8px; background: var(--void); font-variant-numeric: tabular-nums; }
+.debug-row { display: flex; gap: 4px; padding: 1px 0; }
+.debug-addr { flex: 0 0 2.4em; color: var(--text-muted); font-size: 11.5px; }
+.debug-byte {
+  width: 2.6em;
+  text-align: center;
+  color: var(--text);
+  font-size: 11.5px;
+}
+/* THE BYTE BEING EXECUTED. A fill rather than an outline, so it reads from a
+   glance away, and the instrument's cyan rather than a value colour: which
+   address the counter is on is not a bit. */
+.debug-byte-pc { background: var(--neon-dim); color: var(--text); }
+.debug-ram-empty { color: var(--text-muted); font-size: 11.5px; }
 
 /* -------------------------------------------------------------------- map -- */
 .map h2 {

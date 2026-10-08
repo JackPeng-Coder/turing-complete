@@ -2,6 +2,7 @@ import { CircuitValidationError, UnstableCircuitError } from '../core/errors';
 import type { Graph } from '../core/graph';
 import { Simulation, compile } from '../core/net';
 import type { Registry } from '../core/registry';
+import { portValueToNumber } from '../core/signal';
 import { bindLevelIo, loadProgramImage, programImageOf, programTargets, type LevelIo } from './checks';
 import type { LevelSpec } from './spec';
 
@@ -59,6 +60,17 @@ export interface ProgramRun {
   readRegisters(): readonly number[] | null;
   /** The `pc8` state -- the address being executed -- or `null` with no counter. */
   readPc(): number | null;
+  /**
+   * The circuit's `halt` line, or `null` when this board has no `halt` part.
+   *
+   * THE ONE THING THE DEBUGGER CANNOT INFER. Chapter 3's machine freezes the
+   * counter while `halt` is high, so a program that has finished and a program
+   * that jumped to its own address both stand still -- and "the counter stopped
+   * moving" would report the second as the first. This reads the machine's own
+   * signal instead: `halt` is a part with an output pin, and its value is the
+   * same one the counter's load logic sees.
+   */
+  readHalt(): boolean | null;
   /** The 256-byte program image as it stands, or `null` with no `ram_prog`. */
   readRam(): readonly number[] | null;
 }
@@ -229,6 +241,18 @@ export function createProgramRun(
     readPc(): number | null {
       const state = stateOf(instanceOfDef('pc8'));
       return state === null ? null : (state[0] ?? 0);
+    },
+
+    readHalt(): boolean | null {
+      if (ready === null) return null;
+      const id = instanceOfDef('halt');
+      if (id === null) return null;
+      // A pin, not state: `halt` publishes `out = in` (see `defs/cpu.ts`), so the
+      // value here is the same signal the counter's load logic reads. `null` when
+      // the board has no such part, because a board that never built the line has
+      // not told the panel the counter is free.
+      const line = ready.sim.read(ready.sim.net.outputBase(`${id}.out`), 1);
+      return portValueToNumber(line) === 1;
     },
 
     readRam(): readonly number[] | null {

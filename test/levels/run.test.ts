@@ -183,6 +183,31 @@ describe('createProgramRun', () => {
     expect(run.readOutputs()).toEqual({ out: 0x05 });
   });
 
+  it('reports the halt line the debugger shows', () => {
+    // Chapter 3's halt line freezes the counter so the answer stays published,
+    // and it is the one fact the debugger cannot infer from the counter standing
+    // still: a jump to its own address would look the same.
+    const run = createProgramRun(board(), registry, RUN_LEVEL, ECHO, 'asm');
+    // The first instruction is `move|inp|d1`, which does not write `out`, so
+    // nothing is holding the counter.
+    expect(run.readHalt()).toBe(false);
+    run.step();
+    // One edge later the machine is looking at `move|s1|out`.
+    expect(run.readHalt()).toBe(true);
+  });
+
+  it('has no halt line on a board that never built one', () => {
+    // `null` rather than `false`: a board without the part has not told the panel
+    // the counter is free, and a panel that printed 运行 there would be inventing
+    // a signal. The RAM is real, so the program still loads and steps.
+    const g = emptyGraph(RUN_LEVEL.id);
+    addInstance(g, 'ram_prog', 0, 0, 'RAM');
+    const run = createProgramRun(g, registry, RUN_LEVEL, ECHO, 'asm');
+    expect(run.errors).toEqual([]);
+    expect(run.readHalt()).toBeNull();
+    expect(run.readRam()).not.toBeNull();
+  });
+
   it('reads null for the parts a board does not have, and refuses to run it', () => {
     // The debugger is mounted while the board is still being built, so "there is
     // no register file in this circuit" is an ordinary answer and not an error:

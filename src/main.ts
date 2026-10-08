@@ -22,7 +22,10 @@ import { renderBoard, type BoardView } from './ui/board/render';
 import { attachBoardInput, deleteSelection } from './ui/board/interact';
 import { createDisplay, type DisplaySimulation, type SignalSnapshot } from './ui/board/signals';
 import { instanceRect, screenToWorld, type Point } from './ui/board/view';
-import { testCases, type TestPlan } from './levels/checks';
+import { levelExpectsProgram, playerProgramFormat, testCases, type TestPlan } from './levels/checks';
+import { createProgramRun, type ProgramRun } from './levels/run';
+import { mountIde } from './ui/ide';
+import { mountDebug } from './ui/debug';
 import type { LevelSpec } from './levels/spec';
 
 const registry = createRegistry(BASE_DEFS);
@@ -194,6 +197,36 @@ if (app) {
    * tells a player nothing about the ones they got wrong.
    */
   let testResults: (Readonly<Record<string, number>> | null)[] = [];
+  /**
+   * The program run the editor's step controls and the debugger drive, or `null`
+   * on a level that grades no program the player wrote.
+   *
+   * A RUN IS A COMPILED CIRCUIT PLUS ITS STORAGE, so it cannot survive an edit --
+   * exactly like `display`, and for the same reason. It is dropped (not rebuilt)
+   * whenever the text or the graph changes, and rebuilt on the next control that
+   * needs one, so a panel never shows state from a circuit that is no longer on
+   * the board.
+   */
+  let playerRun: ProgramRun | null = null;
+  /** What `playerRun` was built from; a different value means it must be rebuilt. */
+  let playerRunKey = '';
+  /** Bumped by every board edit: the run is compiled from a live graph, not a copy. */
+  let graphRevision = 0;
+  /** The column holding the editor and the debugger, while the level wants them. */
+  let bench: HTMLElement | null = null;
+  let ide: { render(): void } | null = null;
+  let debug: { render(): void } | null = null;
+  /** True while the program is being stepped on a timer. */
+  let programRunning = false;
+  let programTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * The pace the program steps at, as an index into `TEST_RATES`.
+   *
+   * The same vocabulary the test run's speed button uses, and its own index rather
+   * than the shared one: watching a program execute and watching the level's cases
+   * play are two different things to want at two different speeds.
+   */
+  let programRate = DEFAULT_TEST_RATE;
 
   const paint = (): void => {
     if (!boardScreen.hidden) renderBoard(canvas, store, store.get().camera, view);
@@ -233,6 +266,11 @@ if (app) {
     vector = { ...values };
     display?.drive(vector);
     sample();
+    // The readout panel is the game's only input control, so the same vector goes
+    // to the program run: a program that reads `inp` must see the byte the player
+    // clicked, not a zero, and it is cheap here because a level with no program
+    // run syncs nothing.
+    syncPlayerInputs();
   };
 
   /** Drives one input vector onto the board and repaints everything that shows it. */
@@ -541,6 +579,15 @@ if (app) {
     });
     rebuild();
     showScreen('board');
+    // The bench follows the level: an editor on a level that grades no program,
+    // or a debugger still reading the previous level's machine, would both be
+    // describing something that is not on screen.
+    mountBench();
+    // A level that ships a circuit opens on a machine rather than on a corner of
+    // one: the chapter-4 CPU spans a couple of thousand world units, so the
+    // default camera would show its left third and a player would have to find
+    // the fit button before they could see what they were handed.
+    if (next.board) fitView();
     showBriefing(narrativeFor(levelId).before);
   };
 
@@ -579,15 +626,222 @@ if (app) {
     });
   };
 
+  // -------------------------------------------------------------------------
+  // the program run: the editor's step controls and the debugger
+  // -------------------------------------------------------------------------
+
+  /** The level's program text, as the app holds it. */
+  const playerText = (): string => {
+    const { level: current, programs } = store.get();
+    return programs[current.id] ?? '';
+  };
+
+  /**
+   * Drives the level's input vector onto the program run.
+   *
+   * THE READOUT PANEL IS THE INPUT CONTROL, on every level, and it drives the
+   * board's display -- so a program that reads `inp` would read zeros in the
+   * debugger while the panel beside it showed the byte the player set. The same
+   * vector therefore goes to both, and it is re-applied whenever a run is built
+   * because a fresh `Simulation` has no inputs in it.
+   */
+  const syncPlayerInputs = (): void => {
+    if (playerRun === null) return;
+    for (const pin of store.get().level.io.inputs) {
+      playerRun.setInput(pin.id, vector[pin.id] ?? 0);
+    }
+  };
+
+  /**
+   * The run for the circuit and the text that are on screen right now.
+   *
+   * BUILT ON DEMAND, because a `ProgramRun` owns a compiled circuit: anything
+   * that reads the machine's state -- a step, a readout, an assemble -- asks for
+   * one here, and a run whose key no longer matches the store's text or graph is
+   * rebuilt rather than reused. `null` on a level with no player program, which is
+   * the same answer the bench's own mount takes.
+   */
+  const ensurePlayerRun = (): ProgramRun | null => {
+    const { graph, level: current } = store.get();
+    if (!levelExpectsProgram(current)) return null;
+    const format = playerProgramFormat(current);
+    const key = `${current.id}\u0000${graphRevision}\u0000${format}\u0000${playerText()}`;
+    if (playerRun === null || playerRunKey !== key) {
+      playerRun = createProgramRun(graph, registry, current, playerText(), format);
+      playerRunKey = key;
+      syncPlayerInputs();
+    }
+    return playerRun;
+  };
+
+  const stopProgramRun = (): void => {
+    if (programTimer !== null) clearInterval(programTimer);
+    programTimer = null;
+    programRunning = false;
+  };
+
+  /** Starts the program clock at the current pace, replacing any timer already on. */
+  const startProgramTimer = (): void => {
+    stopProgramRun();
+    programRunning = true;
+    programTimer = setInterval(runProgramStep, TEST_RATES[programRate]!.ms);
+  };
+
+  /** Throws the run away: its circuit or its text is no longer the one on screen. */
+  const dropPlayerRun = (): void => {
+    stopProgramRun();
+    playerRun = null;
+    playerRunKey = '';
+  };
+
+  /** One tick of the program clock, and the end of it when there is nothing left to run. */
+  const runProgramStep = (): void => {
+    const target = ensurePlayerRun();
+    if (target !== null) target.step();
+    // A run that can no longer advance -- a refused program, or a circuit that
+    // stopped settling under it -- must not leave a timer ticking at it forever.
+    if (target === null || target.errors.length > 0) stopProgramRun();
+    refreshBench();
+  };
+
+  const toggleProgramRun = (): void => {
+    if (programRunning) {
+      stopProgramRun();
+      refreshBench();
+      return;
+    }
+    const target = ensurePlayerRun();
+    if (target === null || target.errors.length > 0) {
+      // Nothing to run: the status line already says why, and a timer stepping a
+      // refused program would be a control that lies about what it is doing.
+      refreshBench();
+      return;
+    }
+    startProgramTimer();
+    // The test run steps as soon as it starts (`startTest` calls `runTestStep`),
+    // so the first edge arrives with the click rather than a beat later.
+    runProgramStep();
+  };
+
+  const refreshBench = (): void => {
+    ide?.render();
+    debug?.render();
+  };
+
+  /**
+   * A keystroke in the editor: the text moves in both copies, and the verdict goes.
+   *
+   * ONE VALUE, THREE PLACES. `AppState.programs` is what the checks and the run
+   * read, `Progress.programs` is what survives a refresh, and `saveProgress` is
+   * written from the same object -- so the three cannot disagree, and `applyGrade`
+   * (which rebuilds `Progress` around `progress.programs`) can only ever carry the
+   * latest text, because every path that replaces `Progress` reads the one the
+   * store holds.
+   */
+  const onProgramEdit = (text: string): void => {
+    const { level: current, programs, progress: current0 } = store.get();
+    const next = { ...programs, [current.id]: text };
+    progress = { ...current0, programs: next };
+    saveProgress(progress);
+    // A verdict reached before the edit describes a different program, and a run
+    // compiled from the old text describes a different circuit.
+    dropPlayerRun();
+    store.set({ programs: next, progress, lastGrade: null });
+  };
+
+  /**
+   * The editor and the debugger, mounted while the level grades a program the
+   * player wrote and removed when it does not.
+   *
+   * WHY IT IS NOT ALWAYS MOUNTED, hidden: the board screen is what chapters 1 to 3
+   * were built and tested against, and a panel that appeared on level 4 would be a
+   * screen nobody designed for. `levelExpectsProgram` is the level-data question;
+   * this is where the DOM follows it. Removing the column also drops the run, so a
+   * level change cannot leave a compiled circuit of the previous level behind.
+   */
+  const mountBench = (): void => {
+    bench?.remove();
+    bench = null;
+    ide = null;
+    debug = null;
+    dropPlayerRun();
+    if (!levelExpectsProgram(store.get().level)) return;
+
+    const column = document.createElement('div');
+    column.className = 'overlay overlay-bench';
+    ide = mountIde(column, store, {
+      format: () => playerProgramFormat(store.get().level),
+      onEdit: onProgramEdit,
+      onAssemble: () => {
+        ensurePlayerRun();
+        // The tick metric is read out of the checks, and a player check walks the
+        // player's program, so the bar is re-measured when the program is read --
+        // not on every keystroke, where it would be a compile per character for a
+        // number nobody reads mid-word.
+        measure();
+        refreshBench();
+      },
+      // The level's own run, the same handler the panel and the toolbar call: a
+      // program level's cases cannot be played one at a time (`testCases` says
+      // why), so this grades the circuit against the player's program.
+      onTest: () => {
+        ensurePlayerRun();
+        toggleTest();
+      },
+      onStep: () => {
+        const target = ensurePlayerRun();
+        if (target === null) return;
+        target.step();
+        refreshBench();
+      },
+      onToggleRun: toggleProgramRun,
+      running: () => programRunning,
+      testing: () => testing,
+      rate: () => TEST_RATES[programRate]!.label,
+      onCycleRate: () => {
+        programRate = (programRate + 1) % TEST_RATES.length;
+        // A running program takes the new pace at once: a speed button that only
+        // applied to the next run would be a control that did nothing while it
+        // mattered.
+        if (programRunning) startProgramTimer();
+        refreshBench();
+      },
+      result: () =>
+        playerRun === null
+          ? null
+          : { bytes: playerRun.bytes, errors: playerRun.errors, ticks: playerRun.ticks },
+    });
+    debug = mountDebug(column, {
+      registers: () => playerRun?.readRegisters() ?? null,
+      pc: () => playerRun?.readPc() ?? null,
+      ram: () => playerRun?.readRam() ?? null,
+      halt: () => playerRun?.readHalt() ?? null,
+      ticks: () => playerRun?.ticks ?? 0,
+    });
+    bench = column;
+    stage.append(column);
+    // A run exists from the moment the bench does, so the debugger opens on the
+    // machine's own state -- the counter at its first instruction, the registers
+    // empty -- rather than on a card of dashes.
+    ensurePlayerRun();
+    refreshBench();
+  };
+
   /** Every board edit: the circuit changed, so the display and the measurement did too. */
   const onChange = (): void => {
     if (testing) stopTest();
+    // A run is a compiled circuit: this one was compiled from the graph as it was
+    // before the edit, so it goes rather than being left to describe a circuit
+    // nobody can see. It is rebuilt by the next control that asks for one.
+    graphRevision += 1;
+    dropPlayerRun();
     rebuild();
     // The columns keep their layout but lose their numbers: they were read from
     // the circuit as it was before this edit.
     testResults = [];
     activeCase = null;
     measure();
+    refreshBench();
   };
 
   const mapRender = mountMap(mapScreen, store, openLevel);
@@ -699,7 +953,13 @@ if (app) {
   // Render on state change only: a continuous rAF loop would repaint a static
   // board 60 times a second forever. Panning, zooming and dragging all go
   // through store.set, so they still repaint every frame they change something.
-  store.subscribe(() => paint());
+  // The bench rides along: its panels read the store (the level's text, the
+  // verdict) and are not subscribers of their own, so one edit repaints all three
+  // in the order they are laid out over the board.
+  store.subscribe(() => {
+    paint();
+    refreshBench();
+  });
   globalThis.addEventListener('resize', paint);
 
   // The app opens on the resume point's level, so its briefing is the first
@@ -708,6 +968,9 @@ if (app) {
   showBriefing(narrativeFor(level.id).before);
   paint();
   refreshPanels();
+  mountBench();
+  // ...and the level it opened on gets the same framing `openLevel` gives it.
+  if (level.board) fitView();
 }
 
 /**

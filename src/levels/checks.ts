@@ -1300,6 +1300,55 @@ export function playerProgramText(player?: PlayerProgram): string {
 }
 
 /**
+ * True when a level hands the keyboard to the player: it grades a program the
+ * player WROTE, or drives one through a closed-loop checker.
+ *
+ * THIS IS THE MOUNT DECISION for the assembly editor (`ui/ide.ts`), and it is a
+ * level-data question rather than a UI one, which is why it is answered here.
+ * Both shapes count, and for the same reason: a `program` check with
+ * `from: 'player'` reads the player's buffer directly, and a `custom` check --
+ * chapter 4's code lock and maze -- is handed the same buffer and drives the CPU
+ * through it. A `program` check with `from: 'level'` is NOT one of them: chapter
+ * 3's machine levels grade a program the level ships, so there is nothing for the
+ * player to type.
+ *
+ * The walk is deliberately defensive, like `testCases`: level data reaches the
+ * kernel untyped, and a `null` entry or a check with no readable `kind` must
+ * leave the editor closed rather than throw out of the mount path.
+ */
+export function levelExpectsProgram(spec: LevelSpec): boolean {
+  const checks: readonly LevelCheck[] = Array.isArray(spec.checks) ? spec.checks : [];
+  for (const entry of checks) {
+    if (!isRecord(entry) || typeof entry.kind !== 'string') continue;
+    if (entry.kind === 'custom') return true;
+    if (entry.kind === 'program' && entry.from === 'player') return true;
+  }
+  return false;
+}
+
+/**
+ * The reader this level's player programs are written for: `'asm'`, or `'bytes'`
+ * for the hand-written machine-code format of the programming chapter.
+ *
+ * THE SAME CHOICE THE LEVEL'S OWN CHECK MAKES, asked once so the editor and the
+ * checker cannot read one text two ways: the punchcard level's program is bytes,
+ * and an editor that assumed assembly would show a byte count for a program the
+ * grade then refuses. The first `program from: 'player'` check wins (a level
+ * could in principle declare two readers for two buffers, and the app has one);
+ * a level whose channel is a `custom` checker, or which has no player channel at
+ * all, answers `'asm'`, which is what both closed-loop checkers read.
+ */
+export function playerProgramFormat(spec: LevelSpec): 'asm' | 'bytes' {
+  const checks: readonly LevelCheck[] = Array.isArray(spec.checks) ? spec.checks : [];
+  for (const entry of checks) {
+    if (!isRecord(entry) || entry.kind !== 'program' || entry.from !== 'player') continue;
+    const reader = programOption(entry.format, ['asm', 'bytes']);
+    if (reader.kind === 'value') return reader.value;
+  }
+  return 'asm';
+}
+
+/**
  * A parsed program text: the bytes it denotes, or the sentences explaining why it
  * denotes none.
  *
