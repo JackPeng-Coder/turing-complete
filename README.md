@@ -27,7 +27,7 @@ A from-scratch, from-NAND-to-CPU educational puzzle game that reimplements the *
 LevelHead's *Turing Complete*: you start with one primitive gate and build your way up, gate by gate,
 towards a working CPU.
 
-## What works today (Phases 0–2)
+## What works today (Phases 0–3)
 
 - **Chapter 1 — 13 levels**, from the NAND gate to the logic exam.
 - **Chapter 2 — 26 levels (14–39)**: the four-bit reader, parity and counting, the byte operators,
@@ -36,6 +36,9 @@ towards a working CPU.
 - **Chapter 3 — 10 levels (40–49)**: the ALU and the machine around it — registers and buses, the
   opcode decoder, the program counter and its RAM, and a capstone that runs an assembled program
   against the machine you built.
+- **Chapter 4 — 7 levels (50–56)**: programming the CPU you built — hand-written machine code, the
+  assembler, arithmetic and conditional jumps, and two closed-loop puzzles (the code lock and the
+  maze) whose checker drives your program one tick at a time.
 - A **canvas wiring board**: place parts, drag wires, pan and zoom. Wires are routed, not just drawn:
   a run is chosen against every part and every wire already on the board, so it goes *around* a gate
   rather than through it, and two nets never settle into the same lane and read as one wire.
@@ -53,8 +56,8 @@ towards a working CPU.
 - **Progress saved to `localStorage`**, so a refresh keeps your stars.
 - A **chapter map** for navigating levels and seeing what is unlocked.
 
-Chapters 4–7 (programming and the assembly IDE, the LEG CPU, functions, the assembly challenges and
-the sandbox) are planned but not built yet.
+Chapters 5–7 (the LEG CPU, functions, the assembly challenges and the sandbox) are planned but not
+built yet.
 
 ## Interface
 
@@ -159,7 +162,7 @@ bring it back.
 src/
   core/     simulator: signals, component registry + definitions, graph/netlist, settle & tick
   asm/      the assembler and its ISA: field ranges, addressing modes, operands, program images
-  levels/   LevelSpec types, the campaign table, checks, grader, and content/ (49 levels: chapters 1–3)
+  levels/   LevelSpec types, the campaign table, checks, grader, and content/ (56 levels: chapters 1–4)
   app/      application state, command/undo stack, progress, and the shared viewport types
   ui/       the board's chrome: top bar, palette, clock + I/O readout, tool grid, test cases,
             chapter map, and the Canvas board (see ui/board/)
@@ -177,10 +180,10 @@ anything starts to — that file is this project's linter, because no linter is 
 
 ## Contributing / scope
 
-Phases 0–2 cover chapters 1–3, which is **49 of the campaign's 93 levels**. The campaign follows the
+Phases 0–3 cover chapters 1–4, which is **56 of the campaign's 93 levels**. The campaign follows the
 **2.x** structure of the game (13/26/10/7/26/7/4 chapters, Symphony in place of LEG, 2–64-bit
 widths); the table that fixes it is [`src/levels/campaign.ts`](src/levels/campaign.ts), and
-`test/levels/campaign-shape.test.ts` holds every level to it. The remaining chapters 4–7 are listed
+`test/levels/campaign-shape.test.ts` holds every level to it. The remaining chapters 5–7 are listed
 in [`GAME_RESEARCH_2026-10-03.md`](GAME_RESEARCH_2026-10-03.md) §5; the phase they will be built in
 is not decided yet. [`RESEARCH.md`](RESEARCH.md) records where the two research documents disagree
 and which one this project follows for what.

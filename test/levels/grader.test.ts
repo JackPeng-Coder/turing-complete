@@ -3,8 +3,10 @@ import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/gra
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { delayOf } from '../../src/core/net';
 import { createRegistry, type ComponentDef } from '../../src/core/registry';
+import { graphFromBoard } from '../../src/levels/board';
 import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
 import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
+import type { PlayerProgram } from '../../src/levels/checks';
 import type { LevelSpec } from '../../src/levels/spec';
 import { LEVELS, LEVEL_ORDER, getLevel } from '../../src/levels/index';
 import type { Metrics } from '../../src/levels/grader';
@@ -12,6 +14,7 @@ import { SCORE_WEIGHTS, gateCost, grade, scoreOf, starsOf } from '../../src/leve
 import { build } from '../fixtures/build';
 import { CH2_REFERENCES } from '../fixtures/ch2-references';
 import { CH3_REFERENCES } from '../fixtures/ch3-references';
+import { CH4_REFERENCES } from '../fixtures/ch4-references';
 
 const registry = createRegistry(BASE_DEFS);
 
@@ -407,10 +410,18 @@ describe('phase-0 regression: the chapter-1 reference scores are frozen', () => 
  * It walks the SHIPPED level set (`LEVELS`, assembled by `src/levels/index.ts`),
  * not this file's table, so a level that ships later without a reference circuit
  * here fails the coverage case instead of being silently skipped. Every chapter
- * is joined now, so the circuits come from three places -- this file's
- * chapter-1 map plus the shared chapter-2 and chapter-3 fixtures -- and the walk
- * covers all 49 ids. It covered twelve before the join, which is the walk
- * working as designed rather than a gap: it can only check the levels that ship.
+ * is joined now, so the references come from four places -- this file's
+ * chapter-1 map plus the shared chapter-2, chapter-3 and chapter-4 fixtures --
+ * and the walk covers all 56 ids. It covered twelve before the join, which is the
+ * walk working as designed rather than a gap: it can only check the levels that
+ * ship.
+ *
+ * CHAPTER 4'S REFERENCES ARE PROGRAMS, NOT CIRCUITS, and they are graded the way
+ * the app grades them: the graph is the level's own `board`
+ * (`graphFromBoard(level.id, level.board)`) and the program travels on
+ * `grade`'s fourth argument as a `PlayerProgram`. No board is filed anywhere
+ * (ruling 1), so there is no second copy of the CPU to drift from the one the
+ * level hands the player.
  *
  * This is what fix round 2 turned on: pricing the built-in `and`/`or` on the NAND
  * basis moved `ch1-06` (2 -> 4), `ch1-10` (2 -> 6) and `ch1-11` (2 -> 4) past
@@ -419,26 +430,48 @@ describe('phase-0 regression: the chapter-1 reference scores are frozen', () => 
  * they still satisfy the levels they belong to.
  */
 describe('every shipped level: its reference solution meets its own three-star bounds', () => {
-  /** Chapter 1 from this file, chapters 2 and 3 from the shared fixtures. */
-  const shippedReference: Record<string, () => Graph> = {
+  /**
+   * A filed reference: chapters 1-3 file circuits, chapter 4 files programs.
+   *
+   * The union is not a convenience. A chapter-4 level ships the chapter-3 machine
+   * as its `board`, so a circuit filed for it here would be a second copy of the
+   * CPU -- free to drift from the one a player is handed, and the drift would read
+   * as a pass.
+   */
+  type FiledReference = (() => Graph) | { readonly program: string };
+
+  /** Chapter 1 from this file, chapters 2 to 4 from the shared fixtures. */
+  const shippedReference: Record<string, FiledReference> = {
     ...ch1Reference,
     ...CH2_REFERENCES,
     ...CH3_REFERENCES,
+    ...CH4_REFERENCES,
   };
 
-  it('has a reference circuit for every shipped level', () => {
+  /** The graph and player program a level's filed reference grades with. */
+  function referenceOf(level: LevelSpec): { graph: Graph; player?: PlayerProgram } {
+    const filed = shippedReference[level.id];
+    if (!filed) throw new Error(`${level.id} has no reference`);
+    if (typeof filed === 'function') return { graph: filed() };
+    const board = level.board;
+    if (!board) throw new Error(`${level.id} files a program but ships no board to run it on`);
+    return { graph: graphFromBoard(level.id, board), player: { text: filed.program } };
+  }
+
+  it('has a reference for every shipped level', () => {
     expect(LEVELS.length).toBeGreaterThan(0);
     const missing = LEVELS.map((l) => l.id).filter((id) => !(id in shippedReference));
-    expect(missing, `no reference circuit for: ${missing.join(', ')}`).toEqual([]);
+    expect(missing, `no reference for: ${missing.join(', ')}`).toEqual([]);
   });
 
   for (const id of LEVEL_ORDER) {
     it(`${id} meets every bound its level declares`, () => {
       const level = getLevel(id);
-      const make = shippedReference[id];
-      expect(make, `${id} has no reference circuit`).toBeDefined();
-      if (!make) return;
-      const result = grade(make(), registry, level);
+      const filed = shippedReference[id];
+      expect(filed, `${id} has no reference`).toBeDefined();
+      if (!filed) return;
+      const reference = referenceOf(level);
+      const result = grade(reference.graph, registry, level, reference.player);
       expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
       expect(result.passed).toBe(true);
       const target = level.threeStar;

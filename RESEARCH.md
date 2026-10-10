@@ -71,7 +71,7 @@
 
 **切换后**：按 2.x 改为《逻辑整合》（`ch3-40`）与《计算核心》（`ch3-46`）等名；`ch3-42-alu-2` 补上一条从第 2 章挪来的奖励（`ashr8`/`rot_l8`/`rot_r8`——它们的原发放关卡《逻辑引擎》被退役），《程序》与《立即数》按 2.x 交换先后（现为 47 立即数、48 程序）。原计划曾以为 `alu2` 是"无人发放的组件"，实际上**它不是组件、只是关卡名**——这一处推断错误已纠正，`registry.test.ts` 会拦住这类不存在的 id。
 
-**第 4–7 章（尚未实现）**——**基线已经选定 2.x**（2026-10-04），因此剩余工作量是 2.x 的 44 关（7+26+7+4；第 5 章是 Symphony 的 26 关）。1.x 时期规划的 35 关（6+11+10+8，第 5 章是 LEG 的 11 关）不再采用，留在[三份阶段计划](docs/superpowers/plans/)里作为历史。章节表见[新资料](GAME_RESEARCH_2026-10-03.md) §5 的第 4–7 章；阶段划分在第 3 阶段启动时确定。
+**第 4 章 7 关已实现（2.x 基线），剩余第 5–7 章 37 关**——**基线已经选定 2.x**（2026-10-04），因此剩余工作量是 2.x 的 37 关（26+7+4；第 5 章是 Symphony 的 26 关）。1.x 时期规划的 35 关（6+11+10+8，第 5 章是 LEG 的 11 关）不再采用，留在[三份阶段计划](docs/superpowers/plans/)里作为历史。章节表见[新资料](GAME_RESEARCH_2026-10-03.md) §5 的第 5–7 章；阶段划分在第 3 阶段启动时确定。
 
 ---
 
@@ -94,10 +94,10 @@
 
 ## 5. 谁说了算（source of truth）
 
-- **已实现内容（第 1–3 章 49 关）**：名字与顺序来自[新资料](GAME_RESEARCH_2026-10-03.md) §5（2.x）；io / 检查器 / 三星 / 奖励由本复刻设计。**唯一事实来源是 [`src/levels/campaign.ts`](src/levels/campaign.ts)**，`test/levels/campaign-shape.test.ts` 把它变成断言；逐关出处见 [`docs/research/chapter-2-level-provenance.md`](docs/research/chapter-2-level-provenance.md)（已按新 id 重写）。第 0–2 阶段的计划文档里的关卡编号属于 1.x 时期，作为历史记录保留未改——对照关系见本节 §3。
+- **已实现内容（第 1–4 章 56 关）**：名字与顺序来自[新资料](GAME_RESEARCH_2026-10-03.md) §5（2.x）；io / 检查器 / 三星 / 奖励由本复刻设计。**唯一事实来源是 [`src/levels/campaign.ts`](src/levels/campaign.ts)**，`test/levels/campaign-shape.test.ts` 把它变成断言；逐关出处见 [`docs/research/chapter-2-level-provenance.md`](docs/research/chapter-2-level-provenance.md)（已按新 id 重写）。第 0–2 阶段的计划文档里的关卡编号属于 1.x 时期，作为历史记录保留未改——对照关系见本节 §3。
 - **架构与仿真语义**：以 [设计规格](docs/superpowers/specs/2026-09-25-turing-complete-replica-design.md) 与 [三份阶段计划](docs/superpowers/plans/) 为准；两份资料只提供背景事实。
 - **未来重制参考**：新资料 §11「复刻开发参考（技术要点）」与 §5「93 关全表」是 2.x 的权威描述；`isa_spec`（开发者本人开源的汇编框架）是 Symphony 汇编器的参考实现。
-- **尚未实现的第 4–7 章**：1.x 的章节表在旧资料 §5.4–5.7，2.x 的在[新资料](GAME_RESEARCH_2026-10-03.md) §5 的第 4–7 章表。先定基线，再查对应那一份，**不要混用**——两份的第 5 章是两台完全不同的 CPU（LEG 11 关 vs Symphony 26 关）。
+- **尚未实现的第 5–7 章**：1.x 的章节表在旧资料 §5.4–5.7，2.x 的在[新资料](GAME_RESEARCH_2026-10-03.md) §5 的第 5–7 章表。先定基线，再查对应那一份，**不要混用**——两份的第 5 章是两台完全不同的 CPU（LEG 11 关 vs Symphony 26 关）。
 - **成本口径**：`gate / delay / tick` 的定义与 `score` 公式只在设计规格里，两份资料都没有——**别拿资料里的成就数值当评分依据**。
 
 ---

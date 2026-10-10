@@ -66,7 +66,7 @@ prose.
 ```
 src/core/     simulator: signals, registry and definitions, graph/netlist, settle and tick
 src/asm/      the assembler and its ISA: field ranges, modes, operands, program images
-src/levels/   LevelSpec types, checks, grader, and content/ (chapters 1-3 so far)
+src/levels/   LevelSpec types, checks, grader, and content/ (chapters 1-4 so far)
 src/app/      state, command/undo stack, progress, shared viewport types
 src/ui/       the chrome, and ui/board/ -- camera, hit testing, routing, painting
 src/persist/  localStorage save and load
@@ -84,10 +84,10 @@ every place they contradict each other, and names which one this project follows
 
 The shipped campaign follows the **2.x** structure as of 2026-10-04. `src/levels/campaign.ts` is the
 table that fixes its shape and `test/levels/campaign-shape.test.ts` holds every level to it, so change
-that table — not a level object — when the campaign's shape has to change. Chapters 1-3 (49 levels)
-are built; chapters 4-7 (44 levels) are listed in the dossier's §5 and their phase is not decided yet.
+that table — not a level object — when the campaign's shape has to change. Chapters 1-4 (56 levels)
+are built; chapters 5-7 (37 levels) are listed in the dossier's §5 and their phase is not decided yet.
 
-Read `RESEARCH.md` before planning chapter 4. No image of the original's art may be committed, in any
+Read `RESEARCH.md` before planning chapter 5. No image of the original's art may be committed, in any
 case — that is a hard constraint in the design spec (§1.4), and it is why the `imgs/` folder that came
 with the 2.x dossier is not in the tree. The 1.x compendium contains no images at all.
 

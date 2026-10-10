@@ -8,14 +8,18 @@ import {
   type Progress,
 } from '../../src/app/progress';
 import type { Graph } from '../../src/core/graph';
+import { graphFromBoard } from '../../src/levels/board';
 import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
 import { CH3_LEVELS } from '../../src/levels/content/ch3/index';
+import { CH4_LEVELS } from '../../src/levels/content/ch4/index';
+import type { PlayerProgram } from '../../src/levels/checks';
 import { grade, type GradeResult } from '../../src/levels/grader';
 import { LEVELS, LEVEL_ORDER } from '../../src/levels/index';
 import type { LevelSpec } from '../../src/levels/spec';
 import { build, registry } from '../fixtures/build';
 import { CH2_REFERENCES } from '../fixtures/ch2-references';
 import { CH3_REFERENCES } from '../fixtures/ch3-references';
+import { CH4_REFERENCES } from '../fixtures/ch4-references';
 
 /**
  * The whole-set machine check: can the palette the app hands a first-time player
@@ -38,29 +42,32 @@ import { CH3_REFERENCES } from '../fixtures/ch3-references';
  * `allowedComponents` here would let this check and the app drift apart, which
  * is the failure mode it exists to catch.
  *
- * BOTH CHAPTERS ARE JOINED NOW, so the shipped set is `LEVELS` -- all 49 ids, no
- * filter and no sibling list. This file used to carry a `NOT_JOINED_YET` slice
- * (`CH2_LEVELS` filtered against `LEVEL_ORDER`) that covered chapter 2's
- * written-but-unreachable levels; `content/index.ts` now appends that same
- * array, the filter matched nothing, and it is gone. The join is asserted rather
- * than assumed, by the `the assembled set` block below: 49 levels, chapter-2
- * indices 14-39 contiguous and unique, and no id twice.
+ * EVERY CHAPTER JOINED SO FAR IS IN THE SHIPPED SET, so the set is `LEVELS` --
+ * all 56 ids, no filter and no sibling list. This file used to carry a
+ * `NOT_JOINED_YET` slice (`CH2_LEVELS` filtered against `LEVEL_ORDER`) that
+ * covered chapter 2's written-but-unreachable levels; `content/index.ts` now
+ * appends that same array, the filter matched nothing, and it is gone. The join is
+ * asserted rather than assumed, by the `the assembled set` block below: 56 levels,
+ * each chapter's indices contiguous and unique, and no id twice.
  *
- * THE REFERENCE SOLUTIONS COME FROM TWO PLACES, and the asymmetry is scope
- * rather than taste. Chapter 2's 26 graphs moved to
+ * THE REFERENCES COME FROM THIS FILE AND THREE FIXTURES, and the asymmetry is
+ * scope rather than taste. Chapter 2's 26 graphs moved to
  * `test/fixtures/ch2-references.ts`, which the four batch tests now share (that
- * file's header explains the move); chapter 1's thirteen are still written out
+ * file's header explains the move); chapter 3's ten come from
+ * `test/fixtures/ch3-references.ts`; chapter 1's thirteen are still written out
  * below, because this task may not edit the chapter-1 test files that own them.
- * Either way the copies cannot rot quietly: the tests below grade every filed
- * reference against the level it is filed under, and the walk fails loudly if
- * one stops passing.
+ * Chapter 4's seven are not circuits at all -- the level ships the CPU, so the
+ * reference is a PROGRAM (`test/fixtures/ch4-references.ts`) and the graph is read
+ * from the level's own `board` (`referenceFor` below). Either way the copies
+ * cannot rot quietly: the tests below grade every filed reference against the
+ * level it is filed under, and the walk fails loudly if one stops passing.
  */
 
 /**
  * Every level the repository ships, in the game's order.
  *
  * `LEVELS` IS the game's order -- `levels/index.ts` re-exports `ALL_LEVELS`,
- * which is chapter 1 followed by chapter 2 -- so nothing here re-sorts or
+ * which is chapters 1 to 4 in campaign order -- so nothing here re-sorts or
  * re-filters it. A walk that derived its own order could agree with itself while
  * disagreeing with the app, which is the failure this file exists to catch.
  */
@@ -73,11 +80,39 @@ function specOf(id: string): LevelSpec {
   return level;
 }
 
-/** The reference solution filed for this level, or a loud failure. */
-function solutionFor(id: string): () => Graph {
-  const make = REFERENCE_SOLUTIONS[id];
-  if (!make) throw new Error(`no reference solution filed for ${id}`);
-  return make;
+/**
+ * A reference solution as filed: a circuit factory, or -- chapter 4's shape -- the
+ * reference PROGRAM the level's own board runs.
+ *
+ * THE UNION IS THE POINT, and its two halves come from different places for a
+ * reason. Chapters 1-3's levels ship no starting circuit, so the reference IS the
+ * circuit, filed in this file's map or in a chapter fixture. Chapter 4's levels
+ * ship the chapter-3 machine as their `board`, so filing a circuit beside the
+ * level would be a second copy of the CPU, free to drift from the one a player is
+ * handed -- and the drift would read as a PASS, because a stale copy keeps grading
+ * green against a machine the levels no longer ship. A chapter-4 entry is
+ * therefore just its `CH4_REFERENCES` program, and the graph is read from the
+ * level itself with the app's own `graphFromBoard` (ruling 1: the board does not
+ * enter the fixture).
+ */
+type FiledReference = (() => Graph) | { readonly program: string };
+
+/**
+ * The graph and player program a level's filed reference grades with, or a loud
+ * failure when nothing is filed.
+ *
+ * A circuit reference yields a graph and no player buffer; a program reference
+ * yields the level's own board and the text as the fourth argument `grade` and
+ * `runChecks` read -- the same channel the app passes the player's buffer
+ * through, so chapter 4 is graded exactly the way the app grades it.
+ */
+function referenceFor(level: LevelSpec): { graph: Graph; player?: PlayerProgram } {
+  const filed = REFERENCE_SOLUTIONS[level.id];
+  if (!filed) throw new Error(`no reference solution filed for ${level.id}`);
+  if (typeof filed === 'function') return { graph: filed() };
+  const board = level.board;
+  if (!board) throw new Error(`${level.id} files a program but ships no board to run it on`);
+  return { graph: graphFromBoard(level.id, board), player: { text: filed.program } };
 }
 
 /**
@@ -133,10 +168,12 @@ function paletteAt(index: number): Set<string> {
  * graphs each level's three-star target was measured from, which is what makes
  * "the palette can build the reference" the right thing to assert: the reference
  * is the circuit a player is expected to reach, so a palette that cannot build
- * it cannot pass the level. Chapter 2's 26 are the shared fixture's, one entry
- * per level in index order.
+ * it cannot pass the level. Chapter 2's 26 and chapter 3's ten are the shared
+ * fixtures', one entry per level in index order. Chapter 4's seven are PROGRAMS
+ * (see `FiledReference`): the graph is the level's own `board`, and the text is
+ * `CH4_REFERENCES`, spread in whole so no program is copied a second time.
  */
-const REFERENCE_SOLUTIONS: Record<string, () => Graph> = {
+const REFERENCE_SOLUTIONS: Record<string, FiledReference> = {
   'ch1-01-humble-beginnings': () =>
     build([
       { kind: 'part', def: 'const_on', id: 'src', from: [] },
@@ -260,17 +297,21 @@ const REFERENCE_SOLUTIONS: Record<string, () => Graph> = {
   // measured their three-star targets from. A copy pasted here instead would be
   // free to drift from the measured one, and the drift would read as a pass.
   ...CH3_REFERENCES,
+  // Chapter 4, levels 50-56: the same fixture the batch tests grade, spread in
+  // whole. Each entry is `{ program, format }`, which satisfies the `{ program }`
+  // half of `FiledReference`; the graph comes from the level's own board.
+  ...CH4_REFERENCES,
 };
 
-describe('the assembled set is chapter 1, then 2, then 3, in order', () => {
-  it('ships 49 levels with no id twice', () => {
+describe('the assembled set is chapter 1, then 2, then 3, then 4, in order', () => {
+  it('ships 56 levels with no id twice', () => {
     // The join's arithmetic, and the two halves of it. A duplicate id would not
     // change either length -- `LEVEL_ORDER` is a list of ids, so the game would
     // simply have two levels by that name and one of them unreachable -- which
     // is exactly why uniqueness is asserted rather than implied by the count.
-    expect(LEVELS.length).toBe(49);
-    expect(LEVEL_ORDER.length).toBe(49);
-    expect(new Set(LEVEL_ORDER).size).toBe(49);
+    expect(LEVELS.length).toBe(56);
+    expect(LEVEL_ORDER.length).toBe(56);
+    expect(new Set(LEVEL_ORDER).size).toBe(56);
   });
 
   it('keeps chapter 2 whole, in index order, exactly where its own join put it', () => {
@@ -315,12 +356,38 @@ describe('the assembled set is chapter 1, then 2, then 3, in order', () => {
     expect(new Set(inGame.map((level) => level.index)).size).toBe(10);
   });
 
-  it('puts chapters 1 and 2 first, and nothing after chapter 3', () => {
+  it('keeps chapter 4 whole, in index order, exactly where its own join put it', () => {
+    // Chapter 4's version of the claim above, and the third time this campaign has
+    // needed it: two tasks delivered its seven levels, each with its own green
+    // batch test, and `content/index.ts` named none of them -- so no player could
+    // reach level 50, let alone 56. A batch test imports its batch by path and
+    // passes either way; this walks the game. Unlike chapter 2's four scattered
+    // batches, chapter 4's two are in campaign order, so the export is compared
+    // as a sequence rather than as a set.
+    const inGame = LEVELS.filter((level) => level.chapter === 4);
+    expect(inGame.map((level) => level.id)).toEqual(CH4_LEVELS.map((level) => level.id));
+    expect(inGame).toHaveLength(7);
+    // Contiguous AND unique: 50..56 with no gap and no repeat, which is what
+    // `isUnlocked` (the immediate predecessor) assumes when it walks the order.
+    expect(inGame.map((level) => level.index)).toEqual(
+      Array.from({ length: 7 }, (_, offset) => 50 + offset),
+    );
+    expect(new Set(inGame.map((level) => level.index)).size).toBe(7);
+  });
+
+  it('puts chapters 1 to 3 first, and nothing after chapter 4', () => {
     // "Appends; does not merge or interleave" has two failure directions, and
     // only one of them was ever asserted before chapter 3 existed: a later
     // chapter landing inside an earlier one. The other is an earlier chapter
     // landing after a later one -- which a bare `slice(0, 12)` cannot see -- so
     // the claim is now stated over the whole order rather than its head.
+    //
+    // CHAPTER 3'S SLICE IS BOUNDED AT BOTH ENDS, which is what chapter 4 landing
+    // proved: `slice(39)` used to be the same thing as `slice(39, 49)` only
+    // because 49 was the last index the game had, and an unbounded slice silently
+    // becomes "chapter 3 plus everything appended after it". The bound was written
+    // in when chapter 3 landed and needed no change here; chapter 4's own span is
+    // asserted after it, bounded at the end by the order's own length.
     expect(LEVELS.filter((level) => level.chapter === 1)).toHaveLength(13);
     expect(LEVEL_ORDER.slice(0, 13)).toEqual(
       LEVELS.filter((level) => level.chapter === 1).map((level) => level.id),
@@ -328,8 +395,11 @@ describe('the assembled set is chapter 1, then 2, then 3, in order', () => {
     expect(LEVEL_ORDER.slice(13, 39)).toEqual(
       LEVELS.filter((level) => level.chapter === 2).map((level) => level.id),
     );
-    expect(LEVEL_ORDER.slice(39)).toEqual(
+    expect(LEVEL_ORDER.slice(39, 49)).toEqual(
       LEVELS.filter((level) => level.chapter === 3).map((level) => level.id),
+    );
+    expect(LEVEL_ORDER.slice(49)).toEqual(
+      LEVELS.filter((level) => level.chapter === 4).map((level) => level.id),
     );
   });
 });
@@ -344,9 +414,12 @@ describe('every shipped level can build its own reference solution', () => {
   it('grades every filed reference against the level it is filed under', () => {
     // This is what keeps the copies above honest: a reference that no longer
     // passes its own level is a stale copy, and the walk below would then be
-    // asserting buildability of a circuit the level does not accept.
+    // asserting buildability of a circuit the level does not accept. Chapter 4's
+    // references come with a player program (see `referenceFor`), which is passed
+    // on the same fourth argument the app uses.
     for (const level of SHIPPED) {
-      const result = grade(solutionFor(level.id)(), registry, level);
+      const reference = referenceFor(level);
+      const result = grade(reference.graph, registry, level, reference.player);
       expect(result.failures, `${level.id}: ${JSON.stringify(result.failures)}`).toEqual([]);
       expect(result.passed, level.id).toBe(true);
     }
@@ -355,7 +428,7 @@ describe('every shipped level can build its own reference solution', () => {
   for (const [index, level] of SHIPPED.entries()) {
     it(level.id, () => {
       const palette = paletteAt(index);
-      for (const inst of solutionFor(level.id)().instances) {
+      for (const inst of referenceFor(level).graph.instances) {
         expect(
           palette.has(inst.def),
           `${level.id} uses ${inst.def}, which its palette does not offer (palette: ${[...palette].join(', ')})`,
@@ -419,7 +492,7 @@ describe('chapter 1 palettes are unchanged by offering a level its own rewards',
     for (const [index, level] of SHIPPED.entries()) {
       if (level.chapter !== 1) continue;
       const before = unlockedComponents(progressBefore(index), SHIPPED);
-      for (const inst of solutionFor(level.id)().instances) {
+      for (const inst of referenceFor(level).graph.instances) {
         expect(
           before.has(inst.def),
           `${level.id} uses ${inst.def}, which only its own reward unlocks`,

@@ -3,9 +3,9 @@
  * index, under which name.
  *
  * This table is the 2.x baseline, transcribed from `GAME_RESEARCH_2026-10-03.md`
- * §5 ("完整关卡流程（93 关全表）", the sourced Steam-guide table). Chapters 4-7
- * (levels 50-93) are not built yet and are not listed here; this file covers the
- * 49 levels of chapters 1-3, which is what the replica ships.
+ * §5 ("完整关卡流程（93 关全表）", the sourced Steam-guide table). Chapters 5-7
+ * (levels 57-93) are not built yet and are not listed here; this file covers the
+ * 56 levels of chapters 1-4, which is what the replica ships.
  *
  * It exists as data rather than as prose so that `test/levels/campaign-shape.test.ts`
  * can hold the level specs to it: the id, the chapter, the global `index` and
@@ -27,7 +27,7 @@ export interface CampaignEntry {
   readonly en: string;
 }
 
-/** Chapters 1-3 of the 2.x campaign, in unlock order. */
+/** Chapters 1-4 of the 2.x campaign, in unlock order. */
 export const CAMPAIGN: readonly CampaignEntry[] = [
   // Chapter 1 -- 布尔代数 (Boolean Logic), 13 levels
   { id: 'ch1-01-humble-beginnings', chapter: 1, index: 1, zh: '从零开始', en: 'Humble Beginnings' },
@@ -131,4 +131,25 @@ export const CAMPAIGN: readonly CampaignEntry[] = [
   },
   { id: 'ch3-48-program', chapter: 3, index: 48, zh: '程序', en: 'Program' },
   { id: 'ch3-49-turing-complete', chapter: 3, index: 49, zh: '图灵完备', en: 'Turing Complete' },
+
+  // Chapter 4 -- 编程 (Programming), 7 levels
+  {
+    id: 'ch4-50-punchcard-programming',
+    chapter: 4,
+    index: 50,
+    zh: '打孔编程',
+    en: 'Punchcard Programming',
+  },
+  {
+    id: 'ch4-51-assembly-programming',
+    chapter: 4,
+    index: 51,
+    zh: '汇编程序',
+    en: 'Assembly Programming',
+  },
+  { id: 'ch4-52-circumference', chapter: 4, index: 52, zh: '三番两次', en: 'Circumference' },
+  { id: 'ch4-53-conditional-jumps', chapter: 4, index: 53, zh: '条件跳转', en: 'Conditional Jumps' },
+  { id: 'ch4-54-code-breaker', chapter: 4, index: 54, zh: '道破心机', en: 'Code Breaker' },
+  { id: 'ch4-55-mod-4', chapter: 4, index: 55, zh: '高速掩码', en: 'Mod 4' },
+  { id: 'ch4-56-the-maze', chapter: 4, index: 56, zh: '路在脚下', en: 'The Maze' },
 ];

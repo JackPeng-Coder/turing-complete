@@ -12,6 +12,7 @@ import { DECODER_DEF_IDS } from '../../src/core/defs/wide';
 import type { PortValue } from '../../src/core/signal';
 import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
 import { CH3_LEVELS } from '../../src/levels/content/ch3/index';
+import { CH4_LEVELS } from '../../src/levels/content/ch4/index';
 import { LEVELS, LEVEL_ORDER, levelsOfChapter } from '../../src/levels/index';
 import type { LevelSpec } from '../../src/levels/spec';
 import { registry } from '../fixtures/build';
@@ -494,7 +495,7 @@ describe('chapter 2 is exactly 26 levels, at indices 14-39', () => {
       [...CH2_LEVELS].map((level) => level.id).sort(),
     );
     expect(levelsOfChapter(1)).toHaveLength(13);
-    expect(LEVELS).toHaveLength(49);
+    expect(LEVELS).toHaveLength(56);
   });
 });
 
@@ -513,18 +514,21 @@ describe('chapter 3 is exactly 10 levels, at indices 40-49', () => {
     expect(new Set(chapter3.map((level) => level.id)).size).toBe(10);
   });
 
-  it('is the chapter join point, in the same order, at the end of the game', () => {
-    // Chapter 3 is the LAST chapter this build ships, so `slice(39)` runs to the
-    // end of the order -- the exact shape that made chapter 2's equivalent
-    // assertion wrong the moment a later chapter appeared. That is safe here only
-    // because there is no chapter 4 yet; the bounded form is used regardless, so
-    // the day chapter 4 lands this fails loudly instead of silently widening.
+  it('is the chapter join point, in the same order, with chapter 4 following it', () => {
+    // Chapter 3 USED TO BE the last chapter this build ships, so this block's
+    // sibling in chapter 2 is the shape that warned about it: `slice(39)` running
+    // to the end of the order would have silently become "chapter 3 plus
+    // everything appended after it" the moment a later chapter appeared, so the
+    // bound was written in regardless -- "the day chapter 4 lands this fails
+    // loudly instead of silently widening". Chapter 4 landed in this task and the
+    // bound is what kept the assertion honest: chapter 3 is still exactly
+    // `LEVEL_ORDER.slice(39, 49)`, and the seven levels after it are chapter 4's,
+    // in the campaign's order, at indices 50-56.
     expect(levelsOfChapter(3).map((level) => level.id)).toEqual(
       CH3_LEVELS.map((level) => level.id),
     );
     expect(LEVEL_ORDER.slice(39, 49)).toEqual(CH3_LEVELS.map((level) => level.id));
-    // And nothing beyond it: 49 is the last index the game has.
-    expect(LEVEL_ORDER).toHaveLength(49);
+    expect(LEVEL_ORDER.slice(49)).toEqual(CH4_LEVELS.map((level) => level.id));
   });
 
   it('hands the six machine parts out one per level, in the order they are built', () => {

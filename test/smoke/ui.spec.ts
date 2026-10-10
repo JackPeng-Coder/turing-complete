@@ -19,7 +19,7 @@ import { STORAGE_KEY } from '../../src/persist/storage';
  * level list is not shipping it: a level nobody can open, or one that opens but
  * never grades, is invisible in the earlier tests either way. Those tests seed a
  * save with the levels before their target already passed -- the only practical
- * way to reach level 31, let alone 49, in a browser test -- and then walk the
+ * way to reach level 31, let alone 49 or 56, in a browser test -- and then walk the
  * real path: open it, read its palette, build its reference, pass it, and watch
  * the next tile unlock.
  *
@@ -447,13 +447,15 @@ test('?dev=1 opens every level, and says so', async ({ page }) => {
   await expect(page.locator('.shell-dev')).toBeVisible();
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  // Every one of the 49, from a save with nothing passed in it. Level 1 alone
+  // Every one of the 56, from a save with nothing passed in it. Level 1 alone
   // would be enabled without the flag.
-  await expect(page.locator('.map-tile:not([disabled])')).toHaveCount(49);
+  await expect(page.locator('.map-tile:not([disabled])')).toHaveCount(56);
   await page.screenshot({ path: 'test-results/smoke-dev-map.png' });
 
-  // The last level opens, and it offers the parts that level was designed
-  // around -- the whole reason the flag reaches the palette as well as the map.
+  // Level 49 opens -- chapter 3's last level, not the game's last any more, which
+  // is why the tile is addressed by index rather than as the final one -- and it
+  // offers the parts that level was designed around: the whole reason the flag
+  // reaches the palette as well as the map.
   await page.locator('.map-tile').nth(48).click();
   // Opening a level raises its briefing, and the briefing covers the bar.
   await page.getByRole('button', { name: '开始' }).click();
@@ -610,9 +612,9 @@ test('chapter 2 is reachable: level 14 opens once chapter 1 is passed', async ({
   await expect(page.locator('.truth-table')).toBeVisible();
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  // All 49 tiles -- chapter 2's 26 and chapter 3's ten are on the map, which is
-  // the player's only view of them.
-  await expect(page.locator('.map-tile')).toHaveCount(49);
+  // All 56 tiles -- chapter 2's 26, chapter 3's ten and chapter 4's seven are on
+  // the map, which is the player's only view of them.
+  await expect(page.locator('.map-tile')).toHaveCount(56);
   await expect(page.locator('.map-tile').nth(13)).toContainText('二进制速算');
   await expect(page.locator('.map-tile').nth(13)).toBeEnabled();
   // Unlocking stays strictly linear across the join: level 15 waits for 14.
@@ -679,7 +681,7 @@ test('the last chapter-2 level opens: level 39 is reachable', async ({ page }) =
   await expect(page.locator('.shell-bar')).toContainText('计数器');
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  await expect(page.locator('.map-tile')).toHaveCount(49);
+  await expect(page.locator('.map-tile')).toHaveCount(56);
   await expect(page.locator('.map-tile').nth(38)).toContainText('计数器');
   await expect(page.locator('.map-tile').nth(38)).toBeEnabled();
 
@@ -730,7 +732,7 @@ test('chapter 3 is reachable: level 40 opens once chapter 2 is passed', async ({
   await expect(page.locator('.shell-bar')).toContainText('逻辑整合');
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  await expect(page.locator('.map-tile')).toHaveCount(49);
+  await expect(page.locator('.map-tile')).toHaveCount(56);
   await expect(page.locator('.map-tile').nth(39)).toContainText('逻辑整合');
   await expect(page.locator('.map-tile').nth(39)).toBeEnabled();
   // Unlocking stays strictly linear across the second join too: 41 waits for 40.
@@ -745,19 +747,20 @@ test('chapter 3 is reachable: level 40 opens once chapter 2 is passed', async ({
   await page.screenshot({ path: 'test-results/smoke-ch3-level40-open.png' });
 });
 
-test('the last level opens and mounts its program check: level 49', async ({ page }) => {
+test('chapter 3 ends with a level that mounts its program check: level 49', async ({ page }) => {
   // 48 passed: the resume point is the phase's acceptance level -- the one whose
   // check runs a real OVERTURE program against the machine the player built,
   // rather than a truth table. Reaching it proves the join reaches the end of
-  // chapter 3, and that the `program` check kind (level data + `checks.ts`) is
-  // wired into the app rather than only into the unit tests.
+  // chapter 3 (it is no longer the game's last level -- chapter 4 follows it), and
+  // that the `program` check kind (level data + `checks.ts`) is wired into the app
+  // rather than only into the unit tests.
   await seedProgress(page, 48);
   await page.goto('/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('图灵完备');
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  await expect(page.locator('.map-tile')).toHaveCount(49);
+  await expect(page.locator('.map-tile')).toHaveCount(56);
   await expect(page.locator('.map-tile').nth(48)).toContainText('图灵完备');
   await expect(page.locator('.map-tile').nth(48)).toBeEnabled();
 

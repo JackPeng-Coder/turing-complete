@@ -2,7 +2,7 @@
  * The campaign's shape, held to `src/levels/campaign.ts`.
  *
  * The table in that file is the 2.x target (the sourced 93-level table's
- * chapters 1-3). This test is what makes it binding: id, chapter, global index
+ * chapters 1-4). This test is what makes it binding: id, chapter, global index
  * and both names have to agree exactly, in that order, and no level may exist
  * that the table does not name.
  *
@@ -41,12 +41,14 @@ describe('the campaign shape', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('ships three chapters of 13, 26 and 10 levels', () => {
+  it('ships four chapters of 13, 26, 10 and 7 levels', () => {
     expect(LEVELS).toHaveLength(CAMPAIGN.length);
-    expect([1, 2, 3].map((chapter) => levelsOfChapter(chapter).length)).toEqual([13, 26, 10]);
+    expect([1, 2, 3, 4].map((chapter) => levelsOfChapter(chapter).length)).toEqual([
+      13, 26, 10, 7,
+    ]);
   });
 
-  it('numbers the levels 1..49 with no gap, repeat or stray', () => {
+  it('numbers the levels 1..56 with no gap, repeat or stray', () => {
     expect(LEVELS.map((level) => level.index)).toEqual(CAMPAIGN.map((_, i) => i + 1));
     expect(new Set(LEVEL_ORDER).size).toBe(LEVEL_ORDER.length);
     const named = new Set(CAMPAIGN.map((entry) => entry.id));

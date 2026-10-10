@@ -205,16 +205,22 @@ describe('the editor’s mount decision', () => {
   });
 
   /**
-   * THE GUARANTEE THE OTHER PANELS DEPEND ON. Chapters 1 to 3 are built and
-   * tested against the board screen as it stands; a panel that appeared on one of
-   * their levels would change that DOM. Every shipped level is walked rather than
-   * spot-checked, so the day a chapter-3 level grows a `custom` check this fails
-   * here instead of in the smoke suite.
+   * THE GUARANTEE THE OTHER PANELS DEPEND ON, now stated as the two-sided rule it
+   * always was. Chapters 1 to 3 are built and tested against the board screen as
+   * it stands; a panel that appeared on one of their levels would change that DOM.
+   * Chapter 4 is the programming chapter, and EVERY one of its seven levels grades
+   * a program the player wrote, so the editor appearing there is the feature
+   * rather than a regression. Both directions are walked over `LEVELS` rather than
+   * spot-checked, so the day a chapter-1-to-3 level grows a `custom` check -- or a
+   * chapter-4 level loses its player channel -- this fails here instead of in the
+   * smoke suite.
    */
-  it('leaves every shipped level without an editor', () => {
+  it('leaves chapters 1 to 3 without an editor, and mounts one on every chapter-4 level', () => {
     expect(LEVELS.length).toBeGreaterThan(40);
     for (const level of LEVELS) {
-      expect(levelExpectsProgram(level), level.id).toBe(false);
+      // Chapter 4 is the programming chapter; chapters 5 to 7 are not shipped.
+      const programming = level.chapter > 3;
+      expect(levelExpectsProgram(level), level.id).toBe(programming);
     }
   });
 
