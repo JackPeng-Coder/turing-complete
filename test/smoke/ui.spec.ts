@@ -779,6 +779,81 @@ test('chapter 3 ends with a level that mounts its program check: level 49', asyn
 });
 
 /**
+ * CHAPTER 4'S OWN CHANNEL, GRADED END TO END: the program the PLAYER writes.
+ *
+ * Level 49 proved the `program` check kind is mounted in the app; this is the
+ * same kind reading the other source. The machine is chapter 3's CPU and the
+ * level ships its own board, so nothing is built here -- what is under test is
+ * the TEXT in the editor, which is why the walk below types the reference into
+ * the byte editor, presses 测试 and reads the verdict. A program check's cases
+ * cannot be played one column at a time (`testCases` says why), so that button
+ * assembles the text, loads it into the board's RAM and grades in one step.
+ *
+ * THE FIVE LINES ARE HAND-WRITTEN MACHINE CODE -- level 50 has no mnemonics, so
+ * the editor's own label is the byte reader's and each line is eight binary
+ * digits. They are `test/fixtures/ch4-references.ts`'s
+ * `ch4-50-punchcard-programming` verbatim, inlined rather than imported because
+ * this spec is a browser walk: the fixture is the batch tests' own module.
+ * `ch4-batch1.test.ts` is what keeps those bytes re-derived from the ISA table.
+ */
+test('chapter 4 grades a hand-written program: level 50', async ({ page }) => {
+  // 49 passed -- every level of chapters 1 to 3 -- so the resume point is
+  // chapter 4's first level. Reaching it is what this walk is here to prove.
+  await seedProgress(page, 49);
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('打孔编程');
+
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await expect(page.locator('.map-tile')).toHaveCount(56);
+  await expect(page.locator('.map-tile').nth(49)).toContainText('打孔编程');
+  await expect(page.locator('.map-tile').nth(49)).toBeEnabled();
+
+  await page.locator('.map-tile').nth(49).click();
+  await expect(page.locator('.screen-board')).toBeVisible();
+  await expect(page.locator('.shell-bar')).toContainText('打孔编程');
+  // A tile is real navigation, so it raises the level's briefing again -- and the
+  // briefing covers the bench, so it has to go before the editor can be clicked.
+  await page.getByRole('button', { name: '开始' }).click();
+
+  // The bench is mounted because this level grades a program the player wrote,
+  // and its editor names the reader the level asks for: bytes, not assembly.
+  const code = page.locator('.ide-code');
+  await expect(code).toHaveAttribute('aria-label', '二进制程序编辑器');
+
+  await code.fill(
+    [
+      '10110001    # move|inp|d1   r1 = in',
+      '00000101    # loadi|5       r0 = 5',
+      '10000010    # move|s0|d2    r2 = 5',
+      '01000000    # add           r3 = in + 5',
+      '10011111    # move|s3|out   out = r3',
+    ].join('\n'),
+  );
+  await page.screenshot({ path: 'test-results/smoke-ch4-level50-program.png' });
+
+  await page.locator('.ide-test').click();
+
+  await expect(page.locator('.truth-table h2')).toHaveText('全部用例通过');
+  await expect(page.locator('.shell-metrics')).toContainText('总开销');
+  // The text became an image: the five bytes the level's own hint names.
+  await expect(page.locator('.ide-bytes')).toHaveText('B10582409F');
+
+  // Passing opens the dialog, and its summary calls the level what it is.
+  const result = page.locator('.result');
+  await expect(result).toContainText('关卡完成');
+  await expect(result).toContainText('程序关卡');
+  await page.screenshot({ path: 'test-results/smoke-ch4-level50-passed.png' });
+
+  // Passing wrote progress -- level 50 keeps its star and level 51 unlocks --
+  // which is what makes this "graded" rather than merely "displayed".
+  await page.getByRole('button', { name: '继续' }).click();
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await expect(page.locator('.map-tile').nth(49)).toContainText('★');
+  await expect(page.locator('.map-tile').nth(50)).toBeEnabled();
+});
+
+/**
  * A SAVE WRITTEN BEFORE THE 2.x REALIGNMENT KEEPS ITS STARS.
  *
  * The realignment renamed 37 level ids and removed three, and a save is keyed by
