@@ -6,7 +6,7 @@ import { graphFromBoard } from '../../src/levels/board';
 import { overtureBoard } from '../../src/levels/boards/overture';
 import { createProgramRun } from '../../src/levels/run';
 import type { LevelSpec } from '../../src/levels/spec';
-import { createDisplay, resetBoard } from '../../src/ui/board/signals';
+import { createDisplay } from '../../src/ui/board/signals';
 import { mountDebug } from '../../src/ui/debug';
 
 const registry = createRegistry(BASE_DEFS);
@@ -103,18 +103,24 @@ describe('the board, the run and the debugger as main.ts wires them', () => {
   });
 
   /**
-   * THE BOARD'S 停止并复位 MUST NOT EAT THE PROGRAM. `main.ts`'s `onStop` calls
-   * `resetBoard(display, run)` -- the same call, on the same pair, this test
-   * makes -- and the bug this pins is what happened when that path was a bare
-   * `display.reset()`: the display paints the run's own `Simulation`, so clearing
-   * the display's storage cleared `ram_prog` too, and the editor went on showing
-   * "5 字节" over 256 zeros. The debugger then read zeros and the counter walked a
-   * zero program, because nothing reloads the image until the text changes.
+   * THE BOARD'S 停止并复位 MUST NOT EAT THE PROGRAM. `main.ts`'s `onStop` drops
+   * the run and rebuilds the display -- `rebuild` is the only place a display is
+   * bound to a run, and a run is put at its starting state by its OWN
+   * constructor/reset (`levels/run.ts`), which clears the circuit and loads the
+   * image back into it. This test pins that property at the seam: the same
+   * `createProgramRun` + `createDisplay` wiring, and the run's own `reset`.
+   *
+   * THE BUG THIS GUARDS AGAINST WAS A BARE `display.reset()`, and it is worth
+   * saying why that is the wrong call even now: the display paints the run's own
+   * `Simulation`, so clearing the display's storage cleared `ram_prog` too, and
+   * the editor went on showing "5 字节" over 256 zeros. The debugger then read
+   * zeros and the counter walked a zero program, because nothing reloads the
+   * image until the text changes.
    *
    * THE RESET STILL HAS TO RESET, so this is not satisfied by a board that never
    * cleared: the tick goes back to 0 and the register file is empty after it.
    */
-  it('keeps the program loaded, and still runnable, when the board is reset', () => {
+  it('resets the run back to tick 0 with the image still loaded', () => {
     const graph = graphFromBoard(PROGRAM_LEVEL.id, overtureBoard({ inputId: 'in' }));
     const run = createProgramRun(graph, registry, PROGRAM_LEVEL, ECHO, 'asm');
     expect(run.errors).toEqual([]);
@@ -129,13 +135,15 @@ describe('the board, the run and the debugger as main.ts wires them', () => {
     expect(run.readRegisters()).toEqual([0, INPUT, 0, 0, 0, 0]);
     expect(run.readRam()!.slice(0, 2)).toEqual([0xb1, 0x8f]);
 
-    resetBoard(display, run);
+    run.reset();
     // `main.ts` re-drives the readout panel's vector onto the run after the
     // reset, because a cleared simulation has no inputs in it.
     run.setInput('in', INPUT);
 
-    // THE CLOCK AND THE REGISTERS CLEARED, THE IMAGE DID NOT: the same bytes the
-    // editor's text compiles to, and the counter back at the first instruction.
+    // THE CLOCK AND THE REGISTERS CLEARED, THE IMAGE DID NOT -- and the display
+    // says so too, because it is painting the one simulation the run reset. The
+    // same image the editor's text compiles to, and the counter back at the
+    // first instruction.
     expect(display!.read().tick).toBe(0);
     expect(run.ticks).toBe(0);
     expect(run.readPc()).toBe(0);

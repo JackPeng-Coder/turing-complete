@@ -20,7 +20,7 @@ import { mountMap } from './ui/map';
 import { narrativeFor } from './ui/narrative';
 import { renderBoard, type BoardView } from './ui/board/render';
 import { attachBoardInput, deleteSelection } from './ui/board/interact';
-import { createDisplay, resetBoard, type DisplaySimulation, type SignalSnapshot } from './ui/board/signals';
+import { createDisplay, type DisplaySimulation, type SignalSnapshot } from './ui/board/signals';
 import { instanceRect, screenToWorld, type Point } from './ui/board/view';
 import { levelExpectsProgram, playerProgramFormat, testCases, type TestPlan } from './levels/checks';
 import { createProgramRun, type ProgramRun } from './levels/run';
@@ -355,10 +355,19 @@ if (app) {
     // truth table's rows each do, and only a script's FIRST step does -- step 3
     // reads a register step 2 clocked. The checker does exactly this.
     //
-    // THROUGH `resetBoard`, NOT THE DISPLAY: on a level that also grades a
-    // player's program the display is painting the run's own machine, and
-    // clearing that storage directly would empty the `ram_prog` the run loaded.
-    if (item.reset) resetBoard(display, playerRun);
+    // A CASE RESET GOES THE WAY 停止并复位 DOES on a level that also grades a
+    // program, and for the same reason: the display may be painting the run's own
+    // machine, and clearing that simulation directly would empty the `ram_prog`
+    // the run loaded. Dropping the run and rebuilding clears the circuit AND
+    // loads the image back into the machine the board paints. A board with no
+    // player program is reset in place, because rebuilding it would recompile the
+    // graph for every one of a fuzz level's hundred cases.
+    if (item.reset) {
+      if (levelExpectsProgram(store.get().level)) {
+        dropPlayerRun();
+        rebuild();
+      } else display?.reset();
+    }
     if (demonstrating) driveTo(item.inputs);
     else driveQuiet(item.inputs);
     while ((snapshot?.tick ?? 0) < item.tick) {
@@ -948,18 +957,20 @@ if (app) {
     onStop: () => {
       running = false;
       stopClock();
-      // 停止并复位 CLEARS THE BOARD WITHOUT ERASING THE PROGRAM. On a program
-      // level the display is painting the run's own machine, so a bare
-      // `display.reset()` used to clear `ram_prog` under the editor: the byte
-      // count stayed put over 256 zeros, the debugger read zeros, and the counter
-      // walked a zero program until the text changed. The reset goes through
-      // `resetBoard` -- which resets the RUN, reloading the image -- and the
-      // readout panel's vector is re-driven onto the cleared machine, because a
-      // reset clears the inputs with the storage. Both panels are repainted: the
-      // debugger's counter and RAM window are readings of that same machine.
-      resetBoard(display, ensurePlayerRun());
-      syncPlayerInputs();
-      sample();
+      // 停止并复位 CLEARS THE BOARD THE PLAYER IS LOOKING AT WITHOUT ERASING THE
+      // PROGRAM. `rebuild` is the only place a display is bound to a run, and a
+      // text edit drops the run without rebuilding -- so after any keystroke the
+      // display is still painting the previous run's machine while
+      // `ensurePlayerRun` hands back a different one. A reset sent to that run
+      // would clear a machine nobody can see and leave the board on screen
+      // exactly as it was. So the run goes and the display is rebuilt with it: a
+      // fresh run is reset and its image loaded before it is handed over
+      // (`levels/run.ts`), and a board with no run at all compiles its own
+      // cleared circuit. Nothing typed is lost -- the player's text lives in
+      // `state.programs`, and the next 汇编/单步/测试 rebuilds the same run and
+      // reloads the same image.
+      dropPlayerRun();
+      rebuild();
       paint();
       io.render();
       refreshBench();
