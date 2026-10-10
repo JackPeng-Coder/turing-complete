@@ -1,0 +1,105 @@
+# T10 restore material: the phase-record content held by the withdrawn commit cd6a280
+# Apply with: git apply this file  (or retype from it) when closing the ledger at T10.
+# The 9.5MB session zip is deliberately NOT part of this patch (AGENTS.md: transcripts do not stay in the tree).
+
+commit cd6a280f22a2817078ea2f39cd458357de67de1e
+Author: JackPeng-Coder <jackpeng-coder@qq.com>
+Date:   Fri Oct 9 09:15:03 2026 +0800
+
+    又没钱了，先提交一下
+
+diff --git a/.superpowers/sdd/2026-10-08-turing-complete-phase3/progress.md b/.superpowers/sdd/2026-10-08-turing-complete-phase3/progress.md
+index b33c34d..6bdfb1f 100644
+--- a/.superpowers/sdd/2026-10-08-turing-complete-phase3/progress.md
++++ b/.superpowers/sdd/2026-10-08-turing-complete-phase3/progress.md
+@@ -28,8 +28,8 @@ Started: 2026-10-08（Asia/Shanghai），基线 `pnpm test` 37 文件 / 1227 用
+ | T2 | 玩家程序通路 + 存档（并入 T3） | **已完成**（评审：APPROVED WITH MINOR ISSUES，遗留已并入 T4 的 Part A） | `3fac5ed` + `53d28b6` + `417b76f`；`pnpm test` 39 文件 / **1279 通过**；`build` 干净；`smoke` 20 通过 |
+ | T3 | `src/asm/image.ts` 机器码格式（并入 T2） | **已完成** | `53d28b6`；`test/levels/image.test.ts` 10 个用例 |
+ | T4 | `lock` / `maze` 两个闭环检查器（并入 T2 评审遗留） | **已完成**（评审进行中） | `5601acc` + `e9dee5b` + `ef3b47f` + `e8b9fb5`；`pnpm test` 41 文件 / **1331 通过**；`build` 干净；`smoke` 20 通过 |
+-| T5 | `Simulation.readState` + `src/levels/run.ts` | 未开始 | |
+-| T6 | 汇编 IDE + 调试面板 | 未开始 | |
++| T5 | `Simulation.readState` + `src/levels/run.ts`（并入 T6） | **已完成** | `4ab1b68` + `06c97dd` |
++| T6 | 汇编 IDE + 调试面板（并入 T5） | **已完成**（评审：APPROVED WITH MINOR ISSUES；I1/I2/I3/M1/M3/M5 已并入 T6b 修复） | `430eb1c` + `4ab1b68` + `06c97dd` + `c116018`；`pnpm test` 44 文件 / **1399 通过**；`build` 干净；`smoke` 20 通过 |
+ | T7 | 第 50–52 关 | 未开始 | |
+ | T8 | 第 53–56 关 | 未开始 | |
+ | T9 | 章节装配与定点更新 | 未开始 | |
+@@ -222,6 +222,58 @@ maze 的是步，注释与测试互相矛盾）；I4 检查器硬编码引脚名
+    `custom/index.ts` 取 `getCustomCheck`——模块图上多了一条边（两种导入顺序都有测试覆盖，无 TDZ 问题，
+    但属于可以消掉的坏味道，已列入 T6 的清理项）。
+ 
++### T5 + T6 运行面、汇编 IDE 与调试器 — 已完成（评审：APPROVED WITH MINOR ISSUES）
++
++**执行裁决（成本）**：T5（`readState` + `run.ts`）与 T6（IDE + 调试面板）合并为一次派发。
++
++**提交**：`430eb1c`（Part A：消掉 custom↔checks 运行期环、恢复通道措辞、`ram` 非字符串判 invalid）、
++`4ab1b68`（`Simulation.readState`）、`06c97dd`（`src/levels/run.ts`）、`c116018`（IDE + 调试面板）。
++**实测**：`pnpm test` 44 文件 / **1399 通过**（+39）；`pnpm build` 干净；`pnpm smoke` 20 通过。
++
++**评审确认**：八项规格全部满足、三条门禁复跑全绿、第 1–3 章盘面 DOM 一字未变
++（`levelExpectsProgram` 对全部 49 关为假，bench 处于休眠态，这也是它至今**没在浏览器里跑过**的原因）；
++`ide.ts` 在 textarea 上截住 keydown 是必要的（`interact.ts:618` 监听在 `globalThis` 上，
++且 `onKeyDown` 没有 `event.target` 守卫，否则退格会删元件、Ctrl+Z 会撤销电路）。
++
++**评审的关键发现（I1，必须在第 4 章数据之前修）**：盘面由 `createDisplay` 自己的
++`Simulation` 绘制，而它**从不 `loadImage`**——画出来的 CPU 永远在执行全 0 程序；
++IDE 与调试器读的却是 `ProgramRun` 那台已载入镜像的机器。于是点五次「单步」后，
++调试器显示 5 拍而同屏的时钟卡显示 0 拍、关卡的 `out` 行显示的是零程序电路的值。
++修法（T6b）：**两台机器合并成一台**——`ProgramRun` 暴露其 `{net, sim}`，`createDisplay`
++接受可选机器并优先绘制它，缺省行为完全不变。另有 I2（调试面板的 RAM 缓存永不命中，
++平移缩放都会重建 72 个格子）、I3（`errors` 的「非空即未载入」在引脚宽度不符那条路径上是假的）、
++M1（程序被拒后调试面板仍在描述一台从未启动的机器）、M3（一句过时注释）、
++M5（切到地图后程序计时器不停），一并修。
++
++**显式延后（报告给用户）**：断点与反汇编（裁决 5）。
++
++### T6b 盘面与运行共用一台机器 — 已完成
++
++**提交**：`5911858`（I1 + I3 + M1 + M5）、`444658e`（I2）、`a64614e`（M3）。
++**实测**：`pnpm test` 45 文件 / **1406 通过**；`pnpm build` 干净；`pnpm smoke` 20 通过。
++
++**I1 的红→绿（真实数值）**
++- 修前：点五次「单步」后 `display.read().tick === 0`（IO 面板的时钟卡）而 `run.ticks === 5`
++  （调试器），关卡的 `out` 行显示的是全 0 程序的值。评审描述属实且更宽。
++- 修后：`display.read().tick === 5`、`run.ticks === 5`、`levelOutputs.get('out') === 0x2A`、
++  `readOutputs() === { out: 0x2A }`、`REG1 === 0x2A`（输入 `0x2A`）。
++- 做法：`ProgramRun.machine` 暴露 `{net, sim}`；`createDisplay(..., machine?)` 优先绘制这份机器，
++  且**不对交进来的机器调用 `reset()`**（那会抹掉刚载入的镜像）；没有机器时行为与从前逐字节相同
++  （另有测试钉住「无机器时自己编译一份」）。`core/net.ts` 未改。
++- 连带发现：`mountBench()` 原本开头就 `dropPlayerRun()`，会把 `rebuild()` 刚建好的那台丢掉、
++  再给面板建第二台——正是同一个 bug 换了张面孔。该调用移到 `openLevel()`，并在 `mountBench`
++  的注释里写明它为什么不能拥有这台机器。
++
++**其余**：I3 改为契约成真（电路级句子在载入之前追加，且此时跳过载入，非空 `errors` 真的等于
++什么都没载入）；M1 让 `stateOf`/`readHalt`/`readRam`/`machine` 都过 `idle()`，被拒的程序显示破折号
++而不是构造函数的零表；I2 改成按字节内容比较（并修掉它自己引入的两个新 bug：`null` 哨兵让首帧
++看起来像未变、`sameBytes` 必须把 `null` 只与 `null` 视为相等）；M5 放在 `onOpenMap`。
++
++**遗留（不阻塞，报告给用户）**：`main.ts` 没有 app harness，接线只在改动的接缝上被钉住
++（`rebuild()` 里传机器的那一行只有类型检查与 smoke 覆盖 chapters 1–3 的路径）；
++M5 没有单测；`display.reset()` 现在连运行的存储一起清（同一台机器的必然结果，属新耦合）。
++按裁决 8，T6b 的复核并入 T10 的整分支评审，不单独再派一次评审。
++
+ ## 延后项（本阶段结束时汇总给用户）
+ 
+ - 断点与反汇编视图（spec §6.3）——裁决 5。
+diff --git a/.superpowers/sdd/2026-10-08-turing-complete-phase3/reference-programs.md b/.superpowers/sdd/2026-10-08-turing-complete-phase3/reference-programs.md
+index b8e1f1b..f228aec 100644
+--- a/.superpowers/sdd/2026-10-08-turing-complete-phase3/reference-programs.md
++++ b/.superpowers/sdd/2026-10-08-turing-complete-phase3/reference-programs.md
+@@ -173,6 +173,16 @@ move|s3|out
+ **写 steps 的两个坑**：`driveSteps` 在**每个 step** 都会写全部输入脚（缺省写 0），
+ 所以后续每一步都必须重复 `inputs`，否则输入会被清零；`expect` 只比较它声明的键。
+ 
++## 板子的指标（`grade()` 实测，供 threeStar 用）
++
++| 板 | gate | delay |
++|---|---|---|
++| `overtureBoard({ inputId })`（`halt` 默认 true，第 50–53、55 关） | **675** | **6** |
++| `overtureBoard({ inputId, halt: false })`（第 54、56 关） | **675** | **6** |
++
++`halt` 是 0 成本元件，所以两形状门数相同。`threeStar.tick` 取参考解在该关检查器下的
++实测 `ticksUsed`（例如第 54 关 `secret: 42` 是 **590**）；第 50–53、55 关是 steps 里最后断言的拍。
++
+ ## 给 T7/T8 的口径
+ 
+ - 这些字节是**参考解**，不是关卡数据里的 `source`：第 4 章的关卡是 `from: 'player'`，

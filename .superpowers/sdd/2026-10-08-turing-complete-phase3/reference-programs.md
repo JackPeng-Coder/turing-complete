@@ -173,6 +173,24 @@ move|s3|out
 **写 steps 的两个坑**：`driveSteps` 在**每个 step** 都会写全部输入脚（缺省写 0），
 所以后续每一步都必须重复 `inputs`，否则输入会被清零；`expect` 只比较它声明的键。
 
+## 板子的指标（`grade()` 实测，供 `threeStar` 用）
+
+| 板 | gate | delay |
+|---|---|---|
+| `overtureBoard({ inputId })`（`halt` 默认 true；50–53、55 关用这个） | **675** | **6** |
+| `overtureBoard({ inputId, halt: false })`（54、56 关） | **675** | **6** |
+
+`halt` 是 0 成本元件，所以两形状门数相同。实测 `threeStar.tick`（T7/T8 交付时用真实内核
+`grade().metrics.tick` 复测，并在各自批测试里钉住字面值）：
+
+| 关卡 | 50 | 51 | 52 | 53 | 54 | 55 | 56 |
+|---|---|---|---|---|---|---|---|
+| tick | 10 | 10 | 14 | 135 | 590 | 10 | 168 |
+
+50–53、55 是 `steps` 里最后断言的拍（`program` 关卡两条独立 walk 取 `Math.max`，
+R9）；54 是锁检查器的 `ticksUsed`（`2 + 14·42`）；56 是迷宫检查器的 `ticksUsed`
+（9 次 17 指令通过 + 第 10 次 `move` 的 `out` 在偏移 14 + 到达边）。
+
 ## 给 T7/T8 的口径
 
 - 这些字节是**参考解**，不是关卡数据里的 `source`：第 4 章的关卡是 `from: 'player'`，

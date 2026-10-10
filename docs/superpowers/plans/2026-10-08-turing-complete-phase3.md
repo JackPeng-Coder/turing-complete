@@ -319,7 +319,8 @@ spec §6.3 的清单里，`断点` 需要一个常驻执行循环与断点命中
 
 **Steps:**
 1. 先写 `test/levels/ch4-batch1.test.ts`（模板 `test/levels/ch3-batch3.test.ts`）：
-   参考解（`level.board` 建图 + 参考程序）拿到 1 星；`threeStar` 三项等于实测；
+   参考解（`level.board` 建图 + 参考程序）通过——「拿到 1 星」按裁决 R10 读作「**至少** 1 星」，
+   而裁决 3 把 `threeStar` 钉在实测上，故参考解必然 3 星；`threeStar` 三项等于实测；
    调色板覆盖参考解用到的每个元件；反例（改坏程序/空程序）必须失败；
    索引区间、`rewards` 缺省、没有未解锁元件。
 2. 确认失败（关卡不存在）。

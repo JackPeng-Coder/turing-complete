@@ -1,0 +1,688 @@
+# Re-review package (fix wave): 4757e394b36ec77139d0e7cbe308203215f52131..163fddc9ad9526e89cb3aabf14b4b9367e14de6e
+
+## Commits
+163fddc docs(levels): trim the chapter-4 hints and correct two stale notes
+5cce329 fix(levels): stop the lock's record naming the secret
+e7244ca fix(ui): keep the player's program when the board is reset
+
+## Files changed
+ src/levels/checks.ts             |  2 +-
+ src/levels/content/ch4/batch1.ts |  8 +++---
+ src/levels/custom/lock.ts        | 12 ++++++---
+ src/main.ts                      | 27 +++++++++++++++-----
+ src/ui/board/signals.ts          | 23 ++++++++++++++++-
+ test/levels/ch4-batch2.test.ts   | 55 +++++++++++++++++++++++++++++-----------
+ test/levels/custom-lock.test.ts  | 34 ++++++++++++++++++++++---
+ test/smoke/ui.spec.ts            |  2 +-
+ test/ui/display-run.test.ts      | 50 +++++++++++++++++++++++++++++++++++-
+ 9 files changed, 176 insertions(+), 37 deletions(-)
+
+## Diff
+diff --git a/src/levels/checks.ts b/src/levels/checks.ts
+index 3267bd8..aab33ce 100644
+--- a/src/levels/checks.ts
++++ b/src/levels/checks.ts
+@@ -1540,21 +1540,21 @@ function imageOfBytes(text: string): { readonly bytes: readonly number[] } | { r
+  * `instanceDefs()` are parallel arrays in evaluation order: an id and its def in
+  * one place, which is what "every `ram_prog` instance" needs. `compile` sets
+  * each `CompiledInstance.key` from the document instance id, so the ids this
+  * returns are the ids `Simulation.loadImage` resolves -- the same ones the
+  * document would give, without the helper having to be handed a `Graph` it does
+  * not otherwise read.
+  *
+  * Returning an empty list is not an option: a check that has nowhere to put its
+  * program is a `missing-io` failure, not a check that quietly runs nothing.
+  *
+- * EXPORTED FOR THE IDE AND THE DEBUGGER (the phase plan's Task 9). They load the
++ * EXPORTED FOR THE IDE AND THE DEBUGGER (the phase plan's Task 6). They load the
+  * same image into the same `ram_prog` instances to show a program running on the
+  * board, and "which instances hold a program" is the one rule they must not
+  * answer differently from the checkers: a second copy of it would drift, and the
+  * drift would be invisible from both sides -- the check would grade into the RAM
+  * the debugger does not read, or the other way round.
+  */
+ export function programTargets(
+   ram: unknown,
+   net: Netlist,
+ ): { readonly ids: readonly string[] } | { readonly detail: string; readonly reason: 'invalid' | 'missing-io' } {
+diff --git a/src/levels/content/ch4/batch1.ts b/src/levels/content/ch4/batch1.ts
+index a5a6147..6f92936 100644
+--- a/src/levels/content/ch4/batch1.ts
++++ b/src/levels/content/ch4/batch1.ts
+@@ -240,22 +240,22 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
+   {
+     id: 'ch4-50-punchcard-programming',
+     chapter: 4,
+     index: 50,
+     name: { zh: '打孔编程', en: 'Punchcard Programming' },
+     brief: {
+       zh: '这台 CPU 就是你第 3 章搭好的那台 OVERTURE——现在轮到给它写程序了。这一关从最底层开始：手工机器码，每行 8 位二进制就是一个字节的指令，装进程序 RAM 后一个时钟沿执行一条。程序要算 out = (in + 5) & 0xff：把输入搬进寄存器，loadi 取常数 5，add 相加，最后把结果 move 到 out。写 out 之后机器会停在那条指令上，out 上的字节必须一直保持。',
+       en: 'This is the very CPU you built in chapter 3 -- now it is your turn to write programs for it. This level starts at the bottom: hand-written machine code, one line of 8 binary digits per byte of instruction, loaded into the program RAM and executed one instruction per clock edge. The program must compute out = (in + 5) & 0xff: move the input into a register, loadi the constant 5, add, and move the sum to out. Once out is written the machine stops on that instruction, and the byte on out has to stay there.',
+     },
+     hint: {
+-      zh: '一条指令就是一个字节：高 2 位是模式——00 是 loadi，01 是计算，10 是 move，11 是跳转。loadi 的低 6 位就是立即数（0-63）；计算指令的低 6 位是「运算码 + 000」，add 的运算码是 000；move 的低 6 位是「源 + 目的」：源 000-101 是寄存器 s0-s5、110 是输入 inp，目的 000-101 是 d0-d5、111 是 out。所以 move|inp|d1 是 10110001，loadi|5 是 00000101，move|s0|d2 是 10000010，add 是 01000000，move|s3|out 是 10011111。每行必须正好 8 位，# 之后是注释。',
+-      en: 'One instruction is one byte: the top 2 bits are the mode -- 00 loadi, 01 calc, 10 move, 11 jump. A loadi\u2019s low 6 bits are the immediate (0-63); a calc\u2019s low 6 bits are "opcode + 000", and add is opcode 000; a move\u2019s low 6 bits are "source + destination", where source 000-101 is registers s0-s5 and 110 is the input inp, and destination 000-101 is d0-d5 and 111 is out. So move|inp|d1 is 10110001, loadi|5 is 00000101, move|s0|d2 is 10000010, add is 01000000, and move|s3|out is 10011111. Every line has to be exactly 8 binary digits; everything after # is a comment.',
++      zh: '一条指令就是一个字节：高 2 位是模式——00 是 loadi，01 是计算，10 是 move，11 是跳转。loadi 的低 6 位就是立即数（0-63）；计算指令的低 6 位是「运算码 + 000」，add 的运算码是 000；move 的低 6 位是「源 + 目的」：源 000-101 是寄存器 s0-s5、110 是输入 inp，目的 000-101 是 d0-d5、111 是 out。一个例子：move|s2|d4 的高 2 位是 10（move）、接下来 010 是 s2、最后 100 是 d4，拼起来就是 10010100。每行必须正好 8 位，# 之后是注释。',
++      en: 'One instruction is one byte: the top 2 bits are the mode -- 00 loadi, 01 calc, 10 move, 11 jump. A loadi\u2019s low 6 bits are the immediate (0-63); a calc\u2019s low 6 bits are "opcode + 000", and add is opcode 000; a move\u2019s low 6 bits are "source + destination", where source 000-101 is registers s0-s5 and 110 is the input inp, and destination 000-101 is d0-d5 and 111 is out. One worked example: move|s2|d4 is 10 for move, then 010 for s2 and 100 for d4, so the byte is 10010100. Every line has to be exactly 8 binary digits; everything after # is a comment.',
+     },
+     allowedComponents: [...BOARD_PARTS],
+     io: IO_IN,
+     // The player's program text, read as one byte per line, on two walks with
+     // two different vectors (ruling R9). No `source`: the reference lives in
+     // the fixture (ruling 2).
+     checks: [
+       {
+         kind: 'program',
+         from: 'player',
+@@ -304,22 +304,22 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
+   {
+     id: 'ch4-51-assembly-programming',
+     chapter: 4,
+     index: 51,
+     name: { zh: '汇编程序', en: 'Assembly Programming' },
+     brief: {
+       zh: '还是你第 3 章搭的那台 CPU，这次不用手写字节了：这一关解锁汇编器，你写助记符，汇编器替你编成机器码。程序要算 out = (in + 3) & 0xff，和上一关同一条路，只是常数从 5 换成 3。每行一条指令——move|inp|d1、loadi|3、move|s0|d2、add、move|s3|out 这样的写法，# 之后是注释。写 out 之后机器停住，结果要保持。',
+       en: 'The same CPU you built in chapter 3, and no hand encoding this time: this level unlocks the assembler -- you write mnemonics and it compiles the bytes for you. The program must compute out = (in + 3) & 0xff, the same path as the last level with the constant changed from 5 to 3. One instruction per line, spelled like move|inp|d1, loadi|3, move|s0|d2, add, move|s3|out, with # starting a comment. After out is written the machine stops, and the result has to stay.',
+     },
+     hint: {
+-      zh: '汇编器认的写法就这几种：loadi|N（N 是 0-63 的立即数）、move|sX|dY（源可以是 s0-s5 或 inp，目的可以是 d0-d5 或 out）、六种运算 add/sub/and/or/nand/nor，以及 label 和跳转。上一关的五个字节在这里就是 move|inp|d1、loadi|5、move|s0|d2、add、move|s3|out——把 5 改成 3 就是本关的程序。注意 add 固定读 r1 与 r2、把结果写进 r3，所以两个加数要先 move 进 r1 和 r2，结果再 move 出去。',
+-      en: 'The assembler takes a handful of spellings: loadi|N (N is an immediate from 0 to 63), move|sX|dY (source s0-s5 or inp, destination d0-d5 or out), the six calculations add/sub/and/or/nand/nor, and labels with jumps. Last level\u2019s five bytes spelled this way are move|inp|d1, loadi|5, move|s0|d2, add, move|s3|out -- change the 5 to 3 and you have this level\u2019s program. Note that add always reads r1 and r2 and writes r3: move your two addends into r1 and r2 first, and move the result out afterwards.',
++      zh: '汇编器认的写法就这几种：loadi|N（N 是 0-63 的立即数）、move|sX|dY（源可以是 s0-s5 或 inp，目的可以是 d0-d5 或 out）、六种运算 add/sub/and/or/nand/nor，以及 label 和跳转。一个例子：move|s2|d4 就是上一关手写的那个位布局，只是有了名字——高 2 位 10 是 move、010 是 s2、100 是 d4，也就是字节 10010100。# 之后是注释，每行一条指令。注意 add 固定读 r1 与 r2、把结果写进 r3，所以两个加数要先 move 进 r1 和 r2，结果再 move 出去。',
++      en: 'The assembler takes a handful of spellings: loadi|N (N is an immediate from 0 to 63), move|sX|dY (source s0-s5 or inp, destination d0-d5 or out), the six calculations add/sub/and/or/nand/nor, and labels with jumps. One worked example: move|s2|d4 is the bit layout you wrote by hand last level, with a name on it -- 10 for move, 010 for s2, 100 for d4, the byte 10010100. # starts a comment and every line is one instruction. Note that add always reads r1 and r2 and writes r3: move your two addends into r1 and r2 first, and move the result out afterwards.',
+     },
+     allowedComponents: [...BOARD_PARTS],
+     io: IO_IN,
+     checks: [
+       {
+         kind: 'program',
+         from: 'player',
+         format: 'asm',
+         steps: STEPS_51_AT_100,
+       },
+diff --git a/src/levels/custom/lock.ts b/src/levels/custom/lock.ts
+index 0d02d7d..f608edf 100644
+--- a/src/levels/custom/lock.ts
++++ b/src/levels/custom/lock.ts
+@@ -190,31 +190,35 @@ export const callLock = (
+     // the byte written above only arrives there through the combinational parts
+     // between the level's pin and the CPU's register file -- `srcData` -> `d1` ->
+     // `data` on the OVERTURE board. Tick without settling and the machine
+     // samples the PREVIOUS answer, which is a circuit nobody built and a puzzle
+     // with no solution.
+     io.settle();
+     io.tick();
+   }
+ 
+   // ONE FAILURE, keyed by the level's own pins: the answer that was on `match`
+-  // while the last code was being tried, the byte the level wanted, and the byte
+-  // the board's program had reached. The detail repeats the number in words
++  // while the last code was being tried, and the byte the board's program had
++  // reached. THE SECRET IS NOT IN IT. The failure record is what the panel
++  // renders, and `truthTable.ts` draws any record with a non-empty vector as a
++  // matrix column -- so an `expected` byte would print the answer on the
++  // player's first failing run and collapse the closed-loop search this level
++  // exists to be. The detail repeats the byte the program reached in words
+   // because the failure table renders numbers and a player reads sentences.
+   const failure: CheckFailure = {
+     check: 'custom',
+     inputs: { match: 0 },
+-    expected: { try: secret },
++    expected: {},
+     actual: { try: tried },
+     tick: budget,
+     reason: 'mismatch',
+-    detail: `the budget of ${budget} tick(s) ran out with the last code tried being ${tried}, not ${secret}`,
++    detail: `the budget of ${budget} tick(s) ran out with the last code tried being ${tried}`,
+   };
+   return { passed: false, failures: [failure], ticksUsed: budget };
+ };
+ 
+ /** `params` is level data: an object or nothing, never a `TypeError`. */
+ function isRecord(value: unknown): value is Record<string, unknown> {
+   return typeof value === 'object' && value !== null && !Array.isArray(value);
+ }
+ 
+ /** Registers this checker under the id a `custom` check names. */
+diff --git a/src/main.ts b/src/main.ts
+index 6309b08..87f3b5a 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -13,21 +13,21 @@ import { devModeFrom } from './app/dev';
+ import { mountShell } from './ui/shell';
+ import { mountPalette } from './ui/palette';
+ import { mountTruthTable, TEST_DEMO_LIMIT } from './ui/truthTable';
+ import { mountIoPanel } from './ui/ioPanel';
+ import { showResult } from './ui/result';
+ import { mountToolbar } from './ui/toolbar';
+ import { mountMap } from './ui/map';
+ import { narrativeFor } from './ui/narrative';
+ import { renderBoard, type BoardView } from './ui/board/render';
+ import { attachBoardInput, deleteSelection } from './ui/board/interact';
+-import { createDisplay, type DisplaySimulation, type SignalSnapshot } from './ui/board/signals';
++import { createDisplay, resetBoard, type DisplaySimulation, type SignalSnapshot } from './ui/board/signals';
+ import { instanceRect, screenToWorld, type Point } from './ui/board/view';
+ import { levelExpectsProgram, playerProgramFormat, testCases, type TestPlan } from './levels/checks';
+ import { createProgramRun, type ProgramRun } from './levels/run';
+ import { mountIde } from './ui/ide';
+ import { mountDebug } from './ui/debug';
+ import type { LevelSpec } from './levels/spec';
+ 
+ const registry = createRegistry(BASE_DEFS);
+ let progress: Progress = loadProgress();
+ const level: LevelSpec = getLevel(resumePointOf(progress, LEVEL_ORDER));
+@@ -43,23 +43,23 @@ const store: Store<AppState> = createStore<AppState>({
+   // touch, which is what keeps it a board rather than a built-in CPU.
+   graph: level.board ? graphFromBoard(level.id, level.board) : emptyGraph(level.id),
+   registry,
+   progress,
+   camera: { x: 40, y: 40, zoom: 1 },
+   selected: [],
+   dragging: null,
+   armed: null,
+   dev,
+   // The programs come out of the loaded save, so reopening the app restores the
+-  // text the player left on each level. Nothing writes them yet -- the IDE is a
+-  // later task -- but the channel is wired end to end so that the day the editor
+-  // arrives it has somewhere to type into.
++  // text the player left on each level. The IDE writes them back as they are
++  // typed (`onProgramEdit`), through `progress.programs` and `saveProgress`, so
++  // the editor, the checks and the save all read the same text.
+   programs: progress.programs,
+   metrics: null,
+   lastGrade: null,
+   status: null,
+ });
+ 
+ const stack = new CommandStack();
+ const app = document.querySelector<HTMLDivElement>('#app');
+ 
+ /**
+@@ -347,21 +347,25 @@ if (app) {
+     if (item === undefined) {
+       finishTest();
+       return;
+     }
+ 
+     const demonstrating = testStep < TEST_DEMO_LIMIT;
+     activeCase = testStep;
+     // A case's own `reset` says whether it starts from a cleared circuit: a
+     // truth table's rows each do, and only a script's FIRST step does -- step 3
+     // reads a register step 2 clocked. The checker does exactly this.
+-    if (item.reset) display?.reset();
++    //
++    // THROUGH `resetBoard`, NOT THE DISPLAY: on a level that also grades a
++    // player's program the display is painting the run's own machine, and
++    // clearing that storage directly would empty the `ram_prog` the run loaded.
++    if (item.reset) resetBoard(display, playerRun);
+     if (demonstrating) driveTo(item.inputs);
+     else driveQuiet(item.inputs);
+     while ((snapshot?.tick ?? 0) < item.tick) {
+       display?.tick();
+       if (demonstrating) {
+         sample();
+         paint();
+       }
+     }
+     testResults[testStep] = levelOutputs();
+@@ -937,24 +941,35 @@ if (app) {
+     onStep: step,
+     onToggleRun: () => {
+       running = !running;
+       if (running) startClock();
+       else stopClock();
+       paintTools();
+     },
+     onStop: () => {
+       running = false;
+       stopClock();
+-      display?.reset();
++      // 停止并复位 CLEARS THE BOARD WITHOUT ERASING THE PROGRAM. On a program
++      // level the display is painting the run's own machine, so a bare
++      // `display.reset()` used to clear `ram_prog` under the editor: the byte
++      // count stayed put over 256 zeros, the debugger read zeros, and the counter
++      // walked a zero program until the text changed. The reset goes through
++      // `resetBoard` -- which resets the RUN, reloading the image -- and the
++      // readout panel's vector is re-driven onto the cleared machine, because a
++      // reset clears the inputs with the storage. Both panels are repainted: the
++      // debugger's counter and RAM window are readings of that same machine.
++      resetBoard(display, ensurePlayerRun());
++      syncPlayerInputs();
+       sample();
+       paint();
+       io.render();
++      refreshBench();
+       paintTools();
+     },
+     onToggleTest: toggleTest,
+   });
+ 
+   /**
+    * A click on a level input flips what it drives.
+    *
+    * One bit toggles; a wider pin counts up and wraps, because a click is a
+    * nudge and not a way to type a byte -- exact values are the readout panel's
+diff --git a/src/ui/board/signals.ts b/src/ui/board/signals.ts
+index 80e8f8a..3d62651 100644
+--- a/src/ui/board/signals.ts
++++ b/src/ui/board/signals.ts
+@@ -14,21 +14,21 @@
+  * disagreed with it would paint a circuit that looks right and fails, which is
+  * exactly why both go through `compile` and `bindLevelIo`.
+  *
+  * A circuit that never settles, or a graph `compile` refuses, yields `null`
+  * rather than an exception: the board is also the editor, and the state a player
+  * types through on the way to a working circuit is usually not runnable.
+  */
+ import { Simulation, compile } from '../../core/net';
+ import { bindLevelIo, type LevelIo } from '../../levels/checks';
+ import type { LevelSpec } from '../../levels/spec';
+-import type { ProgramMachine } from '../../levels/run';
++import type { ProgramMachine, ProgramRun } from '../../levels/run';
+ import type { Graph } from '../../core/graph';
+ import type { Registry } from '../../core/registry';
+ import { maskInto, portValueToNumber } from '../../core/signal';
+ 
+ /** Every value the board and the readout panels need, read in one pass. */
+ export interface SignalSnapshot {
+   /** Value at a compiled output pin, keyed `${instanceId}.${portId}`. */
+   readonly outputs: ReadonlyMap<string, number>;
+   /** Value at a level output pin, keyed by the level's own pin id. */
+   readonly levelOutputs: ReadonlyMap<string, number>;
+@@ -178,19 +178,40 @@ export function createDisplay(
+ 
+   // A display that compiled its own circuit is the one that starts it: reset
+   // clears every storage byte, which for a program level would wipe the image the
+   // run just loaded. A machine handed in is already at its starting state -- the
+   // run resets and loads before it hands the machine over -- so it is painted as
+   // it stands.
+   if (!machine) display.reset();
+   return display;
+ }
+ 
++/**
++ * The board's reset: 停止并复位, and every case that starts from a cleared
++ * circuit. The one place that knows a display may be painting a run's machine.
++ *
++ * A DISPLAY BUILT ON A RUN'S MACHINE MAY NOT BE RESET DIRECTLY. `createDisplay`
++ * is handed the `ProgramRun`'s `Simulation` on a program level, so
++ * `DisplaySimulation.reset` -- which clears the simulation's storage -- would
++ * erase `ram_prog` under the run: the editor would still show the text, the
++ * debugger would read 256 zeros and the PC would walk a zero program, and
++ * nothing would reload the image until the text itself changed. Given a run
++ * that owns the machine, the reset therefore goes through the RUN's own
++ * `reset`, which clears the board and then loads the image back into it (see
++ * `levels/run.ts`). `DisplaySimulation.reset` is still the answer for a board
++ * with no run behind it: chapters 1 to 3, and a program level whose text has not
++ * loaded (the run is inert and hands out no machine).
++ */
++export function resetBoard(display: DisplaySimulation | null, run: ProgramRun | null): void {
++  if (run !== null && run.machine !== null) run.reset();
++  else display?.reset();
++}
++
+ /** A value reduced into a pin's width, so a stale vector cannot be rejected. */
+ function within(value: number, width: number): number {
+   return maskInto(value, width);
+ }
+ 
+ /** The snapshot before anything has run, for callers with no display at all. */
+ export function emptySignals(): SignalSnapshot {
+   return UNSTABLE;
+ }
+diff --git a/test/levels/ch4-batch2.test.ts b/test/levels/ch4-batch2.test.ts
+index b89a858..6f25ca1 100644
+--- a/test/levels/ch4-batch2.test.ts
++++ b/test/levels/ch4-batch2.test.ts
+@@ -192,26 +192,31 @@ function drivenOf(spec: LevelSpec): readonly (readonly number[])[] {
+       const values = Object.values(step.inputs ?? {});
+       const value = values[0];
+       if (values.length !== 1 || typeof value !== 'number') {
+         throw new Error(`${spec.id} step ${step.tick} does not drive exactly one byte`);
+       }
+       return value;
+     }),
+   );
+ }
+ 
++/** The answer the walk at `index` demands once the program has published it. */
++function answerOfWalk(spec: LevelSpec, index: number): number {
++  const walk = walksOf(spec)[index] ?? [];
++  const answer = walk.find((value) => value !== undefined && value !== 0);
++  if (answer === undefined) throw new Error(`${spec.id} walk ${index} never demands an answer`);
++  return answer;
++}
++
+ /** The answer the first walk demands once the program has published it. */
+ function answerOf(spec: LevelSpec): number {
+-  const first = walksOf(spec)[0] ?? [];
+-  const answer = first.find((value) => value !== undefined && value !== 0);
+-  if (answer === undefined) throw new Error(`${spec.id} first walk never demands an answer`);
+-  return answer;
++  return answerOfWalk(spec, 0);
+ }
+ 
+ /** A custom level's `params` as a record of untrusted data. */
+ function paramsOf(spec: LevelSpec): Readonly<Record<string, unknown>> {
+   const params = customOf(spec).params;
+   if (params === undefined) throw new Error(`${spec.id}'s custom check declares no params`);
+   return params;
+ }
+ 
+ /**
+@@ -348,26 +353,35 @@ describe('chapter 4 batch 2 - reference programs', () => {
+     ]);
+     // The vectors themselves, repeated at every step of their own walk.
+     expect(drivenOf(level('ch4-53-conditional-jumps'))).toEqual([
+       [10, 10, 10, 10],
+       [1, 1, 1, 1],
+     ]);
+     expect(drivenOf(level('ch4-55-mod-4'))).toEqual([
+       [42, 42, 42, 42],
+       [255, 255, 255, 255],
+     ]);
+-    // The semantics the chapter-4 table fixes, recomputed here: the sum 1..n,
+-    // and the low two bits of the byte.
+-    expect((10 + 9 + 8 + 7 + 6 + 5 + 4 + 3 + 2 + 1) & 0xff).toBe(55);
+-    expect((1 + 0) & 0xff).toBe(1);
+-    expect(42 & 3).toBe(2);
+-    expect(255 & 3).toBe(3);
++    // The semantics the chapter-4 table fixes, recomputed from the vectors the
++    // level data itself drives -- the sum 1..n, and the low two bits of the byte
++    // -- so moving a walk's input without moving its answer is a red test rather
++    // than a comparison of two literals.
++    const sumWalks = drivenOf(level('ch4-53-conditional-jumps'));
++    sumWalks.forEach((row, index) => {
++      const n = row[0]!;
++      expect(answerOfWalk(level('ch4-53-conditional-jumps'), index)).toBe(
++        ((n * (n + 1)) / 2) & 0xff,
++      );
++    });
++    const maskWalks = drivenOf(level('ch4-55-mod-4'));
++    maskWalks.forEach((row, index) => {
++      expect(answerOfWalk(level('ch4-55-mod-4'), index)).toBe(row[0]! & 3);
++    });
+     // And the ticks, read off the same walks rather than trusted: 53's are the
+     // long loop and the shortest one, 55's are its five-instruction shape.
+     expect(lastAssertedTick(level('ch4-53-conditional-jumps'))).toBe(135);
+     expect(lastAssertedTick(level('ch4-55-mod-4'))).toBe(10);
+     expect(programsOf(level('ch4-53-conditional-jumps'))[0]?.steps.map((s) => s.tick)).toEqual([
+       0, 128, 129, 135,
+     ]);
+     expect(programsOf(level('ch4-53-conditional-jumps'))[1]?.steps.map((s) => s.tick)).toEqual([
+       0, 11, 12, 18,
+     ]);
+@@ -751,21 +765,26 @@ describe('chapter 4 batch 2 - the checks have teeth', () => {
+     'loadi|16',
+     'j',
+   ].join('\n');
+ 
+   it('rejects a search that steps over the secret on the code lock', () => {
+     const spec = level('ch4-54-code-breaker');
+     const outcome = runChecks(boardOf(spec), registry, spec, { text: STRIDED_SEARCH });
+     expect(outcome.passed, 'the code lock passed a search that never lands on the secret').toBe(false);
+     const failure = outcome.failures[0]!;
+     expect(failure.reason).toBe('mismatch');
+-    expect(failure.expected).toEqual({ try: 42 });
++    // THE RECORD THE PANEL RENDERS CARRIES NO SECRET. `truthTable.ts` draws
++    // `expected` as a matrix column, so `{ try: 42 }` here would print the code
++    // lock's answer as eight bits after the player's first failing run -- the
++    // closed-loop search the level exists to be would collapse instead.
++    expect(failure.expected).toEqual({});
++    expect(JSON.stringify(failure)).not.toContain('42');
+     expect(failure.tick).toBe(1024);
+     expect(failure.detail).toContain('budget');
+   });
+ 
+   it('rejects a player who has typed nothing on the code lock, and a text that will not run', () => {
+     // The vacuum and the corruption, through the checker rather than through the
+     // `program` branch: both have to be refusals naming the player's buffer and
+     // the offending line, never a board quietly reading zeros.
+     const spec = level('ch4-54-code-breaker');
+     const empty = runChecks(boardOf(spec), registry, spec, { text: '' });
+@@ -991,25 +1010,31 @@ describe('chapter 4 batch 2 - level data', () => {
+       const answers = walksOf(spec).map((walk) => walk.find((v) => v !== undefined && v !== 0));
+       expect(new Set(answers).size, `${spec.id} walks demand the same answer`).toBe(programs.length);
+     }
+   });
+ 
+   it("pins the code lock's puzzle data: the secret byte and a budget above the search", () => {
+     // Ruling 4: the puzzle's data lives in the level, not in the checker -- a
+     // secret byte and a budget. 42 rather than 0, because on a real board the
+     // first read of `try` happens before the program has run and a board that
+     // has not moved yet publishes 0 (custom-lock.test.ts pins that boundary).
+-    // The budget is measured against the reference: 590 ticks to reach 42, so
+-    // 1024 is headroom rather than a number that happens to be big.
++    // The budget is checked against the reference's OWN grade rather than a
++    // comparison of two literals: the reference passes, and the ticks it spent
++    // have to fit inside the budget -- which is what makes 1024 headroom rather
++    // than a number that happens to be big.
+     const spec = level('ch4-54-code-breaker');
+-    expect(paramsOf(spec)).toEqual({ secret: 42, budget: 1024 });
+-    expect(590).toBeLessThan(1024);
++    const params = paramsOf(spec);
++    expect(params).toEqual({ secret: 42, budget: 1024 });
++    const outcome = runReference(spec);
++    expect(outcome.passed).toBe(true);
++    expect(outcome.ticksUsed).toBeGreaterThan(0);
++    expect(outcome.ticksUsed).toBeLessThan(params.budget as number);
+   });
+ 
+   it("pins the maze's pattern three ways: params, brief and this file", () => {
+     // Ruling 3(d): the pattern lives in the level's `params` AND in the level's
+     // story, and the batch test holds both to one literal -- so editing the grid
+     // without editing the brief (or the other way round) is a red test rather
+     // than a level whose story describes a maze it no longer ships.
+     const spec = level('ch4-56-the-maze');
+     expect(paramsOf(spec).grid).toEqual(MAZE_GRID);
+     expect(paramsOf(spec).budget).toBe(1024);
+diff --git a/test/levels/custom-lock.test.ts b/test/levels/custom-lock.test.ts
+index 0c686f9..5639cd7 100644
+--- a/test/levels/custom-lock.test.ts
++++ b/test/levels/custom-lock.test.ts
+@@ -165,42 +165,65 @@ describe('lock', () => {
+     // The write always describes the byte that was READ, never the secret: a
+     // checker that leaked the answer onto `match` would tell the player's
+     // program what to guess and pass without a search.
+     expect(script.log.filter((c) => c.method === 'writeInput').slice(0, -1).every((c) => c.value === 0))
+       .toBe(true);
+   });
+ 
+   it('fails on the budget, naming the last byte it tried', () => {
+     // A script that only ever publishes 1 never finds a secret of 200, so the
+     // checker has to stop at its budget. The failure is ONE record keyed by the
+-    // level's own pins: the input it wrote, the byte it expected, the byte it
+-    // got, and the tick the budget ran out on.
++    // level's own pins: the input it wrote, the byte the board's program reached,
++    // and the tick the budget ran out on. It does NOT carry the secret -- see the
++    // record test below -- because the panel renders `expected` as a column.
+     const script = scriptedIo({ outputs: new Array<number>(64).fill(1) });
+     const outcome = callLock(script.io, LOCK_LEVEL, SECRET(200, 8), PLAYER);
+ 
+     expect(outcome.passed).toBe(false);
+     expect(outcome.failures).toHaveLength(1);
+     const failure = outcome.failures[0]!;
+     expect(failure.check).toBe('custom');
+     expect(failure.reason).toBe('mismatch');
+     expect(failure.inputs).toEqual({ match: 0 });
+-    expect(failure.expected).toEqual({ try: 200 });
++    expect(failure.expected).toEqual({});
+     expect(failure.actual).toEqual({ try: 1 });
+     expect(failure.tick).toBe(8);
+     expect(failure.detail).toContain('1');
++    expect(failure.detail).not.toContain('200');
+     // ONE UNIT IS ONE EXCHANGE. Eight units are eight reads of `try` and eight
+     // edges, and the read that would have been the ninth never happens.
+     expect(outcome.ticksUsed).toBe(8);
+     expect(script.ticks()).toBe(8);
+     expect(script.log.filter((c) => c.method === 'readOutput')).toHaveLength(8);
+   });
+ 
++  it('never puts the secret in the failure record the panel renders', () => {
++    // THE CLOSED LOOP'S ONE SECRET. `truthTable.ts` renders every failure with a
++    // non-empty vector as a matrix column, `expected` included -- so a record
++    // that carried `{ try: secret }` would print the answer as eight bits on the
++    // player's first failing run, and level 54 would collapse into three
++    // instructions. The record stays keyed by the level's own pins and carries
++    // the byte the board published, never the byte the level wanted.
++    const script = scriptedIo({ outputs: new Array<number>(16).fill(9) });
++    const outcome = callLock(script.io, LOCK_LEVEL, SECRET(200, 8), PLAYER);
++
++    expect(outcome.passed).toBe(false);
++    const failure = outcome.failures[0]!;
++    expect(failure.inputs).toEqual({ match: 0 });
++    expect(failure.actual).toEqual({ try: 9 });
++    expect(failure.expected).toEqual({});
++    // The whole panel-facing object, not just the fields read above: a secret
++    // that crept back in under any name would still be a substring of it.
++    expect(JSON.stringify(failure)).not.toContain('200');
++    expect(failure.detail).not.toContain('200');
++  });
++
+   it('runs the documented 4096-tick budget when the check declares none', () => {
+     // The default is a hard ceiling like `FUZZ_ROUNDS_CAP`, so a board that
+     // never matches must terminate rather than hang the editor. The count is
+     // the assertion: a missing default would loop forever here.
+     expect(DEFAULT_LOCK_BUDGET).toBe(4096);
+     const script = scriptedIo({ outputs: new Array<number>(DEFAULT_LOCK_BUDGET + 8).fill(0) });
+     const outcome = callLock(script.io, LOCK_LEVEL, SECRET(1), PLAYER);
+ 
+     expect(outcome.passed).toBe(false);
+     expect(outcome.ticksUsed).toBe(DEFAULT_LOCK_BUDGET);
+@@ -580,21 +603,24 @@ describe('lock on the reference board', () => {
+     // never leaves zero (the machine runs off the end of the image and reads
+     // zeroed RAM, which is `loadi|0` again). The failure is the checker's own
+     // record, keyed by the level's pins, at the tick the budget ran out.
+     const stuck = { text: 'loadi|0\nmove|s0|out' };
+     const outcome = runChecks(board(), registry, withCheck(SECRET(42, 32)), stuck);
+     expect(outcome.passed).toBe(false);
+     expect(outcome.failures).toHaveLength(1);
+     const failure = outcome.failures[0]!;
+     expect(failure.reason).toBe('mismatch');
+     expect(failure.actual).toEqual({ try: 0 });
+-    expect(failure.expected).toEqual({ try: 42 });
++    // No `expected`: the record the panel renders must not name the secret (42
++    // here), or the player's first failing run would print the answer.
++    expect(failure.expected).toEqual({});
++    expect(JSON.stringify(failure)).not.toContain('42');
+     expect(failure.tick).toBe(32);
+     expect(outcome.ticksUsed).toBe(32);
+   });
+ 
+   it('drives the board in the documented order: reset, load, then read-write-settle-tick', () => {
+     // I1's PROTOCOL, PINNED ON A REAL CIRCUIT. The exchange is read the published
+     // byte, answer it, settle so the answer reaches the circuit, then apply the
+     // edge -- and the reset and the load come before the first read, because a
+     // read before either of them is a fabricated zero. The wrapper records what
+     // the CHECKER asked the level interface for, which is the only place the
+diff --git a/test/smoke/ui.spec.ts b/test/smoke/ui.spec.ts
+index 1f93bb9..fead654 100644
+--- a/test/smoke/ui.spec.ts
++++ b/test/smoke/ui.spec.ts
+@@ -829,21 +829,21 @@ test('chapter 4 grades a hand-written program: level 50', async ({ page }) => {
+       '01000000    # add           r3 = in + 5',
+       '10011111    # move|s3|out   out = r3',
+     ].join('\n'),
+   );
+   await page.screenshot({ path: 'test-results/smoke-ch4-level50-program.png' });
+ 
+   await page.locator('.ide-test').click();
+ 
+   await expect(page.locator('.truth-table h2')).toHaveText('全部用例通过');
+   await expect(page.locator('.shell-metrics')).toContainText('总开销');
+-  // The text became an image: the five bytes the level's own hint names.
++  // The text became an image: the five bytes the reference solution uses.
+   await expect(page.locator('.ide-bytes')).toHaveText('B10582409F');
+ 
+   // Passing opens the dialog, and its summary calls the level what it is.
+   const result = page.locator('.result');
+   await expect(result).toContainText('关卡完成');
+   await expect(result).toContainText('程序关卡');
+   await page.screenshot({ path: 'test-results/smoke-ch4-level50-passed.png' });
+ 
+   // Passing wrote progress -- level 50 keeps its star and level 51 unlocks --
+   // which is what makes this "graded" rather than merely "displayed".
+diff --git a/test/ui/display-run.test.ts b/test/ui/display-run.test.ts
+index 5d79a46..a1a4d3e 100644
+--- a/test/ui/display-run.test.ts
++++ b/test/ui/display-run.test.ts
+@@ -1,19 +1,19 @@
+ // @vitest-environment jsdom
+ import { describe, expect, it } from 'vitest';
+ import { createRegistry } from '../../src/core/registry';
+ import { BASE_DEFS } from '../../src/core/defs/index';
+ import { graphFromBoard } from '../../src/levels/board';
+ import { overtureBoard } from '../../src/levels/boards/overture';
+ import { createProgramRun } from '../../src/levels/run';
+ import type { LevelSpec } from '../../src/levels/spec';
+-import { createDisplay } from '../../src/ui/board/signals';
++import { createDisplay, resetBoard } from '../../src/ui/board/signals';
+ import { mountDebug } from '../../src/ui/debug';
+ 
+ const registry = createRegistry(BASE_DEFS);
+ 
+ /**
+  * ONE MACHINE BEHIND EVERY READOUT: the board's clock card, its `out` row and the
+  * debugger's counter.
+  *
+  * THE INTEGRATION `main.ts` PERFORMS, at the seam it performs it. A program level
+  * builds the run first and hands the run's machine to `createDisplay`, so the
+@@ -94,11 +94,59 @@ describe('the board, the run and the debugger as main.ts wires them', () => {
+     const snapshot = display!.read();
+     expect(snapshot.stable).toBe(true);
+     expect(snapshot.levelOutputs.get('out')).toBe(INPUT);
+     expect(run.readOutputs()).toEqual({ out: INPUT });
+ 
+     // ...and the byte is visible in the machine's own state, which is the reading
+     // the panel exists for.
+     expect(run.readRegisters()).toEqual([0, INPUT, 0, 0, 0, 0]);
+     expect(root.querySelector('.debug-reg:nth-child(2)')?.textContent).toContain('0x2A');
+   });
++
++  /**
++   * THE BOARD'S 停止并复位 MUST NOT EAT THE PROGRAM. `main.ts`'s `onStop` calls
++   * `resetBoard(display, run)` -- the same call, on the same pair, this test
++   * makes -- and the bug this pins is what happened when that path was a bare
++   * `display.reset()`: the display paints the run's own `Simulation`, so clearing
++   * the display's storage cleared `ram_prog` too, and the editor went on showing
++   * "5 字节" over 256 zeros. The debugger then read zeros and the counter walked a
++   * zero program, because nothing reloads the image until the text changes.
++   *
++   * THE RESET STILL HAS TO RESET, so this is not satisfied by a board that never
++   * cleared: the tick goes back to 0 and the register file is empty after it.
++   */
++  it('keeps the program loaded, and still runnable, when the board is reset', () => {
++    const graph = graphFromBoard(PROGRAM_LEVEL.id, overtureBoard({ inputId: 'in' }));
++    const run = createProgramRun(graph, registry, PROGRAM_LEVEL, ECHO, 'asm');
++    expect(run.errors).toEqual([]);
++    const display = createDisplay(graph, registry, PROGRAM_LEVEL, {}, run.machine);
++    expect(display).not.toBeNull();
++
++    // The machine has run: state the reset has to clear, and a program in RAM.
++    run.setInput('in', INPUT);
++    display!.tick();
++    display!.tick();
++    expect(display!.read().tick).toBe(2);
++    expect(run.readRegisters()).toEqual([0, INPUT, 0, 0, 0, 0]);
++    expect(run.readRam()!.slice(0, 2)).toEqual([0xb1, 0x8f]);
++
++    resetBoard(display, run);
++    // `main.ts` re-drives the readout panel's vector onto the run after the
++    // reset, because a cleared simulation has no inputs in it.
++    run.setInput('in', INPUT);
++
++    // THE CLOCK AND THE REGISTERS CLEARED, THE IMAGE DID NOT: the same bytes the
++    // editor's text compiles to, and the counter back at the first instruction.
++    expect(display!.read().tick).toBe(0);
++    expect(run.ticks).toBe(0);
++    expect(run.readPc()).toBe(0);
++    expect(run.readRegisters()).toEqual([0, 0, 0, 0, 0, 0]);
++    expect(run.readRam()!.slice(0, 2)).toEqual([0xb1, 0x8f]);
++
++    // ...AND IT STILL RUNS. A zeroed `ram_prog` cannot reach this byte: with the
++    // image erased every instruction is `loadi|0`, so `out` stays 0.
++    display!.tick();
++    display!.tick();
++    expect(display!.read().levelOutputs.get('out')).toBe(INPUT);
++    expect(run.readOutputs()).toEqual({ out: INPUT });
++  });
+ });

@@ -1,0 +1,951 @@
+# Review package: f1add6d5a5f6d109ff960a46e79d5ff2f2e5eca3..4a608524d5f24af5f693de8f0361c7ebf5c6a296
+
+## Commits
+4a60852 feat(levels): add chapter 4's first three programming levels
+
+## Files changed
+ src/levels/content/ch4/batch1.ts | 331 ++++++++++++++++++++++++++
+ test/fixtures/ch4-references.ts  |  87 +++++++
+ test/levels/ch4-batch1.test.ts   | 503 +++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 921 insertions(+)
+
+## Diff
+diff --git a/src/levels/content/ch4/batch1.ts b/src/levels/content/ch4/batch1.ts
+new file mode 100644
+index 0000000..6b61347
+--- /dev/null
++++ b/src/levels/content/ch4/batch1.ts
+@@ -0,0 +1,331 @@
++import { overtureBoard } from '../../boards/overture';
++import type { LevelSpec, ProgramStep } from '../../spec';
++// `LevelIo` -- the pin shape -- is `tables.ts`'s; `checks.ts` exports an
++// unrelated runtime interface of the same name (the bound simulation).
++import type { LevelIo } from '../../tables';
++
++/**
++ * Chapter 4, levels 50-52: the machine the player BUILT becomes the machine the
++ * player PROGRAMS.
++ *
++ * THE CPU IS THE ONE FROM CHAPTER 3, AND THE BOARD IS THE IMPORT CHANNEL
++ * (ruling 1). Each level ships `board: overtureBoard({ inputId })` -- the same
++ * builder `test/fixtures/ch3-references.ts` grades chapter 3's machine against,
++ * so there is exactly one circuit behind both chapters and no copy to drift
++ * (see `boards/overture.ts`). It is a STARTING POINT, not a built-in CPU: the
++ * player can still edit every part and wire of it. `inputId` is the one knob
++ * these levels turn, because every one of them reads the level's input pin.
++ *
++ * THE PROGRAM IS THE PLAYER'S (ruling 2). `runChecks(graph, registry, spec,
++ * player?)` reads the buffer its fourth argument carries when the check says
++ * `from: 'player'`, and that is the only channel these levels have: the level
++ * data carries NO `source`, because the reference programs belong to
++ * `test/fixtures/ch4-references.ts` and the player buffer must never be graded
++ * against text the level ships. What the check DOES carry is the walk -- the
++ * ticks and the bytes that must be on `out`.
++ *
++ * THE TICK ARITHMETIC IS CHAPTER 3'S, ONE SIDE FACING OUT. The program RAM is
++ * combinational from the counter, so while the machine is looking at
++ * `move|sX|out` the answer is ALREADY on `out`; that is the program's Nth
++ * instruction (index N-1) and therefore tick N-1 after N-1 edges. The `halt`
++ * line -- the default, and the reason these are all straight-line levels --
++ * freezes the counter on that instruction and the byte stays put. So each walk
++ * asserts 0 before that tick, the answer on it, and the same answer several
++ * edges later, where a machine (or a program) that does not hold its answer
++ * fails.
++ *
++ * EVERY STEP REPEATS ITS INPUTS, and that is a driver rule rather than a style
++ * one: `driveSteps` writes EVERY input pin at every step and defaults the pins a
++ * step omits to 0, so a step that forgot `inputs` would clear the very byte the
++ * program is supposed to read. `test/levels/ch4-batch1.test.ts` holds every
++ * step to it.
++ *
++ * CHAPTER 4 HANDS OUT NO NEW PARTS (spec §3.3: "无新元件；解锁汇编 IDE 与调试器"),
++ * so every level's `rewards` is absent and the palette is not "everything
++ * earned" (chapter 3's shape) but the exact parts the SHIPPED BOARD is built
++ * from -- the machine is the level, and the parts are the ones it is made of.
++ */
++
++/**
++ * Every part the shipped board is made of: `overtureBoard({ inputId })`'s
++ * parts, connectors included, and nothing else.
++ *
++ * Read against `boards/overture.ts`'s `placedParts`: the level's own pins, the
++ * fetch stage (rails, program RAM, counter, decoder), the mode and field glue
++ * (splitters, the four mode gates and the one-hot decoders), the register file
++ * with its ALU and write path (muxes and switches), and the jump glue plus the
++ * halt line. `test/levels/ch4-batch1.test.ts` holds this list to the board in
++ * BOTH directions -- every part the board uses is listed, and the list names
++ * nothing the board does not use.
++ */
++const BOARD_PARTS = [
++  // The level's own pins: two inputs (the clock the driver ticks on, and the
++  // data pin this level reads) and the answer.
++  'level_input',
++  'level_output',
++  // Fetch and the constant rails.
++  'const_on',
++  'const_off',
++  'ram_prog',
++  'pc8',
++  'instr_decoder',
++  // Mode and fields: splitters, the mode gates, the one-hot decoders, and the
++  // REG1/REG2/REG3 constants the read addresses are made from.
++  'splitter',
++  'not',
++  'nor',
++  'and',
++  'nand',
++  'decoder3',
++  'maker',
++  // The register file, the ALU and the write path (source, calc/loadi selects,
++  // and the write-address rules).
++  'mux8',
++  'switch8',
++  'regfile6',
++  'alu8',
++  // The jump glue and the halt line that holds the answer on `out`.
++  'equal8',
++  'or3',
++  'or',
++  'halt',
++] as const;
++
++/** The two arithmetic levels: one 8-bit input, one 8-bit answer. */
++const IO_IN: LevelIo = {
++  inputs: [{ id: 'in', width: 8 }],
++  outputs: [{ id: 'out', width: 8 }],
++};
++
++/** Level 52's pin shape: the same one byte in, one byte out, named `r`. */
++const IO_R: LevelIo = {
++  inputs: [{ id: 'r', width: 8 }],
++  outputs: [{ id: 'out', width: 8 }],
++};
++
++/**
++ * Level 50's walk: `in` is driven at 100 and the answer is 105.
++ *
++ * TICK 4 IS WHERE THE ANSWER APPEARS, and the number is the program's own
++ * shape: `out` publishes while the counter looks at `move|s3|out`, the fifth
++ * instruction (index 4), so the byte is there after four edges. Tick 3 demands
++ * 0 one edge earlier and tick 10 demands the byte again -- the halt has to have
++ * frozen the counter, or the byte would have fallen back to 0.
++ *
++ * WHY 100. The answer 105 is outside the range a five-instruction CONSTANT
++ * program can publish at tick 4 -- an immediate (0-63) or its complement
++ * (192-255), because `loadi` is six bits and only four instructions execute
++ * before the reveal -- so "ignore the input, hold the answer" cannot pass this
++ * walk however it is spelled.
++ */
++const STEPS_50: readonly ProgramStep[] = [
++  { tick: 0, inputs: { in: 100 }, expect: { out: 0 } },
++  { tick: 3, inputs: { in: 100 }, expect: { out: 0 } },
++  { tick: 4, inputs: { in: 100 }, expect: { out: 105 } },
++  { tick: 10, inputs: { in: 100 }, expect: { out: 105 } },
++];
++
++/**
++ * Level 51's walk: the same shape against `in + 3`, driven at 100 for 103.
++ *
++ * Same tick arithmetic as level 50's (the program is the same five
++ * instructions with the constant changed), and the same reason for 100: 103 is
++ * not an immediate and not an immediate's complement.
++ */
++const STEPS_51: readonly ProgramStep[] = [
++  { tick: 0, inputs: { in: 100 }, expect: { out: 0 } },
++  { tick: 3, inputs: { in: 100 }, expect: { out: 0 } },
++  { tick: 4, inputs: { in: 100 }, expect: { out: 103 } },
++  { tick: 10, inputs: { in: 100 }, expect: { out: 103 } },
++];
++
++/**
++ * Level 52's walk: `r` is driven at 200, and 6r = 1200 wraps to 176.
++ *
++ * THE WRAP IS THE LEVEL'S OWN TEACHING POINT -- `out = (6 * r) & 0xff` and the
++ * mod 256 is real -- and 200 is the value the reference-program verification
++ * measured (r = 200 -> 176). The answer appears at tick 8, the index of this
++ * program's `move|s3|out`, and tick 7 demands 0 one edge earlier.
++ *
++ * ONE WALK IS ONE EXECUTION, so this check pins one (r, out) pair; a program
++ * that hard-codes 176 can pass it. The pair is chosen for the wrap rather than
++ * for unreachability -- at eight setup instructions even 176 can be built from
++ * constants -- and the teeth of this level live where the batch test puts them:
++ * the 5r draft (the one the reference-program notes record as a real mistake)
++ * is caught at this same tick.
++ */
++const STEPS_52: readonly ProgramStep[] = [
++  { tick: 0, inputs: { r: 200 }, expect: { out: 0 } },
++  { tick: 7, inputs: { r: 200 }, expect: { out: 0 } },
++  { tick: 8, inputs: { r: 200 }, expect: { out: 176 } },
++  { tick: 14, inputs: { r: 200 }, expect: { out: 176 } },
++];
++
++export const CH4_BATCH1: readonly LevelSpec[] = [
++  /**
++   * ch4-50-punchcard-programming -- Punchcard Programming / 打孔编程
++   *
++   * SOURCED: the name in both languages and its position from the 2.x dossier's
++   * chapter-4 table -- its first level, global 50 -- plus its one-line concept,
++   * hand-written binary encoding, and its 1.x ancestor's name ("Add 5").
++   * Chapter 4's teaching goal is sourced with it: first hand-write machine
++   * code, then unlock the assembler, and solve programming puzzles with your
++   * own CPU.
++   *
++   * AUTHORED (this replica's design): everything a player sees or a test
++   * measures. The `in:8 -> out:8` pin shape; the semantics `out = (in + 5) &
++   * 0xff`; the board (the chapter-3 machine, `overtureBoard({ inputId: 'in' })`
++   * with the default halt -- see the module note); the `program` check that
++   * reads the PLAYER's buffer as one-byte-per-line machine code
++   * (`from: 'player'`, `format: 'bytes'`); the four-step walk and its input
++   * 100; the palette (the board's own parts) and the absent reward; and the
++   * measured three-star target.
++   *
++   * THIS IS THE LEVEL THAT HAND-ENCODES. No mnemonics and no assembler: the
++   * player writes the opcode bits themselves, which is the whole concept, so
++   * the check's reader is `parseImage` (`asm/image.ts`) -- eight binary digits
++   * per line, comments allowed -- rather than the assembler the next level
++   * unlocks. The reference program in the fixture is those five bytes, and the
++   * batch test re-derives them from the ISA table so the two readers cannot
++   * drift apart.
++   */
++  {
++    id: 'ch4-50-punchcard-programming',
++    chapter: 4,
++    index: 50,
++    name: { zh: '打孔编程', en: 'Punchcard Programming' },
++    brief: {
++      zh: '这台 CPU 就是你第 3 章搭好的那台 OVERTURE——现在轮到给它写程序了。这一关从最底层开始：手工机器码，每行 8 位二进制就是一个字节的指令，装进程序 RAM 后一个时钟沿执行一条。程序要算 out = (in + 5) & 0xff：把输入搬进寄存器，loadi 取常数 5，add 相加，最后把结果 move 到 out。写 out 之后机器会停在那条指令上，out 上的字节必须一直保持。',
++      en: 'This is the very CPU you built in chapter 3 -- now it is your turn to write programs for it. This level starts at the bottom: hand-written machine code, one line of 8 binary digits per byte of instruction, loaded into the program RAM and executed one instruction per clock edge. The program must compute out = (in + 5) & 0xff: move the input into a register, loadi the constant 5, add, and move the sum to out. Once out is written the machine stops on that instruction, and the byte on out has to stay there.',
++    },
++    hint: {
++      zh: '一条指令就是一个字节：高 2 位是模式——00 是 loadi，01 是计算，10 是 move，11 是跳转。loadi 的低 6 位就是立即数（0-63）；计算指令的低 6 位是「运算码 + 000」，add 的运算码是 000；move 的低 6 位是「源 + 目的」：源 000-101 是寄存器 s0-s5、110 是输入 inp，目的 000-101 是 d0-d5、111 是 out。所以 move|inp|d1 是 10110001，loadi|5 是 00000101，move|s0|d2 是 10000010，add 是 01000000，move|s3|out 是 10011111。每行必须正好 8 位，# 之后是注释。',
++      en: 'One instruction is one byte: the top 2 bits are the mode -- 00 loadi, 01 calc, 10 move, 11 jump. A loadi\u2019s low 6 bits are the immediate (0-63); a calc\u2019s low 6 bits are "opcode + 000", and add is opcode 000; a move\u2019s low 6 bits are "source + destination", where source 000-101 is registers s0-s5 and 110 is the input inp, and destination 000-101 is d0-d5 and 111 is out. So move|inp|d1 is 10110001, loadi|5 is 00000101, move|s0|d2 is 10000010, add is 01000000, and move|s3|out is 10011111. Every line has to be exactly 8 binary digits; everything after # is a comment.',
++    },
++    allowedComponents: [...BOARD_PARTS],
++    io: IO_IN,
++    // The player's program text, read as one byte per line. No `source`: the
++    // reference lives in the fixture (ruling 2).
++    checks: [
++      {
++        kind: 'program',
++        from: 'player',
++        format: 'bytes',
++        steps: STEPS_50,
++      },
++    ],
++    board: overtureBoard({ inputId: 'in' }),
++    // Measured: 675 gates and 6 deep (the shipped board -- see the module note
++    // and `boards/overture.ts`), and the tick is this walk's last assertion.
++    threeStar: { gate: 675, delay: 6, tick: 10 },
++  },
++
++  /**
++   * ch4-51-assembly-programming -- Assembly Programming / 汇编程序
++   *
++   * SOURCED: the name in both languages and its position (the second level of
++   * chapter 4, global 51) from the 2.x dossier's table, and its one-line
++   * concept: assembly syntax, imm/mov/add. The chapter's sequence is sourced
++   * too -- this is the level where the assembler is unlocked, one level after
++   * the hand encoding.
++   *
++   * AUTHORED (this replica's design): the `in:8 -> out:8` pin shape; the
++   * semantics `out = (in + 3) & 0xff`; the board (the same chapter-3 machine,
++   * `overtureBoard({ inputId: 'in' })`); the `program` check that reads the
++   * PLAYER's buffer as assembly (`from: 'player'`, `format: 'asm'`); the walk,
++   * which is level 50's shape against the other constant; the palette and the
++   * absent reward; and the measured three-star target.
++   *
++   * THE PROGRAM IS LEVEL 50'S PROGRAM SPELLED DIFFERENTLY, which is the
++   * level's own claim rather than a coincidence: the same five instructions,
++   * the same bytes except the immediate, and the batch test pins both spellings
++   * against one ISA table. What the player learns here is that the assembler
++   * does not compute anything new -- it names the bits the previous level wrote
++   * by hand -- so the answer still has to be built out of registers, and `add`
++   * still reads r1 and r2 into r3.
++   */
++  {
++    id: 'ch4-51-assembly-programming',
++    chapter: 4,
++    index: 51,
++    name: { zh: '汇编程序', en: 'Assembly Programming' },
++    brief: {
++      zh: '还是你第 3 章搭的那台 CPU，这次不用手写字节了：这一关解锁汇编器，你写助记符，汇编器替你编成机器码。程序要算 out = (in + 3) & 0xff，和上一关同一条路，只是常数从 5 换成 3。每行一条指令——move|inp|d1、loadi|3、move|s0|d2、add、move|s3|out 这样的写法，# 之后是注释。写 out 之后机器停住，结果要保持。',
++      en: 'The same CPU you built in chapter 3, and no hand encoding this time: this level unlocks the assembler -- you write mnemonics and it compiles the bytes for you. The program must compute out = (in + 3) & 0xff, the same path as the last level with the constant changed from 5 to 3. One instruction per line, spelled like move|inp|d1, loadi|3, move|s0|d2, add, move|s3|out, with # starting a comment. After out is written the machine stops, and the result has to stay.',
++    },
++    hint: {
++      zh: '汇编器认的写法就这几种：loadi|N（N 是 0-63 的立即数）、move|sX|dY（源可以是 s0-s5 或 inp，目的可以是 d0-d5 或 out）、六种运算 add/sub/and/or/nand/nor，以及 label 和跳转。上一关的五个字节在这里就是 move|inp|d1、loadi|5、move|s0|d2、add、move|s3|out——把 5 改成 3 就是本关的程序。注意 add 固定读 r1 与 r2、把结果写进 r3，所以两个加数要先 move 进 r1 和 r2，结果再 move 出去。',
++      en: 'The assembler takes a handful of spellings: loadi|N (N is an immediate from 0 to 63), move|sX|dY (source s0-s5 or inp, destination d0-d5 or out), the six calculations add/sub/and/or/nand/nor, and labels with jumps. Last level\u2019s five bytes spelled this way are move|inp|d1, loadi|5, move|s0|d2, add, move|s3|out -- change the 5 to 3 and you have this level\u2019s program. Note that add always reads r1 and r2 and writes r3: move your two addends into r1 and r2 first, and move the result out afterwards.',
++    },
++    allowedComponents: [...BOARD_PARTS],
++    io: IO_IN,
++    checks: [
++      {
++        kind: 'program',
++        from: 'player',
++        format: 'asm',
++        steps: STEPS_51,
++      },
++    ],
++    board: overtureBoard({ inputId: 'in' }),
++    // Measured: the same board as level 50, so the same gate and delay; the
++    // tick is this walk's last assertion.
++    threeStar: { gate: 675, delay: 6, tick: 10 },
++  },
++
++  /**
++   * ch4-52-circumference -- Circumference / 三番两次
++   *
++   * SOURCED: the name in both languages and its position (the third level of
++   * chapter 4, global 52) from the 2.x dossier's table -- including the odd
++   * pairing the source makes: the Chinese name 三番两次 is the idiom for "over
++   * and over", and the English one is Circumference (the level's 1.x ancestor
++   * was "Calibrating Laser Cannons"). The one-line concept is sourced with
++   * them: compute 6r. The joke is the arithmetic itself -- a circumference is
++   * about 6r, and 三番两次 reads as "three, twice", which is exactly how the
++   * reference program computes it.
++   *
++   * AUTHORED (this replica's design): the `r:8 -> out:8` pin shape (the radius
++   * is the chapter's one renamed input); the semantics `out = (6 * r) & 0xff`,
++   * wrap and all; the board (`overtureBoard({ inputId: 'r' })`); the `program`
++   * check reading the PLAYER's assembly; the walk at r = 200, where 6r wraps to
++   * 176; the palette and the absent reward; and the measured three-star target.
++   *
++   * WHY THIS LEVEL EXISTS BETWEEN THE ASSEMBLER AND THE LOOPS: the ISA has no
++   * multiply, so 6r is addition used again and again -- and `add` reads r1 and
++   * r2 into r3 and NOWHERE else, so every intermediate result has to be moved
++   * back into place before the next sum. The program's seventh instruction is
++   * that lesson: without `move|s3|d1` the two addends are 2r and 3r and the
++   * answer is 5r -- the exact mistake the reference-program notes record, and
++   * the sabotage case the batch test runs.
++   */
++  {
++    id: 'ch4-52-circumference',
++    chapter: 4,
++    index: 52,
++    name: { zh: '三番两次', en: 'Circumference' },
++    brief: {
++      zh: '这台 CPU 是你第 3 章搭的，给它写程序的第三课：指令表里没有乘法，只有 add/sub/and/or/nand/nor——要算 6r，就得把加法三番两次地用。输入脚叫 r，程序要算 out = (6 * r) & 0xff，注意结果按 256 取模（r = 200 时 6r = 1200，out 是 176）。写 out 之后机器停住，结果保持。',
++      en: 'The CPU you built in chapter 3, and the third lesson in programming it: the instruction table has no multiply -- only add/sub/and/or/nand/nor -- so 6r has to come from addition used over and over. The input pin is r, and the program must compute out = (6 * r) & 0xff, wrapping at 256 (r = 200 gives 6r = 1200 and out = 176). After out is written the machine stops, and the result has to stay.',
++    },
++    hint: {
++      zh: 'add 固定算 r3 = r1 + r2，结果不 move 回 r1 或 r2 就没法参加下一步。一条省指令的路：r1 = r、r2 = r，相加得 2r；把 2r move 回 r1，再和 r2 里的 r 相加得 3r；把 3r 分别 move 进 r1 和 r2，最后一次相加就是 6r——这正是「三番两次」。最后那步别只 move 进 r2：两个加数都得是 3r，否则加出来的是 5r。',
++      en: 'add always computes r3 = r1 + r2, and a result that is not moved back into r1 or r2 cannot take part in the next step. One short route: r1 = r, r2 = r, add to get 2r; move 2r back into r1 and add r2\u2019s r to get 3r; move 3r into BOTH r1 and r2, then add once more for 6r -- three, twice. Do not move 3r into r2 alone: both addends have to be 3r, or the sum is 5r.',
++    },
++    allowedComponents: [...BOARD_PARTS],
++    io: IO_R,
++    checks: [
++      {
++        kind: 'program',
++        from: 'player',
++        format: 'asm',
++        steps: STEPS_52,
++      },
++    ],
++    board: overtureBoard({ inputId: 'r' }),
++    // Measured: the same board as levels 50 and 51 (only the input pin's name
++    // changes), so the same gate and delay; the tick is this walk's last
++    // assertion.
++    threeStar: { gate: 675, delay: 6, tick: 14 },
++  },
++];
+diff --git a/test/fixtures/ch4-references.ts b/test/fixtures/ch4-references.ts
+new file mode 100644
+index 0000000..04dba2b
+--- /dev/null
++++ b/test/fixtures/ch4-references.ts
+@@ -0,0 +1,87 @@
++/**
++ * Chapter 4's reference programs.
++ *
++ * WHY PROGRAMS AND NOT BOARDS. `ch3-references.ts` holds circuits because
++ * chapter 3's levels ship none; chapter 4 turns that around and the board comes
++ * from the level itself (`graphFromBoard(level.id, level.board)` in the batch
++ * tests). Filing a board here too would be a second copy of the CPU, free to
++ * drift from the one the levels ship -- and the drift would read as a PASS,
++ * because the reference would keep grading green against a machine the levels
++ * no longer hand the player. Ruling 1 says it in one line: the board does not
++ * enter this fixture.
++ *
++ * WHY THE `format` FIELD TRAVELS WITH THE TEXT. The reader is the LEVEL's
++ * choice -- level 50 is hand-written machine code (`bytes` -> `parseImage`),
++ * levels 51 and 52 are assembly (`asm` -> `assemble`) -- and the player channel
++ * grades with the reader the check declares. A reference filed under the other
++ * one would not parse the way its level grades the player's buffer, so the pair
++ * is stored whole and the batch test pins the two against each other.
++ *
++ * ONLY PROGRAMS THAT PASS THEIR LEVEL LIVE HERE -- the ones the three-star
++ * targets were measured from. The plausible-wrong programs (the sabotaged
++ * constants, the 5r draft of level 52) stay in the batch test that asserts
++ * they fail, because those are that file's argument.
++ *
++ * The byte strings are the controller's pre-verified encodings (see
++ * `.superpowers/sdd/2026-10-08-turing-complete-phase3/reference-programs.md`);
++ * `test/levels/ch4-batch1.test.ts` re-derives them from `asm/isa.ts`'s table so
++ * an encoding change cannot pass by moving fixture and assembler together.
++ */
++export const CH4_REFERENCES: Record<string, { program: string; format: 'asm' | 'bytes' }> = {
++  /**
++   * Level 50, out = (in + 5) & 0xff, one byte per line in binary.
++   *
++   * This is the level where the bytes ARE the point: the punchcard format has
++   * no mnemonics, so each line carries its own opcode bits and the trailing
++   * comment is the only translation. `B1 05 82 40 9F` in hex.
++   */
++  'ch4-50-punchcard-programming': {
++    program: [
++      '10110001    # move|inp|d1   r1 = in',
++      '00000101    # loadi|5       r0 = 5',
++      '10000010    # move|s0|d2    r2 = 5',
++      '01000000    # add           r3 = in + 5',
++      '10011111    # move|s3|out   out = r3',
++    ].join('\n'),
++    format: 'bytes',
++  },
++
++  /**
++   * Level 51, out = (in + 3) & 0xff: the same five instructions as level 50,
++   * spelled the way the assembler reads them. `B1 03 82 40 9F`.
++   */
++  'ch4-51-assembly-programming': {
++    program: [
++      'move|inp|d1    # r1 = in',
++      'loadi|3        # r0 = 3',
++      'move|s0|d2     # r2 = 3',
++      'add            # r3 = in + 3',
++      'move|s3|out    # out = r3',
++    ].join('\n'),
++    format: 'asm',
++  },
++
++  /**
++   * Level 52, out = (6 * r) & 0xff -- r counted "three times twice".
++   *
++   * `add` always reads REG1 and REG2 and always writes REG3, so every doubling
++   * or tripling has to move its result back into place first: r + r = 2r,
++   * 2r + r = 3r, then 3r + 3r = 6r. The seventh instruction (`move|s3|d1`) is
++   * the one the first draft forgot -- without it the program computes 5r, which
++   * is the sabotage case the batch test runs. `B1 B2 40 99 40 9A 99 40 9F`.
++   */
++  'ch4-52-circumference': {
++    program: [
++      'move|inp|d1    # r1 = r',
++      'move|inp|d2    # r2 = r',
++      'add            # r3 = 2r',
++      'move|s3|d1     # r1 = 2r',
++      'add            # r3 = 3r   (2r + r)',
++      'move|s3|d2     # r2 = 3r',
++      'move|s3|d1     # r1 = 3r',
++      'add            # r3 = 6r   (3r + 3r)',
++      'move|s3|out    # out = r3',
++    ].join('\n'),
++    format: 'asm',
++  },
++};
+diff --git a/test/levels/ch4-batch1.test.ts b/test/levels/ch4-batch1.test.ts
+new file mode 100644
+index 0000000..a141039
+--- /dev/null
++++ b/test/levels/ch4-batch1.test.ts
+@@ -0,0 +1,503 @@
++// tsconfig lists only `vitest/globals` in `types`, so Node's ambient types are
++// deliberately not in this program. The import is real at runtime (vitest runs
++// this file in Node) and the marker assertion below is what reads the batch
++// source; the suppression is one line rather than a project-wide `@types/node`
++// dependency, exactly as chapter 2's batch tests spell it.
++// @ts-expect-error -- no Node ambient types in this project's tsconfig
++import { readFileSync } from 'node:fs';
++import { describe, expect, it } from 'vitest';
++import { OVERTURE_ISA, assemble, parseImage } from '../../src/asm/index';
++import { STARTER_COMPONENTS } from '../../src/app/progress';
++import { graphFromBoard } from '../../src/levels/board';
++import { overtureBoard } from '../../src/levels/boards/overture';
++import { runChecks } from '../../src/levels/checks';
++import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
++import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
++import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
++import { CH3_LEVELS } from '../../src/levels/content/ch3/index';
++import { CH4_BATCH1 } from '../../src/levels/content/ch4/batch1';
++import { grade } from '../../src/levels/grader';
++import type { LevelSpec, ProgramCheck, ProgramStep } from '../../src/levels/spec';
++import { registry } from '../fixtures/build';
++import { CH4_REFERENCES } from '../fixtures/ch4-references';
++
++/**
++ * Chapter 4, levels 50-52 -- the machine the player built in chapter 3, now
++ * programmed by the player.
++ *
++ * The chapter turns both halves of the earlier games around: the CIRCUIT is
++ * given (`level.board` ships `overtureBoard({ inputId })`, the same builder the
++ * chapter-3 reference grades against) and the PROGRAM is the player's
++ * (`from: 'player'`, read from the buffer `runChecks`'s fourth argument). So
++ * every assertion below runs the fixture's program through the player channel
++ * against the level's own board -- there is no second circuit in this file and
++ * no `source` in the level data to lean on (ruling 2), which is also what this
++ * file pins.
++ *
++ * The counterexamples are therefore PROGRAMS, not machines: a sabotaged
++ * reference, an empty buffer, a corrupted line, a byte written at the wrong
++ * width. Each names the failure reason the checker has to report -- `mismatch`
++ * with the tick and both bytes, `missing-program` for the vacuum, `invalid`
++ * with the reader's own line number for a text that will not parse.
++ */
++
++function level(id: string): LevelSpec {
++  const found = CH4_BATCH1.find((l) => l.id === id);
++  if (!found) throw new Error(`no such level in this batch: ${id}`);
++  return found;
++}
++
++/** A level's program check, or a loud failure. */
++function programOf(spec: LevelSpec): ProgramCheck {
++  const check = spec.checks[0];
++  if (check?.kind !== 'program') throw new Error(`${spec.id} has no program check`);
++  return check;
++}
++
++/**
++ * The reference program filed for a level, or a loud failure.
++ *
++ * Chapter 4's references are TEXTS -- the board comes from the level itself --
++ * so this is the fixture's `{ program, format }` pair and not a circuit. The
++ * pair is handed to `runChecks`/`grade` wrapped as a `PlayerProgram`, exactly
++ * as the app wraps the player's buffer.
++ */
++function referenceOf(spec: LevelSpec): { readonly program: string; readonly format: 'asm' | 'bytes' } {
++  const entry = CH4_REFERENCES[spec.id];
++  if (entry === undefined) throw new Error(`${spec.id} has no reference program`);
++  return entry;
++}
++
++/** The level's own starting board, read into a graph, or a loud failure. */
++function boardOf(spec: LevelSpec) {
++  if (spec.board === undefined) throw new Error(`${spec.id} ships no board`);
++  return graphFromBoard(spec.id, spec.board);
++}
++
++/** The reference program run against the board its own level ships. */
++function runReference(spec: LevelSpec) {
++  return runChecks(boardOf(spec), registry, spec, { text: referenceOf(spec).program });
++}
++
++/** The tick of the walk's last assertion -- the batch's `threeStar.tick`. */
++function lastAssertedTick(spec: LevelSpec): number {
++  const asserted = programOf(spec).steps.filter((step: ProgramStep) => step.expect !== undefined);
++  if (asserted.length === 0) throw new Error(`${spec.id} asserts nothing`);
++  return asserted.reduce((max, step) => Math.max(max, step.tick), 0);
++}
++
++/** Every `out` byte the walk asserts, in step order. */
++function walkOf(spec: LevelSpec): readonly (number | undefined)[] {
++  return programOf(spec).steps.map((step) => step.expect?.out);
++}
++
++/** The answer a walk demands once the program has published it. */
++function answerOf(spec: LevelSpec): number {
++  const answer = walkOf(spec).find((value) => value !== undefined && value !== 0);
++  if (answer === undefined) throw new Error(`${spec.id} walk never demands an answer`);
++  return answer;
++}
++
++describe('chapter 4 batch 1 - reference programs', () => {
++  it('files a reference program for every level in the batch', () => {
++    for (const spec of CH4_BATCH1) {
++      const reference = referenceOf(spec);
++      expect(reference.program.trim(), `${spec.id} reference is empty`).not.toBe('');
++      // The fixture's reader is the reader the LEVEL's check declares: a
++      // reference written for the other one would not even parse the same way
++      // the player's buffer is graded.
++      expect(reference.format, `${spec.id} reference is filed under the wrong reader`).toBe(
++        programOf(spec).format ?? 'asm',
++      );
++    }
++  });
++
++  it('runs every filed reference against the board its level ships', () => {
++    for (const spec of CH4_BATCH1) {
++      const outcome = runReference(spec);
++      expect(
++        outcome.passed,
++        `${spec.id}: ${outcome.failures.map((f) => f.detail ?? JSON.stringify(f)).join(' | ')}`,
++      ).toBe(true);
++    }
++  });
++
++  it('grades every reference at three stars', () => {
++    for (const spec of CH4_BATCH1) {
++      const result = grade(boardOf(spec), registry, spec, { text: referenceOf(spec).program });
++      expect(result.passed, `${spec.id} did not pass`).toBe(true);
++      expect(result.stars, `${spec.id} did not earn three stars`).toBe(3);
++    }
++  });
++
++  it('pins every three-star target to its reference solution own metrics', () => {
++    // A target is the reference's measured score, never a hand-written
++    // aspiration. All three levels ship the SAME board shape (the chapter-3
++    // machine plus one source mux), so they must state one gate and one delay
++    // -- 675 and 6 -- and the tick is the walk's own last assertion.
++    for (const spec of CH4_BATCH1) {
++      const result = grade(boardOf(spec), registry, spec, { text: referenceOf(spec).program });
++      const m = result.metrics;
++      expect(m.gate, `${spec.id} gate metric moved off the brief's 675`).toBe(675);
++      expect(m.delay, `${spec.id} delay metric moved off the brief's 6`).toBe(6);
++      expect(m.tick, `${spec.id} tick metric is not its walk's last assertion`).toBe(
++        lastAssertedTick(spec),
++      );
++      expect(spec.threeStar, `${spec.id} states no target`).toBeDefined();
++      expect(spec.threeStar, `${spec.id} target is not its reference's metrics`).toEqual({
++        gate: m.gate,
++        delay: m.delay,
++        tick: m.tick,
++      });
++    }
++  });
++
++  it('states the answer each program computes, and where it appears', () => {
++    // The three walks, read out of the level data: 0 while the machine is still
++    // working, the answer on the edge that reveals the `move|sX|out`
++    // instruction, and the same byte held afterwards. The inputs are the ones
++    // the steps drive, and the answers are the semantics the chapter-4 table
++    // fixes -- (in + 5), (in + 3) and (6r), each taken mod 256.
++    expect(walkOf(level('ch4-50-punchcard-programming'))).toEqual([0, 0, 105, 105]);
++    expect(walkOf(level('ch4-51-assembly-programming'))).toEqual([0, 0, 103, 103]);
++    expect(walkOf(level('ch4-52-circumference'))).toEqual([0, 0, 176, 176]);
++    expect((100 + 5) & 0xff).toBe(105);
++    expect((100 + 3) & 0xff).toBe(103);
++    // 6 * 200 = 1200, and the mod 256 is the level's teaching point: the byte
++    // is 176, which is what the reference-program verification measured.
++    expect((6 * 200) & 0xff).toBe(176);
++  });
++
++  it('never lets a walk assert one constant', () => {
++    // The teeth rule from chapter 3, one channel over: a walk that demanded the
++    // same byte at every tick would pass a program that did nothing but hold a
++    // constant. Each walk disagrees with itself -- 0 before the answer, the
++    // answer after -- so the program has to actually get there.
++    for (const spec of CH4_BATCH1) {
++      const expected = walkOf(spec).filter((v): v is number => v !== undefined);
++      expect(new Set(expected).size, `${spec.id} asserts one constant`).toBeGreaterThan(1);
++    }
++  });
++
++  it('reads each reference into the bytes the ISA table fixes', () => {
++    // Hand-encoded from `asm/isa.ts`'s table (mode in bits [7:6]): `move|inp|d1`
++    // is 10_110_001, `loadi|5` is 00_000101, `move|s0|d2` is 10_000_010, `add`
++    // is 01_000_000, `move|s3|out` is 10_011_111. So an encoding change cannot
++    // pass by moving the fixture and the assembler together, and the punchcard
++    // level's image reader and the assembler cannot drift apart: level 50's
++    // bytes and level 51's assembly are the same five instructions with one
++    // immediate changed.
++    const bytes50 = parseImage(referenceOf(level('ch4-50-punchcard-programming')).program);
++    expect(bytes50.errors).toEqual([]);
++    expect(bytes50.bytes).toEqual([0xb1, 0x05, 0x82, 0x40, 0x9f]);
++    const bytes51 = assemble(referenceOf(level('ch4-51-assembly-programming')).program, OVERTURE_ISA);
++    expect(bytes51.errors).toEqual([]);
++    expect(bytes51.bytes).toEqual([0xb1, 0x03, 0x82, 0x40, 0x9f]);
++    const bytes52 = assemble(referenceOf(level('ch4-52-circumference')).program, OVERTURE_ISA);
++    expect(bytes52.errors).toEqual([]);
++    expect(bytes52.bytes).toEqual([0xb1, 0xb2, 0x40, 0x99, 0x40, 0x9a, 0x99, 0x40, 0x9f]);
++  });
++
++  it('offers every part its own reference board needs', () => {
++    for (const spec of CH4_BATCH1) {
++      for (const inst of boardOf(spec).instances) {
++        expect(
++          spec.allowedComponents,
++          `${spec.id} reference uses ${inst.def}, which its palette does not offer`,
++        ).toContain(inst.def);
++      }
++    }
++  });
++
++  it('names exactly the parts its shipped board needs, and nothing more', () => {
++    // The chapter hands out no new parts, so the palette is the board's own
++    // parts and not "everything earned": a palette that reached past the
++    // machine would be a level inviting parts its reference never names.
++    for (const spec of CH4_BATCH1) {
++      const boardDefs = [...new Set(boardOf(spec).instances.map((inst) => inst.def))].sort();
++      expect([...spec.allowedComponents].sort(), `${spec.id} palette is not its board's parts`).toEqual(
++        boardDefs,
++      );
++    }
++  });
++
++  it('ships the chapter-3 machine as its starting board', () => {
++    // Ruling 1: the board is the import channel, and it is the SAME builder the
++    // chapter-3 reference grades against -- one circuit, two readers. The
++    // straight-line levels take the default `halt: true`, and the only knob
++    // these three turn is the level input's pin id.
++    expect(level('ch4-50-punchcard-programming').board).toEqual(overtureBoard({ inputId: 'in' }));
++    expect(level('ch4-51-assembly-programming').board).toEqual(overtureBoard({ inputId: 'in' }));
++    expect(level('ch4-52-circumference').board).toEqual(overtureBoard({ inputId: 'r' }));
++  });
++
++  it('binds one 8-bit input connector and one 8-bit answer', () => {
++    // The names the checker binds by (`IN_<pin>` / `OUT`), and the width the
++    // board's connectors actually compile at: the chapter's io is 8 in, 8 out.
++    for (const spec of CH4_BATCH1) {
++      const graph = boardOf(spec);
++      const inputId = `IN_${spec.io.inputs[0]?.id ?? ''}`;
++      const input = graph.instances.find((inst) => inst.id === inputId);
++      expect(input, `${spec.id} board has no ${inputId}`).toBeDefined();
++      expect(input?.def, `${spec.id} ${inputId} is not a level_input`).toBe('level_input');
++      expect(input?.params.width, `${spec.id} ${inputId} is not 8 bits`).toBe(8);
++      const out = graph.instances.find((inst) => inst.id === 'OUT');
++      expect(out, `${spec.id} board has no OUT`).toBeDefined();
++      expect(out?.params.width, `${spec.id} OUT is not 8 bits`).toBe(8);
++    }
++  });
++});
++
++describe('chapter 4 batch 1 - the checks have teeth', () => {
++  /** The sabotaged program per level, and the wrong byte it must be caught at. */
++  const SABOTAGE: Record<string, { readonly program: string; readonly tick: number; readonly wrong: number }> = {
++    // The constant 5 becomes 4: the program still runs, still publishes on the
++    // right tick, and is wrong by exactly the one bit of the immediate.
++    'ch4-50-punchcard-programming': {
++      program: ['10110001', '00000100', '10000010', '01000000', '10011111'].join('\n'),
++      tick: 4,
++      wrong: 104,
++    },
++    // The same shape of mistake in assembly: `loadi|2` makes the answer in + 2.
++    'ch4-51-assembly-programming': {
++      program: ['move|inp|d1', 'loadi|2', 'move|s0|d2', 'add', 'move|s3|out'].join('\n'),
++      tick: 4,
++      wrong: 102,
++    },
++    // THE BUG THE REFERENCE PROGRAMMING NOTES RECORD: the first draft of this
++    // program forgot `move|s3|d1` and computed 5r instead of 6r -- measured at
++    // r = 9 as 45. The sabotaged text below is that first draft, eight
++    // instructions whose `out` instruction lands one tick early.
++    'ch4-52-circumference': {
++      program: ['move|inp|d1', 'move|inp|d2', 'add', 'move|s3|d1', 'add', 'move|s3|d2', 'add', 'move|s3|out'].join(
++        '\n',
++      ),
++      tick: 8,
++      wrong: 232,
++    },
++  };
++
++  it('rejects a sabotaged program in every level', () => {
++    for (const spec of CH4_BATCH1) {
++      const sabotage = SABOTAGE[spec.id];
++      expect(sabotage, `${spec.id} has no sabotage case`).toBeDefined();
++      const outcome = runChecks(boardOf(spec), registry, spec, { text: sabotage!.program });
++      expect(outcome.passed, `${spec.id} passed a program that computes the wrong answer`).toBe(false);
++      const mismatch = outcome.failures.find(
++        (f) => f.reason === 'mismatch' && f.tick === sabotage!.tick && f.expected.out !== undefined,
++      );
++      expect(mismatch, `${spec.id} did not report a mismatch at tick ${sabotage!.tick}`).toBeDefined();
++      expect(mismatch?.expected).toEqual({ out: answerOf(spec) });
++      expect(mismatch?.actual).toEqual({ out: sabotage!.wrong });
++    }
++  });
++
++  it('rejects an empty program as missing-program', () => {
++    // The ordinary state of a level the player has not typed into yet: a hard
++    // failure, not a pass and not a crash. Whitespace is nothing to run either.
++    for (const spec of CH4_BATCH1) {
++      for (const text of ['', '   ', '\n\t\n']) {
++        const outcome = runChecks(boardOf(spec), registry, spec, { text });
++        expect(outcome.passed, `${spec.id} passed an empty program`).toBe(false);
++        expect(outcome.failures.map((f) => f.reason), `${spec.id} / ${JSON.stringify(text)}`).toEqual([
++          'missing-program',
++        ]);
++        // The detail names the buffer: "the level ships no program" and "you
++        // have not typed one" are different problems for different people.
++        expect(outcome.failures[0]?.detail).toContain('player');
++      }
++    }
++  });
++
++  it('refuses a text that compiles to zero bytes', () => {
++    // Not the empty buffer -- a comment-only one. Both readers accept it as a
++    // legal zero-byte program, and the checker refuses it for the same reason
++    // it refuses the vacuum: no instruction would ever execute.
++    for (const spec of CH4_BATCH1) {
++      const outcome = runChecks(boardOf(spec), registry, spec, { text: '# nothing runnable yet\n' });
++      expect(outcome.passed, `${spec.id} passed a zero-byte program`).toBe(false);
++      expect(outcome.failures.map((f) => f.reason)).toEqual(['missing-program']);
++      expect(outcome.failures[0]?.detail).toContain('zero bytes');
++    }
++  });
++
++  it('reports a corrupted program as invalid, naming its line', () => {
++    // One fault per format, on a line that is not the first: the byte level's
++    // reader and the assembler word their refusals differently, and both have
++    // to carry THEIR line number -- not a constant.
++    const brokenBytes = runChecks(boardOf(level('ch4-50-punchcard-programming')), registry, level('ch4-50-punchcard-programming'), {
++      text: ['10110001', '00000101', '00000102'].join('\n'),
++    });
++    expect(brokenBytes.passed).toBe(false);
++    expect(brokenBytes.failures.map((f) => f.reason)).toEqual(['invalid']);
++    expect(brokenBytes.failures[0]?.detail).toContain('program image failed at line 3');
++
++    for (const id of ['ch4-51-assembly-programming', 'ch4-52-circumference']) {
++      const spec = level(id);
++      const lines = referenceOf(spec).program.trimEnd().split('\n');
++      const outcome = runChecks(boardOf(spec), registry, spec, {
++        text: [...lines, 'bogus'].join('\n'),
++      });
++      expect(outcome.passed, `${id} passed a corrupted program`).toBe(false);
++      expect(outcome.failures.map((f) => f.reason)).toEqual(['invalid']);
++      expect(outcome.failures[0]?.detail).toContain(`program assembly failed at line ${lines.length + 1}`);
++    }
++  });
++
++  it('rejects a machine-code program written at the wrong width', () => {
++    // The punchcard format is exactly eight binary digits per line. A line
++    // that is short (or long) is not a narrower byte -- it is a refusal, at its
++    // own line, before anything is loaded.
++    const spec = level('ch4-50-punchcard-programming');
++    for (const wrong of ['1011000', '101100011']) {
++      const outcome = runChecks(boardOf(spec), registry, spec, {
++        text: ['10110001', wrong, '10011111'].join('\n'),
++      });
++      expect(outcome.passed, `${spec.id} passed the width ${wrong.length}`).toBe(false);
++      expect(outcome.failures.map((f) => f.reason)).toEqual(['invalid']);
++      expect(outcome.failures[0]?.detail).toContain('program image failed at line 2');
++      expect(outcome.failures[0]?.detail).toContain('8 binary digits');
++    }
++  });
++
++  it('rejects an assembly program with a field that does not fit', () => {
++    // The assembly analogue of the wrong width: `loadi`'s immediate is six
++    // bits, so 99 is not a value the field can carry and the assembler refuses
++    // the line rather than truncating it into a different program.
++    for (const id of ['ch4-51-assembly-programming', 'ch4-52-circumference']) {
++      const spec = level(id);
++      const outcome = runChecks(boardOf(spec), registry, spec, {
++        text: ['# out of range', 'loadi|99'].join('\n'),
++      });
++      expect(outcome.passed, `${id} passed an immediate that does not fit`).toBe(false);
++      expect(outcome.failures.map((f) => f.reason)).toEqual(['invalid']);
++      expect(outcome.failures[0]?.detail).toContain('line 2');
++    }
++  });
++
++  it('does not drive the steps after a refusal', () => {
++    // A refused program must stop the check: an invalid failure AND a pile of
++    // mismatches would tell the player their machine is wrong when their
++    // program is.
++    const spec = level('ch4-51-assembly-programming');
++    const outcome = runChecks(boardOf(spec), registry, spec, { text: 'bogus' });
++    expect(outcome.failures.map((f) => f.reason)).toEqual(['invalid']);
++  });
++});
++
++describe('chapter 4 batch 1 - level data', () => {
++  it('uses the chapter-4 index range', () => {
++    expect(CH4_BATCH1.map((l) => l.index)).toEqual([50, 51, 52]);
++    expect(CH4_BATCH1.every((l) => l.chapter === 4)).toBe(true);
++    expect(CH4_BATCH1.map((l) => l.id)).toEqual([
++      'ch4-50-punchcard-programming',
++      'ch4-51-assembly-programming',
++      'ch4-52-circumference',
++    ]);
++  });
++
++  it('rewards nothing: chapter 4 hands out no new parts', () => {
++    // The unlock chain ends at level 45 (`halt`); chapter 4's gain is the
++    // assembler and the debugger, not another component. A reward here would
++    // mean the chain and the palette had drifted.
++    expect(CH4_BATCH1.map((l) => l.rewards)).toEqual([undefined, undefined, undefined]);
++  });
++
++  it('offers no part that no level at or before it hands out', () => {
++    // The whole-set walk holds this rule for every SHIPPED level, and chapter 4
++    // is not joined into `LEVELS` yet -- so this batch states it for its own
++    // three levels against chapters 1 through 3 and itself.
++    const ordered: readonly LevelSpec[] = [
++      ...CH1_PART1,
++      ...CH1_PART2,
++      ...CH2_LEVELS,
++      ...CH3_LEVELS,
++      ...CH4_BATCH1,
++    ].filter((spec) => spec.index <= 52);
++    for (const [position, spec] of ordered.entries()) {
++      if (spec.chapter !== 4 || spec.index < 50) continue;
++      const earned = new Set<string>(STARTER_COMPONENTS);
++      for (const atOrBefore of ordered.slice(0, position + 1)) {
++        for (const def of atOrBefore.rewards?.components ?? []) earned.add(def);
++      }
++      for (const def of spec.allowedComponents) {
++        expect(earned.has(def), `${spec.id} offers ${def}, which no level at or before it rewards`).toBe(
++          true,
++        );
++      }
++    }
++  });
++
++  it('gives the three levels one 8-bit input and one 8-bit answer', () => {
++    // The board's connectors are 8 bits, so the chapter's io is 8 in and 8 out
++    // whatever the bits MEAN -- and the input pin carries the name the
++    // reference program reads (`in` for the two arithmetic levels, `r` for the
++    // radius whose circumference the third one computes).
++    expect(level('ch4-50-punchcard-programming').io).toEqual({
++      inputs: [{ id: 'in', width: 8 }],
++      outputs: [{ id: 'out', width: 8 }],
++    });
++    expect(level('ch4-51-assembly-programming').io).toEqual({
++      inputs: [{ id: 'in', width: 8 }],
++      outputs: [{ id: 'out', width: 8 }],
++    });
++    expect(level('ch4-52-circumference').io).toEqual({
++      inputs: [{ id: 'r', width: 8 }],
++      outputs: [{ id: 'out', width: 8 }],
++    });
++  });
++
++  it('grades the player program and carries no source of its own', () => {
++    // Ruling 2: the level data's `source` and the player buffer are two
++    // channels that must not feed each other. Every check here reads the
++    // player's text -- that is what makes these levels chapter 4 -- and a
++    // `source` shipped beside `from: 'player'` would be dead weight at best
++    // and a silent fallback at worst.
++    expect(CH4_BATCH1.map((l) => l.checks)).toHaveLength(3);
++    for (const spec of CH4_BATCH1) {
++      const check = programOf(spec);
++      expect(spec.checks, `${spec.id} declares more than one check`).toHaveLength(1);
++      expect(check.from, spec.id).toBe('player');
++      expect(check.source, `${spec.id} ships a source of its own`).toBeUndefined();
++      expect(check.steps.length, `${spec.id} walk is empty`).toBeGreaterThan(0);
++    }
++    // The reader is the one the chapter teaches, in order: hand-written bytes
++    // first, then assembly from the level that introduces it.
++    expect(CH4_BATCH1.map((l) => programOf(l).format)).toEqual(['bytes', 'asm', 'asm']);
++  });
++
++  it('drives its walk on the level input pin, repeating it every step', () => {
++    // `driveSteps` writes EVERY input pin at every step and defaults the ones
++    // the step omits to 0 -- a step that forgot `inputs` would clear the very
++    // byte the program is supposed to read. So every step of every walk names
++    // the input, and the name is the level's own pin id.
++    for (const spec of CH4_BATCH1) {
++      const pin = spec.io.inputs[0]?.id ?? '';
++      for (const step of programOf(spec).steps) {
++        expect(step.inputs, `${spec.id} step ${step.tick} names no input`).toBeDefined();
++        expect(Object.keys(step.inputs ?? {}), `${spec.id} step ${step.tick}`).toEqual([pin]);
++      }
++    }
++  });
++
++  it('carries the sourced-vs-authored data comment', () => {
++    // The 2.x dossier fixes the names and the concept; the io, the programs,
++    // the boards and the targets are this replica's design. The marker block is
++    // what a reviewer reads to tell the two apart, and this checks it exists.
++    const source = readFileSync(
++      new URL('../../src/levels/content/ch4/batch1.ts', import.meta.url),
++      'utf8',
++    );
++    const comments = new Map<string, string>();
++    for (const match of source.matchAll(/\/\*\*([\s\S]*?)\*\/\s*\{\s*id: '([^']+)'/g)) {
++      const [, body, id] = match;
++      if (body !== undefined && id !== undefined) comments.set(id, body);
++    }
++    for (const spec of CH4_BATCH1) {
++      const comment = comments.get(spec.id) ?? '';
++      expect(comment.length, `${spec.id} has no data comment`).toBeGreaterThan(0);
++      expect(comment, `${spec.id} does not record what is sourced`).toContain('SOURCED');
++      expect(comment, `${spec.id} does not record what is authored`).toContain('AUTHORED');
++    }
++  });
++});

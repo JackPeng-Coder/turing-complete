@@ -1,0 +1,551 @@
+# Micro re-review package (residual fix): 163fddc9ad9526e89cb3aabf14b4b9367e14de6e..413cc5f9b1930fb9ad8fdac7a725393f9de67970
+
+## Commits
+413cc5f docs(levels): keep level 51's brief out of the answer
+d5ded79 test(smoke): pin the chapter-4 reset flow
+c7facc1 fix(ui): reset the board the player is looking at
+
+## Files changed
+ src/levels/content/ch4/batch1.ts |   4 +-
+ src/main.ts                      |  45 ++++++++------
+ src/ui/board/signals.ts          |  23 +-------
+ test/smoke/ui.spec.ts            | 123 +++++++++++++++++++++++++++++++++------
+ test/ui/display-run.test.ts      |  32 ++++++----
+ 5 files changed, 156 insertions(+), 71 deletions(-)
+
+## Diff
+diff --git a/src/levels/content/ch4/batch1.ts b/src/levels/content/ch4/batch1.ts
+index 6f92936..e406e0b 100644
+--- a/src/levels/content/ch4/batch1.ts
++++ b/src/levels/content/ch4/batch1.ts
+@@ -300,22 +300,22 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
+    * does not compute anything new -- it names the bits the previous level wrote
+    * by hand -- so the answer still has to be built out of registers, and `add`
+    * still reads r1 and r2 into r3.
+    */
+   {
+     id: 'ch4-51-assembly-programming',
+     chapter: 4,
+     index: 51,
+     name: { zh: '汇编程序', en: 'Assembly Programming' },
+     brief: {
+-      zh: '还是你第 3 章搭的那台 CPU，这次不用手写字节了：这一关解锁汇编器，你写助记符，汇编器替你编成机器码。程序要算 out = (in + 3) & 0xff，和上一关同一条路，只是常数从 5 换成 3。每行一条指令——move|inp|d1、loadi|3、move|s0|d2、add、move|s3|out 这样的写法，# 之后是注释。写 out 之后机器停住，结果要保持。',
+-      en: 'The same CPU you built in chapter 3, and no hand encoding this time: this level unlocks the assembler -- you write mnemonics and it compiles the bytes for you. The program must compute out = (in + 3) & 0xff, the same path as the last level with the constant changed from 5 to 3. One instruction per line, spelled like move|inp|d1, loadi|3, move|s0|d2, add, move|s3|out, with # starting a comment. After out is written the machine stops, and the result has to stay.',
++      zh: '还是你第 3 章搭的那台 CPU，这次不用手写字节了：这一关解锁汇编器，你写助记符，汇编器替你编成机器码。程序要算 out = (in + 3) & 0xff，和上一关同一条路，只是常数从 5 换成 3。每行一条指令，# 之后是注释——汇编器认哪几种写法、每种长什么样，提示里列了表和例子。写 out 之后机器停住，结果要保持。',
++      en: 'The same CPU you built in chapter 3, and no hand encoding this time: this level unlocks the assembler -- you write mnemonics and it compiles the bytes for you. The program must compute out = (in + 3) & 0xff, the same path as the last level with the constant changed from 5 to 3. One instruction per line, with # starting a comment: the hint lists the spellings the assembler accepts, with a worked example. After out is written the machine stops, and the result has to stay.',
+     },
+     hint: {
+       zh: '汇编器认的写法就这几种：loadi|N（N 是 0-63 的立即数）、move|sX|dY（源可以是 s0-s5 或 inp，目的可以是 d0-d5 或 out）、六种运算 add/sub/and/or/nand/nor，以及 label 和跳转。一个例子：move|s2|d4 就是上一关手写的那个位布局，只是有了名字——高 2 位 10 是 move、010 是 s2、100 是 d4，也就是字节 10010100。# 之后是注释，每行一条指令。注意 add 固定读 r1 与 r2、把结果写进 r3，所以两个加数要先 move 进 r1 和 r2，结果再 move 出去。',
+       en: 'The assembler takes a handful of spellings: loadi|N (N is an immediate from 0 to 63), move|sX|dY (source s0-s5 or inp, destination d0-d5 or out), the six calculations add/sub/and/or/nand/nor, and labels with jumps. One worked example: move|s2|d4 is the bit layout you wrote by hand last level, with a name on it -- 10 for move, 010 for s2, 100 for d4, the byte 10010100. # starts a comment and every line is one instruction. Note that add always reads r1 and r2 and writes r3: move your two addends into r1 and r2 first, and move the result out afterwards.',
+     },
+     allowedComponents: [...BOARD_PARTS],
+     io: IO_IN,
+     checks: [
+       {
+         kind: 'program',
+diff --git a/src/main.ts b/src/main.ts
+index 87f3b5a..78aa287 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -13,21 +13,21 @@ import { devModeFrom } from './app/dev';
+ import { mountShell } from './ui/shell';
+ import { mountPalette } from './ui/palette';
+ import { mountTruthTable, TEST_DEMO_LIMIT } from './ui/truthTable';
+ import { mountIoPanel } from './ui/ioPanel';
+ import { showResult } from './ui/result';
+ import { mountToolbar } from './ui/toolbar';
+ import { mountMap } from './ui/map';
+ import { narrativeFor } from './ui/narrative';
+ import { renderBoard, type BoardView } from './ui/board/render';
+ import { attachBoardInput, deleteSelection } from './ui/board/interact';
+-import { createDisplay, resetBoard, type DisplaySimulation, type SignalSnapshot } from './ui/board/signals';
++import { createDisplay, type DisplaySimulation, type SignalSnapshot } from './ui/board/signals';
+ import { instanceRect, screenToWorld, type Point } from './ui/board/view';
+ import { levelExpectsProgram, playerProgramFormat, testCases, type TestPlan } from './levels/checks';
+ import { createProgramRun, type ProgramRun } from './levels/run';
+ import { mountIde } from './ui/ide';
+ import { mountDebug } from './ui/debug';
+ import type { LevelSpec } from './levels/spec';
+ 
+ const registry = createRegistry(BASE_DEFS);
+ let progress: Progress = loadProgress();
+ const level: LevelSpec = getLevel(resumePointOf(progress, LEVEL_ORDER));
+@@ -348,24 +348,33 @@ if (app) {
+       finishTest();
+       return;
+     }
+ 
+     const demonstrating = testStep < TEST_DEMO_LIMIT;
+     activeCase = testStep;
+     // A case's own `reset` says whether it starts from a cleared circuit: a
+     // truth table's rows each do, and only a script's FIRST step does -- step 3
+     // reads a register step 2 clocked. The checker does exactly this.
+     //
+-    // THROUGH `resetBoard`, NOT THE DISPLAY: on a level that also grades a
+-    // player's program the display is painting the run's own machine, and
+-    // clearing that storage directly would empty the `ram_prog` the run loaded.
+-    if (item.reset) resetBoard(display, playerRun);
++    // A CASE RESET GOES THE WAY 停止并复位 DOES on a level that also grades a
++    // program, and for the same reason: the display may be painting the run's own
++    // machine, and clearing that simulation directly would empty the `ram_prog`
++    // the run loaded. Dropping the run and rebuilding clears the circuit AND
++    // loads the image back into the machine the board paints. A board with no
++    // player program is reset in place, because rebuilding it would recompile the
++    // graph for every one of a fuzz level's hundred cases.
++    if (item.reset) {
++      if (levelExpectsProgram(store.get().level)) {
++        dropPlayerRun();
++        rebuild();
++      } else display?.reset();
++    }
+     if (demonstrating) driveTo(item.inputs);
+     else driveQuiet(item.inputs);
+     while ((snapshot?.tick ?? 0) < item.tick) {
+       display?.tick();
+       if (demonstrating) {
+         sample();
+         paint();
+       }
+     }
+     testResults[testStep] = levelOutputs();
+@@ -941,32 +950,34 @@ if (app) {
+     onStep: step,
+     onToggleRun: () => {
+       running = !running;
+       if (running) startClock();
+       else stopClock();
+       paintTools();
+     },
+     onStop: () => {
+       running = false;
+       stopClock();
+-      // 停止并复位 CLEARS THE BOARD WITHOUT ERASING THE PROGRAM. On a program
+-      // level the display is painting the run's own machine, so a bare
+-      // `display.reset()` used to clear `ram_prog` under the editor: the byte
+-      // count stayed put over 256 zeros, the debugger read zeros, and the counter
+-      // walked a zero program until the text changed. The reset goes through
+-      // `resetBoard` -- which resets the RUN, reloading the image -- and the
+-      // readout panel's vector is re-driven onto the cleared machine, because a
+-      // reset clears the inputs with the storage. Both panels are repainted: the
+-      // debugger's counter and RAM window are readings of that same machine.
+-      resetBoard(display, ensurePlayerRun());
+-      syncPlayerInputs();
+-      sample();
++      // 停止并复位 CLEARS THE BOARD THE PLAYER IS LOOKING AT WITHOUT ERASING THE
++      // PROGRAM. `rebuild` is the only place a display is bound to a run, and a
++      // text edit drops the run without rebuilding -- so after any keystroke the
++      // display is still painting the previous run's machine while
++      // `ensurePlayerRun` hands back a different one. A reset sent to that run
++      // would clear a machine nobody can see and leave the board on screen
++      // exactly as it was. So the run goes and the display is rebuilt with it: a
++      // fresh run is reset and its image loaded before it is handed over
++      // (`levels/run.ts`), and a board with no run at all compiles its own
++      // cleared circuit. Nothing typed is lost -- the player's text lives in
++      // `state.programs`, and the next 汇编/单步/测试 rebuilds the same run and
++      // reloads the same image.
++      dropPlayerRun();
++      rebuild();
+       paint();
+       io.render();
+       refreshBench();
+       paintTools();
+     },
+     onToggleTest: toggleTest,
+   });
+ 
+   /**
+    * A click on a level input flips what it drives.
+diff --git a/src/ui/board/signals.ts b/src/ui/board/signals.ts
+index 3d62651..80e8f8a 100644
+--- a/src/ui/board/signals.ts
++++ b/src/ui/board/signals.ts
+@@ -14,21 +14,21 @@
+  * disagreed with it would paint a circuit that looks right and fails, which is
+  * exactly why both go through `compile` and `bindLevelIo`.
+  *
+  * A circuit that never settles, or a graph `compile` refuses, yields `null`
+  * rather than an exception: the board is also the editor, and the state a player
+  * types through on the way to a working circuit is usually not runnable.
+  */
+ import { Simulation, compile } from '../../core/net';
+ import { bindLevelIo, type LevelIo } from '../../levels/checks';
+ import type { LevelSpec } from '../../levels/spec';
+-import type { ProgramMachine, ProgramRun } from '../../levels/run';
++import type { ProgramMachine } from '../../levels/run';
+ import type { Graph } from '../../core/graph';
+ import type { Registry } from '../../core/registry';
+ import { maskInto, portValueToNumber } from '../../core/signal';
+ 
+ /** Every value the board and the readout panels need, read in one pass. */
+ export interface SignalSnapshot {
+   /** Value at a compiled output pin, keyed `${instanceId}.${portId}`. */
+   readonly outputs: ReadonlyMap<string, number>;
+   /** Value at a level output pin, keyed by the level's own pin id. */
+   readonly levelOutputs: ReadonlyMap<string, number>;
+@@ -178,40 +178,19 @@ export function createDisplay(
+ 
+   // A display that compiled its own circuit is the one that starts it: reset
+   // clears every storage byte, which for a program level would wipe the image the
+   // run just loaded. A machine handed in is already at its starting state -- the
+   // run resets and loads before it hands the machine over -- so it is painted as
+   // it stands.
+   if (!machine) display.reset();
+   return display;
+ }
+ 
+-/**
+- * The board's reset: 停止并复位, and every case that starts from a cleared
+- * circuit. The one place that knows a display may be painting a run's machine.
+- *
+- * A DISPLAY BUILT ON A RUN'S MACHINE MAY NOT BE RESET DIRECTLY. `createDisplay`
+- * is handed the `ProgramRun`'s `Simulation` on a program level, so
+- * `DisplaySimulation.reset` -- which clears the simulation's storage -- would
+- * erase `ram_prog` under the run: the editor would still show the text, the
+- * debugger would read 256 zeros and the PC would walk a zero program, and
+- * nothing would reload the image until the text itself changed. Given a run
+- * that owns the machine, the reset therefore goes through the RUN's own
+- * `reset`, which clears the board and then loads the image back into it (see
+- * `levels/run.ts`). `DisplaySimulation.reset` is still the answer for a board
+- * with no run behind it: chapters 1 to 3, and a program level whose text has not
+- * loaded (the run is inert and hands out no machine).
+- */
+-export function resetBoard(display: DisplaySimulation | null, run: ProgramRun | null): void {
+-  if (run !== null && run.machine !== null) run.reset();
+-  else display?.reset();
+-}
+-
+ /** A value reduced into a pin's width, so a stale vector cannot be rejected. */
+ function within(value: number, width: number): number {
+   return maskInto(value, width);
+ }
+ 
+ /** The snapshot before anything has run, for callers with no display at all. */
+ export function emptySignals(): SignalSnapshot {
+   return UNSTABLE;
+ }
+diff --git a/test/smoke/ui.spec.ts b/test/smoke/ui.spec.ts
+index fead654..d08268d 100644
+--- a/test/smoke/ui.spec.ts
++++ b/test/smoke/ui.spec.ts
+@@ -31,29 +31,39 @@ import { STORAGE_KEY } from '../../src/persist/storage';
+  * what these do.
+  */
+ 
+ /**
+  * Writes a save with the first `count` levels passed, before the app boots.
+  *
+  * The app opens on `resumePointOf` -- the first unlocked level that has not been
+  * passed -- so passing 1..N opens level N+1. `LEVEL_ORDER` is imported rather
+  * than restated: a hard-coded list of ids here would rot silently the day a level
+  * is renamed, and the failure would look like a UI bug.
++ *
++ * `programs` is the save's other half: the editor text a player left on each
++ * level (`persist/storage.ts` carries it through as `progress.programs`). A test
++ * that needs the app to open with a program already in the editor -- and the
++ * board's display already built on the machine that program is loaded in -- seeds
++ * it here rather than typing it after the boot.
+  */
+-async function seedProgress(page: Page, count: number): Promise<void> {
++async function seedProgress(
++  page: Page,
++  count: number,
++  programs: Record<string, string> = {},
++): Promise<void> {
+   const levels: Record<string, { passed: boolean; best: null; stars: number }> = {};
+   for (const id of LEVEL_ORDER.slice(0, count)) {
+     levels[id] = { passed: true, best: null, stars: 3 };
+   }
+   await page.addInitScript(
+     ([key, json]) => globalThis.localStorage.setItem(key, json),
+-    [STORAGE_KEY, JSON.stringify({ version: 1, levels })] as const,
++    [STORAGE_KEY, JSON.stringify({ version: 1, levels, programs })] as const,
+   );
+ }
+ 
+ /** Centre of the board canvas, in page coordinates. */
+ async function boardCentre(page: Page): Promise<{ cx: number; cy: number }> {
+   const box = (await page.locator('canvas.board').boundingBox())!;
+   return { cx: box.x + box.width / 2, cy: box.y + box.height / 2 };
+ }
+ 
+ /** Arms a palette part by its localised name, then drops it at a page point. */
+@@ -771,37 +781,48 @@ test('chapter 3 ends with a level that mounts its program check: level 49', asyn
+   // are all on offer -- the claim `level-buildability.test.ts` walks, checked
+   // here against the palette the app actually renders.
+   await expect(page.getByRole('button', { name: '8 位运算器' })).toBeEnabled();
+   await expect(page.getByRole('button', { name: '程序存储器' })).toBeEnabled();
+   // And the program check is mounted: an empty board must grade as a failure
+   // rather than as nothing at all, which is what `missing-program` means.
+   await expect(page.locator('.truth-table')).toBeVisible();
+   await page.screenshot({ path: 'test-results/smoke-ch3-level49-open.png' });
+ });
+ 
++/**
++ * LEVEL 50'S REFERENCE PROGRAM, the text a passing run of it contains.
++ *
++ * THE FIVE LINES ARE HAND-WRITTEN MACHINE CODE -- level 50 has no mnemonics, so
++ * the editor's own label is the byte reader's and each line is eight binary
++ * digits. They are `test/fixtures/ch4-references.ts`'s
++ * `ch4-50-punchcard-programming` verbatim, inlined rather than imported because
++ * this spec is a browser walk: the fixture is the batch tests' own module.
++ * `ch4-batch1.test.ts` is what keeps those bytes re-derived from the ISA table.
++ */
++const LEVEL_50_PROGRAM = [
++  '10110001    # move|inp|d1   r1 = in',
++  '00000101    # loadi|5       r0 = 5',
++  '10000010    # move|s0|d2    r2 = 5',
++  '01000000    # add           r3 = in + 5',
++  '10011111    # move|s3|out   out = r3',
++].join('\n');
++
+ /**
+  * CHAPTER 4'S OWN CHANNEL, GRADED END TO END: the program the PLAYER writes.
+  *
+  * Level 49 proved the `program` check kind is mounted in the app; this is the
+  * same kind reading the other source. The machine is chapter 3's CPU and the
+  * level ships its own board, so nothing is built here -- what is under test is
+  * the TEXT in the editor, which is why the walk below types the reference into
+  * the byte editor, presses 测试 and reads the verdict. A program check's cases
+  * cannot be played one column at a time (`testCases` says why), so that button
+  * assembles the text, loads it into the board's RAM and grades in one step.
+- *
+- * THE FIVE LINES ARE HAND-WRITTEN MACHINE CODE -- level 50 has no mnemonics, so
+- * the editor's own label is the byte reader's and each line is eight binary
+- * digits. They are `test/fixtures/ch4-references.ts`'s
+- * `ch4-50-punchcard-programming` verbatim, inlined rather than imported because
+- * this spec is a browser walk: the fixture is the batch tests' own module.
+- * `ch4-batch1.test.ts` is what keeps those bytes re-derived from the ISA table.
+  */
+ test('chapter 4 grades a hand-written program: level 50', async ({ page }) => {
+   // 49 passed -- every level of chapters 1 to 3 -- so the resume point is
+   // chapter 4's first level. Reaching it is what this walk is here to prove.
+   await seedProgress(page, 49);
+   await page.goto('/');
+   await page.getByRole('button', { name: '开始' }).click();
+   await expect(page.locator('.shell-bar')).toContainText('打孔编程');
+ 
+   await page.getByRole('button', { name: '章节地图' }).click();
+@@ -814,29 +835,21 @@ test('chapter 4 grades a hand-written program: level 50', async ({ page }) => {
+   await expect(page.locator('.shell-bar')).toContainText('打孔编程');
+   // A tile is real navigation, so it raises the level's briefing again -- and the
+   // briefing covers the bench, so it has to go before the editor can be clicked.
+   await page.getByRole('button', { name: '开始' }).click();
+ 
+   // The bench is mounted because this level grades a program the player wrote,
+   // and its editor names the reader the level asks for: bytes, not assembly.
+   const code = page.locator('.ide-code');
+   await expect(code).toHaveAttribute('aria-label', '二进制程序编辑器');
+ 
+-  await code.fill(
+-    [
+-      '10110001    # move|inp|d1   r1 = in',
+-      '00000101    # loadi|5       r0 = 5',
+-      '10000010    # move|s0|d2    r2 = 5',
+-      '01000000    # add           r3 = in + 5',
+-      '10011111    # move|s3|out   out = r3',
+-    ].join('\n'),
+-  );
++  await code.fill(LEVEL_50_PROGRAM);
+   await page.screenshot({ path: 'test-results/smoke-ch4-level50-program.png' });
+ 
+   await page.locator('.ide-test').click();
+ 
+   await expect(page.locator('.truth-table h2')).toHaveText('全部用例通过');
+   await expect(page.locator('.shell-metrics')).toContainText('总开销');
+   // The text became an image: the five bytes the reference solution uses.
+   await expect(page.locator('.ide-bytes')).toHaveText('B10582409F');
+ 
+   // Passing opens the dialog, and its summary calls the level what it is.
+@@ -846,20 +859,94 @@ test('chapter 4 grades a hand-written program: level 50', async ({ page }) => {
+   await page.screenshot({ path: 'test-results/smoke-ch4-level50-passed.png' });
+ 
+   // Passing wrote progress -- level 50 keeps its star and level 51 unlocks --
+   // which is what makes this "graded" rather than merely "displayed".
+   await page.getByRole('button', { name: '继续' }).click();
+   await page.getByRole('button', { name: '章节地图' }).click();
+   await expect(page.locator('.map-tile').nth(49)).toContainText('★');
+   await expect(page.locator('.map-tile').nth(50)).toBeEnabled();
+ });
+ 
++/**
++ * 停止并复位 MUST CLEAR THE BOARD THE PLAYER IS LOOKING AT, NOT ANOTHER ONE.
++ *
++ * THE WIRING `test/ui/display-run.test.ts` CANNOT REACH. A display is bound to a
++ * run in one place only (`rebuild`), and a keystroke in the editor drops the run
++ * without rebuilding -- so after any edit the display keeps painting the previous
++ * run's machine while `ensurePlayerRun` hands back a different one. A reset aimed
++ * at that other run clears a circuit nobody can see and leaves the board on screen
++ * exactly as it was, which is the defect this walk pins: the clock card reads the
++ * display's own snapshot (`main.ts`'s io panel), so a board that was not reset
++ * says so in the card the player is looking at.
++ *
++ * THE SAVE SEEDS THE PROGRAM FOR THE SAME REASON. With level 50's text already in
++ * `progress.programs`, the app opens with the display built on the run's machine
++ * (the state a player is in after pressing 汇编, and the one the bug needs) rather
++ * than on its own compilation of the board.
++ *
++ * WHAT A PLAYER SEES IS THE ASSERTION: the card goes back to 0 ticks, the editor
++ * still holds the text, and the assembled image is still in the debugger's RAM --
++ * 汇编/单步 reads the same five bytes rather than 256 zeros.
++ */
++test('chapter 4 resets the board without losing the program: level 50', async ({ page }) => {
++  await seedProgress(page, 49, { 'ch4-50-punchcard-programming': LEVEL_50_PROGRAM });
++  await page.goto('/');
++  await page.getByRole('button', { name: '开始' }).click();
++  await expect(page.locator('.shell-bar')).toContainText('打孔编程');
++
++  // The save's text is in the editor, and the debugger was built on the machine
++  // it is loaded in: the RAM window shows the five bytes, not a page of zeros.
++  const code = page.locator('.ide-code');
++  await expect(code).toHaveValue(LEVEL_50_PROGRAM);
++  await expect(page.locator('.debug-ram .debug-byte').first()).toHaveText('B1');
++  await page.screenshot({ path: 'test-results/smoke-ch4-level50-reset-open.png' });
++
++  // Clock the board twice, through the toolbar's 单步: the edges land on the
++  // machine the display paints, so the clock card is the board's own count.
++  const boardStep = page.locator('.tools button[aria-label="单步"]');
++  await boardStep.click();
++  await boardStep.click();
++  await expect(page.locator('.io-tick')).toContainText('2 拍');
++
++  // A keystroke -- the ordinary state of the screen -- drops the run the display
++  // was built on. The text put back is the same one, so nothing about the
++  // program has changed; only the display/run binding has come apart.
++  await code.press('Control+End');
++  await page.keyboard.type(' ');
++  await page.keyboard.press('Backspace');
++  await expect(code).toHaveValue(LEVEL_50_PROGRAM);
++
++  await page.locator('.tools button[aria-label="停止并复位"]').click();
++
++  // THE BOARD ON SCREEN IS RESET: the card reads the display's clock, and it is
++  // back at zero. (Before the fix this is where the walk failed: the reset went
++  // to the fresh run the keystroke had left behind, while the display went on
++  // painting the old machine at 2 ticks.)
++  await expect(page.locator('.io-tick')).toContainText('0 拍');
++  // ...and the program was not silently lost: the text is still in the editor.
++  await expect(code).toHaveValue(LEVEL_50_PROGRAM);
++  await page.screenshot({ path: 'test-results/smoke-ch4-level50-reset.png' });
++
++  // ...AND THE MACHINE IS STILL THE PROGRAM'S. One 单步 walks the image that was
++  // reloaded into the reset board, so the debugger's RAM window still shows the
++  // assembled bytes and the bytes are what was assembled.
++  await page.locator('.ide-step').click();
++  await expect(page.locator('.ide-bytes')).toHaveText('B10582409F');
++  const ram = page.locator('.debug-ram .debug-byte');
++  await expect(ram.nth(0)).toHaveText('B1');
++  await expect(ram.nth(1)).toHaveText('05');
++  await expect(ram.nth(2)).toHaveText('82');
++  await expect(ram.nth(3)).toHaveText('40');
++  await expect(ram.nth(4)).toHaveText('9F');
++  await expect(page.locator('.debug-ticks')).toContainText('1 拍');
++});
++
+ /**
+  * A SAVE WRITTEN BEFORE THE 2.x REALIGNMENT KEEPS ITS STARS.
+  *
+  * The realignment renamed 37 level ids and removed three, and a save is keyed by
+  * id -- so without `levels/id-map.ts` inside `migrate` every star would land on a
+  * level that no longer exists, silently, because every lookup would simply miss.
+  * The unit tests pin the translation table; this walks a real browser through it.
+  *
+  * The ids below are 1.x's. The fifth one is the interesting one: old
+  * `ch1-06-nor-gate` is the CURRENT `ch1-05-nor-gate`, because the realignment
+diff --git a/test/ui/display-run.test.ts b/test/ui/display-run.test.ts
+index a1a4d3e..3e2b92d 100644
+--- a/test/ui/display-run.test.ts
++++ b/test/ui/display-run.test.ts
+@@ -1,19 +1,19 @@
+ // @vitest-environment jsdom
+ import { describe, expect, it } from 'vitest';
+ import { createRegistry } from '../../src/core/registry';
+ import { BASE_DEFS } from '../../src/core/defs/index';
+ import { graphFromBoard } from '../../src/levels/board';
+ import { overtureBoard } from '../../src/levels/boards/overture';
+ import { createProgramRun } from '../../src/levels/run';
+ import type { LevelSpec } from '../../src/levels/spec';
+-import { createDisplay, resetBoard } from '../../src/ui/board/signals';
++import { createDisplay } from '../../src/ui/board/signals';
+ import { mountDebug } from '../../src/ui/debug';
+ 
+ const registry = createRegistry(BASE_DEFS);
+ 
+ /**
+  * ONE MACHINE BEHIND EVERY READOUT: the board's clock card, its `out` row and the
+  * debugger's counter.
+  *
+  * THE INTEGRATION `main.ts` PERFORMS, at the seam it performs it. A program level
+  * builds the run first and hands the run's machine to `createDisplay`, so the
+@@ -96,53 +96,61 @@ describe('the board, the run and the debugger as main.ts wires them', () => {
+     expect(snapshot.levelOutputs.get('out')).toBe(INPUT);
+     expect(run.readOutputs()).toEqual({ out: INPUT });
+ 
+     // ...and the byte is visible in the machine's own state, which is the reading
+     // the panel exists for.
+     expect(run.readRegisters()).toEqual([0, INPUT, 0, 0, 0, 0]);
+     expect(root.querySelector('.debug-reg:nth-child(2)')?.textContent).toContain('0x2A');
+   });
+ 
+   /**
+-   * THE BOARD'S 停止并复位 MUST NOT EAT THE PROGRAM. `main.ts`'s `onStop` calls
+-   * `resetBoard(display, run)` -- the same call, on the same pair, this test
+-   * makes -- and the bug this pins is what happened when that path was a bare
+-   * `display.reset()`: the display paints the run's own `Simulation`, so clearing
+-   * the display's storage cleared `ram_prog` too, and the editor went on showing
+-   * "5 字节" over 256 zeros. The debugger then read zeros and the counter walked a
+-   * zero program, because nothing reloads the image until the text changes.
++   * THE BOARD'S 停止并复位 MUST NOT EAT THE PROGRAM. `main.ts`'s `onStop` drops
++   * the run and rebuilds the display -- `rebuild` is the only place a display is
++   * bound to a run, and a run is put at its starting state by its OWN
++   * constructor/reset (`levels/run.ts`), which clears the circuit and loads the
++   * image back into it. This test pins that property at the seam: the same
++   * `createProgramRun` + `createDisplay` wiring, and the run's own `reset`.
++   *
++   * THE BUG THIS GUARDS AGAINST WAS A BARE `display.reset()`, and it is worth
++   * saying why that is the wrong call even now: the display paints the run's own
++   * `Simulation`, so clearing the display's storage cleared `ram_prog` too, and
++   * the editor went on showing "5 字节" over 256 zeros. The debugger then read
++   * zeros and the counter walked a zero program, because nothing reloads the
++   * image until the text changes.
+    *
+    * THE RESET STILL HAS TO RESET, so this is not satisfied by a board that never
+    * cleared: the tick goes back to 0 and the register file is empty after it.
+    */
+-  it('keeps the program loaded, and still runnable, when the board is reset', () => {
++  it('resets the run back to tick 0 with the image still loaded', () => {
+     const graph = graphFromBoard(PROGRAM_LEVEL.id, overtureBoard({ inputId: 'in' }));
+     const run = createProgramRun(graph, registry, PROGRAM_LEVEL, ECHO, 'asm');
+     expect(run.errors).toEqual([]);
+     const display = createDisplay(graph, registry, PROGRAM_LEVEL, {}, run.machine);
+     expect(display).not.toBeNull();
+ 
+     // The machine has run: state the reset has to clear, and a program in RAM.
+     run.setInput('in', INPUT);
+     display!.tick();
+     display!.tick();
+     expect(display!.read().tick).toBe(2);
+     expect(run.readRegisters()).toEqual([0, INPUT, 0, 0, 0, 0]);
+     expect(run.readRam()!.slice(0, 2)).toEqual([0xb1, 0x8f]);
+ 
+-    resetBoard(display, run);
++    run.reset();
+     // `main.ts` re-drives the readout panel's vector onto the run after the
+     // reset, because a cleared simulation has no inputs in it.
+     run.setInput('in', INPUT);
+ 
+-    // THE CLOCK AND THE REGISTERS CLEARED, THE IMAGE DID NOT: the same bytes the
+-    // editor's text compiles to, and the counter back at the first instruction.
++    // THE CLOCK AND THE REGISTERS CLEARED, THE IMAGE DID NOT -- and the display
++    // says so too, because it is painting the one simulation the run reset. The
++    // same image the editor's text compiles to, and the counter back at the
++    // first instruction.
+     expect(display!.read().tick).toBe(0);
+     expect(run.ticks).toBe(0);
+     expect(run.readPc()).toBe(0);
+     expect(run.readRegisters()).toEqual([0, 0, 0, 0, 0, 0]);
+     expect(run.readRam()!.slice(0, 2)).toEqual([0xb1, 0x8f]);
+ 
+     // ...AND IT STILL RUNS. A zeroed `ram_prog` cannot reach this byte: with the
+     // image erased every instruction is `loadi|0`, so `out` stays 0.
+     display!.tick();
+     display!.tick();

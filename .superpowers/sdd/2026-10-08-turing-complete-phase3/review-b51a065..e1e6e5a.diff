@@ -1,0 +1,1436 @@
+# Review package: b51a065fa712cf9bfc85d9b193e79c19decfb980..e1e6e5a17e432852e38a3058262d5eb742527632
+
+## Commits
+e1e6e5a docs(levels): register chapter 4 and refresh every pinned count
+
+## Files changed
+ AGENTS.md                                          |   8 +-
+ README.md                                          |  15 ++-
+ RESEARCH.md                                        |   6 +-
+ .../2026-09-25-turing-complete-replica-design.md   |  10 +-
+ src/levels/campaign.ts                             |  29 ++++-
+ src/levels/content/ch4/index.ts                    |  64 ++++++++++
+ src/levels/content/index.ts                        |   9 +-
+ test/levels/campaign-shape.test.ts                 |  10 +-
+ test/levels/ch4-registration.test.ts               |  88 +++++++++++++
+ test/levels/grader.test.ts                         |  57 +++++++--
+ test/levels/level-buildability.test.ts             | 139 ++++++++++++++++-----
+ test/levels/unlock-chain.test.ts                   |  22 ++--
+ test/smoke/ui.spec.ts                              |  31 ++---
+ test/ui/ide.test.ts                                |  20 +--
+ 14 files changed, 406 insertions(+), 102 deletions(-)
+
+## Diff
+diff --git a/AGENTS.md b/AGENTS.md
+index a6b80bf..182aa41 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -59,42 +59,42 @@ directory is missing from the README's layout block; the README claims a
+ directory that does not exist; a runtime dependency appears, or a devDependency
+ is not pinned exactly; a shadow or an unlisted rounded corner appears in the
+ stylesheet; or two levels share an id. A rule worth keeping belongs there, not in
+ prose.
+ 
+ ## Layout
+ 
+ ```
+ src/core/     simulator: signals, registry and definitions, graph/netlist, settle and tick
+ src/asm/      the assembler and its ISA: field ranges, modes, operands, program images
+-src/levels/   LevelSpec types, checks, grader, and content/ (chapters 1-3 so far)
++src/levels/   LevelSpec types, checks, grader, and content/ (chapters 1-4 so far)
+ src/app/      state, command/undo stack, progress, shared viewport types
+ src/ui/       the chrome, and ui/board/ -- camera, hit testing, routing, painting
+ src/persist/  localStorage save and load
+ test/         Vitest tests, the convention assertions, and the Playwright smoke spec
+ tools/sdd/    PowerShell helpers for a phase's SDD workspace
+ docs/         the design spec, the phase plans, level provenance
+ ```
+ 
+ ## Where the game's facts come from
+ 
+ Two third-party research documents sit at the repository root, and they describe **different versions
+ of the game**: `GAME_REFERENCE.md` is the 1.x compendium, `GAME_RESEARCH_2026-10-03.md` is a sourced
+ 2.x dossier (93 levels, Symphony in place of LEG, 2-64-bit widths). `RESEARCH.md` indexes both, lists
+ every place they contradict each other, and names which one this project follows for what.
+ 
+ The shipped campaign follows the **2.x** structure as of 2026-10-04. `src/levels/campaign.ts` is the
+ table that fixes its shape and `test/levels/campaign-shape.test.ts` holds every level to it, so change
+-that table — not a level object — when the campaign's shape has to change. Chapters 1-3 (49 levels)
+-are built; chapters 4-7 (44 levels) are listed in the dossier's §5 and their phase is not decided yet.
++that table — not a level object — when the campaign's shape has to change. Chapters 1-4 (56 levels)
++are built; chapters 5-7 (37 levels) are listed in the dossier's §5 and their phase is not decided yet.
+ 
+-Read `RESEARCH.md` before planning chapter 4. No image of the original's art may be committed, in any
++Read `RESEARCH.md` before planning chapter 5. No image of the original's art may be committed, in any
+ case — that is a hard constraint in the design spec (§1.4), and it is why the `imgs/` folder that came
+ with the 2.x dossier is not in the tree. The 1.x compendium contains no images at all.
+ 
+ ## Where the record lives
+ 
+ `.superpowers/sdd/<date>-<plan-slug>/` holds each phase's build record: task
+ briefs, implementer reports, review diffs, the decision ledger. It is tracked
+ deliberately -- it is the evidence behind each verdict -- and it is the one place
+ in the repository whose files are ignored by default and un-ignored per phase:
+ 
+diff --git a/README.md b/README.md
+index 135ba5f..524a915 100644
+--- a/README.md
++++ b/README.md
+@@ -20,48 +20,51 @@ disagree — they describe different versions of the game — and which one this
+ what the *game* contains level by level, see
+ [chapter-2 level provenance](docs/research/chapter-2-level-provenance.md), which records exactly
+ which facts came from the source and which are this replica's own design.
+ 
+ ## What this is
+ 
+ A from-scratch, from-NAND-to-CPU educational puzzle game that reimplements the *learning path* of
+ LevelHead's *Turing Complete*: you start with one primitive gate and build your way up, gate by gate,
+ towards a working CPU.
+ 
+-## What works today (Phases 0–2)
++## What works today (Phases 0–3)
+ 
+ - **Chapter 1 — 13 levels**, from the NAND gate to the logic exam.
+ - **Chapter 2 — 26 levels (14–39)**: the four-bit reader, parity and counting, the byte operators,
+   half and full adders, two's complement, decoders, the feedback and storage half — switch, delay,
+   selector, register, RAM and counter.
+ - **Chapter 3 — 10 levels (40–49)**: the ALU and the machine around it — registers and buses, the
+   opcode decoder, the program counter and its RAM, and a capstone that runs an assembled program
+   against the machine you built.
++- **Chapter 4 — 7 levels (50–56)**: programming the CPU you built — hand-written machine code, the
++  assembler, arithmetic and conditional jumps, and two closed-loop puzzles (the code lock and the
++  maze) whose checker drives your program one tick at a time.
+ - A **canvas wiring board**: place parts, drag wires, pan and zoom. Wires are routed, not just drawn:
+   a run is chosen against every part and every wire already on the board, so it goes *around* a gate
+   rather than through it, and two nets never settle into the same lane and read as one wire.
+ - **A live board**: every wire and pin shows the value it is carrying, the level's input bits are
+   clickable so you can drive a half-built circuit and watch it work, and the clock can be stepped,
+   run or reset.
+ - **The level's test cases, laid out as a matrix** while you build: one row per pin, one column per
+   case, expectations filled in and your own output unknown until you run them.
+ - **An on-demand test run.** Nothing grades your circuit while you are drawing it. Press 测试 and the
+   board is driven through the level's cases one at a time -- the inputs change, the column lights up,
+   the output takes its value -- at a speed you choose, and the verdict comes at the end. A level whose
+   cases the checker generates privately (a program image) says so instead of inventing one.
+ - **Gate / delay / tick cost, measured live**, and a three-star target for every level. The cost is a
+   measurement and updates as you edit; whether the circuit is *correct* is what the test run says.
+ - **Progress saved to `localStorage`**, so a refresh keeps your stars.
+ - A **chapter map** for navigating levels and seeing what is unlocked.
+ 
+-Chapters 4–7 (programming and the assembly IDE, the LEG CPU, functions, the assembly challenges and
+-the sandbox) are planned but not built yet.
++Chapters 5–7 (the LEG CPU, functions, the assembly challenges and the sandbox) are planned but not
++built yet.
+ 
+ ## Interface
+ 
+ The chrome is styled as bench instrumentation, not as a page with cards on it: flat slabs separated
+ by 1px hairlines, **no shadows anywhere** — not one `box-shadow` or `text-shadow` in the stylesheet —
+ and no rounded corners except the bit arrows, whose roundness carries the value, and the result
+ medal, which is a stamped disc rather than a glowing orb. `test/conventions.test.ts` asserts both
+ halves of that — no shadow property anywhere, and no radius outside those two.
+ 
+ Two colour axes, kept apart on purpose:
+@@ -152,42 +155,42 @@ writes progress, so no level is passed and no star is awarded on its account.
+ While it is on, the top bar carries an amber `DEV` light — a mode that unlocks the whole game has to be
+ impossible to forget — and clicking that light leaves the mode and cleans the URL, so a refresh does not
+ bring it back.
+ 
+ ## Project layout
+ 
+ ```
+ src/
+   core/     simulator: signals, component registry + definitions, graph/netlist, settle & tick
+   asm/      the assembler and its ISA: field ranges, addressing modes, operands, program images
+-  levels/   LevelSpec types, the campaign table, checks, grader, and content/ (49 levels: chapters 1–3)
++  levels/   LevelSpec types, the campaign table, checks, grader, and content/ (56 levels: chapters 1–4)
+   app/      application state, command/undo stack, progress, and the shared viewport types
+   ui/       the board's chrome: top bar, palette, clock + I/O readout, tool grid, test cases,
+             chapter map, and the Canvas board (see ui/board/)
+   ui/board/ the board itself: camera and hit testing, wire routing, painting, live signals
+   persist/  localStorage save and load
+ test/       Vitest unit and level tests, the convention assertions, and the Playwright smoke spec
+ tools/      the SDD PowerShell helpers that build a phase workspace and its briefs
+ docs/       the design spec, the phase plans, and the per-chapter level provenance
+ ```
+ 
+ Dependencies run one way: `core` ← `asm` ← `levels` ← `app` ← `ui`, with `persist` reading `app` to
+ build an empty save. Nothing imports upwards, and `test/conventions.test.ts` fails the build if
+ anything starts to — that file is this project's linter, because no linter is pinned (see
+ `AGENTS.md` for why, along with the four rules that shape everything else).
+ 
+ ## Contributing / scope
+ 
+-Phases 0–2 cover chapters 1–3, which is **49 of the campaign's 93 levels**. The campaign follows the
++Phases 0–3 cover chapters 1–4, which is **56 of the campaign's 93 levels**. The campaign follows the
+ **2.x** structure of the game (13/26/10/7/26/7/4 chapters, Symphony in place of LEG, 2–64-bit
+ widths); the table that fixes it is [`src/levels/campaign.ts`](src/levels/campaign.ts), and
+-`test/levels/campaign-shape.test.ts` holds every level to it. The remaining chapters 4–7 are listed
++`test/levels/campaign-shape.test.ts` holds every level to it. The remaining chapters 5–7 are listed
+ in [`GAME_RESEARCH_2026-10-03.md`](GAME_RESEARCH_2026-10-03.md) §5; the phase they will be built in
+ is not decided yet. [`RESEARCH.md`](RESEARCH.md) records where the two research documents disagree
+ and which one this project follows for what.
+ 
+ The record of how it was built is committed too. [`.superpowers/sdd/`](.superpowers/sdd/) holds one
+ directory per phase: phases 0 and 1 carry every task's brief, its implementer's report, and the
+ review diffs behind each verdict — phase 0 is missing the briefs for tasks 9 and 11, which were
+ written before the workspace convention settled — and phase 2 carries the decision ledger and the
+ ALU handoff rather than per-task reports, because it ran as fewer and larger tasks. `tools/sdd/`
+ holds the three PowerShell helpers that resolve such a workspace, write a task brief, and stage a
+diff --git a/RESEARCH.md b/RESEARCH.md
+index 464d293..24cac44 100644
+--- a/RESEARCH.md
++++ b/RESEARCH.md
+@@ -64,21 +64,21 @@
+ | 2.x 有，本复刻无 | 《单字节与非 Byte NAND》、《2-4 译码器 2 Bit Decoder》 | 前者见上一行；后者在 1.x 里只作为组件出现在组件目录（2-Bit Decoder），没有独立关卡 |
+ 
+ 还有一处是**改名而非移除**：本复刻第 33 关《数据选择器》（英文名 `Input Selector`，源资料给的概念就是「2-to-1 多路复用器（MUX）」）在 2.x 里中文名不变、英文名改为 `Multiplexer`，并挪到第 2 章第 17 关。
+ 
+ **切换后**：《8 位或》退役，它发放的 `and8`/`or8`/`nand8`/`nor8` 整族移交新的《单字节与非》（`ch2-25`）；《逻辑引擎》与重复的那一关退役；新增《2-4 译码器》（`ch2-36`），顺带补上 `decoder2` 此前**没有任何关卡发放**的洞；《数据选择器》按 2.x 改英文名 `Multiplexer`（`ch2-30`）。
+ 
+ **第 3 章（9 关）**——本复刻的 9 关与 2.x 第 3 章同名，但 2.x 把 ALU 拆成两关（ALU 1 / ALU 2），且 Program 与 Immediate Values 的先后相反，因此 2.x 是 **10 关**。本复刻的 39《算术引擎》、41《元件工坊》、43《计算》三个关名出现在新资料第 272 行的「1.x 有而 2.x 改名/移除」名单里（Arithmetic Engine / Component Factory / Calculations）。
+ 
+ **切换后**：按 2.x 改为《逻辑整合》（`ch3-40`）与《计算核心》（`ch3-46`）等名；`ch3-42-alu-2` 补上一条从第 2 章挪来的奖励（`ashr8`/`rot_l8`/`rot_r8`——它们的原发放关卡《逻辑引擎》被退役），《程序》与《立即数》按 2.x 交换先后（现为 47 立即数、48 程序）。原计划曾以为 `alu2` 是"无人发放的组件"，实际上**它不是组件、只是关卡名**——这一处推断错误已纠正，`registry.test.ts` 会拦住这类不存在的 id。
+ 
+-**第 4–7 章（尚未实现）**——**基线已经选定 2.x**（2026-10-04），因此剩余工作量是 2.x 的 44 关（7+26+7+4；第 5 章是 Symphony 的 26 关）。1.x 时期规划的 35 关（6+11+10+8，第 5 章是 LEG 的 11 关）不再采用，留在[三份阶段计划](docs/superpowers/plans/)里作为历史。章节表见[新资料](GAME_RESEARCH_2026-10-03.md) §5 的第 4–7 章；阶段划分在第 3 阶段启动时确定。
++**第 4 章 7 关已实现（2.x 基线），剩余第 5–7 章 37 关**——**基线已经选定 2.x**（2026-10-04），因此剩余工作量是 2.x 的 37 关（26+7+4；第 5 章是 Symphony 的 26 关）。1.x 时期规划的 35 关（6+11+10+8，第 5 章是 LEG 的 11 关）不再采用，留在[三份阶段计划](docs/superpowers/plans/)里作为历史。章节表见[新资料](GAME_RESEARCH_2026-10-03.md) §5 的第 5–7 章；阶段划分在第 3 阶段启动时确定。
+ 
+ ---
+ 
+ ## 4. 冲突登记表（同一件事，不同说法）
+ 
+ | 事项 | 说法 A | 说法 B | 本仓库采用的 |
+ |---|---|---|---|
+ | 关卡总数 | 旧资料 §16.5 第 986 行：**82** | 旧资料 §5 第 140 行与第 893 行：**70+**（同一文件内部不一致）；新资料：**93** | 82（1.x）；见 [设计规格:13](docs/superpowers/specs/2026-09-25-turing-complete-replica-design.md) |
+ | 章节数 | 各处均为 **7** 章 | 旧资料 §5.2 把第 2 章拆成"算术运算部分/存储器部分"两个小标题却未说明是否算两章（结构提取 U02 记为未决） | 7 章 |
+ | 成就数 | 旧资料 §12：**15** 项 | 新资料 §8：**10** 项（Steam API 一手） | 未实现（评分系统取代成就，见设计规格第 253 行）|
+@@ -87,24 +87,24 @@
+ | 旧资料的 `switch` 出处 | 设计规格第 116 行称"源资料把它列在第 1 章" | 旧资料 §8.1 是"1 位组件的分类"，不是"第 1 章"；旧资料实际的教学位置是第 32 关 | 已按第 118 行声明为偏离 |
+ | 派生文件引用的文件名 | 结构提取第 3 行引用改名前的 `图灵完备_Turing_Complete_游戏资料全集.md` | 磁盘上是 `GAME_REFERENCE.md` | 改名事实记录在逐关溯源第 10 行 |
+ | 成就数值条件 | 旧资料：5 个蓝色元件 / 延迟 ≤35 / 门数 ≤65 等 | 本复刻实测三星目标（如 gate 15、72 门 8 延迟、41 门）| 源资料仅作为事实记录，不是通关条件（设计规格第 253 行）|
+ 
+ **没有"93 关"的第三种说法**：仓库内除新资料外，任何文件都不含 93 这一关卡数；82 出现在旧资料、设计规格、三份计划与 README 中，彼此一致。
+ 
+ ---
+ 
+ ## 5. 谁说了算（source of truth）
+ 
+-- **已实现内容（第 1–3 章 49 关）**：名字与顺序来自[新资料](GAME_RESEARCH_2026-10-03.md) §5（2.x）；io / 检查器 / 三星 / 奖励由本复刻设计。**唯一事实来源是 [`src/levels/campaign.ts`](src/levels/campaign.ts)**，`test/levels/campaign-shape.test.ts` 把它变成断言；逐关出处见 [`docs/research/chapter-2-level-provenance.md`](docs/research/chapter-2-level-provenance.md)（已按新 id 重写）。第 0–2 阶段的计划文档里的关卡编号属于 1.x 时期，作为历史记录保留未改——对照关系见本节 §3。
++- **已实现内容（第 1–4 章 56 关）**：名字与顺序来自[新资料](GAME_RESEARCH_2026-10-03.md) §5（2.x）；io / 检查器 / 三星 / 奖励由本复刻设计。**唯一事实来源是 [`src/levels/campaign.ts`](src/levels/campaign.ts)**，`test/levels/campaign-shape.test.ts` 把它变成断言；逐关出处见 [`docs/research/chapter-2-level-provenance.md`](docs/research/chapter-2-level-provenance.md)（已按新 id 重写）。第 0–2 阶段的计划文档里的关卡编号属于 1.x 时期，作为历史记录保留未改——对照关系见本节 §3。
+ - **架构与仿真语义**：以 [设计规格](docs/superpowers/specs/2026-09-25-turing-complete-replica-design.md) 与 [三份阶段计划](docs/superpowers/plans/) 为准；两份资料只提供背景事实。
+ - **未来重制参考**：新资料 §11「复刻开发参考（技术要点）」与 §5「93 关全表」是 2.x 的权威描述；`isa_spec`（开发者本人开源的汇编框架）是 Symphony 汇编器的参考实现。
+-- **尚未实现的第 4–7 章**：1.x 的章节表在旧资料 §5.4–5.7，2.x 的在[新资料](GAME_RESEARCH_2026-10-03.md) §5 的第 4–7 章表。先定基线，再查对应那一份，**不要混用**——两份的第 5 章是两台完全不同的 CPU（LEG 11 关 vs Symphony 26 关）。
++- **尚未实现的第 5–7 章**：1.x 的章节表在旧资料 §5.4–5.7，2.x 的在[新资料](GAME_RESEARCH_2026-10-03.md) §5 的第 5–7 章表。先定基线，再查对应那一份，**不要混用**——两份的第 5 章是两台完全不同的 CPU（LEG 11 关 vs Symphony 26 关）。
+ - **成本口径**：`gate / delay / tick` 的定义与 `score` 公式只在设计规格里，两份资料都没有——**别拿资料里的成就数值当评分依据**。
+ 
+ ---
+ 
+ ## 6. 版权与图片
+ 
+ - 两份资料**都复述了原作文本**：旧资料第 93 行是一句游戏内英文台词、第 891 行是开发者原话；新资料第 66–72 行整段引用 Steam 官方商店描述。它们作为研究出处随仓库保存，**不是游戏内容**：`src/` 不读取它们，发布产物里没有任何一行来自它们。
+ - **MIT 许可不覆盖这两份文件**，见 [LICENSE](LICENSE) 末尾的 NOTICE。
+ - **原作图片不入库**：新资料 §12.1 提到的 `imgs/`（7 张 Steam CDN 截图与宣传图，共 2.2 MB）**没有**随仓库提交，以守住设计规格 §1.4「不复制原作任何美术资源」的硬约束。需要时按新资料 §12.2 的 CDN 直链取回；§12.2–12.4 的链接清单本身已在库内。
+ - 顺带澄清一个容易被误读的点：**版本控制里**有 11 个 PNG，全部位于 `.superpowers/sdd/**/task-12-evidence/`。那是**本复刻自己界面**的冒烟测试截图（阶段 0/1 的验收证据），与原作美术无关；旧资料本身则一张图都没有。（`test-results/` 下另会有当次冒烟测试产生的截图，它被 `.gitignore` 忽略且每次运行都会被清空，不在仓库内。）
+diff --git a/docs/superpowers/specs/2026-09-25-turing-complete-replica-design.md b/docs/superpowers/specs/2026-09-25-turing-complete-replica-design.md
+index 6f06e49..b594f10 100644
+--- a/docs/superpowers/specs/2026-09-25-turing-complete-replica-design.md
++++ b/docs/superpowers/specs/2026-09-25-turing-complete-replica-design.md
+@@ -3,21 +3,21 @@
+ - 日期：2026-09-25
+ - 状态：待用户审阅
+ - 源资料：`GAME_REFERENCE.md`（用户提供；2026-09-29 由原名 `图灵完备_Turing_Complete_游戏资料全集.md` 改名）
+ 
+ ---
+ 
+ ## 1. 目标与非目标
+ 
+ ### 1.1 目标
+ 
+-从 NAND 门出发，自底向上复刻《图灵完备》的完整学习路径：玩家用 NAND 搭出所有基本逻辑门，进而搭出算术单元、存储器、8 位 CPU（OVERTURE → Symphony），最后用汇编语言解决编程关卡。共 93 关、7 个章节（2.x 基线；第 1–3 章 49 关已实现）。
++从 NAND 门出发，自底向上复刻《图灵完备》的完整学习路径：玩家用 NAND 搭出所有基本逻辑门，进而搭出算术单元、存储器、8 位 CPU（OVERTURE → Symphony），最后用汇编语言解决编程关卡。共 93 关、7 个章节（2.x 基线；第 1–4 章 56 关已实现）。
+ 
+ ### 1.2 非目标（本期不做）
+ 
+ - 在线排行榜后端、云存档、多人、成就同步
+ - 飞船 NPC 美术、角色立绘、对话演出
+ - 移动端触屏适配（桌面浏览器优先）
+ 
+ ### 1.3 已确认的决策（来自头脑风暴）
+ 
+ | 决策点 | 结论 |
+@@ -217,33 +217,33 @@ interface Simulation {
+ | `constraint` | 断言全局性质（如「4 个输入中至少 2 个为高」），由内核构造穷举向量 | 奇数个信号、成对的麻烦、信号计数 |
+ | `fuzz` | 随机向量 + 固定种子，重复 N 轮 | 8 位运算、ALU |
+ | `custom` | 关卡专属脚本钩子 | 迷宫、跳舞机、AI 对决、太空入侵 |
+ 
+ > **实施分期**：阶段 0（第 1 章 13 关）只落地 `truth-table` / `script` / `constraint` 三种。`fuzz` 与 `custom` 必须分别在开始第 2 章（8 位运算）与第 3 章（CPU）之前实现。
+ 
+ `custom` 是逃生舱，但必须只依赖内核公开接口，且必须能离线跑通（不抓网络、不读真实时间）。
+ 
+ ### 5.3 章节与关卡清单
+ 
+-章节结构以 **2.x 基线**为准（2026-10-04 起，见 [`docs/superpowers/plans/2026-10-04-turing-complete-2x-realign.md`](../plans/2026-10-04-turing-complete-2x-realign.md)）：7 章 93 关，其中第 1–3 章共 49 关已实现。逐关的 id、全局序号与中英文名以 `src/levels/campaign.ts` 为唯一事实来源，`test/levels/campaign-shape.test.ts` 逐项核对。
++章节结构以 **2.x 基线**为准（2026-10-04 起，见 [`docs/superpowers/plans/2026-10-04-turing-complete-2x-realign.md`](../plans/2026-10-04-turing-complete-2x-realign.md)）：7 章 93 关，其中第 1–4 章共 56 关已实现。逐关的 id、全局序号与中英文名以 `src/levels/campaign.ts` 为唯一事实来源，`test/levels/campaign-shape.test.ts` 逐项核对。
+ 
+ | 章节 | 关卡数 | 主题 | 交付状态 |
+ |---|---|---|---|
+ | Ch1 布尔代数 | 13 | 逻辑门推导 | 已交付（阶段 0–2） |
+ | Ch2 算术运算、存储器 | 26 | 运算电路 + 存储 | 已交付（阶段 0–2） |
+ | Ch3 CPU 架构 OVERTURE | 10 | 第一台 CPU | 已交付（阶段 0–2） |
+-| Ch4 编程 | 7 | 汇编入门 | 未交付 |
++| Ch4 编程 | 7 | 汇编入门 | 已交付（阶段 3） |
+ | Ch5 进阶处理器架构 Symphony | 26 | 第二台 CPU | 未交付 |
+ | Ch6 进阶编程 | 7 | 程序与算法 | 未交付 |
+ | Ch7 可选元件关 | 4 | 乘除模与刷分关 | 未交付 |
+ 
+-第 4–7 章的阶段划分在阶段 3 启动时确定；它们对应的关卡表见 `GAME_RESEARCH_2026-10-03.md` §5。
++第 5–7 章的阶段划分在阶段 3 启动时确定；它们对应的关卡表见 `GAME_RESEARCH_2026-10-03.md` §5。
+ 
+ 关卡名沿用源资料的中英文对照表（关卡名是识别性标题，非艺术资产）。
+ 
+ ### 5.4 评分系统
+ 
+ | 指标 | 精确定义 |
+ |---|---|
+ | **Gate（门数量）** | 电路 + 自定义组件 + 宽位组件全部展开后，**NAND 等价门**的总数。展开时每个基础门的贡献 = 1，`const`/`probe`/`level_*` 元件贡献 0 |
+ | **Delay（延迟）** | 展开后的电路上，**任一关卡输入 → 任一关卡输出**的最长路径延迟。计数单位是**组件（节点）**而非 NAND：路径上每个组件恰好贡献 1 单位（§3.2「每个组件恰好贡献 1 单位延迟」，宽位组件同样记为 1），存储元件贡献 0 |
+ | **Tick（时钟周期）** | 通过该关卡全部测试用例所消耗的最大时钟拍数，含 `reset` 后到首个断言之间 |
+@@ -392,20 +392,22 @@ turing-complete/
+ | **0（纵切片）** | 内核 + 画板 + 关卡框架 + 评分 + 存档 + 第 1 章 13 关 + 精简叙事外壳 | 浏览器里能从第 1 关连到第 13 关，13 关全部可解、判定正确；参考解与反例测试通过；UI 冒烟测试通过；刷新后进度保留 |
+ | 1 | 第 2 章 26 关（算术与存储）+ 宽位组件体系 | 26 关回归通过；锁存器/振荡器/计数器测试通过 |
+ | 2 | 第 3 章 10 关（OVERTURE） | 能搭出可运行 OVERTURE 的程序并跑通《程序》《立即数》验证 |
+ | 3 | 第 4 章 7 关（编程）+ IDE + 调试器 | 《打孔编程》《迷宫》等关卡的参考汇编程序通过 |
+ | 4 | 第 5 章 26 关（Symphony）+ RAM/栈 | Symphony 参考解跑通《栈》《函数调用》 |
+ | 5 | 第 6 章 7 关（进阶编程）+ 16/32/64 位组件 | 宽位展开与评分测试通过 |
+ | 6 | 第 7 章 4 关（可选元件关）+ 沙盒 + 外设 | 沙盒可自由构建并导出；显示/键盘/声音组件可用 |
+ 
+ > **阶段 0–2 的关卡数在 2026-10-04 的 2.x 重构中变过一次**（12→13、9→10）：当时交付的 12/26/9 是 1.x 基线的形状，重构把第 1 章补上《同或门》与《逻辑试炼》、把第 3 章补上《ALU 2》。第 3 阶段起按上表的 2.x 形状实施。
+ 
++> **阶段 3 已完成（2026-10-10）**：第 4 章 7 关（50–56，《打孔编程》→《路在脚下》）连同汇编 IDE 与调试器已交付并装配进关卡表，验收标准里的《打孔编程》《迷宫》参考程序在 `level-buildability` / `grader` 的全集走查中通过。
++
+ 每个阶段结束由我跑完整回归，并向你报告实际测试输出（不是「应该能跑」）。
+ 
+ ---
+ 
+ ## 13. 待确认项
+ 
+ 以下三点在动手前需要你拍板：
+ 
+ 1. **视觉风格**：原创深色工业风 + 程序化绘制元件符号（推荐），还是你有偏好的配色/风格参考？
+ 2. **中文/英文**：UI 与关卡文案中英双语（推荐，与源资料的对照表一致），还是只做中文？
+diff --git a/src/levels/campaign.ts b/src/levels/campaign.ts
+index 6ede2f5..1c6e251 100644
+--- a/src/levels/campaign.ts
++++ b/src/levels/campaign.ts
+@@ -1,18 +1,18 @@
+ /**
+  * The campaign's shape: which levels exist, in which chapter, at which global
+  * index, under which name.
+  *
+  * This table is the 2.x baseline, transcribed from `GAME_RESEARCH_2026-10-03.md`
+- * §5 ("完整关卡流程（93 关全表）", the sourced Steam-guide table). Chapters 4-7
+- * (levels 50-93) are not built yet and are not listed here; this file covers the
+- * 49 levels of chapters 1-3, which is what the replica ships.
++ * §5 ("完整关卡流程（93 关全表）", the sourced Steam-guide table). Chapters 5-7
++ * (levels 57-93) are not built yet and are not listed here; this file covers the
++ * 56 levels of chapters 1-4, which is what the replica ships.
+  *
+  * It exists as data rather than as prose so that `test/levels/campaign-shape.test.ts`
+  * can hold the level specs to it: the id, the chapter, the global `index` and
+  * both names have to agree exactly, in this order. Before this table, the shape
+  * lived only in the plans -- and drifted: the campaign used to spend two of its
+  * 47 slots on one puzzle (Binary Racer, once at chapter 1's capstone and once in
+  * chapter 2) and left two parts (`decoder2`, `alu2`) with no level to hand them
+  * out.
+  *
+  * `index` is the GLOBAL position, not the position within the chapter: chapter 2
+@@ -20,21 +20,21 @@
+  * (`ch2-14-binary-racer`), so the two must be changed together.
+  */
+ export interface CampaignEntry {
+   readonly id: string;
+   readonly chapter: number;
+   readonly index: number;
+   readonly zh: string;
+   readonly en: string;
+ }
+ 
+-/** Chapters 1-3 of the 2.x campaign, in unlock order. */
++/** Chapters 1-4 of the 2.x campaign, in unlock order. */
+ export const CAMPAIGN: readonly CampaignEntry[] = [
+   // Chapter 1 -- 布尔代数 (Boolean Logic), 13 levels
+   { id: 'ch1-01-humble-beginnings', chapter: 1, index: 1, zh: '从零开始', en: 'Humble Beginnings' },
+   { id: 'ch1-02-nand-gate', chapter: 1, index: 2, zh: '与非门', en: 'NAND Gate' },
+   { id: 'ch1-03-not-gate', chapter: 1, index: 3, zh: '非门', en: 'NOT Gate' },
+   { id: 'ch1-04-and-gate', chapter: 1, index: 4, zh: '与门', en: 'AND Gate' },
+   { id: 'ch1-05-nor-gate', chapter: 1, index: 5, zh: '或非门', en: 'NOR Gate' },
+   { id: 'ch1-06-or-gate', chapter: 1, index: 6, zh: '或门', en: 'OR Gate' },
+   { id: 'ch1-07-always-on', chapter: 1, index: 7, zh: '长明灯', en: 'Always On' },
+   { id: 'ch1-08-second-cycle', chapter: 1, index: 8, zh: '第二周期', en: 'Second Cycle' },
+@@ -124,11 +124,32 @@ export const CAMPAIGN: readonly CampaignEntry[] = [
+   { id: 'ch3-46-alu', chapter: 3, index: 46, zh: '计算核心', en: 'ALU' },
+   {
+     id: 'ch3-47-immediate-values',
+     chapter: 3,
+     index: 47,
+     zh: '立即数',
+     en: 'Immediate Values',
+   },
+   { id: 'ch3-48-program', chapter: 3, index: 48, zh: '程序', en: 'Program' },
+   { id: 'ch3-49-turing-complete', chapter: 3, index: 49, zh: '图灵完备', en: 'Turing Complete' },
++
++  // Chapter 4 -- 编程 (Programming), 7 levels
++  {
++    id: 'ch4-50-punchcard-programming',
++    chapter: 4,
++    index: 50,
++    zh: '打孔编程',
++    en: 'Punchcard Programming',
++  },
++  {
++    id: 'ch4-51-assembly-programming',
++    chapter: 4,
++    index: 51,
++    zh: '汇编程序',
++    en: 'Assembly Programming',
++  },
++  { id: 'ch4-52-circumference', chapter: 4, index: 52, zh: '三番两次', en: 'Circumference' },
++  { id: 'ch4-53-conditional-jumps', chapter: 4, index: 53, zh: '条件跳转', en: 'Conditional Jumps' },
++  { id: 'ch4-54-code-breaker', chapter: 4, index: 54, zh: '道破心机', en: 'Code Breaker' },
++  { id: 'ch4-55-mod-4', chapter: 4, index: 55, zh: '高速掩码', en: 'Mod 4' },
++  { id: 'ch4-56-the-maze', chapter: 4, index: 56, zh: '路在脚下', en: 'The Maze' },
+ ];
+diff --git a/src/levels/content/ch4/index.ts b/src/levels/content/ch4/index.ts
+new file mode 100644
+index 0000000..bf7dc2a
+--- /dev/null
++++ b/src/levels/content/ch4/index.ts
+@@ -0,0 +1,64 @@
++import type { LevelSpec } from '../../spec';
++import { CH4_BATCH1 } from './batch1';
++import { CH4_BATCH2 } from './batch2';
++// THE REGISTRATION IMPORTS, and they are side effects on purpose. The two
++// closed-loop checkers levels 54 and 56 name (`custom: lock`, `custom: maze`) are
++// populated into `levels/custom/index.ts`'s registry BY MODULE EVALUATION -- each
++// calls `registerCustomCheck` for its own id at the top level -- and nothing else
++// in `src/` imports them: `levels/checks.ts` imports only the registry (it looks
++// ids up, it does not know the checkers) and `custom/index.ts` deliberately
++// imports none of its own checkers. Before this file existed, the only importers
++// of `custom/lock.ts` / `custom/maze.ts` in the whole repository were the tests
++// that grade those levels, so a player opening level 54 in a browser got
++// `missing-check` -- the level's check named a checker no module had registered.
++//
++// WHY HERE AND NOT IN `custom/index.ts`. Making `custom/index.ts` import its own
++// two checkers is the other legal spelling, and it is the one this project
++// refused: the import would be a genuine runtime cycle (lock imports
++// `registerCustomCheck` from `custom/index.ts`), so the checker's top-level
++// `registerCustomCheck('lock', ...)` call would run while `custom/index.ts` was
++// still being evaluated -- before its `const checkers = new Map()` line -- and a
++// `Map.set` on a module-local `const` that has not been initialised is a TDZ
++// `ReferenceError` at import time, in every entry point, for every level. Placed
++// on the CONTENT path instead, the edges only run one way (`content/ch4/index.ts`
++// -> `custom/lock.ts` -> `custom/index.ts`, which imports nothing at runtime but
++// types), so the registry is fully constructed before a checker registers itself
++// into it. The set of checkers that ship is still decided by the level set that
++// names them, exactly as `custom/index.ts` documents; this is that naming, and
++// `test/levels/ch4-registration.test.ts` is what holds it (a test that imports
++// NO checker, only this content path, and grades 54 and 56 through it).
++import '../../custom/lock';
++import '../../custom/maze';
++
++/**
++ * Chapter 4, assembled from its two batches.
++ *
++ * The chapter was written in two batches (levels 50-52, 53-56) so each author
++ * owned a self-contained file; this is the one place they are joined, and nothing
++ * else should import a batch directly -- except a batch's own test, which grades
++ * that batch against its own file.
++ *
++ * The order below IS the chapter's order: `content/index.ts` appends this array
++ * to chapters 1-3, so the two batches land in the game as levels 50..56 with
++ * nothing between them. `test/levels/campaign-shape.test.ts` holds the whole set
++ * to the campaign table (56 levels, chapters of 13/26/10/7) and
++ * `test/levels/level-buildability.test.ts` holds this export to the game's order
++ * -- the same pair of checks that caught chapter 3 being written, tested and
++ * appended nowhere, which is why a chapter is not finished until
++ * `content/index.ts` names it.
++ *
++ * THE CHAPTER'S DATA IS TWO SHAPES IN FOUR FILES, and the split is by author.
++ * Levels 50-55 are the straight-line programming levels (a `program` check that
++ * reads the PLAYER's buffer -- `from: 'player'`, no `source` in the level data --
++ * on two walks each), and 54/56 are the closed-loop `custom` levels whose data
++ * (a secret byte, a maze grid) lives in `params`, in the level. The reference
++ * PROGRAMS are not here at all: they belong to `test/fixtures/ch4-references.ts`,
++ * one `{ program, format }` per level, because a level that shipped its own
++ * reference text would let an empty player buffer be graded against it.
++ *
++ * THE BOARD IS THE LEVEL'S OWN, CHAPTER 3'S MACHINE (`boards/overture.ts`), and
++ * that is a shared circuit rather than a copy: the builder is the same one
++ * `test/fixtures/ch3-references.ts` grades the built machine against, so the CPU
++ * the player programs in chapter 4 is the CPU the player built in chapter 3.
++ */
++export const CH4_LEVELS: readonly LevelSpec[] = [...CH4_BATCH1, ...CH4_BATCH2];
+diff --git a/src/levels/content/index.ts b/src/levels/content/index.ts
+index 1feb090..343690e 100644
+--- a/src/levels/content/index.ts
++++ b/src/levels/content/index.ts
+@@ -1,37 +1,42 @@
+ import type { LevelSpec } from '../spec';
+ import { CH1_PART1 } from './ch1/part1';
+ import { CH1_PART2 } from './ch1/part2';
+ import { CH2_LEVELS } from './ch2/index';
+ import { CH3_LEVELS } from './ch3/index';
++import { CH4_LEVELS } from './ch4/index';
+ 
+ /**
+  * Every level the game ships, in play order: chapter 1 (levels 1-13), chapter 2
+- * (14-39), chapter 3 (40-49).
++ * (14-39), chapter 3 (40-49), chapter 4 (50-56).
+  *
+  * This is the ONLY join between chapters. `levels/index.ts` turns it into
+  * `LEVELS` / `LEVEL_ORDER` -- which is what the app walks, what `isUnlocked`
+  * gates on, and what the whole-set tests in `test/levels/` walk -- so a chapter
+  * that is written but not appended here is invisible to the game however
+  * complete it is. That was chapter 2's state until its assembly: 22 of its 26
+  * levels existed and no player could reach them. Chapter 3 then repeated the
+  * mistake exactly -- all nine levels written, all three batch tests green, and
+  * not one of them reachable -- which is the second data point behind the rule
+- * that a chapter is not finished until this file names it.
++ * that a chapter is not finished until this file names it. Chapter 4 supplied the
++ * third: two tasks delivered its seven levels, each with its own green batch
++ * test, and not one of them was reachable until the line below named the
++ * chapter.
+  *
+  * FILE MEMBERSHIP NO LONGER IMPLIES ORDER, so this sorts by `index`. A level's
+  * index is its global position and `src/levels/campaign.ts` is the table that
+  * fixes it; the 2.x realignment moved levels BETWEEN batch files (chapter 2's
+  * `circular-dependency` and `delayed-lines` are now the chapter's 4th and 7th
+  * levels and still live in `ch2/batch4.ts` beside their old neighbours), so the
+  * spread of the files is a record of which task wrote what, not a running
+  * order. Sorting here makes level `n + 1` the `LEVEL_ORDER[n + 1]` by
+  * construction, which is the invariant `isUnlocked` -- the immediate predecessor
+  * -- is written against, and `test/levels/campaign-shape.test.ts` holds the
+  * result to the table.
+  */
+ export const ALL_LEVELS: readonly LevelSpec[] = [
+   ...CH1_PART1,
+   ...CH1_PART2,
+   ...CH2_LEVELS,
+   ...CH3_LEVELS,
++  ...CH4_LEVELS,
+ ].sort((a, b) => a.index - b.index);
+diff --git a/test/levels/campaign-shape.test.ts b/test/levels/campaign-shape.test.ts
+index b0960aa..2899562 100644
+--- a/test/levels/campaign-shape.test.ts
++++ b/test/levels/campaign-shape.test.ts
+@@ -1,15 +1,15 @@
+ /**
+  * The campaign's shape, held to `src/levels/campaign.ts`.
+  *
+  * The table in that file is the 2.x target (the sourced 93-level table's
+- * chapters 1-3). This test is what makes it binding: id, chapter, global index
++ * chapters 1-4). This test is what makes it binding: id, chapter, global index
+  * and both names have to agree exactly, in that order, and no level may exist
+  * that the table does not name.
+  *
+  * It exists because the shape is the one thing that cannot be checked by looking
+  * at a single level. The realignment that introduced it was prompted by exactly
+  * this class of bug: a level object can be perfectly valid on its own while the
+  * campaign it sits in is wrong -- two levels sharing one puzzle, a part that no
+  * level ever hands out, a global index that skips a number.
+  */
+ import { describe, expect, it } from 'vitest';
+@@ -34,22 +34,24 @@ describe('the campaign shape', () => {
+       if (level.index !== entry.index)
+         offenders.push(`${entry.id}: index ${level.index}, table says ${entry.index}`);
+       if (level.name.zh !== entry.zh)
+         offenders.push(`${entry.id}: zh "${level.name.zh}", table says "${entry.zh}"`);
+       if (level.name.en !== entry.en)
+         offenders.push(`${entry.id}: en "${level.name.en}", table says "${entry.en}"`);
+     }
+     expect(offenders).toEqual([]);
+   });
+ 
+-  it('ships three chapters of 13, 26 and 10 levels', () => {
++  it('ships four chapters of 13, 26, 10 and 7 levels', () => {
+     expect(LEVELS).toHaveLength(CAMPAIGN.length);
+-    expect([1, 2, 3].map((chapter) => levelsOfChapter(chapter).length)).toEqual([13, 26, 10]);
++    expect([1, 2, 3, 4].map((chapter) => levelsOfChapter(chapter).length)).toEqual([
++      13, 26, 10, 7,
++    ]);
+   });
+ 
+-  it('numbers the levels 1..49 with no gap, repeat or stray', () => {
++  it('numbers the levels 1..56 with no gap, repeat or stray', () => {
+     expect(LEVELS.map((level) => level.index)).toEqual(CAMPAIGN.map((_, i) => i + 1));
+     expect(new Set(LEVEL_ORDER).size).toBe(LEVEL_ORDER.length);
+     const named = new Set(CAMPAIGN.map((entry) => entry.id));
+     expect(LEVELS.filter((level) => !named.has(level.id)).map((level) => level.id)).toEqual([]);
+   });
+ });
+diff --git a/test/levels/ch4-registration.test.ts b/test/levels/ch4-registration.test.ts
+new file mode 100644
+index 0000000..aa52d5b
+--- /dev/null
++++ b/test/levels/ch4-registration.test.ts
+@@ -0,0 +1,88 @@
++import { describe, expect, it } from 'vitest';
++import { graphFromBoard } from '../../src/levels/board';
++// THE ONLY LEVEL IMPORT, and it is the point of this file: the levels come from
++// `content/index.ts` -- `ALL_LEVELS`, the game's own join -- and NOT from
++// `content/ch4/index.ts` and NOT from a checker module. The two closed-loop
++// checkers register themselves into `levels/custom/index.ts` at module
++// evaluation, so this file grades them through whatever the content path pulled
++// in. If it imported `custom/lock.ts` or `custom/maze.ts` -- as the batch tests
++// do, deliberately, because those grade the checkers themselves -- the assertion
++// below would prove nothing about the game: a browser session imports the app's
++// level list, and it is the app's import graph that has to carry the registration.
++import { ALL_LEVELS } from '../../src/levels/content/index';
++import { grade } from '../../src/levels/grader';
++import type { LevelSpec } from '../../src/levels/spec';
++import { registry } from '../fixtures/build';
++import { CH4_REFERENCES } from '../fixtures/ch4-references';
++
++/**
++ * The registration hand-off, held shut from the outside.
++ *
++ * THE DEFECT THIS FILE EXISTS FOR. Chapter 4's levels 54 and 56 ship a
++ * `custom` check (`lock`, `maze`) whose params carry the puzzle -- and neither
++ * checker is imported by anything under `src/` except the content path this task
++ * built. Before it, the only importers in the repository were the tests that
++ * grade the checkers directly, so chapter 4 compiled, passed every batch test,
++ * and would have failed in a browser with `missing-check`: the check names an id
++ * and `levels/checks.ts` looks it up in a registry nothing had filled. A test
++ * that imports the checker is exactly the test that cannot see this, which is
++ * why this one does not.
++ *
++ * WHY IT ALSO PINS THE REFERENCES. "Not `missing-check`" alone would be a weak
++ * claim -- a registered checker handed a broken program also fails, just with a
++ * different reason. So each level is graded with the reference program
++ * `test/fixtures/ch4-references.ts` files for it (never a copy here) against the
++ * board the level itself ships (`graphFromBoard(level.id, level.board)`), and the
++ * assertion is the whole outcome: no failures at all, and a pass. That is the
++ * same claim the batch tests make, made once more through the game's own entry
++ * point rather than through the chapter's batched data.
++ */
++const CLOSED_LOOP: ReadonlyArray<readonly [string, string]> = [
++  ['ch4-54-code-breaker', 'lock'],
++  ['ch4-56-the-maze', 'maze'],
++];
++
++/** One level from the game's own join, or a loud failure when it is not there. */
++function shippedLevel(id: string): LevelSpec {
++  const level = ALL_LEVELS.find((candidate) => candidate.id === id);
++  if (!level) throw new Error(`the content path does not ship ${id}`);
++  return level;
++}
++
++describe('chapter 4 registers its closed-loop checkers on the content path', () => {
++  it('ships levels 54 and 56, each with the custom check id its checker owns', () => {
++    for (const [id, checker] of CLOSED_LOOP) {
++      const level = shippedLevel(id);
++      expect(level.checks, `${id} does not ship exactly one custom check`).toHaveLength(1);
++      expect(level.checks.map((check) => `${check.kind}:${'id' in check ? check.id : ''}`)).toEqual([
++        `custom:${checker}`,
++      ]);
++    }
++  });
++
++  for (const [id, checker] of CLOSED_LOOP) {
++    it(`grades ${id}'s reference through the ${checker} checker instead of missing-check`, () => {
++      const level = shippedLevel(id);
++      const board = level.board;
++      expect(board, `${id} ships no board for the reference to run on`).toBeDefined();
++      if (!board) return;
++      const reference = CH4_REFERENCES[id];
++      expect(reference, `${id} has no reference program`).toBeDefined();
++      if (!reference) return;
++
++      const result = grade(graphFromBoard(level.id, board), registry, level, {
++        text: reference.program,
++      });
++
++      // The failure reason this file exists to catch, named first so a
++      // regression reports itself as "the checker is not registered" rather than
++      // as a generic red grade.
++      expect(
++        result.failures.map((failure) => failure.reason),
++        `${id} graded through the content path: ${JSON.stringify(result.failures)}`,
++      ).not.toContain('missing-check');
++      expect(result.failures, `${id}: ${JSON.stringify(result.failures)}`).toEqual([]);
++      expect(result.passed, id).toBe(true);
++    });
++  }
++});
+diff --git a/test/levels/grader.test.ts b/test/levels/grader.test.ts
+index 893d290..fb105f4 100644
+--- a/test/levels/grader.test.ts
++++ b/test/levels/grader.test.ts
+@@ -1,24 +1,27 @@
+ import { describe, expect, it } from 'vitest';
+ import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
+ import { BASE_DEFS } from '../../src/core/defs/index';
+ import { delayOf } from '../../src/core/net';
+ import { createRegistry, type ComponentDef } from '../../src/core/registry';
++import { graphFromBoard } from '../../src/levels/board';
+ import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
+ import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
++import type { PlayerProgram } from '../../src/levels/checks';
+ import type { LevelSpec } from '../../src/levels/spec';
+ import { LEVELS, LEVEL_ORDER, getLevel } from '../../src/levels/index';
+ import type { Metrics } from '../../src/levels/grader';
+ import { SCORE_WEIGHTS, gateCost, grade, scoreOf, starsOf } from '../../src/levels/grader';
+ import { build } from '../fixtures/build';
+ import { CH2_REFERENCES } from '../fixtures/ch2-references';
+ import { CH3_REFERENCES } from '../fixtures/ch3-references';
++import { CH4_REFERENCES } from '../fixtures/ch4-references';
+ 
+ const registry = createRegistry(BASE_DEFS);
+ 
+ /**
+  * A def with the two cost fields set independently, for the tests that have to
+  * see which one `gateCost()` reads. `gateCost` is spread in conditionally
+  * because `exactOptionalPropertyTypes` distinguishes an absent key from an
+  * explicit `undefined`.
+  */
+ function defWithCosts(id: string, cost: number, gateCostValue?: number): ComponentDef {
+@@ -400,52 +403,82 @@ describe('phase-0 regression: the chapter-1 reference scores are frozen', () =>
+ 
+ /**
+  * The phase-0 principle this file now enforces mechanically: **a level's
+  * `threeStar` bounds must be met by that level's own reference solution** (phase
+  * 0 tightened several targets precisely because they were LOOSER than the
+  * reference; a target the reference FAILS is a defect, not a fixture).
+  *
+  * It walks the SHIPPED level set (`LEVELS`, assembled by `src/levels/index.ts`),
+  * not this file's table, so a level that ships later without a reference circuit
+  * here fails the coverage case instead of being silently skipped. Every chapter
+- * is joined now, so the circuits come from three places -- this file's
+- * chapter-1 map plus the shared chapter-2 and chapter-3 fixtures -- and the walk
+- * covers all 49 ids. It covered twelve before the join, which is the walk
+- * working as designed rather than a gap: it can only check the levels that ship.
++ * is joined now, so the references come from four places -- this file's
++ * chapter-1 map plus the shared chapter-2, chapter-3 and chapter-4 fixtures --
++ * and the walk covers all 56 ids. It covered twelve before the join, which is the
++ * walk working as designed rather than a gap: it can only check the levels that
++ * ship.
++ *
++ * CHAPTER 4'S REFERENCES ARE PROGRAMS, NOT CIRCUITS, and they are graded the way
++ * the app grades them: the graph is the level's own `board`
++ * (`graphFromBoard(level.id, level.board)`) and the program travels on
++ * `grade`'s fourth argument as a `PlayerProgram`. No board is filed anywhere
++ * (ruling 1), so there is no second copy of the CPU to drift from the one the
++ * level hands the player.
+  *
+  * This is what fix round 2 turned on: pricing the built-in `and`/`or` on the NAND
+  * basis moved `ch1-06` (2 -> 4), `ch1-10` (2 -> 6) and `ch1-11` (2 -> 4) past
+  * their old targets, and the targets were recalibrated to the measured values in
+  * the level data. The frozen table above says what the numbers ARE; this says
+  * they still satisfy the levels they belong to.
+  */
+ describe('every shipped level: its reference solution meets its own three-star bounds', () => {
+-  /** Chapter 1 from this file, chapters 2 and 3 from the shared fixtures. */
+-  const shippedReference: Record<string, () => Graph> = {
++  /**
++   * A filed reference: chapters 1-3 file circuits, chapter 4 files programs.
++   *
++   * The union is not a convenience. A chapter-4 level ships the chapter-3 machine
++   * as its `board`, so a circuit filed for it here would be a second copy of the
++   * CPU -- free to drift from the one a player is handed, and the drift would read
++   * as a pass.
++   */
++  type FiledReference = (() => Graph) | { readonly program: string };
++
++  /** Chapter 1 from this file, chapters 2 to 4 from the shared fixtures. */
++  const shippedReference: Record<string, FiledReference> = {
+     ...ch1Reference,
+     ...CH2_REFERENCES,
+     ...CH3_REFERENCES,
++    ...CH4_REFERENCES,
+   };
+ 
+-  it('has a reference circuit for every shipped level', () => {
++  /** The graph and player program a level's filed reference grades with. */
++  function referenceOf(level: LevelSpec): { graph: Graph; player?: PlayerProgram } {
++    const filed = shippedReference[level.id];
++    if (!filed) throw new Error(`${level.id} has no reference`);
++    if (typeof filed === 'function') return { graph: filed() };
++    const board = level.board;
++    if (!board) throw new Error(`${level.id} files a program but ships no board to run it on`);
++    return { graph: graphFromBoard(level.id, board), player: { text: filed.program } };
++  }
++
++  it('has a reference for every shipped level', () => {
+     expect(LEVELS.length).toBeGreaterThan(0);
+     const missing = LEVELS.map((l) => l.id).filter((id) => !(id in shippedReference));
+-    expect(missing, `no reference circuit for: ${missing.join(', ')}`).toEqual([]);
++    expect(missing, `no reference for: ${missing.join(', ')}`).toEqual([]);
+   });
+ 
+   for (const id of LEVEL_ORDER) {
+     it(`${id} meets every bound its level declares`, () => {
+       const level = getLevel(id);
+-      const make = shippedReference[id];
+-      expect(make, `${id} has no reference circuit`).toBeDefined();
+-      if (!make) return;
+-      const result = grade(make(), registry, level);
++      const filed = shippedReference[id];
++      expect(filed, `${id} has no reference`).toBeDefined();
++      if (!filed) return;
++      const reference = referenceOf(level);
++      const result = grade(reference.graph, registry, level, reference.player);
+       expect(result.failures, JSON.stringify(result.failures)).toEqual([]);
+       expect(result.passed).toBe(true);
+       const target = level.threeStar;
+       expect(target, `${id} declares no three-star targets`).toBeDefined();
+       if (!target) return;
+       // Each bound is compared directly, with both numbers in the message: the
+       // rule is "the reference MEETS the target", so a failure has to name the
+       // measured value and the target it beat.
+       const { gate, delay, tick } = result.metrics;
+       if (target.gate !== undefined) {
+diff --git a/test/levels/level-buildability.test.ts b/test/levels/level-buildability.test.ts
+index 5f6f9a3..f4af9bc 100644
+--- a/test/levels/level-buildability.test.ts
++++ b/test/levels/level-buildability.test.ts
+@@ -1,28 +1,32 @@
+ import { describe, expect, it } from 'vitest';
+ import {
+   STARTER_COMPONENTS,
+   applyGrade,
+   emptyProgress,
+   paletteDefsFor,
+   unlockedComponents,
+   type Progress,
+ } from '../../src/app/progress';
+ import type { Graph } from '../../src/core/graph';
++import { graphFromBoard } from '../../src/levels/board';
+ import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
+ import { CH3_LEVELS } from '../../src/levels/content/ch3/index';
++import { CH4_LEVELS } from '../../src/levels/content/ch4/index';
++import type { PlayerProgram } from '../../src/levels/checks';
+ import { grade, type GradeResult } from '../../src/levels/grader';
+ import { LEVELS, LEVEL_ORDER } from '../../src/levels/index';
+ import type { LevelSpec } from '../../src/levels/spec';
+ import { build, registry } from '../fixtures/build';
+ import { CH2_REFERENCES } from '../fixtures/ch2-references';
+ import { CH3_REFERENCES } from '../fixtures/ch3-references';
++import { CH4_REFERENCES } from '../fixtures/ch4-references';
+ 
+ /**
+  * The whole-set machine check: can the palette the app hands a first-time player
+  * build every shipped level's own reference solution, and does every shipped
+  * level offer only parts it has earned?
+  *
+  * WHY THIS FILE EXISTS. Both defects it catches were found by reading, not by a
+  * test. Level 16's reference needs `splitter`, and `splitter` is level 16's own
+  * reward: `paletteDefsFor` offered the rewards of PASSED levels only, so a
+  * first-time palette could not build the level at all. `mem1` is the 1-bit
+@@ -31,60 +35,91 @@ import { CH3_REFERENCES } from '../fixtures/ch3-references';
+  * see the first -- they assert a reference against `level.allowedComponents`,
+  * never against the palette the app computes -- and nothing walked the shipped
+  * set as a whole for the second.
+  *
+  * THE WALK IS DERIVED, NOT LISTED. The level set comes from `LEVELS` /
+  * `LEVEL_ORDER` (`src/levels/index.ts`) and the palette comes from
+  * `paletteDefsFor` itself; re-deriving `unlockedComponents` filtered by
+  * `allowedComponents` here would let this check and the app drift apart, which
+  * is the failure mode it exists to catch.
+  *
+- * BOTH CHAPTERS ARE JOINED NOW, so the shipped set is `LEVELS` -- all 49 ids, no
+- * filter and no sibling list. This file used to carry a `NOT_JOINED_YET` slice
+- * (`CH2_LEVELS` filtered against `LEVEL_ORDER`) that covered chapter 2's
+- * written-but-unreachable levels; `content/index.ts` now appends that same
+- * array, the filter matched nothing, and it is gone. The join is asserted rather
+- * than assumed, by the `the assembled set` block below: 49 levels, chapter-2
+- * indices 14-39 contiguous and unique, and no id twice.
++ * EVERY CHAPTER JOINED SO FAR IS IN THE SHIPPED SET, so the set is `LEVELS` --
++ * all 56 ids, no filter and no sibling list. This file used to carry a
++ * `NOT_JOINED_YET` slice (`CH2_LEVELS` filtered against `LEVEL_ORDER`) that
++ * covered chapter 2's written-but-unreachable levels; `content/index.ts` now
++ * appends that same array, the filter matched nothing, and it is gone. The join is
++ * asserted rather than assumed, by the `the assembled set` block below: 56 levels,
++ * each chapter's indices contiguous and unique, and no id twice.
+  *
+- * THE REFERENCE SOLUTIONS COME FROM TWO PLACES, and the asymmetry is scope
+- * rather than taste. Chapter 2's 26 graphs moved to
++ * THE REFERENCES COME FROM THIS FILE AND THREE FIXTURES, and the asymmetry is
++ * scope rather than taste. Chapter 2's 26 graphs moved to
+  * `test/fixtures/ch2-references.ts`, which the four batch tests now share (that
+- * file's header explains the move); chapter 1's thirteen are still written out
++ * file's header explains the move); chapter 3's ten come from
++ * `test/fixtures/ch3-references.ts`; chapter 1's thirteen are still written out
+  * below, because this task may not edit the chapter-1 test files that own them.
+- * Either way the copies cannot rot quietly: the tests below grade every filed
+- * reference against the level it is filed under, and the walk fails loudly if
+- * one stops passing.
++ * Chapter 4's seven are not circuits at all -- the level ships the CPU, so the
++ * reference is a PROGRAM (`test/fixtures/ch4-references.ts`) and the graph is read
++ * from the level's own `board` (`referenceFor` below). Either way the copies
++ * cannot rot quietly: the tests below grade every filed reference against the
++ * level it is filed under, and the walk fails loudly if one stops passing.
+  */
+ 
+ /**
+  * Every level the repository ships, in the game's order.
+  *
+  * `LEVELS` IS the game's order -- `levels/index.ts` re-exports `ALL_LEVELS`,
+- * which is chapter 1 followed by chapter 2 -- so nothing here re-sorts or
++ * which is chapters 1 to 4 in campaign order -- so nothing here re-sorts or
+  * re-filters it. A walk that derived its own order could agree with itself while
+  * disagreeing with the app, which is the failure this file exists to catch.
+  */
+ const SHIPPED: readonly LevelSpec[] = LEVELS;
+ 
+ /** The shipped level with this id, or a loud failure -- `find` returns `undefined`. */
+ function specOf(id: string): LevelSpec {
+   const level = SHIPPED.find((entry) => entry.id === id);
+   if (!level) throw new Error(`no shipped level ${id}`);
+   return level;
+ }
+ 
+-/** The reference solution filed for this level, or a loud failure. */
+-function solutionFor(id: string): () => Graph {
+-  const make = REFERENCE_SOLUTIONS[id];
+-  if (!make) throw new Error(`no reference solution filed for ${id}`);
+-  return make;
++/**
++ * A reference solution as filed: a circuit factory, or -- chapter 4's shape -- the
++ * reference PROGRAM the level's own board runs.
++ *
++ * THE UNION IS THE POINT, and its two halves come from different places for a
++ * reason. Chapters 1-3's levels ship no starting circuit, so the reference IS the
++ * circuit, filed in this file's map or in a chapter fixture. Chapter 4's levels
++ * ship the chapter-3 machine as their `board`, so filing a circuit beside the
++ * level would be a second copy of the CPU, free to drift from the one a player is
++ * handed -- and the drift would read as a PASS, because a stale copy keeps grading
++ * green against a machine the levels no longer ship. A chapter-4 entry is
++ * therefore just its `CH4_REFERENCES` program, and the graph is read from the
++ * level itself with the app's own `graphFromBoard` (ruling 1: the board does not
++ * enter the fixture).
++ */
++type FiledReference = (() => Graph) | { readonly program: string };
++
++/**
++ * The graph and player program a level's filed reference grades with, or a loud
++ * failure when nothing is filed.
++ *
++ * A circuit reference yields a graph and no player buffer; a program reference
++ * yields the level's own board and the text as the fourth argument `grade` and
++ * `runChecks` read -- the same channel the app passes the player's buffer
++ * through, so chapter 4 is graded exactly the way the app grades it.
++ */
++function referenceFor(level: LevelSpec): { graph: Graph; player?: PlayerProgram } {
++  const filed = REFERENCE_SOLUTIONS[level.id];
++  if (!filed) throw new Error(`no reference solution filed for ${level.id}`);
++  if (typeof filed === 'function') return { graph: filed() };
++  const board = level.board;
++  if (!board) throw new Error(`${level.id} files a program but ships no board to run it on`);
++  return { graph: graphFromBoard(level.id, board), player: { text: filed.program } };
+ }
+ 
+ /**
+  * A pass record for the walks below.
+  *
+  * The metrics are placeholders and deliberately so: this progress exists to
+  * answer "what has the player unlocked by the time they reach level N", and
+  * `applyGrade` is the app's own way of writing a pass. Grading the references
+  * here would conflate "the palette can build the reference" with "the reference
+  * still passes", which is a separate test on purpose.
+@@ -126,24 +161,26 @@ function paletteAt(index: number): Set<string> {
+ }
+ 
+ /**
+  * Every shipped level's reference solution.
+  *
+  * Chapter 1's thirteen are copied from the test files that own them (see this
+  * file's header for why the copy exists and what keeps it honest) and are the
+  * graphs each level's three-star target was measured from, which is what makes
+  * "the palette can build the reference" the right thing to assert: the reference
+  * is the circuit a player is expected to reach, so a palette that cannot build
+- * it cannot pass the level. Chapter 2's 26 are the shared fixture's, one entry
+- * per level in index order.
++ * it cannot pass the level. Chapter 2's 26 and chapter 3's ten are the shared
++ * fixtures', one entry per level in index order. Chapter 4's seven are PROGRAMS
++ * (see `FiledReference`): the graph is the level's own `board`, and the text is
++ * `CH4_REFERENCES`, spread in whole so no program is copied a second time.
+  */
+-const REFERENCE_SOLUTIONS: Record<string, () => Graph> = {
++const REFERENCE_SOLUTIONS: Record<string, FiledReference> = {
+   'ch1-01-humble-beginnings': () =>
+     build([
+       { kind: 'part', def: 'const_on', id: 'src', from: [] },
+       { kind: 'output', from: 'src' },
+     ]),
+   'ch1-02-nand-gate': () =>
+     build([
+       { kind: 'input', name: 'a' },
+       { kind: 'input', name: 'b' },
+       { kind: 'part', def: 'nand', id: 'g', from: ['a', 'b'] },
+@@ -253,31 +290,35 @@ const REFERENCE_SOLUTIONS: Record<string, () => Graph> = {
+   // Chapter 2, levels 14-39, from the shared fixture the batch tests also use.
+   ...CH2_REFERENCES,
+   // Chapter 3, levels 40-49, likewise -- and here the fixture matters more than
+   // it did for chapter 2. All three chapter-3 levels in a batch share ONE
+   // reference graph (`overtureMachine`, `computeUnitGraph`, ...), parameterised
+   // by `options`; the fixture is what holds those parameter defaults still, so
+   // this walk is checking the palette against the same graph the batch tests
+   // measured their three-star targets from. A copy pasted here instead would be
+   // free to drift from the measured one, and the drift would read as a pass.
+   ...CH3_REFERENCES,
++  // Chapter 4, levels 50-56: the same fixture the batch tests grade, spread in
++  // whole. Each entry is `{ program, format }`, which satisfies the `{ program }`
++  // half of `FiledReference`; the graph comes from the level's own board.
++  ...CH4_REFERENCES,
+ };
+ 
+-describe('the assembled set is chapter 1, then 2, then 3, in order', () => {
+-  it('ships 49 levels with no id twice', () => {
++describe('the assembled set is chapter 1, then 2, then 3, then 4, in order', () => {
++  it('ships 56 levels with no id twice', () => {
+     // The join's arithmetic, and the two halves of it. A duplicate id would not
+     // change either length -- `LEVEL_ORDER` is a list of ids, so the game would
+     // simply have two levels by that name and one of them unreachable -- which
+     // is exactly why uniqueness is asserted rather than implied by the count.
+-    expect(LEVELS.length).toBe(49);
+-    expect(LEVEL_ORDER.length).toBe(49);
+-    expect(new Set(LEVEL_ORDER).size).toBe(49);
++    expect(LEVELS.length).toBe(56);
++    expect(LEVEL_ORDER.length).toBe(56);
++    expect(new Set(LEVEL_ORDER).size).toBe(56);
+   });
+ 
+   it('keeps chapter 2 whole, in index order, exactly where its own join put it', () => {
+     // `CH2_LEVELS` is the chapter's own entry point (`content/ch2/index.ts`), so
+     // this is the claim that matters about the join: what the chapter says it
+     // exports, in the order it says it, is what the game's order contains --
+     // nothing lost, nothing reordered, nothing doubled.
+     const inGame = LEVELS.filter((level) => level.chapter === 2);
+     // The chapter's export is compared as a SET of ids rather than as a sequence,
+     // which is the 2.x shape rather than a relaxation: the four batches hold
+@@ -308,61 +349,93 @@ describe('the assembled set is chapter 1, then 2, then 3, in order', () => {
+     expect(inGame.map((level) => level.id)).toEqual(CH3_LEVELS.map((level) => level.id));
+     expect(inGame).toHaveLength(10);
+     // Contiguous AND unique: 40..49 with no gap and no repeat, which is what
+     // `isUnlocked` (the immediate predecessor) assumes when it walks the order.
+     expect(inGame.map((level) => level.index)).toEqual(
+       Array.from({ length: 10 }, (_, offset) => 40 + offset),
+     );
+     expect(new Set(inGame.map((level) => level.index)).size).toBe(10);
+   });
+ 
+-  it('puts chapters 1 and 2 first, and nothing after chapter 3', () => {
++  it('keeps chapter 4 whole, in index order, exactly where its own join put it', () => {
++    // Chapter 4's version of the claim above, and the third time this campaign has
++    // needed it: two tasks delivered its seven levels, each with its own green
++    // batch test, and `content/index.ts` named none of them -- so no player could
++    // reach level 50, let alone 56. A batch test imports its batch by path and
++    // passes either way; this walks the game. Unlike chapter 2's four scattered
++    // batches, chapter 4's two are in campaign order, so the export is compared
++    // as a sequence rather than as a set.
++    const inGame = LEVELS.filter((level) => level.chapter === 4);
++    expect(inGame.map((level) => level.id)).toEqual(CH4_LEVELS.map((level) => level.id));
++    expect(inGame).toHaveLength(7);
++    // Contiguous AND unique: 50..56 with no gap and no repeat, which is what
++    // `isUnlocked` (the immediate predecessor) assumes when it walks the order.
++    expect(inGame.map((level) => level.index)).toEqual(
++      Array.from({ length: 7 }, (_, offset) => 50 + offset),
++    );
++    expect(new Set(inGame.map((level) => level.index)).size).toBe(7);
++  });
++
++  it('puts chapters 1 to 3 first, and nothing after chapter 4', () => {
+     // "Appends; does not merge or interleave" has two failure directions, and
+     // only one of them was ever asserted before chapter 3 existed: a later
+     // chapter landing inside an earlier one. The other is an earlier chapter
+     // landing after a later one -- which a bare `slice(0, 12)` cannot see -- so
+     // the claim is now stated over the whole order rather than its head.
++    //
++    // CHAPTER 3'S SLICE IS BOUNDED AT BOTH ENDS, which is what chapter 4 landing
++    // proved: `slice(39)` used to be the same thing as `slice(39, 49)` only
++    // because 49 was the last index the game had, and an unbounded slice silently
++    // becomes "chapter 3 plus everything appended after it". The bound was written
++    // in when chapter 3 landed and needed no change here; chapter 4's own span is
++    // asserted after it, bounded at the end by the order's own length.
+     expect(LEVELS.filter((level) => level.chapter === 1)).toHaveLength(13);
+     expect(LEVEL_ORDER.slice(0, 13)).toEqual(
+       LEVELS.filter((level) => level.chapter === 1).map((level) => level.id),
+     );
+     expect(LEVEL_ORDER.slice(13, 39)).toEqual(
+       LEVELS.filter((level) => level.chapter === 2).map((level) => level.id),
+     );
+-    expect(LEVEL_ORDER.slice(39)).toEqual(
++    expect(LEVEL_ORDER.slice(39, 49)).toEqual(
+       LEVELS.filter((level) => level.chapter === 3).map((level) => level.id),
+     );
++    expect(LEVEL_ORDER.slice(49)).toEqual(
++      LEVELS.filter((level) => level.chapter === 4).map((level) => level.id),
++    );
+   });
+ });
+ 
+ describe('every shipped level can build its own reference solution', () => {
+   it('files a reference solution for every shipped level', () => {
+     // The walk below can only prove something about the levels it has a graph
+     // for, so a level shipped without one is a hole in the check, not a pass.
+     expect(Object.keys(REFERENCE_SOLUTIONS).sort()).toEqual(SHIPPED.map((level) => level.id).sort());
+   });
+ 
+   it('grades every filed reference against the level it is filed under', () => {
+     // This is what keeps the copies above honest: a reference that no longer
+     // passes its own level is a stale copy, and the walk below would then be
+-    // asserting buildability of a circuit the level does not accept.
++    // asserting buildability of a circuit the level does not accept. Chapter 4's
++    // references come with a player program (see `referenceFor`), which is passed
++    // on the same fourth argument the app uses.
+     for (const level of SHIPPED) {
+-      const result = grade(solutionFor(level.id)(), registry, level);
++      const reference = referenceFor(level);
++      const result = grade(reference.graph, registry, level, reference.player);
+       expect(result.failures, `${level.id}: ${JSON.stringify(result.failures)}`).toEqual([]);
+       expect(result.passed, level.id).toBe(true);
+     }
+   });
+ 
+   for (const [index, level] of SHIPPED.entries()) {
+     it(level.id, () => {
+       const palette = paletteAt(index);
+-      for (const inst of solutionFor(level.id)().instances) {
++      for (const inst of referenceFor(level).graph.instances) {
+         expect(
+           palette.has(inst.def),
+           `${level.id} uses ${inst.def}, which its palette does not offer (palette: ${[...palette].join(', ')})`,
+         ).toBe(true);
+       }
+     });
+   }
+ });
+ 
+ describe('no shipped level offers a part it has not earned', () => {
+@@ -412,21 +485,21 @@ describe('chapter 1 palettes are unchanged by offering a level its own rewards',
+     }
+   });
+ 
+   it('draws every chapter-1 reference from parts an earlier level rewards', () => {
+     // The stronger half of the same claim: chapter 1's references are buildable
+     // without the level's own rewards at all, which is what chapter 1 shipped
+     // with. `unlockedComponents` on the progress before the level is that set.
+     for (const [index, level] of SHIPPED.entries()) {
+       if (level.chapter !== 1) continue;
+       const before = unlockedComponents(progressBefore(index), SHIPPED);
+-      for (const inst of solutionFor(level.id)().instances) {
++      for (const inst of referenceFor(level).graph.instances) {
+         expect(
+           before.has(inst.def),
+           `${level.id} uses ${inst.def}, which only its own reward unlocks`,
+         ).toBe(true);
+       }
+     }
+   });
+ });
+ 
+ describe('the latch part chapter 2 builds from is reachable', () => {
+diff --git a/test/levels/unlock-chain.test.ts b/test/levels/unlock-chain.test.ts
+index 2d4f658..974ad2e 100644
+--- a/test/levels/unlock-chain.test.ts
++++ b/test/levels/unlock-chain.test.ts
+@@ -5,20 +5,21 @@
+ // loudly if a later task ever does add Node types, at which point the directive
+ // can simply go.
+ // @ts-expect-error -- no Node ambient types in this project's tsconfig
+ import { readFileSync } from 'node:fs';
+ import { describe, expect, it } from 'vitest';
+ import { STARTER_COMPONENTS } from '../../src/app/progress';
+ import { DECODER_DEF_IDS } from '../../src/core/defs/wide';
+ import type { PortValue } from '../../src/core/signal';
+ import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
+ import { CH3_LEVELS } from '../../src/levels/content/ch3/index';
++import { CH4_LEVELS } from '../../src/levels/content/ch4/index';
+ import { LEVELS, LEVEL_ORDER, levelsOfChapter } from '../../src/levels/index';
+ import type { LevelSpec } from '../../src/levels/spec';
+ import { registry } from '../fixtures/build';
+ 
+ /**
+  * The chapter's unlock chain, asserted as a chain rather than level by level.
+  *
+  * WHAT THIS ADDS OVER THE OTHER TWO WALKS. `level-buildability.test.ts` checks
+  * each level against its own palette (can the player build this level's
+  * reference, and does the level offer anything it has not earned);
+@@ -487,51 +488,54 @@ describe('chapter 2 is exactly 26 levels, at indices 14-39', () => {
+     // batches hold scattered slices of the chapter's numbering (batch 1 is 14,
+     // 15, 16, 18, 21), so `content/index.ts` sorts the joined set by index and
+     // `LEVEL_ORDER` is the campaign's order, not the batches'. The sibling test
+     // above is what pins that order; this one pins that the game's chapter-2
+     // span is exactly chapter 2, with nothing lost and nothing doubled.
+     expect(LEVEL_ORDER.slice(13, 39)).toEqual(levelsOfChapter(2).map((level) => level.id));
+     expect([...levelsOfChapter(2)].map((level) => level.id).sort()).toEqual(
+       [...CH2_LEVELS].map((level) => level.id).sort(),
+     );
+     expect(levelsOfChapter(1)).toHaveLength(13);
+-    expect(LEVELS).toHaveLength(49);
++    expect(LEVELS).toHaveLength(56);
+   });
+ });
+ 
+ // ---------------------------------------------------------------------------
+ // Rule 4 for chapter 3: ten levels, indices 40-49, and the machine in order
+ // ---------------------------------------------------------------------------
+ 
+ describe('chapter 3 is exactly 10 levels, at indices 40-49', () => {
+   it('has 10 levels, one per index from 40 to 49', () => {
+     const chapter3 = levelsOfChapter(3);
+     expect(chapter3).toHaveLength(10);
+     expect(chapter3.map((level) => level.index)).toEqual(
+       Array.from({ length: 10 }, (_, offset) => 40 + offset),
+     );
+     expect(new Set(chapter3.map((level) => level.index)).size).toBe(10);
+     expect(new Set(chapter3.map((level) => level.id)).size).toBe(10);
+   });
+ 
+-  it('is the chapter join point, in the same order, at the end of the game', () => {
+-    // Chapter 3 is the LAST chapter this build ships, so `slice(39)` runs to the
+-    // end of the order -- the exact shape that made chapter 2's equivalent
+-    // assertion wrong the moment a later chapter appeared. That is safe here only
+-    // because there is no chapter 4 yet; the bounded form is used regardless, so
+-    // the day chapter 4 lands this fails loudly instead of silently widening.
++  it('is the chapter join point, in the same order, with chapter 4 following it', () => {
++    // Chapter 3 USED TO BE the last chapter this build ships, so this block's
++    // sibling in chapter 2 is the shape that warned about it: `slice(39)` running
++    // to the end of the order would have silently become "chapter 3 plus
++    // everything appended after it" the moment a later chapter appeared, so the
++    // bound was written in regardless -- "the day chapter 4 lands this fails
++    // loudly instead of silently widening". Chapter 4 landed in this task and the
++    // bound is what kept the assertion honest: chapter 3 is still exactly
++    // `LEVEL_ORDER.slice(39, 49)`, and the seven levels after it are chapter 4's,
++    // in the campaign's order, at indices 50-56.
+     expect(levelsOfChapter(3).map((level) => level.id)).toEqual(
+       CH3_LEVELS.map((level) => level.id),
+     );
+     expect(LEVEL_ORDER.slice(39, 49)).toEqual(CH3_LEVELS.map((level) => level.id));
+-    // And nothing beyond it: 49 is the last index the game has.
+-    expect(LEVEL_ORDER).toHaveLength(49);
++    expect(LEVEL_ORDER.slice(49)).toEqual(CH4_LEVELS.map((level) => level.id));
+   });
+ 
+   it('hands the six machine parts out one per level, in the order they are built', () => {
+     // The chain the plan asks to be pinned, as a chain rather than as six
+     // independent facts. `test/levels/ch3-batch*.test.ts` already assert each
+     // level's OWN reward, and the row test above asserts each part is unlocked by
+     // exactly one chapter-3 level; neither says WHICH one. This is the claim that
+     // makes the chapter teach a machine instead of six unrelated parts: the ALU
+     // arrives before the level that does arithmetic with it, the register file
+     // before the level that decodes into it, `ram_prog` before the three levels
+diff --git a/test/smoke/ui.spec.ts b/test/smoke/ui.spec.ts
+index a353f70..a3be7f6 100644
+--- a/test/smoke/ui.spec.ts
++++ b/test/smoke/ui.spec.ts
+@@ -12,21 +12,21 @@ import { STORAGE_KEY } from '../../src/persist/storage';
+  * The drag offsets are deliberately hard-coded against the board's geometry:
+  * `pinPosition()` puts an output pin at `x + INSTANCE_WIDTH (72)`, vertically
+  * centred, and a part dropped at cursor `(px, py)` lands with its pin row on
+  * `py`. If the part size changes, these offsets have to change with it -- that
+  * coupling is the point, because pointer feel is part of the UI contract.
+  *
+  * CHAPTERS 2 AND 3 ARE COVERED BY THE LAST SIX TESTS. Joining a chapter to the
+  * level list is not shipping it: a level nobody can open, or one that opens but
+  * never grades, is invisible in the earlier tests either way. Those tests seed a
+  * save with the levels before their target already passed -- the only practical
+- * way to reach level 31, let alone 49, in a browser test -- and then walk the
++ * way to reach level 31, let alone 49 or 56, in a browser test -- and then walk the
+  * real path: open it, read its palette, build its reference, pass it, and watch
+  * the next tile unlock.
+  *
+  * THE CHAPTER-3 TESTS ARE THE ONES THAT WOULD HAVE CAUGHT ITS ACTUAL DEFECT. All
+  * nine of its levels were written, compiled and passed their own batch tests
+  * while `content/index.ts` never named the chapter, so no player could reach any
+  * of them. A batch test imports its batch by path and passes either way; only a
+  * walk that starts from the app's own level list can see the difference, which is
+  * what these do.
+  */
+@@ -440,27 +440,29 @@ test('right-click removes the part under the pointer, undoably', async ({ page }
+  * gates; this walks the thing a developer actually does -- land on the URL, open
+  * the map, click the last level -- and the thing that keeps it honest: the game
+  * says so, loudly, and one click puts it back.
+  */
+ test('?dev=1 opens every level, and says so', async ({ page }) => {
+   await page.goto('/?dev=1');
+   await page.getByRole('button', { name: '开始' }).click();
+   await expect(page.locator('.shell-dev')).toBeVisible();
+ 
+   await page.getByRole('button', { name: '章节地图' }).click();
+-  // Every one of the 49, from a save with nothing passed in it. Level 1 alone
++  // Every one of the 56, from a save with nothing passed in it. Level 1 alone
+   // would be enabled without the flag.
+-  await expect(page.locator('.map-tile:not([disabled])')).toHaveCount(49);
++  await expect(page.locator('.map-tile:not([disabled])')).toHaveCount(56);
+   await page.screenshot({ path: 'test-results/smoke-dev-map.png' });
+ 
+-  // The last level opens, and it offers the parts that level was designed
+-  // around -- the whole reason the flag reaches the palette as well as the map.
++  // Level 49 opens -- chapter 3's last level, not the game's last any more, which
++  // is why the tile is addressed by index rather than as the final one -- and it
++  // offers the parts that level was designed around: the whole reason the flag
++  // reaches the palette as well as the map.
+   await page.locator('.map-tile').nth(48).click();
+   // Opening a level raises its briefing, and the briefing covers the bar.
+   await page.getByRole('button', { name: '开始' }).click();
+   await expect(page.locator('.shell-bar')).toContainText('图灵完备');
+   await expect(page.getByRole('button', { name: '8 位运算器', exact: true })).toBeEnabled();
+ 
+   // One click leaves the mode, and the URL goes with it: a refresh must not
+   // bring back a sandbox nobody asked for again.
+   await page.locator('.shell-dev').click();
+   await expect(page.locator('.shell-dev')).toBeHidden();
+@@ -603,23 +605,23 @@ test('chapter 2 is reachable: level 14 opens once chapter 1 is passed', async ({
+ 
+   await expect(page.locator('.shell-bar')).toContainText('二进制速算');
+   // The palette is live across the join: this level's own parts are the chapter-1
+   // ones it lists, and the XOR gate is among them. (It is also chapter 2's first
+   // level rather than one of its byte puzzles, which is the 2.x order.)
+   await expect(page.getByRole('button', { name: '异或门' })).toBeEnabled();
+   // The level's own checker is mounted and live.
+   await expect(page.locator('.truth-table')).toBeVisible();
+ 
+   await page.getByRole('button', { name: '章节地图' }).click();
+-  // All 49 tiles -- chapter 2's 26 and chapter 3's ten are on the map, which is
+-  // the player's only view of them.
+-  await expect(page.locator('.map-tile')).toHaveCount(49);
++  // All 56 tiles -- chapter 2's 26, chapter 3's ten and chapter 4's seven are on
++  // the map, which is the player's only view of them.
++  await expect(page.locator('.map-tile')).toHaveCount(56);
+   await expect(page.locator('.map-tile').nth(13)).toContainText('二进制速算');
+   await expect(page.locator('.map-tile').nth(13)).toBeEnabled();
+   // Unlocking stays strictly linear across the join: level 15 waits for 14.
+   await expect(page.locator('.map-tile').nth(14)).toBeDisabled();
+ 
+   // And a chapter-2 tile is real navigation, exactly as a chapter-1 one is.
+   await page.locator('.map-tile').nth(13).click();
+   await expect(page.locator('.screen-map')).toBeHidden();
+   await expect(page.locator('.screen-board')).toBeVisible();
+   await expect(page.locator('.shell-bar')).toContainText('二进制速算');
+@@ -672,21 +674,21 @@ test('a chapter-2 level opens and grades end to end', async ({ page }) => {
+ 
+ test('the last chapter-2 level opens: level 39 is reachable', async ({ page }) => {
+   // 37 passed: the resume point is the chapter's last level. Reaching it proves
+   // the join reaches the end of the chapter, not just its first batch.
+   await seedProgress(page, 38);
+   await page.goto('/');
+   await page.getByRole('button', { name: '开始' }).click();
+   await expect(page.locator('.shell-bar')).toContainText('计数器');
+ 
+   await page.getByRole('button', { name: '章节地图' }).click();
+-  await expect(page.locator('.map-tile')).toHaveCount(49);
++  await expect(page.locator('.map-tile')).toHaveCount(56);
+   await expect(page.locator('.map-tile').nth(38)).toContainText('计数器');
+   await expect(page.locator('.map-tile').nth(38)).toBeEnabled();
+ 
+   await page.locator('.map-tile').nth(38).click();
+   await expect(page.locator('.screen-board')).toBeVisible();
+   await expect(page.locator('.shell-bar')).toContainText('计数器');
+   // A real level, not an empty screen: its palette offers the register the level
+   // is built from and its checker is mounted.
+   await expect(page.getByRole('button', { name: '8 位寄存器' })).toBeEnabled();
+   await expect(page.locator('.truth-table')).toBeVisible();
+@@ -723,48 +725,49 @@ test('a sequential level replays its steps and reads every one of them', async (
+ test('chapter 3 is reachable: level 40 opens once chapter 2 is passed', async ({ page }) => {
+   // 39 passed -- the whole of chapters 1 and 2 -- so the resume point is the
+   // first chapter-3 level. Before the chapter was appended to the level list this
+   // test failed at the resume point itself, which is the point of it.
+   await seedProgress(page, 39);
+   await page.goto('/');
+   await page.getByRole('button', { name: '开始' }).click();
+   await expect(page.locator('.shell-bar')).toContainText('逻辑整合');
+ 
+   await page.getByRole('button', { name: '章节地图' }).click();
+-  await expect(page.locator('.map-tile')).toHaveCount(49);
++  await expect(page.locator('.map-tile')).toHaveCount(56);
+   await expect(page.locator('.map-tile').nth(39)).toContainText('逻辑整合');
+   await expect(page.locator('.map-tile').nth(39)).toBeEnabled();
+   // Unlocking stays strictly linear across the second join too: 41 waits for 40.
+   await expect(page.locator('.map-tile').nth(40)).toBeDisabled();
+ 
+   // A real level, not an empty screen: its palette offers the eight-bit wiring
+   // the level is built from and its checker is mounted.
+   await page.locator('.map-tile').nth(39).click();
+   await expect(page.locator('.screen-board')).toBeVisible();
+   await expect(page.locator('.shell-bar')).toContainText('逻辑整合');
+   await expect(page.locator('.truth-table')).toBeVisible();
+   await page.screenshot({ path: 'test-results/smoke-ch3-level40-open.png' });
+ });
+ 
+-test('the last level opens and mounts its program check: level 49', async ({ page }) => {
++test('chapter 3 ends with a level that mounts its program check: level 49', async ({ page }) => {
+   // 48 passed: the resume point is the phase's acceptance level -- the one whose
+   // check runs a real OVERTURE program against the machine the player built,
+   // rather than a truth table. Reaching it proves the join reaches the end of
+-  // chapter 3, and that the `program` check kind (level data + `checks.ts`) is
+-  // wired into the app rather than only into the unit tests.
++  // chapter 3 (it is no longer the game's last level -- chapter 4 follows it), and
++  // that the `program` check kind (level data + `checks.ts`) is wired into the app
++  // rather than only into the unit tests.
+   await seedProgress(page, 48);
+   await page.goto('/');
+   await page.getByRole('button', { name: '开始' }).click();
+   await expect(page.locator('.shell-bar')).toContainText('图灵完备');
+ 
+   await page.getByRole('button', { name: '章节地图' }).click();
+-  await expect(page.locator('.map-tile')).toHaveCount(49);
++  await expect(page.locator('.map-tile')).toHaveCount(56);
+   await expect(page.locator('.map-tile').nth(48)).toContainText('图灵完备');
+   await expect(page.locator('.map-tile').nth(48)).toBeEnabled();
+ 
+   await page.locator('.map-tile').nth(48).click();
+   await expect(page.locator('.screen-board')).toBeVisible();
+   await expect(page.locator('.shell-bar')).toContainText('图灵完备');
+   // The palette is everything earned through level 48, so the six machine parts
+   // are all on offer -- the claim `level-buildability.test.ts` walks, checked
+   // here against the palette the app actually renders.
+   await expect(page.getByRole('button', { name: '8 位运算器' })).toBeEnabled();
+diff --git a/test/ui/ide.test.ts b/test/ui/ide.test.ts
+index 297d9c2..3f45cd0 100644
+--- a/test/ui/ide.test.ts
++++ b/test/ui/ide.test.ts
+@@ -198,30 +198,36 @@ describe('the editor’s mount decision', () => {
+     expect(
+       levelExpectsProgram(playerLevel({ checks: [{ kind: 'custom', id: 'lock' }] })),
+     ).toBe(true);
+     // ...while the LEVEL's own program is not the player's to edit: chapter 3's
+     // machine levels grade a program the level ships.
+     expect(levelExpectsProgram(getLevel('ch3-49-turing-complete'))).toBe(false);
+     expect(levelExpectsProgram(getLevel('ch1-04-and-gate'))).toBe(false);
+   });
+ 
+   /**
+-   * THE GUARANTEE THE OTHER PANELS DEPEND ON. Chapters 1 to 3 are built and
+-   * tested against the board screen as it stands; a panel that appeared on one of
+-   * their levels would change that DOM. Every shipped level is walked rather than
+-   * spot-checked, so the day a chapter-3 level grows a `custom` check this fails
+-   * here instead of in the smoke suite.
++   * THE GUARANTEE THE OTHER PANELS DEPEND ON, now stated as the two-sided rule it
++   * always was. Chapters 1 to 3 are built and tested against the board screen as
++   * it stands; a panel that appeared on one of their levels would change that DOM.
++   * Chapter 4 is the programming chapter, and EVERY one of its seven levels grades
++   * a program the player wrote, so the editor appearing there is the feature
++   * rather than a regression. Both directions are walked over `LEVELS` rather than
++   * spot-checked, so the day a chapter-1-to-3 level grows a `custom` check -- or a
++   * chapter-4 level loses its player channel -- this fails here instead of in the
++   * smoke suite.
+    */
+-  it('leaves every shipped level without an editor', () => {
++  it('leaves chapters 1 to 3 without an editor, and mounts one on every chapter-4 level', () => {
+     expect(LEVELS.length).toBeGreaterThan(40);
+     for (const level of LEVELS) {
+-      expect(levelExpectsProgram(level), level.id).toBe(false);
++      // Chapter 4 is the programming chapter; chapters 5 to 7 are not shipped.
++      const programming = level.chapter > 3;
++      expect(levelExpectsProgram(level), level.id).toBe(programming);
+     }
+   });
+ 
+   it('reads the format the level’s own check reads', () => {
+     // The punchcard level's programs are hand-written bytes and every other
+     // level's are assembly: the editor has to read the same format its checker
+     // will, or a player would type a program that runs in the panel and fails in
+     // the grade.
+     expect(playerProgramFormat(playerLevel())).toBe('asm');
+     expect(
