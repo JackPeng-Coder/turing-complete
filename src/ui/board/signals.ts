@@ -21,7 +21,7 @@
 import { Simulation, compile } from '../../core/net';
 import { bindLevelIo, type LevelIo } from '../../levels/checks';
 import type { LevelSpec } from '../../levels/spec';
-import type { ProgramMachine } from '../../levels/run';
+import type { ProgramMachine, ProgramRun } from '../../levels/run';
 import type { Graph } from '../../core/graph';
 import type { Registry } from '../../core/registry';
 import { maskInto, portValueToNumber } from '../../core/signal';
@@ -183,6 +183,27 @@ export function createDisplay(
   // it stands.
   if (!machine) display.reset();
   return display;
+}
+
+/**
+ * The board's reset: 停止并复位, and every case that starts from a cleared
+ * circuit. The one place that knows a display may be painting a run's machine.
+ *
+ * A DISPLAY BUILT ON A RUN'S MACHINE MAY NOT BE RESET DIRECTLY. `createDisplay`
+ * is handed the `ProgramRun`'s `Simulation` on a program level, so
+ * `DisplaySimulation.reset` -- which clears the simulation's storage -- would
+ * erase `ram_prog` under the run: the editor would still show the text, the
+ * debugger would read 256 zeros and the PC would walk a zero program, and
+ * nothing would reload the image until the text itself changed. Given a run
+ * that owns the machine, the reset therefore goes through the RUN's own
+ * `reset`, which clears the board and then loads the image back into it (see
+ * `levels/run.ts`). `DisplaySimulation.reset` is still the answer for a board
+ * with no run behind it: chapters 1 to 3, and a program level whose text has not
+ * loaded (the run is inert and hands out no machine).
+ */
+export function resetBoard(display: DisplaySimulation | null, run: ProgramRun | null): void {
+  if (run !== null && run.machine !== null) run.reset();
+  else display?.reset();
 }
 
 /** A value reduced into a pin's width, so a stale vector cannot be rejected. */

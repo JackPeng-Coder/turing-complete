@@ -6,7 +6,7 @@ import { graphFromBoard } from '../../src/levels/board';
 import { overtureBoard } from '../../src/levels/boards/overture';
 import { createProgramRun } from '../../src/levels/run';
 import type { LevelSpec } from '../../src/levels/spec';
-import { createDisplay } from '../../src/ui/board/signals';
+import { createDisplay, resetBoard } from '../../src/ui/board/signals';
 import { mountDebug } from '../../src/ui/debug';
 
 const registry = createRegistry(BASE_DEFS);
@@ -100,5 +100,53 @@ describe('the board, the run and the debugger as main.ts wires them', () => {
     // the panel exists for.
     expect(run.readRegisters()).toEqual([0, INPUT, 0, 0, 0, 0]);
     expect(root.querySelector('.debug-reg:nth-child(2)')?.textContent).toContain('0x2A');
+  });
+
+  /**
+   * THE BOARD'S 停止并复位 MUST NOT EAT THE PROGRAM. `main.ts`'s `onStop` calls
+   * `resetBoard(display, run)` -- the same call, on the same pair, this test
+   * makes -- and the bug this pins is what happened when that path was a bare
+   * `display.reset()`: the display paints the run's own `Simulation`, so clearing
+   * the display's storage cleared `ram_prog` too, and the editor went on showing
+   * "5 字节" over 256 zeros. The debugger then read zeros and the counter walked a
+   * zero program, because nothing reloads the image until the text changes.
+   *
+   * THE RESET STILL HAS TO RESET, so this is not satisfied by a board that never
+   * cleared: the tick goes back to 0 and the register file is empty after it.
+   */
+  it('keeps the program loaded, and still runnable, when the board is reset', () => {
+    const graph = graphFromBoard(PROGRAM_LEVEL.id, overtureBoard({ inputId: 'in' }));
+    const run = createProgramRun(graph, registry, PROGRAM_LEVEL, ECHO, 'asm');
+    expect(run.errors).toEqual([]);
+    const display = createDisplay(graph, registry, PROGRAM_LEVEL, {}, run.machine);
+    expect(display).not.toBeNull();
+
+    // The machine has run: state the reset has to clear, and a program in RAM.
+    run.setInput('in', INPUT);
+    display!.tick();
+    display!.tick();
+    expect(display!.read().tick).toBe(2);
+    expect(run.readRegisters()).toEqual([0, INPUT, 0, 0, 0, 0]);
+    expect(run.readRam()!.slice(0, 2)).toEqual([0xb1, 0x8f]);
+
+    resetBoard(display, run);
+    // `main.ts` re-drives the readout panel's vector onto the run after the
+    // reset, because a cleared simulation has no inputs in it.
+    run.setInput('in', INPUT);
+
+    // THE CLOCK AND THE REGISTERS CLEARED, THE IMAGE DID NOT: the same bytes the
+    // editor's text compiles to, and the counter back at the first instruction.
+    expect(display!.read().tick).toBe(0);
+    expect(run.ticks).toBe(0);
+    expect(run.readPc()).toBe(0);
+    expect(run.readRegisters()).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(run.readRam()!.slice(0, 2)).toEqual([0xb1, 0x8f]);
+
+    // ...AND IT STILL RUNS. A zeroed `ram_prog` cannot reach this byte: with the
+    // image erased every instruction is `loadi|0`, so `out` stays 0.
+    display!.tick();
+    display!.tick();
+    expect(display!.read().levelOutputs.get('out')).toBe(INPUT);
+    expect(run.readOutputs()).toEqual({ out: INPUT });
   });
 });

@@ -20,7 +20,7 @@ import { mountMap } from './ui/map';
 import { narrativeFor } from './ui/narrative';
 import { renderBoard, type BoardView } from './ui/board/render';
 import { attachBoardInput, deleteSelection } from './ui/board/interact';
-import { createDisplay, type DisplaySimulation, type SignalSnapshot } from './ui/board/signals';
+import { createDisplay, resetBoard, type DisplaySimulation, type SignalSnapshot } from './ui/board/signals';
 import { instanceRect, screenToWorld, type Point } from './ui/board/view';
 import { levelExpectsProgram, playerProgramFormat, testCases, type TestPlan } from './levels/checks';
 import { createProgramRun, type ProgramRun } from './levels/run';
@@ -50,9 +50,9 @@ const store: Store<AppState> = createStore<AppState>({
   armed: null,
   dev,
   // The programs come out of the loaded save, so reopening the app restores the
-  // text the player left on each level. Nothing writes them yet -- the IDE is a
-  // later task -- but the channel is wired end to end so that the day the editor
-  // arrives it has somewhere to type into.
+  // text the player left on each level. The IDE writes them back as they are
+  // typed (`onProgramEdit`), through `progress.programs` and `saveProgress`, so
+  // the editor, the checks and the save all read the same text.
   programs: progress.programs,
   metrics: null,
   lastGrade: null,
@@ -354,7 +354,11 @@ if (app) {
     // A case's own `reset` says whether it starts from a cleared circuit: a
     // truth table's rows each do, and only a script's FIRST step does -- step 3
     // reads a register step 2 clocked. The checker does exactly this.
-    if (item.reset) display?.reset();
+    //
+    // THROUGH `resetBoard`, NOT THE DISPLAY: on a level that also grades a
+    // player's program the display is painting the run's own machine, and
+    // clearing that storage directly would empty the `ram_prog` the run loaded.
+    if (item.reset) resetBoard(display, playerRun);
     if (demonstrating) driveTo(item.inputs);
     else driveQuiet(item.inputs);
     while ((snapshot?.tick ?? 0) < item.tick) {
@@ -944,10 +948,21 @@ if (app) {
     onStop: () => {
       running = false;
       stopClock();
-      display?.reset();
+      // 停止并复位 CLEARS THE BOARD WITHOUT ERASING THE PROGRAM. On a program
+      // level the display is painting the run's own machine, so a bare
+      // `display.reset()` used to clear `ram_prog` under the editor: the byte
+      // count stayed put over 256 zeros, the debugger read zeros, and the counter
+      // walked a zero program until the text changed. The reset goes through
+      // `resetBoard` -- which resets the RUN, reloading the image -- and the
+      // readout panel's vector is re-driven onto the cleared machine, because a
+      // reset clears the inputs with the storage. Both panels are repainted: the
+      // debugger's counter and RAM window are readings of that same machine.
+      resetBoard(display, ensurePlayerRun());
+      syncPlayerInputs();
       sample();
       paint();
       io.render();
+      refreshBench();
       paintTools();
     },
     onToggleTest: toggleTest,
