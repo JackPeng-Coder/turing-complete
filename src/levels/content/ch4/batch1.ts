@@ -40,6 +40,18 @@ import type { LevelIo } from '../../tables';
  * program is supposed to read. `test/levels/ch4-batch1.test.ts` holds every
  * step to it.
  *
+ * TWO WALKS PER LEVEL, ON TWO DIFFERENT VECTORS (controller ruling R9). A
+ * `program` check executes the player's text once, so one walk pins one
+ * (input, answer) pair -- and a program that ignores the input could hard-code
+ * exactly that pair, publish it on the reveal tick, and pass. Every level here
+ * therefore carries TWO `program` checks: two walks of the same shape on
+ * different inputs. `runChecks` builds a fresh Simulation per check and merges
+ * `ticksUsed` as `Math.max`, so this is one data entry per vector and nothing
+ * else -- but a constant answers both walks the same way and the walks demand
+ * different bytes, so no input-ignoring program can answer both. The batch
+ * test's constant spoofs are the proof: each one reproduces its own walk
+ * perfectly and is rejected by the sibling walk.
+ *
  * CHAPTER 4 HANDS OUT NO NEW PARTS (spec §3.3: "无新元件；解锁汇编 IDE 与调试器"),
  * so every level's `rewards` is absent and the palette is not "everything
  * earned" (chapter 3's shape) but the exact parts the SHIPPED BOARD is built
@@ -104,61 +116,96 @@ const IO_R: LevelIo = {
 };
 
 /**
- * Level 50's walk: `in` is driven at 100 and the answer is 105.
+ * Level 50's walks: `in` driven at 100 for 105, and at 42 for 47 -- the two
+ * (input, answer) pairs this level grades (ruling R9: two vectors, two checks).
  *
  * TICK 4 IS WHERE THE ANSWER APPEARS, and the number is the program's own
  * shape: `out` publishes while the counter looks at `move|s3|out`, the fifth
  * instruction (index 4), so the byte is there after four edges. Tick 3 demands
  * 0 one edge earlier and tick 10 demands the byte again -- the halt has to have
- * frozen the counter, or the byte would have fallen back to 0.
+ * frozen the counter, or the byte would have fallen back to 0. The second walk
+ * repeats the shape on its own input: same ticks, different bytes.
  *
- * WHY 100. The answer 105 is outside the range a five-instruction CONSTANT
- * program can publish at tick 4 -- an immediate (0-63) or its complement
- * (192-255), because `loadi` is six bits and only four instructions execute
- * before the reveal -- so "ignore the input, hold the answer" cannot pass this
- * walk however it is spelled.
+ * WHY 100 AND 42. The vectors are chosen to be spoof-proof TOGETHER rather
+ * than alone. At tick 4 an input-ignoring program has executed four setup
+ * instructions, and the values that can be sitting in a register by then are a
+ * bare immediate (0-63), its complement (192-255), twice an immediate, or the
+ * few constants the ops make from zero -- so 105 cannot be hard-coded at this
+ * tick at all, while 47 can (`loadi|47`, three filler moves, `move|s0|out`).
+ * One walk alone would accept that constant; the sibling walk demands 105 and
+ * rejects it. That is exactly the invariant ruling R9 protects: every level
+ * rejects at least one program that produces the right answer at the right
+ * tick while ignoring its input.
  */
-const STEPS_50: readonly ProgramStep[] = [
+const STEPS_50_AT_100: readonly ProgramStep[] = [
   { tick: 0, inputs: { in: 100 }, expect: { out: 0 } },
   { tick: 3, inputs: { in: 100 }, expect: { out: 0 } },
   { tick: 4, inputs: { in: 100 }, expect: { out: 105 } },
   { tick: 10, inputs: { in: 100 }, expect: { out: 105 } },
 ];
 
+const STEPS_50_AT_42: readonly ProgramStep[] = [
+  { tick: 0, inputs: { in: 42 }, expect: { out: 0 } },
+  { tick: 3, inputs: { in: 42 }, expect: { out: 0 } },
+  { tick: 4, inputs: { in: 42 }, expect: { out: 47 } },
+  { tick: 10, inputs: { in: 42 }, expect: { out: 47 } },
+];
+
 /**
- * Level 51's walk: the same shape against `in + 3`, driven at 100 for 103.
+ * Level 51's walks: the same two-vector shape against `in + 3` -- driven at
+ * 100 for 103, and at 200 for 203.
  *
  * Same tick arithmetic as level 50's (the program is the same five
- * instructions with the constant changed), and the same reason for 100: 103 is
- * not an immediate and not an immediate's complement.
+ * instructions with the constant changed) and the same two-vector rule. 103
+ * cannot be hard-coded at tick 4 (odd, outside the immediate and its
+ * complement), while 203 can: it is 52's complement, `loadi|52` into both
+ * addends followed by `nor`. So the constant that reproduces the second walk
+ * is caught by the first, whichever walk a spoofer aims at.
  */
-const STEPS_51: readonly ProgramStep[] = [
+const STEPS_51_AT_100: readonly ProgramStep[] = [
   { tick: 0, inputs: { in: 100 }, expect: { out: 0 } },
   { tick: 3, inputs: { in: 100 }, expect: { out: 0 } },
   { tick: 4, inputs: { in: 100 }, expect: { out: 103 } },
   { tick: 10, inputs: { in: 100 }, expect: { out: 103 } },
 ];
 
+const STEPS_51_AT_200: readonly ProgramStep[] = [
+  { tick: 0, inputs: { in: 200 }, expect: { out: 0 } },
+  { tick: 3, inputs: { in: 200 }, expect: { out: 0 } },
+  { tick: 4, inputs: { in: 200 }, expect: { out: 203 } },
+  { tick: 10, inputs: { in: 200 }, expect: { out: 203 } },
+];
+
 /**
- * Level 52's walk: `r` is driven at 200, and 6r = 1200 wraps to 176.
+ * Level 52's walks: `r` driven at 200, where 6r = 1200 wraps to 176, and at 9,
+ * where 6r = 54 -- the wrap case and the plain one, the exact pair
+ * `reference-programs.md` verifies on the real board (r = 1/9/42/200 give
+ * 6/54/252/176).
  *
  * THE WRAP IS THE LEVEL'S OWN TEACHING POINT -- `out = (6 * r) & 0xff` and the
  * mod 256 is real -- and 200 is the value the reference-program verification
  * measured (r = 200 -> 176). The answer appears at tick 8, the index of this
  * program's `move|s3|out`, and tick 7 demands 0 one edge earlier.
  *
- * ONE WALK IS ONE EXECUTION, so this check pins one (r, out) pair; a program
- * that hard-codes 176 can pass it. The pair is chosen for the wrap rather than
- * for unreachability -- at eight setup instructions even 176 can be built from
- * constants -- and the teeth of this level live where the batch test puts them:
- * the 5r draft (the one the reference-program notes record as a real mistake)
- * is caught at this same tick.
+ * WHY TWO WALKS HERE, ABOVE ALL. At eight setup instructions even 176 can be
+ * built from constants alone -- `loadi|63, move|s0|d1, loadi|50, move|s0|d2,
+ * add, move|s3|d2, move|s0|d4, add, move|s3|out` is 63 + (63 + 50), revealed
+ * on tick 8 exactly like the reference -- so a single walk was spoofable
+ * whatever vector it chose. The second walk is what closes it: that constant
+ * answers 176 to r = 9 as well, where the answer has to be 54.
  */
-const STEPS_52: readonly ProgramStep[] = [
+const STEPS_52_AT_200: readonly ProgramStep[] = [
   { tick: 0, inputs: { r: 200 }, expect: { out: 0 } },
   { tick: 7, inputs: { r: 200 }, expect: { out: 0 } },
   { tick: 8, inputs: { r: 200 }, expect: { out: 176 } },
   { tick: 14, inputs: { r: 200 }, expect: { out: 176 } },
+];
+
+const STEPS_52_AT_9: readonly ProgramStep[] = [
+  { tick: 0, inputs: { r: 9 }, expect: { out: 0 } },
+  { tick: 7, inputs: { r: 9 }, expect: { out: 0 } },
+  { tick: 8, inputs: { r: 9 }, expect: { out: 54 } },
+  { tick: 14, inputs: { r: 9 }, expect: { out: 54 } },
 ];
 
 export const CH4_BATCH1: readonly LevelSpec[] = [
@@ -177,8 +224,9 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
    * 0xff`; the board (the chapter-3 machine, `overtureBoard({ inputId: 'in' })`
    * with the default halt -- see the module note); the `program` check that
    * reads the PLAYER's buffer as one-byte-per-line machine code
-   * (`from: 'player'`, `format: 'bytes'`); the four-step walk and its input
-   * 100; the palette (the board's own parts) and the absent reward; and the
+   * (`from: 'player'`, `format: 'bytes'`); the two four-step walks and their
+   * inputs 100 and 42 (two vectors on two checks, ruling R9 -- see the module
+   * note); the palette (the board's own parts) and the absent reward; and the
    * measured three-star target.
    *
    * THIS IS THE LEVEL THAT HAND-ENCODES. No mnemonics and no assembler: the
@@ -204,19 +252,27 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
     },
     allowedComponents: [...BOARD_PARTS],
     io: IO_IN,
-    // The player's program text, read as one byte per line. No `source`: the
-    // reference lives in the fixture (ruling 2).
+    // The player's program text, read as one byte per line, on two walks with
+    // two different vectors (ruling R9). No `source`: the reference lives in
+    // the fixture (ruling 2).
     checks: [
       {
         kind: 'program',
         from: 'player',
         format: 'bytes',
-        steps: STEPS_50,
+        steps: STEPS_50_AT_100,
+      },
+      {
+        kind: 'program',
+        from: 'player',
+        format: 'bytes',
+        steps: STEPS_50_AT_42,
       },
     ],
     board: overtureBoard({ inputId: 'in' }),
     // Measured: 675 gates and 6 deep (the shipped board -- see the module note
-    // and `boards/overture.ts`), and the tick is this walk's last assertion.
+    // and `boards/overture.ts`), and the tick is the walks' last assertion
+    // (both share the shape, so `Math.max` is 10).
     threeStar: { gate: 675, delay: 6, tick: 10 },
   },
 
@@ -231,10 +287,11 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
    *
    * AUTHORED (this replica's design): the `in:8 -> out:8` pin shape; the
    * semantics `out = (in + 3) & 0xff`; the board (the same chapter-3 machine,
-   * `overtureBoard({ inputId: 'in' })`); the `program` check that reads the
-   * PLAYER's buffer as assembly (`from: 'player'`, `format: 'asm'`); the walk,
-   * which is level 50's shape against the other constant; the palette and the
-   * absent reward; and the measured three-star target.
+   * `overtureBoard({ inputId: 'in' })`); the `program` checks that read the
+   * PLAYER's buffer as assembly (`from: 'player'`, `format: 'asm'`); the two
+   * walks, which are level 50's shape against `in + 3`, on the two vectors
+   * ruling R9 demands; the palette and the absent reward; and the measured
+   * three-star target.
    *
    * THE PROGRAM IS LEVEL 50'S PROGRAM SPELLED DIFFERENTLY, which is the
    * level's own claim rather than a coincidence: the same five instructions,
@@ -264,12 +321,19 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
         kind: 'program',
         from: 'player',
         format: 'asm',
-        steps: STEPS_51,
+        steps: STEPS_51_AT_100,
+      },
+      {
+        kind: 'program',
+        from: 'player',
+        format: 'asm',
+        steps: STEPS_51_AT_200,
       },
     ],
     board: overtureBoard({ inputId: 'in' }),
     // Measured: the same board as level 50, so the same gate and delay; the
-    // tick is this walk's last assertion.
+    // tick is the walks' last assertion (both share the shape, so `Math.max`
+    // is 10).
     threeStar: { gate: 675, delay: 6, tick: 10 },
   },
 
@@ -288,8 +352,10 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
    * AUTHORED (this replica's design): the `r:8 -> out:8` pin shape (the radius
    * is the chapter's one renamed input); the semantics `out = (6 * r) & 0xff`,
    * wrap and all; the board (`overtureBoard({ inputId: 'r' })`); the `program`
-   * check reading the PLAYER's assembly; the walk at r = 200, where 6r wraps to
-   * 176; the palette and the absent reward; and the measured three-star target.
+   * check reading the PLAYER's assembly; the two walks -- r = 200, where 6r
+   * wraps to 176, and r = 9, where it is 54 -- on the two vectors ruling R9
+   * demands (this level above all: see the walk note); the palette and the
+   * absent reward; and the measured three-star target.
    *
    * WHY THIS LEVEL EXISTS BETWEEN THE ASSEMBLER AND THE LOOPS: the ISA has no
    * multiply, so 6r is addition used again and again -- and `add` reads r1 and
@@ -319,13 +385,19 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
         kind: 'program',
         from: 'player',
         format: 'asm',
-        steps: STEPS_52,
+        steps: STEPS_52_AT_200,
+      },
+      {
+        kind: 'program',
+        from: 'player',
+        format: 'asm',
+        steps: STEPS_52_AT_9,
       },
     ],
     board: overtureBoard({ inputId: 'r' }),
     // Measured: the same board as levels 50 and 51 (only the input pin's name
-    // changes), so the same gate and delay; the tick is this walk's last
-    // assertion.
+    // changes), so the same gate and delay; the tick is the walks' last
+    // assertion (both share the shape, so `Math.max` is 14).
     threeStar: { gate: 675, delay: 6, tick: 14 },
   },
 ];

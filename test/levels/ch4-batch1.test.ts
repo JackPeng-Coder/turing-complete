@@ -36,7 +36,9 @@ import { CH4_REFERENCES } from '../fixtures/ch4-references';
  *
  * The counterexamples are therefore PROGRAMS, not machines: a sabotaged
  * reference, an empty buffer, a corrupted line, a byte written at the wrong
- * width. Each names the failure reason the checker has to report -- `mismatch`
+ * width, and -- the one the two-walk shape exists for (ruling R9) -- an
+ * input-ignoring constant program that publishes the answer on the reveal
+ * tick. Each names the failure reason the checker has to report -- `mismatch`
  * with the tick and both bytes, `missing-program` for the vacuum, `invalid`
  * with the reader's own line number for a text that will not parse.
  */
@@ -47,11 +49,17 @@ function level(id: string): LevelSpec {
   return found;
 }
 
-/** A level's program check, or a loud failure. */
-function programOf(spec: LevelSpec): ProgramCheck {
-  const check = spec.checks[0];
-  if (check?.kind !== 'program') throw new Error(`${spec.id} has no program check`);
-  return check;
+/**
+ * A level's program checks -- every check in this batch is one -- or a loud
+ * failure. PLURAL since ruling R9: one `program` check is one execution of the
+ * player's text, so every level carries two, on different input vectors.
+ */
+function programsOf(spec: LevelSpec): readonly ProgramCheck[] {
+  const programs = spec.checks.filter((check): check is ProgramCheck => check.kind === 'program');
+  if (programs.length === 0 || programs.length !== spec.checks.length) {
+    throw new Error(`${spec.id} has a check that is not a program check`);
+  }
+  return programs;
 }
 
 /**
@@ -79,22 +87,48 @@ function runReference(spec: LevelSpec) {
   return runChecks(boardOf(spec), registry, spec, { text: referenceOf(spec).program });
 }
 
-/** The tick of the walk's last assertion -- the batch's `threeStar.tick`. */
+/**
+ * The tick of every walk's last assertion -- the batch's `threeStar.tick`,
+ * which merges the walks as `Math.max` (ruling 3, read across both checks).
+ */
 function lastAssertedTick(spec: LevelSpec): number {
-  const asserted = programOf(spec).steps.filter((step: ProgramStep) => step.expect !== undefined);
-  if (asserted.length === 0) throw new Error(`${spec.id} asserts nothing`);
-  return asserted.reduce((max, step) => Math.max(max, step.tick), 0);
+  let last = 0;
+  for (const check of programsOf(spec)) {
+    const asserted = check.steps.filter((step: ProgramStep) => step.expect !== undefined);
+    if (asserted.length === 0) throw new Error(`${spec.id} asserts nothing`);
+    last = Math.max(last, ...asserted.map((step) => step.tick));
+  }
+  return last;
 }
 
-/** Every `out` byte the walk asserts, in step order. */
-function walkOf(spec: LevelSpec): readonly (number | undefined)[] {
-  return programOf(spec).steps.map((step) => step.expect?.out);
+/** Every walk's `out` bytes: one array per check, in check and step order. */
+function walksOf(spec: LevelSpec): readonly (readonly (number | undefined)[])[] {
+  return programsOf(spec).map((check) => check.steps.map((step) => step.expect?.out));
 }
 
-/** The answer a walk demands once the program has published it. */
+/**
+ * The input byte every step of every walk drives -- one row per walk. The rows
+ * are `driveSteps`' contract, not a style rule: a step that omitted `inputs`
+ * would clear the very byte the program is supposed to read.
+ */
+function drivenOf(spec: LevelSpec): readonly (readonly number[])[] {
+  return programsOf(spec).map((check) =>
+    check.steps.map((step) => {
+      const values = Object.values(step.inputs ?? {});
+      const value = values[0];
+      if (values.length !== 1 || typeof value !== 'number') {
+        throw new Error(`${spec.id} step ${step.tick} does not drive exactly one byte`);
+      }
+      return value;
+    }),
+  );
+}
+
+/** The answer the first walk demands once the program has published it. */
 function answerOf(spec: LevelSpec): number {
-  const answer = walkOf(spec).find((value) => value !== undefined && value !== 0);
-  if (answer === undefined) throw new Error(`${spec.id} walk never demands an answer`);
+  const first = walksOf(spec)[0] ?? [];
+  const answer = first.find((value) => value !== undefined && value !== 0);
+  if (answer === undefined) throw new Error(`${spec.id} first walk never demands an answer`);
   return answer;
 }
 
@@ -103,12 +137,14 @@ describe('chapter 4 batch 1 - reference programs', () => {
     for (const spec of CH4_BATCH1) {
       const reference = referenceOf(spec);
       expect(reference.program.trim(), `${spec.id} reference is empty`).not.toBe('');
-      // The fixture's reader is the reader the LEVEL's check declares: a
+      // The fixture's reader is the reader the LEVEL's checks declare: a
       // reference written for the other one would not even parse the same way
-      // the player's buffer is graded.
-      expect(reference.format, `${spec.id} reference is filed under the wrong reader`).toBe(
-        programOf(spec).format ?? 'asm',
-      );
+      // the player's buffer is graded. Both walks read through one reader.
+      for (const check of programsOf(spec)) {
+        expect(reference.format, `${spec.id} reference is filed under the wrong reader`).toBe(
+          check.format ?? 'asm',
+        );
+      }
     }
   });
 
@@ -134,13 +170,14 @@ describe('chapter 4 batch 1 - reference programs', () => {
     // A target is the reference's measured score, never a hand-written
     // aspiration. All three levels ship the SAME board shape (the chapter-3
     // machine plus one source mux), so they must state one gate and one delay
-    // -- 675 and 6 -- and the tick is the walk's own last assertion.
+    // -- 675 and 6 -- and the tick is the walks' own last assertion, merged as
+    // `Math.max` because each check drives its own walk.
     for (const spec of CH4_BATCH1) {
       const result = grade(boardOf(spec), registry, spec, { text: referenceOf(spec).program });
       const m = result.metrics;
       expect(m.gate, `${spec.id} gate metric moved off the brief's 675`).toBe(675);
       expect(m.delay, `${spec.id} delay metric moved off the brief's 6`).toBe(6);
-      expect(m.tick, `${spec.id} tick metric is not its walk's last assertion`).toBe(
+      expect(m.tick, `${spec.id} tick metric is not its walks' last assertion`).toBe(
         lastAssertedTick(spec),
       );
       expect(spec.threeStar, `${spec.id} states no target`).toBeDefined();
@@ -150,22 +187,54 @@ describe('chapter 4 batch 1 - reference programs', () => {
         tick: m.tick,
       });
     }
+    // The merged tick, stated as a number rather than assumed: two same-shaped
+    // walks merge (`Math.max`) to the one last assertion a single walk had --
+    // 10, 10 and 14, the ticks the walks above pin per level.
+    expect(CH4_BATCH1.map((spec) => lastAssertedTick(spec))).toEqual([10, 10, 14]);
+    expect(CH4_BATCH1.map((spec) => spec.threeStar?.tick)).toEqual([10, 10, 14]);
   });
 
   it('states the answer each program computes, and where it appears', () => {
-    // The three walks, read out of the level data: 0 while the machine is still
+    // The walks, read out of the level data: 0 while the machine is still
     // working, the answer on the edge that reveals the `move|sX|out`
-    // instruction, and the same byte held afterwards. The inputs are the ones
-    // the steps drive, and the answers are the semantics the chapter-4 table
-    // fixes -- (in + 5), (in + 3) and (6r), each taken mod 256.
-    expect(walkOf(level('ch4-50-punchcard-programming'))).toEqual([0, 0, 105, 105]);
-    expect(walkOf(level('ch4-51-assembly-programming'))).toEqual([0, 0, 103, 103]);
-    expect(walkOf(level('ch4-52-circumference'))).toEqual([0, 0, 176, 176]);
+    // instruction, and the same byte held afterwards. TWO walks per level, on
+    // two different vectors (ruling R9) -- one walk is one execution and a
+    // constant program could imitate it. The answers are the semantics the
+    // chapter-4 table fixes -- (in + 5), (in + 3) and (6r), each taken mod 256.
+    expect(walksOf(level('ch4-50-punchcard-programming'))).toEqual([
+      [0, 0, 105, 105],
+      [0, 0, 47, 47],
+    ]);
+    expect(walksOf(level('ch4-51-assembly-programming'))).toEqual([
+      [0, 0, 103, 103],
+      [0, 0, 203, 203],
+    ]);
+    expect(walksOf(level('ch4-52-circumference'))).toEqual([
+      [0, 0, 176, 176],
+      [0, 0, 54, 54],
+    ]);
+    // The vectors themselves, repeated at every step of their own walk.
+    expect(drivenOf(level('ch4-50-punchcard-programming'))).toEqual([
+      [100, 100, 100, 100],
+      [42, 42, 42, 42],
+    ]);
+    expect(drivenOf(level('ch4-51-assembly-programming'))).toEqual([
+      [100, 100, 100, 100],
+      [200, 200, 200, 200],
+    ]);
+    expect(drivenOf(level('ch4-52-circumference'))).toEqual([
+      [200, 200, 200, 200],
+      [9, 9, 9, 9],
+    ]);
     expect((100 + 5) & 0xff).toBe(105);
+    expect((42 + 5) & 0xff).toBe(47);
     expect((100 + 3) & 0xff).toBe(103);
+    expect((200 + 3) & 0xff).toBe(203);
     // 6 * 200 = 1200, and the mod 256 is the level's teaching point: the byte
-    // is 176, which is what the reference-program verification measured.
+    // is 176, which is what the reference-program verification measured -- and
+    // the second walk is that same verification's plain case, 6 * 9 = 54.
     expect((6 * 200) & 0xff).toBe(176);
+    expect((6 * 9) & 0xff).toBe(54);
   });
 
   it('never lets a walk assert one constant', () => {
@@ -174,8 +243,10 @@ describe('chapter 4 batch 1 - reference programs', () => {
     // constant. Each walk disagrees with itself -- 0 before the answer, the
     // answer after -- so the program has to actually get there.
     for (const spec of CH4_BATCH1) {
-      const expected = walkOf(spec).filter((v): v is number => v !== undefined);
-      expect(new Set(expected).size, `${spec.id} asserts one constant`).toBeGreaterThan(1);
+      for (const walk of walksOf(spec)) {
+        const expected = walk.filter((v): v is number => v !== undefined);
+        expect(new Set(expected).size, `${spec.id} asserts one constant`).toBeGreaterThan(1);
+      }
     }
   });
 
@@ -283,8 +354,14 @@ describe('chapter 4 batch 1 - the checks have teeth', () => {
       expect(sabotage, `${spec.id} has no sabotage case`).toBeDefined();
       const outcome = runChecks(boardOf(spec), registry, spec, { text: sabotage!.program });
       expect(outcome.passed, `${spec.id} passed a program that computes the wrong answer`).toBe(false);
+      // The first walk's mismatch at the reveal tick: with two walks the run
+      // reports the second walk's too, and pinning `expected` to the first
+      // walk's answer keeps this assertion on the walk the numbers above name.
       const mismatch = outcome.failures.find(
-        (f) => f.reason === 'mismatch' && f.tick === sabotage!.tick && f.expected.out !== undefined,
+        (f) =>
+          f.reason === 'mismatch' &&
+          f.tick === sabotage!.tick &&
+          f.expected.out === answerOf(spec),
       );
       expect(mismatch, `${spec.id} did not report a mismatch at tick ${sabotage!.tick}`).toBeDefined();
       expect(mismatch?.expected).toEqual({ out: answerOf(spec) });
@@ -292,19 +369,125 @@ describe('chapter 4 batch 1 - the checks have teeth', () => {
     }
   });
 
+  /**
+   * THE CONSTANT SPOOF: a program that reads no input at all and publishes the
+   * answer on the reveal tick anyway. Each one PASSES the walk it was built
+   * for -- that is exactly the hole one walk per level leaves open -- and must
+   * be rejected all the same, because the sibling walk drives a different input
+   * and demands a different answer at the same tick (ruling R9).
+   *
+   * `walk` names the walk the spoof reproduces; `caught` names the sibling
+   * walk's mismatch that stops it (tick, expected byte, actual byte).
+   */
+  const SPOOF: Record<
+    string,
+    {
+      readonly program: string;
+      readonly walk: number;
+      readonly caught: { readonly tick: number; readonly expected: number; readonly actual: number };
+    }
+  > = {
+    // 47 is a bare immediate, so a constant program can build it and nothing
+    // else can be built at this tick that is not: `loadi|47` parks 47 in s0 and
+    // three filler moves hold s0 still until `move|s0|out` reveals it on index
+    // 4 -- this walk's tick 4. Machine code, because level 50 reads bytes:
+    // loadi|47 = 00_101111, move|s0|d1/d2/d3 = 10_000_001/010/011,
+    // move|s0|out = 10_000_111.
+    'ch4-50-punchcard-programming': {
+      program: ['00101111', '10000001', '10000010', '10000011', '10000111'].join('\n'),
+      walk: 1,
+      caught: { tick: 4, expected: 105, actual: 47 },
+    },
+    // 203 = ~52: `loadi|52` into s0, both addends moved to that value, and
+    // `nor` folds (52 | 52) into its complement -- five instructions, the
+    // reveal on the fifth, exactly this walk's tick 4.
+    'ch4-51-assembly-programming': {
+      program: ['loadi|52', 'move|s0|d1', 'move|s0|d2', 'nor', 'move|s3|out'].join('\n'),
+      walk: 1,
+      caught: { tick: 4, expected: 103, actual: 203 },
+    },
+    // The reviewer's constant for 176, spelled the way the finding spells it:
+    // 63 + (63 + 50), built from immediates alone in nine instructions so the
+    // `out` write lands on index 8, where this walk reveals. The seventh
+    // instruction (`move|s0|d4`) is a deliberate filler -- without it the
+    // reveal would be one tick early and the walk would catch the timing.
+    'ch4-52-circumference': {
+      program: [
+        'loadi|63',
+        'move|s0|d1',
+        'loadi|50',
+        'move|s0|d2',
+        'add',
+        'move|s3|d2',
+        'move|s0|d4',
+        'add',
+        'move|s3|out',
+      ].join('\n'),
+      walk: 0,
+      caught: { tick: 8, expected: 54, actual: 176 },
+    },
+  };
+
+  // One test per level, so the constant spoof's evidence is reported per level
+  // rather than stopping at the first one that trips.
+  for (const spec of CH4_BATCH1) {
+    it(`rejects a program that ignores its input and hard-codes the answer on ${spec.id}`, () => {
+      const spoof = SPOOF[spec.id];
+      expect(spoof, `${spec.id} has no constant spoof`).toBeDefined();
+      // It really reads no input: no `inp` source in the assembly spellings,
+      // and no move-from-inp opcode (10_110_xxx) anywhere in the bytes.
+      const reader = programsOf(spec)[0]?.format ?? 'asm';
+      const image =
+        reader === 'bytes' ? parseImage(spoof!.program) : assemble(spoof!.program, OVERTURE_ISA);
+      expect(image.errors, `${spec.id} spoof does not even compile`).toEqual([]);
+      expect(
+        image.bytes.some((byte) => (byte & 0xf8) === 0xb0),
+        `${spec.id} spoof reads the input`,
+      ).toBe(false);
+      // The walk it was built for it satisfies completely -- running THAT walk
+      // alone (the single-walk shape ruling R9 retires) passes, right answer on
+      // the reveal tick and held after, with the input ignored throughout.
+      const solo = runChecks(
+        boardOf(spec),
+        registry,
+        { ...spec, checks: [programsOf(spec)[spoof!.walk]!] },
+        { text: spoof!.program },
+      );
+      expect(solo.passed, `${spec.id} spoof does not reproduce its own walk`).toBe(true);
+      // And the level rejects it anyway: the sibling walk demands another byte
+      // at the same tick, and a constant cannot answer both.
+      const outcome = runChecks(boardOf(spec), registry, spec, { text: spoof!.program });
+      expect(outcome.passed, `${spec.id} passed a program that ignores its input`).toBe(false);
+      const caught = outcome.failures.find(
+        (f) =>
+          f.reason === 'mismatch' &&
+          f.tick === spoof!.caught.tick &&
+          f.expected.out === spoof!.caught.expected,
+      );
+      expect(
+        caught,
+        `${spec.id} constant spoof was not caught at tick ${spoof!.caught.tick}`,
+      ).toBeDefined();
+      expect(caught?.actual).toEqual({ out: spoof!.caught.actual });
+    });
+  }
+
   it('rejects an empty program as missing-program', () => {
     // The ordinary state of a level the player has not typed into yet: a hard
     // failure, not a pass and not a crash. Whitespace is nothing to run either.
+    // One record per check -- a vacuum is a vacuum in both walks -- so the two
+    // program checks each say it once.
     for (const spec of CH4_BATCH1) {
       for (const text of ['', '   ', '\n\t\n']) {
         const outcome = runChecks(boardOf(spec), registry, spec, { text });
         expect(outcome.passed, `${spec.id} passed an empty program`).toBe(false);
         expect(outcome.failures.map((f) => f.reason), `${spec.id} / ${JSON.stringify(text)}`).toEqual([
           'missing-program',
+          'missing-program',
         ]);
         // The detail names the buffer: "the level ships no program" and "you
         // have not typed one" are different problems for different people.
-        expect(outcome.failures[0]?.detail).toContain('player');
+        for (const f of outcome.failures) expect(f.detail).toContain('player');
       }
     }
   });
@@ -312,25 +495,27 @@ describe('chapter 4 batch 1 - the checks have teeth', () => {
   it('refuses a text that compiles to zero bytes', () => {
     // Not the empty buffer -- a comment-only one. Both readers accept it as a
     // legal zero-byte program, and the checker refuses it for the same reason
-    // it refuses the vacuum: no instruction would ever execute.
+    // it refuses the vacuum: no instruction would ever execute. Both checks
+    // refuse it, one record each.
     for (const spec of CH4_BATCH1) {
       const outcome = runChecks(boardOf(spec), registry, spec, { text: '# nothing runnable yet\n' });
       expect(outcome.passed, `${spec.id} passed a zero-byte program`).toBe(false);
-      expect(outcome.failures.map((f) => f.reason)).toEqual(['missing-program']);
-      expect(outcome.failures[0]?.detail).toContain('zero bytes');
+      expect(outcome.failures.map((f) => f.reason)).toEqual(['missing-program', 'missing-program']);
+      for (const f of outcome.failures) expect(f.detail).toContain('zero bytes');
     }
   });
 
   it('reports a corrupted program as invalid, naming its line', () => {
     // One fault per format, on a line that is not the first: the byte level's
     // reader and the assembler word their refusals differently, and both have
-    // to carry THEIR line number -- not a constant.
+    // to carry THEIR line number -- not a constant. Each check compiles the
+    // text on its own, so the refusal is reported once per check.
     const brokenBytes = runChecks(boardOf(level('ch4-50-punchcard-programming')), registry, level('ch4-50-punchcard-programming'), {
       text: ['10110001', '00000101', '00000102'].join('\n'),
     });
     expect(brokenBytes.passed).toBe(false);
-    expect(brokenBytes.failures.map((f) => f.reason)).toEqual(['invalid']);
-    expect(brokenBytes.failures[0]?.detail).toContain('program image failed at line 3');
+    expect(brokenBytes.failures.map((f) => f.reason)).toEqual(['invalid', 'invalid']);
+    for (const f of brokenBytes.failures) expect(f.detail).toContain('program image failed at line 3');
 
     for (const id of ['ch4-51-assembly-programming', 'ch4-52-circumference']) {
       const spec = level(id);
@@ -339,24 +524,28 @@ describe('chapter 4 batch 1 - the checks have teeth', () => {
         text: [...lines, 'bogus'].join('\n'),
       });
       expect(outcome.passed, `${id} passed a corrupted program`).toBe(false);
-      expect(outcome.failures.map((f) => f.reason)).toEqual(['invalid']);
-      expect(outcome.failures[0]?.detail).toContain(`program assembly failed at line ${lines.length + 1}`);
+      expect(outcome.failures.map((f) => f.reason)).toEqual(['invalid', 'invalid']);
+      for (const f of outcome.failures) {
+        expect(f.detail).toContain(`program assembly failed at line ${lines.length + 1}`);
+      }
     }
   });
 
   it('rejects a machine-code program written at the wrong width', () => {
     // The punchcard format is exactly eight binary digits per line. A line
     // that is short (or long) is not a narrower byte -- it is a refusal, at its
-    // own line, before anything is loaded.
+    // own line, before anything is loaded (once per check).
     const spec = level('ch4-50-punchcard-programming');
     for (const wrong of ['1011000', '101100011']) {
       const outcome = runChecks(boardOf(spec), registry, spec, {
         text: ['10110001', wrong, '10011111'].join('\n'),
       });
       expect(outcome.passed, `${spec.id} passed the width ${wrong.length}`).toBe(false);
-      expect(outcome.failures.map((f) => f.reason)).toEqual(['invalid']);
-      expect(outcome.failures[0]?.detail).toContain('program image failed at line 2');
-      expect(outcome.failures[0]?.detail).toContain('8 binary digits');
+      expect(outcome.failures.map((f) => f.reason)).toEqual(['invalid', 'invalid']);
+      for (const f of outcome.failures) {
+        expect(f.detail).toContain('program image failed at line 2');
+        expect(f.detail).toContain('8 binary digits');
+      }
     }
   });
 
@@ -370,18 +559,19 @@ describe('chapter 4 batch 1 - the checks have teeth', () => {
         text: ['# out of range', 'loadi|99'].join('\n'),
       });
       expect(outcome.passed, `${id} passed an immediate that does not fit`).toBe(false);
-      expect(outcome.failures.map((f) => f.reason)).toEqual(['invalid']);
-      expect(outcome.failures[0]?.detail).toContain('line 2');
+      expect(outcome.failures.map((f) => f.reason)).toEqual(['invalid', 'invalid']);
+      for (const f of outcome.failures) expect(f.detail).toContain('line 2');
     }
   });
 
   it('does not drive the steps after a refusal', () => {
     // A refused program must stop the check: an invalid failure AND a pile of
     // mismatches would tell the player their machine is wrong when their
-    // program is.
+    // program is. Both checks refuse before driving anything, so the run's
+    // whole record is one refusal per check and no mismatch at all.
     const spec = level('ch4-51-assembly-programming');
     const outcome = runChecks(boardOf(spec), registry, spec, { text: 'bogus' });
-    expect(outcome.failures.map((f) => f.reason)).toEqual(['invalid']);
+    expect(outcome.failures.map((f) => f.reason)).toEqual(['invalid', 'invalid']);
   });
 });
 
@@ -447,6 +637,27 @@ describe('chapter 4 batch 1 - level data', () => {
     });
   });
 
+  it('drives two independent vectors through every level, one walk per check', () => {
+    // Ruling R9: one `program` check is one execution of the player's text, so
+    // one walk pins one (input, answer) pair -- and a program that ignores the
+    // input can hard-code exactly that pair. Two checks with DIFFERENT vectors
+    // close it: a constant answers both walks the same way and the walks
+    // disagree, so the spoof above is caught by whichever walk it was not
+    // built for. Each check builds its own Simulation (`runChecks` calls
+    // `createSim` per check) and `ticksUsed` merges as `Math.max`, so this is
+    // one extra data entry per vector and nothing else.
+    for (const spec of CH4_BATCH1) {
+      const programs = programsOf(spec);
+      expect(programs.length, `${spec.id} carries fewer than two program checks`).toBeGreaterThanOrEqual(
+        2,
+      );
+      const vectors = drivenOf(spec).map((row) => row[0]);
+      expect(new Set(vectors).size, `${spec.id} walks drive the same input`).toBe(programs.length);
+      const answers = walksOf(spec).map((walk) => walk.find((v) => v !== undefined && v !== 0));
+      expect(new Set(answers).size, `${spec.id} walks demand the same answer`).toBe(programs.length);
+    }
+  });
+
   it('grades the player program and carries no source of its own', () => {
     // Ruling 2: the level data's `source` and the player buffer are two
     // channels that must not feed each other. Every check here reads the
@@ -455,15 +666,22 @@ describe('chapter 4 batch 1 - level data', () => {
     // and a silent fallback at worst.
     expect(CH4_BATCH1.map((l) => l.checks)).toHaveLength(3);
     for (const spec of CH4_BATCH1) {
-      const check = programOf(spec);
-      expect(spec.checks, `${spec.id} declares more than one check`).toHaveLength(1);
-      expect(check.from, spec.id).toBe('player');
-      expect(check.source, `${spec.id} ships a source of its own`).toBeUndefined();
-      expect(check.steps.length, `${spec.id} walk is empty`).toBeGreaterThan(0);
+      // TWO checks per level (ruling R9): two walks, two vectors, one reader.
+      expect(spec.checks, `${spec.id} does not carry two program checks`).toHaveLength(2);
+      for (const check of programsOf(spec)) {
+        expect(check.from, spec.id).toBe('player');
+        expect(check.source, `${spec.id} ships a source of its own`).toBeUndefined();
+        expect(check.steps.length, `${spec.id} walk is empty`).toBeGreaterThan(0);
+      }
     }
     // The reader is the one the chapter teaches, in order: hand-written bytes
-    // first, then assembly from the level that introduces it.
-    expect(CH4_BATCH1.map((l) => programOf(l).format)).toEqual(['bytes', 'asm', 'asm']);
+    // first, then assembly from the level that introduces it -- and one reader
+    // per level, shared by both of its walks.
+    expect(CH4_BATCH1.map((l) => [...new Set(programsOf(l).map((c) => c.format))])).toEqual([
+      ['bytes'],
+      ['asm'],
+      ['asm'],
+    ]);
   });
 
   it('drives its walk on the level input pin, repeating it every step', () => {
@@ -473,9 +691,11 @@ describe('chapter 4 batch 1 - level data', () => {
     // the input, and the name is the level's own pin id.
     for (const spec of CH4_BATCH1) {
       const pin = spec.io.inputs[0]?.id ?? '';
-      for (const step of programOf(spec).steps) {
-        expect(step.inputs, `${spec.id} step ${step.tick} names no input`).toBeDefined();
-        expect(Object.keys(step.inputs ?? {}), `${spec.id} step ${step.tick}`).toEqual([pin]);
+      for (const check of programsOf(spec)) {
+        for (const step of check.steps) {
+          expect(step.inputs, `${spec.id} step ${step.tick} names no input`).toBeDefined();
+          expect(Object.keys(step.inputs ?? {}), `${spec.id} step ${step.tick}`).toEqual([pin]);
+        }
       }
     }
   });
