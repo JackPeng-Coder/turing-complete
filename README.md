@@ -56,7 +56,7 @@ towards a working CPU.
 - **Progress saved to `localStorage`**, so a refresh keeps your stars.
 - A **chapter map** for navigating levels and seeing what is unlocked.
 
-Chapters 5–7 (the LEG CPU, functions, the assembly challenges and the sandbox) are planned but not
+Chapters 5–7 (the Symphony CPU, functions, the assembly challenges and the sandbox) are planned but not
 built yet.
 
 ## Interface

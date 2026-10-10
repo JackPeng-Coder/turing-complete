@@ -15,7 +15,7 @@ import { STORAGE_KEY } from '../../src/persist/storage';
  * `py`. If the part size changes, these offsets have to change with it -- that
  * coupling is the point, because pointer feel is part of the UI contract.
  *
- * CHAPTERS 2 AND 3 ARE COVERED BY THE LAST SIX TESTS. Joining a chapter to the
+ * CHAPTERS 2, 3 AND 4 ARE COVERED BY THE LATER TESTS. Joining a chapter to the
  * level list is not shipping it: a level nobody can open, or one that opens but
  * never grades, is invisible in the earlier tests either way. Those tests seed a
  * save with the levels before their target already passed -- the only practical

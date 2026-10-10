@@ -620,9 +620,12 @@ describe('runChecks / program from the player', () => {
   });
 
   it('keeps reading the level text when a player program is handed in beside it', () => {
-    // The regression that matters for every shipped level: 49 of them declare a
-    // `source` and no `from`, and the app now passes the player's buffer to
-    // `grade()` on every level. A channel that leaked would grade chapter 3
+    // The regression that matters for every shipped level: chapters 1-3 are the
+    // 49 levels that predate this option, and every `program` check among them
+    // declares a `source` and neither `from` nor `format`. Chapter 4's seven
+    // levels are the other side of the split -- each declares `from: 'player'`
+    // and no `source` at all. The app now passes the player's buffer to
+    // `grade()` on every level, so a channel that leaked would grade chapter 3
     // against a program the player had typed for a chapter-4 level.
     const outcome = runChecks(fetcher(), registry, programSpec([programCheck()]), {
       text: 'bogus',
@@ -767,8 +770,10 @@ describe('runChecks / program with an unknown channel or format', () => {
   });
 
   it('keeps the documented defaults when the fields are simply absent', () => {
-    // "Absent" is not "unknown": 49 shipped levels declare neither field, and
-    // every one of them must keep reading its own `source` as assembly.
+    // "Absent" is not "unknown": the 49 levels of chapters 1-3 declare neither
+    // field on any `program` check they ship, and each must keep reading its own
+    // `source` as assembly. (Chapter 4's seven levels are the other side of the
+    // split: they declare `from: 'player'`, and a `format` with it.)
     const outcome = runChecks(fetcher(), registry, programSpec([programCheck()]));
     expect(outcome.failures).toEqual([]);
     expect(outcome.passed).toBe(true);
