@@ -197,17 +197,21 @@ export const callLock = (
   }
 
   // ONE FAILURE, keyed by the level's own pins: the answer that was on `match`
-  // while the last code was being tried, the byte the level wanted, and the byte
-  // the board's program had reached. The detail repeats the number in words
+  // while the last code was being tried, and the byte the board's program had
+  // reached. THE SECRET IS NOT IN IT. The failure record is what the panel
+  // renders, and `truthTable.ts` draws any record with a non-empty vector as a
+  // matrix column -- so an `expected` byte would print the answer on the
+  // player's first failing run and collapse the closed-loop search this level
+  // exists to be. The detail repeats the byte the program reached in words
   // because the failure table renders numbers and a player reads sentences.
   const failure: CheckFailure = {
     check: 'custom',
     inputs: { match: 0 },
-    expected: { try: secret },
+    expected: {},
     actual: { try: tried },
     tick: budget,
     reason: 'mismatch',
-    detail: `the budget of ${budget} tick(s) ran out with the last code tried being ${tried}, not ${secret}`,
+    detail: `the budget of ${budget} tick(s) ran out with the last code tried being ${tried}`,
   };
   return { passed: false, failures: [failure], ticksUsed: budget };
 };

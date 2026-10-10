@@ -758,7 +758,12 @@ describe('chapter 4 batch 2 - the checks have teeth', () => {
     expect(outcome.passed, 'the code lock passed a search that never lands on the secret').toBe(false);
     const failure = outcome.failures[0]!;
     expect(failure.reason).toBe('mismatch');
-    expect(failure.expected).toEqual({ try: 42 });
+    // THE RECORD THE PANEL RENDERS CARRIES NO SECRET. `truthTable.ts` draws
+    // `expected` as a matrix column, so `{ try: 42 }` here would print the code
+    // lock's answer as eight bits after the player's first failing run -- the
+    // closed-loop search the level exists to be would collapse instead.
+    expect(failure.expected).toEqual({});
+    expect(JSON.stringify(failure)).not.toContain('42');
     expect(failure.tick).toBe(1024);
     expect(failure.detail).toContain('budget');
   });

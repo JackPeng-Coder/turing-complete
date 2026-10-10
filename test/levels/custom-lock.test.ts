@@ -172,8 +172,9 @@ describe('lock', () => {
   it('fails on the budget, naming the last byte it tried', () => {
     // A script that only ever publishes 1 never finds a secret of 200, so the
     // checker has to stop at its budget. The failure is ONE record keyed by the
-    // level's own pins: the input it wrote, the byte it expected, the byte it
-    // got, and the tick the budget ran out on.
+    // level's own pins: the input it wrote, the byte the board's program reached,
+    // and the tick the budget ran out on. It does NOT carry the secret -- see the
+    // record test below -- because the panel renders `expected` as a column.
     const script = scriptedIo({ outputs: new Array<number>(64).fill(1) });
     const outcome = callLock(script.io, LOCK_LEVEL, SECRET(200, 8), PLAYER);
 
@@ -183,15 +184,37 @@ describe('lock', () => {
     expect(failure.check).toBe('custom');
     expect(failure.reason).toBe('mismatch');
     expect(failure.inputs).toEqual({ match: 0 });
-    expect(failure.expected).toEqual({ try: 200 });
+    expect(failure.expected).toEqual({});
     expect(failure.actual).toEqual({ try: 1 });
     expect(failure.tick).toBe(8);
     expect(failure.detail).toContain('1');
+    expect(failure.detail).not.toContain('200');
     // ONE UNIT IS ONE EXCHANGE. Eight units are eight reads of `try` and eight
     // edges, and the read that would have been the ninth never happens.
     expect(outcome.ticksUsed).toBe(8);
     expect(script.ticks()).toBe(8);
     expect(script.log.filter((c) => c.method === 'readOutput')).toHaveLength(8);
+  });
+
+  it('never puts the secret in the failure record the panel renders', () => {
+    // THE CLOSED LOOP'S ONE SECRET. `truthTable.ts` renders every failure with a
+    // non-empty vector as a matrix column, `expected` included -- so a record
+    // that carried `{ try: secret }` would print the answer as eight bits on the
+    // player's first failing run, and level 54 would collapse into three
+    // instructions. The record stays keyed by the level's own pins and carries
+    // the byte the board published, never the byte the level wanted.
+    const script = scriptedIo({ outputs: new Array<number>(16).fill(9) });
+    const outcome = callLock(script.io, LOCK_LEVEL, SECRET(200, 8), PLAYER);
+
+    expect(outcome.passed).toBe(false);
+    const failure = outcome.failures[0]!;
+    expect(failure.inputs).toEqual({ match: 0 });
+    expect(failure.actual).toEqual({ try: 9 });
+    expect(failure.expected).toEqual({});
+    // The whole panel-facing object, not just the fields read above: a secret
+    // that crept back in under any name would still be a substring of it.
+    expect(JSON.stringify(failure)).not.toContain('200');
+    expect(failure.detail).not.toContain('200');
   });
 
   it('runs the documented 4096-tick budget when the check declares none', () => {
@@ -587,7 +610,10 @@ describe('lock on the reference board', () => {
     const failure = outcome.failures[0]!;
     expect(failure.reason).toBe('mismatch');
     expect(failure.actual).toEqual({ try: 0 });
-    expect(failure.expected).toEqual({ try: 42 });
+    // No `expected`: the record the panel renders must not name the secret (42
+    // here), or the player's first failing run would print the answer.
+    expect(failure.expected).toEqual({});
+    expect(JSON.stringify(failure)).not.toContain('42');
     expect(failure.tick).toBe(32);
     expect(outcome.ticksUsed).toBe(32);
   });
