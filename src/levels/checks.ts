@@ -1547,7 +1547,7 @@ function imageOfBytes(text: string): { readonly bytes: readonly number[] } | { r
  * Returning an empty list is not an option: a check that has nowhere to put its
  * program is a `missing-io` failure, not a check that quietly runs nothing.
  *
- * EXPORTED FOR THE IDE AND THE DEBUGGER (the phase plan's Task 9). They load the
+ * EXPORTED FOR THE IDE AND THE DEBUGGER (the phase plan's Task 6). They load the
  * same image into the same `ram_prog` instances to show a program running on the
  * board, and "which instances hold a program" is the one rule they must not
  * answer differently from the checkers: a second copy of it would drift, and the

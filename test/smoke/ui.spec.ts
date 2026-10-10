@@ -836,7 +836,7 @@ test('chapter 4 grades a hand-written program: level 50', async ({ page }) => {
 
   await expect(page.locator('.truth-table h2')).toHaveText('全部用例通过');
   await expect(page.locator('.shell-metrics')).toContainText('总开销');
-  // The text became an image: the five bytes the level's own hint names.
+  // The text became an image: the five bytes the reference solution uses.
   await expect(page.locator('.ide-bytes')).toHaveText('B10582409F');
 
   // Passing opens the dialog, and its summary calls the level what it is.

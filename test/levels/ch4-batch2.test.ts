@@ -199,12 +199,17 @@ function drivenOf(spec: LevelSpec): readonly (readonly number[])[] {
   );
 }
 
+/** The answer the walk at `index` demands once the program has published it. */
+function answerOfWalk(spec: LevelSpec, index: number): number {
+  const walk = walksOf(spec)[index] ?? [];
+  const answer = walk.find((value) => value !== undefined && value !== 0);
+  if (answer === undefined) throw new Error(`${spec.id} walk ${index} never demands an answer`);
+  return answer;
+}
+
 /** The answer the first walk demands once the program has published it. */
 function answerOf(spec: LevelSpec): number {
-  const first = walksOf(spec)[0] ?? [];
-  const answer = first.find((value) => value !== undefined && value !== 0);
-  if (answer === undefined) throw new Error(`${spec.id} first walk never demands an answer`);
-  return answer;
+  return answerOfWalk(spec, 0);
 }
 
 /** A custom level's `params` as a record of untrusted data. */
@@ -355,12 +360,21 @@ describe('chapter 4 batch 2 - reference programs', () => {
       [42, 42, 42, 42],
       [255, 255, 255, 255],
     ]);
-    // The semantics the chapter-4 table fixes, recomputed here: the sum 1..n,
-    // and the low two bits of the byte.
-    expect((10 + 9 + 8 + 7 + 6 + 5 + 4 + 3 + 2 + 1) & 0xff).toBe(55);
-    expect((1 + 0) & 0xff).toBe(1);
-    expect(42 & 3).toBe(2);
-    expect(255 & 3).toBe(3);
+    // The semantics the chapter-4 table fixes, recomputed from the vectors the
+    // level data itself drives -- the sum 1..n, and the low two bits of the byte
+    // -- so moving a walk's input without moving its answer is a red test rather
+    // than a comparison of two literals.
+    const sumWalks = drivenOf(level('ch4-53-conditional-jumps'));
+    sumWalks.forEach((row, index) => {
+      const n = row[0]!;
+      expect(answerOfWalk(level('ch4-53-conditional-jumps'), index)).toBe(
+        ((n * (n + 1)) / 2) & 0xff,
+      );
+    });
+    const maskWalks = drivenOf(level('ch4-55-mod-4'));
+    maskWalks.forEach((row, index) => {
+      expect(answerOfWalk(level('ch4-55-mod-4'), index)).toBe(row[0]! & 3);
+    });
     // And the ticks, read off the same walks rather than trusted: 53's are the
     // long loop and the shortest one, 55's are its five-instruction shape.
     expect(lastAssertedTick(level('ch4-53-conditional-jumps'))).toBe(135);
@@ -1003,11 +1017,17 @@ describe('chapter 4 batch 2 - level data', () => {
     // secret byte and a budget. 42 rather than 0, because on a real board the
     // first read of `try` happens before the program has run and a board that
     // has not moved yet publishes 0 (custom-lock.test.ts pins that boundary).
-    // The budget is measured against the reference: 590 ticks to reach 42, so
-    // 1024 is headroom rather than a number that happens to be big.
+    // The budget is checked against the reference's OWN grade rather than a
+    // comparison of two literals: the reference passes, and the ticks it spent
+    // have to fit inside the budget -- which is what makes 1024 headroom rather
+    // than a number that happens to be big.
     const spec = level('ch4-54-code-breaker');
-    expect(paramsOf(spec)).toEqual({ secret: 42, budget: 1024 });
-    expect(590).toBeLessThan(1024);
+    const params = paramsOf(spec);
+    expect(params).toEqual({ secret: 42, budget: 1024 });
+    const outcome = runReference(spec);
+    expect(outcome.passed).toBe(true);
+    expect(outcome.ticksUsed).toBeGreaterThan(0);
+    expect(outcome.ticksUsed).toBeLessThan(params.budget as number);
   });
 
   it("pins the maze's pattern three ways: params, brief and this file", () => {
