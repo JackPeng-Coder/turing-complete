@@ -307,8 +307,8 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
     index: 51,
     name: { zh: '汇编程序', en: 'Assembly Programming' },
     brief: {
-      zh: '还是你第 3 章搭的那台 CPU，这次不用手写字节了：这一关解锁汇编器，你写助记符，汇编器替你编成机器码。程序要算 out = (in + 3) & 0xff，和上一关同一条路，只是常数从 5 换成 3。每行一条指令——move|inp|d1、loadi|3、move|s0|d2、add、move|s3|out 这样的写法，# 之后是注释。写 out 之后机器停住，结果要保持。',
-      en: 'The same CPU you built in chapter 3, and no hand encoding this time: this level unlocks the assembler -- you write mnemonics and it compiles the bytes for you. The program must compute out = (in + 3) & 0xff, the same path as the last level with the constant changed from 5 to 3. One instruction per line, spelled like move|inp|d1, loadi|3, move|s0|d2, add, move|s3|out, with # starting a comment. After out is written the machine stops, and the result has to stay.',
+      zh: '还是你第 3 章搭的那台 CPU，这次不用手写字节了：这一关解锁汇编器，你写助记符，汇编器替你编成机器码。程序要算 out = (in + 3) & 0xff，和上一关同一条路，只是常数从 5 换成 3。每行一条指令，# 之后是注释——汇编器认哪几种写法、每种长什么样，提示里列了表和例子。写 out 之后机器停住，结果要保持。',
+      en: 'The same CPU you built in chapter 3, and no hand encoding this time: this level unlocks the assembler -- you write mnemonics and it compiles the bytes for you. The program must compute out = (in + 3) & 0xff, the same path as the last level with the constant changed from 5 to 3. One instruction per line, with # starting a comment: the hint lists the spellings the assembler accepts, with a worked example. After out is written the machine stops, and the result has to stay.',
     },
     hint: {
       zh: '汇编器认的写法就这几种：loadi|N（N 是 0-63 的立即数）、move|sX|dY（源可以是 s0-s5 或 inp，目的可以是 d0-d5 或 out）、六种运算 add/sub/and/or/nand/nor，以及 label 和跳转。一个例子：move|s2|d4 就是上一关手写的那个位布局，只是有了名字——高 2 位 10 是 move、010 是 s2、100 是 d4，也就是字节 10010100。# 之后是注释，每行一条指令。注意 add 固定读 r1 与 r2、把结果写进 r3，所以两个加数要先 move 进 r1 和 r2，结果再 move 出去。',
