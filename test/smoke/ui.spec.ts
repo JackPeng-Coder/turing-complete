@@ -38,15 +38,25 @@ import { STORAGE_KEY } from '../../src/persist/storage';
  * passed -- so passing 1..N opens level N+1. `LEVEL_ORDER` is imported rather
  * than restated: a hard-coded list of ids here would rot silently the day a level
  * is renamed, and the failure would look like a UI bug.
+ *
+ * `programs` is the save's other half: the editor text a player left on each
+ * level (`persist/storage.ts` carries it through as `progress.programs`). A test
+ * that needs the app to open with a program already in the editor -- and the
+ * board's display already built on the machine that program is loaded in -- seeds
+ * it here rather than typing it after the boot.
  */
-async function seedProgress(page: Page, count: number): Promise<void> {
+async function seedProgress(
+  page: Page,
+  count: number,
+  programs: Record<string, string> = {},
+): Promise<void> {
   const levels: Record<string, { passed: boolean; best: null; stars: number }> = {};
   for (const id of LEVEL_ORDER.slice(0, count)) {
     levels[id] = { passed: true, best: null, stars: 3 };
   }
   await page.addInitScript(
     ([key, json]) => globalThis.localStorage.setItem(key, json),
-    [STORAGE_KEY, JSON.stringify({ version: 1, levels })] as const,
+    [STORAGE_KEY, JSON.stringify({ version: 1, levels, programs })] as const,
   );
 }
 
@@ -779,6 +789,24 @@ test('chapter 3 ends with a level that mounts its program check: level 49', asyn
 });
 
 /**
+ * LEVEL 50'S REFERENCE PROGRAM, the text a passing run of it contains.
+ *
+ * THE FIVE LINES ARE HAND-WRITTEN MACHINE CODE -- level 50 has no mnemonics, so
+ * the editor's own label is the byte reader's and each line is eight binary
+ * digits. They are `test/fixtures/ch4-references.ts`'s
+ * `ch4-50-punchcard-programming` verbatim, inlined rather than imported because
+ * this spec is a browser walk: the fixture is the batch tests' own module.
+ * `ch4-batch1.test.ts` is what keeps those bytes re-derived from the ISA table.
+ */
+const LEVEL_50_PROGRAM = [
+  '10110001    # move|inp|d1   r1 = in',
+  '00000101    # loadi|5       r0 = 5',
+  '10000010    # move|s0|d2    r2 = 5',
+  '01000000    # add           r3 = in + 5',
+  '10011111    # move|s3|out   out = r3',
+].join('\n');
+
+/**
  * CHAPTER 4'S OWN CHANNEL, GRADED END TO END: the program the PLAYER writes.
  *
  * Level 49 proved the `program` check kind is mounted in the app; this is the
@@ -788,13 +816,6 @@ test('chapter 3 ends with a level that mounts its program check: level 49', asyn
  * the byte editor, presses 测试 and reads the verdict. A program check's cases
  * cannot be played one column at a time (`testCases` says why), so that button
  * assembles the text, loads it into the board's RAM and grades in one step.
- *
- * THE FIVE LINES ARE HAND-WRITTEN MACHINE CODE -- level 50 has no mnemonics, so
- * the editor's own label is the byte reader's and each line is eight binary
- * digits. They are `test/fixtures/ch4-references.ts`'s
- * `ch4-50-punchcard-programming` verbatim, inlined rather than imported because
- * this spec is a browser walk: the fixture is the batch tests' own module.
- * `ch4-batch1.test.ts` is what keeps those bytes re-derived from the ISA table.
  */
 test('chapter 4 grades a hand-written program: level 50', async ({ page }) => {
   // 49 passed -- every level of chapters 1 to 3 -- so the resume point is
@@ -821,15 +842,7 @@ test('chapter 4 grades a hand-written program: level 50', async ({ page }) => {
   const code = page.locator('.ide-code');
   await expect(code).toHaveAttribute('aria-label', '二进制程序编辑器');
 
-  await code.fill(
-    [
-      '10110001    # move|inp|d1   r1 = in',
-      '00000101    # loadi|5       r0 = 5',
-      '10000010    # move|s0|d2    r2 = 5',
-      '01000000    # add           r3 = in + 5',
-      '10011111    # move|s3|out   out = r3',
-    ].join('\n'),
-  );
+  await code.fill(LEVEL_50_PROGRAM);
   await page.screenshot({ path: 'test-results/smoke-ch4-level50-program.png' });
 
   await page.locator('.ide-test').click();
@@ -851,6 +864,80 @@ test('chapter 4 grades a hand-written program: level 50', async ({ page }) => {
   await page.getByRole('button', { name: '章节地图' }).click();
   await expect(page.locator('.map-tile').nth(49)).toContainText('★');
   await expect(page.locator('.map-tile').nth(50)).toBeEnabled();
+});
+
+/**
+ * 停止并复位 MUST CLEAR THE BOARD THE PLAYER IS LOOKING AT, NOT ANOTHER ONE.
+ *
+ * THE WIRING `test/ui/display-run.test.ts` CANNOT REACH. A display is bound to a
+ * run in one place only (`rebuild`), and a keystroke in the editor drops the run
+ * without rebuilding -- so after any edit the display keeps painting the previous
+ * run's machine while `ensurePlayerRun` hands back a different one. A reset aimed
+ * at that other run clears a circuit nobody can see and leaves the board on screen
+ * exactly as it was, which is the defect this walk pins: the clock card reads the
+ * display's own snapshot (`main.ts`'s io panel), so a board that was not reset
+ * says so in the card the player is looking at.
+ *
+ * THE SAVE SEEDS THE PROGRAM FOR THE SAME REASON. With level 50's text already in
+ * `progress.programs`, the app opens with the display built on the run's machine
+ * (the state a player is in after pressing 汇编, and the one the bug needs) rather
+ * than on its own compilation of the board.
+ *
+ * WHAT A PLAYER SEES IS THE ASSERTION: the card goes back to 0 ticks, the editor
+ * still holds the text, and the assembled image is still in the debugger's RAM --
+ * 汇编/单步 reads the same five bytes rather than 256 zeros.
+ */
+test('chapter 4 resets the board without losing the program: level 50', async ({ page }) => {
+  await seedProgress(page, 49, { 'ch4-50-punchcard-programming': LEVEL_50_PROGRAM });
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('打孔编程');
+
+  // The save's text is in the editor, and the debugger was built on the machine
+  // it is loaded in: the RAM window shows the five bytes, not a page of zeros.
+  const code = page.locator('.ide-code');
+  await expect(code).toHaveValue(LEVEL_50_PROGRAM);
+  await expect(page.locator('.debug-ram .debug-byte').first()).toHaveText('B1');
+  await page.screenshot({ path: 'test-results/smoke-ch4-level50-reset-open.png' });
+
+  // Clock the board twice, through the toolbar's 单步: the edges land on the
+  // machine the display paints, so the clock card is the board's own count.
+  const boardStep = page.locator('.tools button[aria-label="单步"]');
+  await boardStep.click();
+  await boardStep.click();
+  await expect(page.locator('.io-tick')).toContainText('2 拍');
+
+  // A keystroke -- the ordinary state of the screen -- drops the run the display
+  // was built on. The text put back is the same one, so nothing about the
+  // program has changed; only the display/run binding has come apart.
+  await code.press('Control+End');
+  await page.keyboard.type(' ');
+  await page.keyboard.press('Backspace');
+  await expect(code).toHaveValue(LEVEL_50_PROGRAM);
+
+  await page.locator('.tools button[aria-label="停止并复位"]').click();
+
+  // THE BOARD ON SCREEN IS RESET: the card reads the display's clock, and it is
+  // back at zero. (Before the fix this is where the walk failed: the reset went
+  // to the fresh run the keystroke had left behind, while the display went on
+  // painting the old machine at 2 ticks.)
+  await expect(page.locator('.io-tick')).toContainText('0 拍');
+  // ...and the program was not silently lost: the text is still in the editor.
+  await expect(code).toHaveValue(LEVEL_50_PROGRAM);
+  await page.screenshot({ path: 'test-results/smoke-ch4-level50-reset.png' });
+
+  // ...AND THE MACHINE IS STILL THE PROGRAM'S. One 单步 walks the image that was
+  // reloaded into the reset board, so the debugger's RAM window still shows the
+  // assembled bytes and the bytes are what was assembled.
+  await page.locator('.ide-step').click();
+  await expect(page.locator('.ide-bytes')).toHaveText('B10582409F');
+  const ram = page.locator('.debug-ram .debug-byte');
+  await expect(ram.nth(0)).toHaveText('B1');
+  await expect(ram.nth(1)).toHaveText('05');
+  await expect(ram.nth(2)).toHaveText('82');
+  await expect(ram.nth(3)).toHaveText('40');
+  await expect(ram.nth(4)).toHaveText('9F');
+  await expect(page.locator('.debug-ticks')).toContainText('1 拍');
 });
 
 /**
