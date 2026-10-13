@@ -1,4 +1,5 @@
 import { LEVELS } from '../levels/index';
+import { SANDBOX_ID } from '../levels/sandbox';
 import type { AppState, Store } from '../app/store';
 import { isUnlocked } from '../app/progress';
 import { THEME } from './theme';
@@ -41,8 +42,7 @@ export function mountMap(
       if (!chapters.includes(level.chapter)) chapters.push(level.chapter);
     }
 
-    for (const chapter of chapters) {
-      const band = document.createElement('section');
+    for (const chapter of chapters) {      const band = document.createElement('section');
       band.className = 'map-chapter';
 
       const inChapter = LEVELS.filter((level) => level.chapter === chapter);
@@ -88,6 +88,22 @@ export function mountMap(
       band.append(grid);
       section.append(band);
     }
+
+    // THE SANDBOX IS NOT A CHAPTER, so it is not a band: nothing gates it, it has
+    // no stars and no chapter number, and a tile in the grid would sit among levels
+    // it is not a level of. It is the one door that is always open, and it belongs
+    // at the end of the map where a player who has finished a chapter looks next.
+    const sandbox = document.createElement('section');
+    sandbox.className = 'map-sandbox';
+    const enter = document.createElement('button');
+    enter.type = 'button';
+    enter.className = 'map-sandbox-open';
+    enter.textContent = '沙盒 · 自由建造';
+    enter.title = '没有题目、没有判定：拿任何元件搭任何东西，电路一直在跑';
+    enter.addEventListener('click', () => onSelect(SANDBOX_ID));
+    if (current.id === SANDBOX_ID) enter.classList.add('map-tile-current');
+    sandbox.append(enter);
+    section.append(sandbox);
   };
   store.subscribe(render);
   render();

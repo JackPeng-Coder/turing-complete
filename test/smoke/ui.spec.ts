@@ -1060,3 +1060,44 @@ test('a saved component is offered in the palette and runs on the board', async 
   await expect(page.locator('.shell-metrics')).toContainText('延迟');
   await page.screenshot({ path: 'test-results/smoke-blueprint.png' });
 });
+
+/**
+ * The sandbox: free build, no verdict, and a circuit that survives a reload.
+ *
+ * THE THREE THINGS THAT MAKE IT A SANDBOX are all asserted here, because each is
+ * the absence of something the rest of the app does. No checks, so the test button
+ * is disabled and pressing the panel's own button says why instead of grading. No
+ * level, so the palette is the whole catalog. And it is somewhere the player
+ * LEAVES something: the circuit is written as it is drawn and comes back.
+ */
+test('the sandbox builds freely, does not grade, and keeps the circuit', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await page.getByRole('button', { name: '沙盒 · 自由建造' }).click();
+
+  await expect(page.locator('.shell-bar')).toContainText('沙盒');
+  // The whole catalog, not a level's list: the wide and CPU families are here.
+  await expect(page.locator('.palette')).toContainText('8 位加法器');
+  await expect(page.locator('.palette')).toContainText('程序存储器');
+
+  // No verdict to give, so the tool says so rather than looking live.
+  const testButton = page.locator('.tool-btn[aria-label="测试"]');
+  await expect(testButton).toBeDisabled();
+
+  const { cx, cy } = await boardCentre(page);
+  await place(page, '高电平', cx - 120, cy + 60);
+  await place(page, '非门', cx + 120, cy + 60);
+  await dragWire(page, cx - 120 + 72, cy + 60, cx + 120, cy + 60);
+  await expect(page.locator('.shell-metrics')).toContainText('延迟');
+  await page.screenshot({ path: 'test-results/smoke-sandbox.png' });
+
+  // Reload: the circuit is written as it is drawn, so it comes back.
+  await page.reload();
+  await page.getByRole('button', { name: '开始' }).click();
+  // The app opens on the resume point, so the sandbox is reached again through the
+  // map -- and the board it holds is the one that was left.
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await page.getByRole('button', { name: '沙盒 · 自由建造' }).click();
+  await expect(page.locator('.shell-metrics')).toContainText('延迟 1');
+});

@@ -19,6 +19,16 @@ export interface ToolbarOptions {
    * that cannot act is worse than one that says why it cannot.
    */
   onWrapSelection(): void;
+  /**
+   * Write the circuit on the board to a file, and read one back.
+   *
+   * ON THE TOOL GRID rather than in a menu: a circuit file is the one way a
+   * circuit leaves the browser, and the tools are where a player looks for what
+   * the board can do. Absent leaves both buttons out, which is how a caller that
+   * has nowhere to write says so.
+   */
+  onExportCircuit?(): void;
+  onImportCircuit?(): void;
 }
 
 export interface ToolbarState {
@@ -30,6 +40,14 @@ export interface ToolbarState {
   readonly rate: string;
   /** Board instances selected, so the wrap button can count them. */
   readonly selected: number;
+  /**
+   * True in the sandbox, where the test button is DISABLED rather than absent.
+   *
+   * Absent would be tidier and wrong: the panel's own 测试 button is the
+   * discoverable one, and a player who has just come from a level has the habit.
+   * A disabled button with a title that says why is the version that teaches.
+   */
+  readonly sandbox: boolean;
 }
 
 /**
@@ -82,7 +100,19 @@ export function mountToolbar(
   trash.title = '删除选中 · 在画板上右键可直接删除元件或导线';
   const wrapBtn = button('封装为元件', 'wrap', () => options.onWrapSelection());
   wrapBtn.title = '把选中的元件封装成一个自制元件（先按住 Ctrl 在画板上框选）';
+  // The circuit file buttons are the two ends of one idea -- a circuit that can
+  // leave the browser and come back -- so they sit next to each other, after the
+  // tools that act on the board itself.
+  const exportBtn = options.onExportCircuit
+    ? button('导出电路', 'download', () => options.onExportCircuit?.())
+    : null;
+  if (exportBtn) exportBtn.title = '把当前电路（含自制元件）存成 .json 文件';
+  const importBtn = options.onImportCircuit
+    ? button('导入电路', 'upload', () => options.onImportCircuit?.())
+    : null;
+  if (importBtn) importBtn.title = '读取一个电路文件，替换画板上的电路';
   grid.append(zoomIn, zoomOut, test, step, run, grow(), fit, stop, gridToggle, wrapBtn, trash);
+  if (exportBtn && importBtn) grid.append(exportBtn, importBtn);
 
   return {
     render(state: ToolbarState): void {
@@ -94,7 +124,12 @@ export function mountToolbar(
       test.setAttribute('aria-pressed', String(state.testing));
       test.replaceChildren(iconSvg(state.testing ? 'stop' : 'test'));
       test.setAttribute('aria-label', state.testing ? '停止测试' : '测试');
-      test.title = state.testing ? '停止测试' : '测试：逐个播放本关用例，最后给出判定';
+      test.disabled = state.sandbox;
+      test.title = state.sandbox
+        ? '沙盒没有测试用例：电路一直在跑，门数与延迟是实时读数'
+        : state.testing
+          ? '停止测试'
+          : '测试：逐个播放本关用例，最后给出判定';
       wrapBtn.disabled = state.selected === 0;
       wrapBtn.title =
         state.selected === 0

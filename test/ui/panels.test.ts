@@ -669,7 +669,7 @@ describe('toolbar', () => {
     // No button here is decorative: a tool that looks live and does nothing is
     // only discovered by clicking it.
     const { root, fired, render } = mount();
-    render({ running: false, grid: true, testing: false, rate: '10Hz', selected: 0 });
+    render({ running: false, grid: true, testing: false, rate: '10Hz', selected: 0, sandbox: false });
     const labels = [
       '放大',
       '缩小',
@@ -703,21 +703,21 @@ describe('toolbar', () => {
 
   it('shows the run button as paused while the clock is running', () => {
     const { root, render } = mount();
-    render({ running: true, grid: false, testing: false, rate: '1Hz', selected: 0 });
+    render({ running: true, grid: false, testing: false, rate: '1Hz', selected: 0, sandbox: false });
     expect(root.querySelector('[aria-label="暂停"]')).not.toBeNull();
     expect(root.querySelector('[aria-label="网格"]')?.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('turns the test button into a stop button while the cases play', () => {
     const { root, render } = mount();
-    render({ running: false, grid: true, testing: true, rate: '10Hz', selected: 0 });
+    render({ running: false, grid: true, testing: true, rate: '10Hz', selected: 0, sandbox: false });
     expect(root.querySelector('[aria-label="停止测试"]')).not.toBeNull();
     expect(root.querySelector('[aria-label="测试"]')).toBeNull();
   });
 
   it('starts with nothing pressed and no clock', () => {
     const { root, render } = mount();
-    render({ running: false, grid: true, testing: false, rate: '10Hz', selected: 0 });
+    render({ running: false, grid: true, testing: false, rate: '10Hz', selected: 0, sandbox: false });
     expect(root.querySelector('[aria-label="运行"]')?.getAttribute('aria-pressed')).toBe('false');
     expect(root.querySelector('[aria-label="网格"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(root.querySelector('[aria-label="测试"]')?.getAttribute('aria-pressed')).toBe(

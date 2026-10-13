@@ -234,3 +234,78 @@ export function libraryFromRecord(raw: unknown): BlueprintLibrary {
   }
   return libraryFrom(entries);
 }
+
+/**
+ * Merges components from a file into the library, renaming the ones that clash.
+ *
+ * AN IMPORT MUST NOT OVERWRITE WHAT IS ALREADY THERE. Two players, or one player
+ * twice, will both have a `bp1` -- it is the id the first wrap mints -- and the
+ * two are different circuits. Overwriting would silently change every instance of
+ * the local `bp1` on the board, so the incoming one is renamed instead, and
+ * `renamed` is returned so the caller can repoint the imported circuit at it: a
+ * file keeps referring to its own components by the ids it wrote, and those ids no
+ * longer exist once the merge is done.
+ *
+ * Ids that do not clash are kept, which is what makes the common case -- a file
+ * imported onto a fresh board -- a no-op.
+ */
+export function mergeLibrary(
+  library: BlueprintLibrary,
+  incoming: BlueprintLibrary,
+): { library: BlueprintLibrary; renamed: ReadonlyMap<string, string> } {
+  const merged: Record<string, { name: { zh: string; en: string }; def: CustomComponentDef }> = {
+    ...library,
+  };
+  const renamed = new Map<string, string>();
+  const taken = new Set(Object.keys(merged));
+
+  for (const entry of Object.values(incoming)) {
+    let id = entry.def.id;
+    if (taken.has(id)) {
+      let n = 2;
+      while (taken.has(`${id}_${n}`)) n += 1;
+      const next = `${id}_${n}`;
+      renamed.set(id, next);
+      id = next;
+    }
+    taken.add(id);
+    merged[id] = {
+      name: { ...entry.name },
+      def: { ...entry.def, id, name: { ...entry.def.name } },
+    };
+  }
+  return { library: merged, renamed };
+}
+
+/**
+ * The same, for the document that came with the file.
+ *
+ * Every reference to a renamed component is repointed -- the instances' `def`,
+ * the components' bodies, and the bodies of the components being imported, which
+ * may use each other. A reference left behind would be an instance of a part that
+ * no longer exists, which `validateGraph` reports as an unknown def rather than
+ * as an import that went wrong.
+ */
+export function repointComponents(graph: Graph, renamed: ReadonlyMap<string, string>): Graph {
+  if (renamed.size === 0) return graph;
+  const remap = (g: Graph): Graph => ({
+    ...g,
+    instances: g.instances.map((inst) => {
+      const def = renamed.get(inst.def);
+      return def === undefined ? { ...inst, params: { ...inst.params } } : { ...inst, def };
+    }),
+    wires: g.wires.map((wire) => ({ ...wire, from: { ...wire.from }, to: { ...wire.to } })),
+    customComponents: g.customComponents.map((component) => ({
+      ...component,
+      name: { ...component.name },
+      inputs: component.inputs.map((pin) => ({ ...pin })),
+      outputs: component.outputs.map((pin) => ({ ...pin })),
+      binds: {
+        inputs: { ...component.binds.inputs },
+        outputs: { ...component.binds.outputs },
+      },
+      body: remap(component.body),
+    })),
+  });
+  return remap(graph);
+}

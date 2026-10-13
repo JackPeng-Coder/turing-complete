@@ -9,9 +9,12 @@ import { CommandStack } from './app/commands';
 import { grade } from './levels/grader';
 import { loadProgress, saveProgress } from './persist/storage';
 import { applyGrade, resumePointOf, type Progress } from './app/progress';
-import { composeRegistry } from './levels/blueprints';
+import { composeRegistry, libraryClosure, referencedComponents } from './levels/blueprints';
 import { mountBlueprintPanel } from './ui/blueprint';
 import { applyWrap, planWrap, type WrapPlan } from './levels/wrap';
+import { SANDBOX_ID, SANDBOX_LEVEL, isSandbox } from './levels/sandbox';
+import { circuitSignature, emptySandbox, loadSandbox, saveSandbox } from './persist/sandbox';
+import { parseCircuit, serializeCircuit } from './persist/circuit';
 import { devModeFrom } from './app/dev';
 import { mountShell } from './ui/shell';
 import { mountPalette } from './ui/palette';
@@ -80,6 +83,22 @@ const stack = new CommandStack();
 const app = document.querySelector<HTMLDivElement>('#app');
 
 /**
+ * The signature of the sandbox circuit as it was last written to storage.
+ *
+ * Module-level because the sandbox outlives any one screen: the board screen is
+ * hidden rather than unmounted when the player reads the map, so a closure-local
+ * copy would be the one thing `openLevel` had to remember to carry. The empty
+ * string means "not in the sandbox", which is also what keeps a level edit from
+ * writing anything.
+ */
+let sandboxSignature = '';
+
+/** A filename-safe stamp, so two exports of one circuit do not overwrite. */
+function dateStamp(): string {
+  return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+}
+
+/**
  * How long the test run holds each case before moving to the next, by speed.
  *
  * The run is a demonstration, so the pace is the player's: a fifteen-row truth
@@ -104,8 +123,7 @@ const TEST_RATES = [
  */
 const DEFAULT_TEST_RATE = 3;
 
-/** What to say when a level's cases cannot be played one at a time. */
-const NO_CASES_NOTE = {
+/** What to say when a level's cases cannot be played one at a time. */const NO_CASES_NOTE = {
   program: {
     zh: '本关的用例是一次程序运行，无法逐个演示：已直接判定',
     en: 'This level’s cases are one program run, so they cannot be played one at a time: graded directly',
@@ -117,6 +135,18 @@ const NO_CASES_NOTE = {
   empty: {
     zh: '本关没有可演示的用例：已直接判定',
     en: 'This level declares no cases to play: graded directly',
+  },
+  /**
+   * The sandbox, which has no cases BY DESIGN.
+   *
+   * Its own note rather than the `empty` one: a level with no cases is a level
+   * something went wrong with, and the sandbox is the screen where nothing is
+   * supposed to happen. Handing the player "graded directly" there would be the
+   * app describing a verdict it is not going to give.
+   */
+  sandbox: {
+    zh: '沙盒没有测试用例：电路一直在跑，门数与延迟就是你的读数',
+    en: 'The sandbox has no test cases: the circuit runs, and the gate and delay counters are your own readings',
   },
 } as const;
 
@@ -256,6 +286,7 @@ if (app) {
       testing,
       rate: RATES[rateIndex]!.label,
       selected: store.get().selected.length,
+      sandbox: isSandbox(store.get().level),
     });
   };
 
@@ -423,8 +454,19 @@ if (app) {
     running = false;
     stopClock();
 
-    const planned = testCases(store.get().level);
+    const current = store.get().level;
+    const planned = testCases(current);
     testResults = [];
+    if (isSandbox(current)) {
+      // NO VERDICT IN THE SANDBOX, and no dialog: `grade()` on a spec with no
+      // checks reports `passed`, so the ordinary path would pop a 关卡完成 card
+      // for a screen that has no levels. The button is disabled there anyway
+      // (`ui/toolbar.ts`); this is the belt to that braces.
+      store.set({ status: NO_CASES_NOTE.sandbox });
+      paintTools();
+      truth.render();
+      return;
+    }
     if (planned.kind === 'none' || display === null) {
       if (planned.kind === 'none') store.set({ status: NO_CASES_NOTE[planned.reason] });
       plan = null;
@@ -600,7 +642,11 @@ if (app) {
    * whether or not it has been passed before.
    */
   const openLevel = (levelId: string): void => {
-    const next = getLevel(levelId);
+    // THE SANDBOX IS NOT IN THE LEVEL TABLE, so it is not looked up: `getLevel`
+    // throws for an id no level has, and its spec is a constant (`levels/sandbox.ts`).
+    // Everything after this point is the same for both -- one board, one set of
+    // panels -- which is the whole reason the sandbox is a `LevelSpec`.
+    const next = levelId === SANDBOX_ID ? SANDBOX_LEVEL : getLevel(levelId);
     stack.clear();
     running = false;
     stopClock();
@@ -621,7 +667,12 @@ if (app) {
     // was on the board before.
     store.set({
       level: next,
-      graph: next.board ? graphFromBoard(next.id, next.board) : emptyGraph(next.id),
+      graph:
+        levelId === SANDBOX_ID
+          ? (loadSandbox() ?? emptySandbox())
+          : next.board
+            ? graphFromBoard(next.id, next.board)
+            : emptyGraph(next.id),
       selected: [],
       armed: null,
       lastGrade: null,
@@ -629,6 +680,7 @@ if (app) {
       status: null,
       camera: { x: 40, y: 40, zoom: 1 },
     });
+    sandboxSignature = isSandbox(next) ? circuitSignature(store.get().graph) : '';
     rebuild();
     showScreen('board');
     // The bench follows the level: an editor on a level that grades no program,
@@ -640,7 +692,10 @@ if (app) {
     // default camera would show its left third and a player would have to find
     // the fit button before they could see what they were handed.
     if (next.board) fitView();
-    showBriefing(narrativeFor(levelId).before);
+    // The sandbox has no narrative: `narrativeFor` reads level data, and its own
+    // brief is the one that says what the screen is for.
+    if (levelId !== SANDBOX_ID) showBriefing(narrativeFor(levelId).before);
+    measure();
   };
 
   /** The next level in the shipped order, or `null` on the last one. */
@@ -1101,6 +1156,85 @@ if (app) {
     return true;
   };
 
+  /**
+   * The circuit file: out and back in.
+   *
+   * THE FILE CARRIES THE COMPONENTS IT NEEDS (`libraryClosure`), because a circuit
+   * that references `bp1` and hopes the reader has one is a file that half the time
+   * does not open. Importing merges what it brought into the library -- renaming
+   * anything that clashes, since two players both have a `bp1` and they are
+   * different circuits -- and then the board holds the imported circuit.
+   */
+  const exportCircuit = (): void => {
+    const { graph, blueprints, level: current } = store.get();
+    const text = serializeCircuit(
+      graph,
+      libraryClosure(blueprints, referencedComponents(graph)),
+    );
+    try {
+      const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${current.id}-${dateStamp()}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      store.set({
+        status: { zh: `已导出 ${current.name.zh} 的电路`, en: 'Circuit exported' },
+      });
+    } catch {
+      // A browser that refuses the download still gets a readable copy on screen.
+      store.set({
+        status: { zh: '无法下载文件：请在浏览器设置里允许下载', en: 'Download refused by the browser' },
+      });
+    }
+  };
+
+  const importCircuit = (): void => {
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = '.json,application/json';
+    picker.addEventListener('change', () => {
+      const file = picker.files?.[0];
+      if (!file) return;
+      void file.text().then((text) => applyImportedFile(text));
+    });
+    picker.click();
+  };
+
+  /** The other half of `importCircuit`, split out so it is testable without a file. */
+  const applyImportedFile = (text: string): void => {
+    const parsed = parseCircuit(text, store.get().blueprints);
+    if ('error' in parsed) {
+      store.set({ status: parsed.error });
+      return;
+    }
+    const { graph, blueprints } = parsed;
+    stack.clear();
+    graphRevision += 1;
+    dropPlayerRun();
+    store.set({
+      graph,
+      blueprints,
+      registry: composeRegistry(registry, blueprints),
+      editing: null,
+      selected: [],
+      armed: null,
+      lastGrade: null,
+      metrics: null,
+      status: {
+        zh: `已导入 ${graph.instances.length} 个元件、${graph.wires.length} 根导线`,
+        en: `Imported ${graph.instances.length} parts and ${graph.wires.length} wires`,
+      },
+      camera: { x: 40, y: 40, zoom: 1 },
+    });
+    progress = { ...progress, blueprints };
+    saveProgress(progress);
+    rebuild();
+    measure();
+    paint();
+    fitView();
+  };
+
   const mapRender = mountMap(mapScreen, store, openLevel);
 
   mountShell(app, store, {
@@ -1203,6 +1337,8 @@ if (app) {
     },
     onToggleTest: toggleTest,
     onWrapSelection: startWrap,
+    onExportCircuit: exportCircuit,
+    onImportCircuit: importCircuit,
   });
 
   /**
@@ -1246,6 +1382,18 @@ if (app) {
     // through the store -- so the count has to follow a selection change, which is
     // not a board edit and so does not come through `onChange`.
     paintTools();
+    // THE SANDBOX CIRCUIT IS SAVED AS IT IS DRAWN, and only when the CIRCUIT
+    // changed: the store notifies on every change, including each frame of a pan
+    // and every click that selects something, and neither of those is worth a
+    // `localStorage` write. The signature is what tells the two apart.
+    if (isSandbox(store.get().level)) {
+      const graph = store.get().graph;
+      const signature = circuitSignature(graph);
+      if (signature !== sandboxSignature) {
+        sandboxSignature = signature;
+        saveSandbox(graph);
+      }
+    }
   });
   globalThis.addEventListener('resize', paint);
 
