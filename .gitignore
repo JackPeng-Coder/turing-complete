@@ -28,3 +28,8 @@ test-results/
 
 # Isolated worktrees for multi-phase work (superpowers:using-git-worktrees).
 .worktrees/
+
+# The flattened transcript digest. `docs/session-archive/session.v4.jsonl` is the
+# record; `digest.md` is a 1 MB derived view of it, regenerated on demand by the
+# reader in `tools/`, so a derived copy never becomes a second source of truth.
+docs/session-archive/digest.md
