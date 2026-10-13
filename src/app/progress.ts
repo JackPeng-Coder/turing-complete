@@ -1,6 +1,8 @@
 import { scoreOf } from '../levels/grader';
 import type { GradeResult, Metrics } from '../levels/grader';
+import type { Registry } from '../core/registry';
 import type { LevelSpec } from '../levels/spec';
+import type { BlueprintLibrary } from '../levels/blueprints';
 
 export interface LevelRecord {
   readonly passed: boolean;
@@ -25,6 +27,22 @@ export interface Progress {
    * of it, with `''` for the missing case.
    */
   readonly programs: Record<string, string>;
+  /**
+   * The player's own components, keyed by component id.
+   *
+   * SAVED WITH THE STARS, like the programs, and for the same reason: a component
+   * is work, and it is work that outlives the circuit it was built in. This is
+   * the LIBRARY -- the durable half -- and a circuit references an entry by id
+   * (`Instance.def`), so the two can never disagree about what a part contains.
+   *
+   * ONE HOME, NOT TWO. A `Graph` also has a `customComponents` field, and this is
+   * where its entries live: the graph is the DOCUMENT (what is on the board) and
+   * the library is the RECORD (what the player has built). A circuit file carries
+   * the entries it needs inline (`persist/circuit.ts`) so an exported file is
+   * self-contained, and importing one merges them back in here; nothing else
+   * duplicates them, so there is no second copy to fall out of sync.
+   */
+  readonly blueprints: BlueprintLibrary;
 }
 
 /**
@@ -58,7 +76,7 @@ export const STARTER_COMPONENTS = [
 export { SCORE_WEIGHTS } from '../levels/grader';
 
 export function emptyProgress(): Progress {
-  return { version: 1, levels: {}, programs: {} };
+  return { version: 1, levels: {}, programs: {}, blueprints: {} };
 }
 
 /**
@@ -169,6 +187,45 @@ export function paletteDefsFor(
 }
 
 /**
+ * Every part the sandbox offers, in registry order.
+ *
+ * THE SANDBOX IS NOT A LEVEL, so its palette is not a level's palette: there is
+ * no `allowedComponents` to intersect with, because there is no puzzle to design
+ * around. What it offers instead:
+ *
+ *  * every BASE part -- the registry's own defs, less the `hidden` plumbing, so
+ *    the palette cannot drift from the components that exist; a part added to the
+ *    game is offered here without a second list to update. Wide components are
+ *    included: they are ordinary registry defs, and "16-bit" is a phase-5
+ *    question about widths, not about whether the sandbox may use `add8`.
+ *  * plus everything the campaign has handed the player, which for the base parts
+ *    is already true, so the union only ever ADDS a player's own components --
+ *    passed in as `extra` because a component is data (`Progress.blueprints`)
+ *    rather than a registry entry.
+ *
+ * `dev` widens nothing here (the base set is already complete) and is accepted so
+ * the two palettes take the same arguments: a caller that passes the flag to
+ * `paletteDefsFor` and forgets it here would otherwise be a silent difference
+ * between two screens that are meant to be parallel.
+ */
+export function sandboxPaletteDefs(
+  registry: Registry,
+  extra: readonly string[] = [],
+): string[] {
+  const offered = registry
+    .all()
+    .filter((def) => def.hidden !== true && def.category !== 'level')
+    .map((def) => def.id);
+  const seen = new Set(offered);
+  for (const id of extra) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    offered.push(id);
+  }
+  return offered;
+}
+
+/**
  * Records a pass: keeps the best score and the best star rating. Pure.
  *
  * `grade()` scores ANY valid-graph circuit, including one that fails its
@@ -205,5 +262,6 @@ export function applyGrade(
       },
     },
     programs: progress.programs,
+    blueprints: progress.blueprints,
   };
 }

@@ -67,7 +67,7 @@ describe('migrate', () => {
   it('drops a stale top-level unlockedComponents field', () => {
     // the unlocked set is derived now; an old save must not resurrect it
     const migrated = migrate({ version: 1, levels: {}, unlockedComponents: ['nand'] });
-    expect(migrated).toEqual({ version: 1, levels: {}, programs: {} });
+    expect(migrated).toEqual({ version: 1, levels: {}, programs: {}, blueprints: {} });
   });
 
   it('throws for unknown shapes', () => {

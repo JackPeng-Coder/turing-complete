@@ -1,3 +1,4 @@
+import type { Graph } from './graph';
 import type { PortValue } from './signal';
 
 export type ComponentCategory =
@@ -13,7 +14,17 @@ export type ComponentCategory =
   | 'io'
   | 'display'
   | 'probe'
-  | 'level';
+  | 'level'
+  /**
+   * A part the PLAYER built: a custom component, handed to the registry as a def
+   * whose `body` is its circuit (`graph.ts`'s `CustomComponentDef`).
+   *
+   * Its own category rather than `logic1` or `wide` because it is not a gate and
+   * its cost is not its own: `gateCost` and `delayOf` expand the body, so the
+   * category only has to answer "is this one of ours", which is also what the
+   * palette's group heading reads.
+   */
+  | 'custom';
 
 export interface PinDef {
   readonly id: string;
@@ -106,6 +117,22 @@ export interface ComponentDef {
   readonly stateBytes: number;
   /** Hidden from the palette (used by level plumbing). */
   readonly hidden?: boolean;
+  /**
+   * The circuit this part stands for, when the PLAYER built it.
+   *
+   * A def with a body is a custom component (`graph.ts`'s
+   * `CustomComponentDef`): it has no `evaluate` and no state of its own, because
+   * `compile` never instantiates it -- it walks the body and emits the leaves,
+   * one set of storage slots per instance (`core/net.ts`). That is what makes a
+   * component a NAME for a circuit rather than a box the simulator has to know
+   * how to open, and it is why one definition can be instanced twice without the
+   * two instances sharing a single bit of state.
+   *
+   * `cost` and `gateCost` are 0 on such a def: its price is the sum of what its
+   * body contains, computed by `gateCost`/`delayOf` as they expand it, so
+   * charging anything here would charge the wire AND the gates inside it.
+   */
+  readonly body?: Graph;
 }
 
 export interface Registry {

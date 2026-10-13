@@ -1,6 +1,6 @@
 import type { Graph, GraphIssue } from '../core/graph';
 import { validateGraph } from '../core/graph';
-import { delayOf } from '../core/net';
+import { delayOf, gateCostOf } from '../core/net';
 import type { Registry } from '../core/registry';
 import { runChecks, type PlayerProgram } from './checks';
 import type { CheckFailure, LevelSpec } from './spec';
@@ -30,25 +30,19 @@ export function scoreOf(m: Metrics): number {
  * Total NAND-equivalent gates of the circuit: the GATE metric (spec §5.4,
  * "电路 + 自定义组件 + 宽位组件全部展开后，NAND 等价门的总数").
  *
+ * A THIN FORWARD to `core/net.ts`, which walks the document's leaves. The body is
+ * there rather than here because `compile` and `delayOf` need the same flattening
+ * and the three metrics must agree about what the document contains: two copies of
+ * "expand the components" would drift, and a drift here is a target that cannot be
+ * reproduced by the compiler's own view of the circuit.
+ *
  * It counts `def.gateCost`, NOT `def.cost`. The two fields are different metrics
  * on purpose: `cost` is the per-node DELAY unit that `delayOf` charges, and a
  * wide component is deliberately one unit of delay (spec §3.2) while expanding
  * to many NAND equivalents here -- an `add8` is 1 delay but 72 gates.
- *
- * The `?? def.cost` fallback is for defs whose two values genuinely agree and are
- * zero on both: a rail, a level connector, a wire-like packer, a storage element.
- * It is NOT the 1-bit default -- a 1-bit `and` is 2 NAND equivalents and an `or`
- * is 3 (see the basis table in `defs/index.ts`), and those gates state their own
- * counts. `test/core/registry.test.ts` fails if a gate ever stops stating one.
  */
 export function gateCost(graph: Graph, registry: Registry): number {
-  let total = 0;
-  for (const inst of graph.instances) {
-    if (!registry.has(inst.def)) continue;
-    const def = registry.get(inst.def);
-    total += def.gateCost ?? def.cost;
-  }
-  return total;
+  return gateCostOf(graph, registry);
 }
 
 export function starsOf(m: Metrics, spec: LevelSpec, passed: boolean): 0 | 1 | 3 {

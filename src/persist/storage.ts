@@ -1,5 +1,6 @@
 import { emptyProgress } from '../app/progress';
 import type { LevelRecord, Progress } from '../app/progress';
+import { libraryFromRecord, type BlueprintLibrary } from '../levels/blueprints';
 import { currentIdOf } from '../levels/id-map';
 
 /**
@@ -62,7 +63,13 @@ export function migrate(raw: unknown): Progress {
       if (current !== null && typeof text === 'string') programs[current] = text;
     }
   }
-  return { version: 1, levels, programs };
+  // Components are keyed by their own id, not by a level, so they need no
+  // translation -- but they do need reading through the one normaliser, because
+  // a library is a graph and a graph from `localStorage` is untrusted input. A
+  // save written before components existed has no `blueprints` field at all, and
+  // reads as an empty library rather than as a corrupt save.
+  const blueprints: BlueprintLibrary = libraryFromRecord(raw.blueprints);
+  return { version: 1, levels, programs, blueprints };
 }
 
 /** Best-effort load; an absent or corrupt store reads as a fresh save. */

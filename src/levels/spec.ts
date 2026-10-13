@@ -304,6 +304,20 @@ export interface LevelSpec {
     readonly tick?: number;
   };
   readonly rewards?: { readonly components?: readonly string[] };
+  /**
+   * `true` on the sandbox: the free-build screen, which is not a challenge.
+   *
+   * It exists so that "this level declares no checks" and "this level is the
+   * sandbox" stay distinguishable in the data. Both have empty `checks`, and the
+   * panels would otherwise have to guess from an id, or would tell a player in
+   * the sandbox that a level is missing its test cases.
+   *
+   * NOT A CHAPTER AND NOT IN THE CAMPAIGN: the sandbox is not part of
+   * `content/index.ts`, `ALL_LEVELS` or `LEVEL_ORDER`, so nothing that walks the
+   * shipped levels (`campaign-shape`, `unlock-chain`, `level-buildability`) ever
+   * sees it.
+   */
+  readonly sandbox?: true;
 }
 
 /**

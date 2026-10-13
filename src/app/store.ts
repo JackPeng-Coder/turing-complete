@@ -20,6 +20,7 @@
 import type { Graph } from '../core/graph';
 import type { Registry } from '../core/registry';
 import type { GradeResult, Metrics } from '../levels/grader';
+import type { BlueprintLibrary } from '../levels/blueprints';
 import type { LevelSpec } from '../levels/spec';
 import type { Progress } from './progress';
 import type { Camera, Point } from './viewport';
@@ -89,6 +90,17 @@ export interface AppState {
    * map cannot disagree with itself.
    */
   programs: Record<string, string>;
+  /**
+   * The player's own components, as the palette and the kernel see them.
+   *
+   * IN THE STORE, not only in `Progress`, because the palette is a view of it and
+   * a view needs to be told when its subject changes: wrapping a selection adds an
+   * entry and a rename replaces one, and both are read from `store.get()` at
+   * render time. `Progress.blueprints` is the durable copy this mirrors (exactly
+   * as `programs` mirrors `Progress.programs`), and `main.ts` keeps the two in step
+   * in one place.
+   */
+  blueprints: BlueprintLibrary;
   /**
    * What the circuit on the board costs, measured as it is edited.
    *

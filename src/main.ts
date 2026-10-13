@@ -9,6 +9,7 @@ import { CommandStack } from './app/commands';
 import { grade } from './levels/grader';
 import { loadProgress, saveProgress } from './persist/storage';
 import { applyGrade, resumePointOf, type Progress } from './app/progress';
+import { composeRegistry } from './levels/blueprints';
 import { devModeFrom } from './app/dev';
 import { mountShell } from './ui/shell';
 import { mountPalette } from './ui/palette';
@@ -32,6 +33,18 @@ const registry = createRegistry(BASE_DEFS);
 let progress: Progress = loadProgress();
 const level: LevelSpec = getLevel(resumePointOf(progress, LEVEL_ORDER));
 
+/**
+ * The registry a document compiles against: the base catalog plus the player's
+ * components.
+ *
+ * THE BASE REGISTRY STAYS THE BASE REGISTRY. `registry` above answers "what parts
+ * does the game ship" and is what `defs/index.ts`'s tests pin; this one is what the
+ * board, the checks and the palette actually resolve ids through, and it is
+ * rebuilt whenever the library changes rather than mutated in place -- see
+ * `composeRegistry` for why a player's part never enters the singleton.
+ */
+let composed = composeRegistry(registry, progress.blueprints);
+
 /** `?dev=1`: every level reachable and every listed part on offer. See `dev.ts`. */
 let dev = devModeFrom(globalThis.location.search);
 
@@ -42,7 +55,7 @@ const store: Store<AppState> = createStore<AppState>({
   // `Graph` -- a starting circuit is a head start, not a fixture nobody can
   // touch, which is what keeps it a board rather than a built-in CPU.
   graph: level.board ? graphFromBoard(level.id, level.board) : emptyGraph(level.id),
-  registry,
+  registry: composed,
   progress,
   camera: { x: 40, y: 40, zoom: 1 },
   selected: [],
@@ -54,6 +67,7 @@ const store: Store<AppState> = createStore<AppState>({
   // typed (`onProgramEdit`), through `progress.programs` and `saveProgress`, so
   // the editor, the checks and the save all read the same text.
   programs: progress.programs,
+  blueprints: progress.blueprints,
   metrics: null,
   lastGrade: null,
   status: null,
@@ -306,7 +320,7 @@ if (app) {
     // the same snapshot as the circuit. A level that has never been typed into
     // hands over an empty string, which the checker reports as `missing-program`
     // rather than running nothing.
-    const result = grade(graph, registry, current, { text: programs[current.id] ?? '' });
+    const result = grade(graph, store.get().registry, current, { text: programs[current.id] ?? '' });
     // One state change covers all three readers: the panel takes its verdict,
     // the bar takes the stars, and the board keeps the last case's vector.
     store.set({ lastGrade: result, metrics: result.metrics });
@@ -318,7 +332,7 @@ if (app) {
     store.set({ progress });
 
     closeResult();
-    showResult(current, result, registry, {
+    showResult(current, result, store.get().registry, {
       onContinue: closeResult,
       onNext: () => {
         closeResult();
@@ -560,8 +574,8 @@ if (app) {
     }
     // The palette only offers ids the registry knows; the guard keeps the
     // "registry.get throws" contract local rather than implied.
-    if (!registry.has(defId)) return;
-    const def = registry.get(defId);
+    if (!store.get().registry.has(defId)) return;
+    const def = store.get().registry.get(defId);
     store.set({
       armed: defId,
       status: {
@@ -650,7 +664,7 @@ if (app) {
     // verdict itself stays `finishTest`'s business.
     const player = { text: programs[current.id] ?? '' };
     store.set({
-      metrics: grade(graph, registry, current, player).metrics,
+      metrics: grade(graph, store.get().registry, current, player).metrics,
       lastGrade: null,
     });
   };
@@ -696,7 +710,7 @@ if (app) {
     const format = playerProgramFormat(current);
     const key = `${current.id}\u0000${graphRevision}\u0000${format}\u0000${playerText()}`;
     if (playerRun === null || playerRunKey !== key) {
-      playerRun = createProgramRun(graph, registry, current, playerText(), format);
+      playerRun = createProgramRun(graph, store.get().registry, current, playerText(), format);
       playerRunKey = key;
       syncPlayerInputs();
     }

@@ -46,6 +46,10 @@ describe('graph construction', () => {
       name: { zh: '自定义门', en: 'Custom Gate' },
       inputs: [{ id: 'a', width: 1 }],
       outputs: [{ id: 'out', width: 1 }],
+      binds: {
+        inputs: { a: { inst: n.id, port: 'a' } },
+        outputs: { out: { inst: o.id, port: 'out' } },
+      },
       body: inner,
     });
 
@@ -56,14 +60,27 @@ describe('graph construction', () => {
     expect(cloned.name).not.toBe(orig.name);
     expect(cloned.inputs[0]).not.toBe(orig.inputs[0]);
     expect(cloned.outputs[0]).not.toBe(orig.outputs[0]);
+    // The binding table is part of the component, so a clone that shared it
+    // would let an edit to one component's pins move another's.
+    expect(cloned.binds.inputs).not.toBe(orig.binds.inputs);
+    expect(cloned.binds.inputs.a).not.toBe(orig.binds.inputs.a);
+    expect(cloned.binds.outputs.out).not.toBe(orig.binds.outputs.out);
     expect(cloned.body).not.toBe(orig.body);
     expect(cloned.body.wires[0]!.from).not.toBe(orig.body.wires[0]!.from);
     expect(cloned.body.wires[0]!.to).not.toBe(orig.body.wires[0]!.to);
 
     cloned.name.en = 'Renamed';
+    // Rebinding is a REPLACEMENT, not a mutation (`BlueprintBinds` is readonly),
+    // so a clone that shared the table would show up as the ORIGINAL's binding
+    // changing when the copy is rebound.
+    copy.customComponents[0] = {
+      ...cloned,
+      binds: { ...cloned.binds, inputs: { a: { inst: 'elsewhere', port: 'b' } } },
+    };
     cloned.body.instances[0]!.x = 999;
     cloned.body.instances.push(addInstance(cloned.body, 'and', 0, 0));
     expect(orig.name.en).toBe('Custom Gate');
+    expect(orig.binds.inputs.a!.port).toBe('a');
     expect(orig.body.instances).toHaveLength(2);
     expect(orig.body.instances[0]!.x).toBe(0);
   });

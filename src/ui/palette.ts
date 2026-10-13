@@ -144,4 +144,8 @@ const CATEGORY_LABEL: Record<ComponentCategory, string> = {
   display: '外设',
   probe: '探针',
   level: '关卡',
+  // The player's own parts, after the catalog's. The heading is what makes a
+  // wrapped selection findable again: `custom` is the one category whose contents
+  // differ between two players.
+  custom: '自制元件',
 };

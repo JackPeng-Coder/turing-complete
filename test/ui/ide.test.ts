@@ -70,6 +70,7 @@ function makeStore(level: LevelSpec, text = ''): Store<AppState> {
     armed: null,
     dev: false,
     programs: text === '' ? {} : { [level.id]: text },
+    blueprints: {},
     metrics: null,
     lastGrade: null,
     status: null,

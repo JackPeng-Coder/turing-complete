@@ -104,15 +104,17 @@ export function createDisplay(
       const net = machine?.net ?? compile(graph, registry);
       const sim = machine?.sim ?? new Simulation(net, registry);
       const io = bindLevelIo(sim, net, level);
-      for (const inst of graph.instances) {
-        if (!registry.has(inst.def)) continue;
-        for (const pin of registry.get(inst.def).outputs) {
-          const key = `${inst.id}.${pin.id}`;
-          try {
-            regions.push({ key, base: net.outputBase(key), width: net.outputWidth(key) });
-          } catch {
-            // A pin `compile` did not allocate: it carries nothing to show.
-          }
+      // ONE REGION PER COMPILED OUTPUT PIN, not per document instance. A custom
+      // component compiles to the parts inside it, so the pins a board can paint
+      // are `i3`'s own for a leaf and `i3/i1`'s for a component -- and the
+      // component's declared pins are aliases of the latter, so enumerating
+      // EVERY output key covers the whole surface, aliases included, without this
+      // module having to know what a component is.
+      for (const key of net.outputKeys()) {
+        try {
+          regions.push({ key, base: net.outputBase(key), width: net.outputWidth(key) });
+        } catch {
+          // A key `compile` reported but cannot address: nothing to show.
         }
       }
       return { sim, io };

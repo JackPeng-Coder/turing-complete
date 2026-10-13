@@ -1,5 +1,11 @@
 import { CircuitValidationError, UnstableCircuitError } from './errors';
-import { validateGraph, type Graph, type GraphIssue, type Instance } from './graph';
+import {
+  PATH_SEPARATOR,
+  validateGraph,
+  type Graph,
+  type GraphIssue,
+  type Instance,
+} from './graph';
 import { assertWidth, createSignalTable, type PortValue, type SignalTable } from './signal';
 import type { ComponentDef, PinDef, Registry } from './registry';
 
@@ -19,9 +25,12 @@ const MIN_CAPACITY = 64;
  */
 export interface Netlist {
   /**
-   * Expanded instances. Phase 0 does not expand custom components, so this is
-   * `graph.instances.length` and `expandedCount` repeats it for the plan's
-   * original spelling.
+   * Leaves compiled, which is what actually runs.
+   *
+   * NOT `graph.instances.length` once a document uses a custom component: the
+   * component is a name for a circuit, so `compile` emits the circuit's parts, one
+   * set per instance of it. `expandedCount` repeats it for the plan's original
+   * spelling.
    */
   readonly instanceCount: number;
   readonly expandedCount: number;
@@ -38,7 +47,13 @@ export interface Netlist {
    * addressed through `drive`.
    */
   readonly drive: Int32Array;
-  /** Expanded instance key -> origin instance id in the document. */
+  /**
+   * Compiled path -> origin instance id in the document.
+   *
+   * The origin is the OUTERMOST instance the leaf belongs to, so every leaf inside
+   * one custom component reports the same id -- the one the player can see on the
+   * board and delete.
+   */
   readonly refs: Map<string, string>;
   /**
    * Slot base of a **contiguous** read region for the input pin
@@ -73,7 +88,16 @@ export interface Netlist {
   inputWidth(key: string): number;
   /** Width of the output pin `"<instId>.<pinId>"`, in bits, as compiled. */
   outputWidth(key: string): number;
-  /** Expanded instance ids, in evaluation order. */
+  /**
+   * Compiled paths inside one outer instance, itself first.
+   *
+   * Empty for an id this netlist does not contain. One entry for an ordinary part
+   * (the path IS the id), several for a custom component -- which is what a
+   * caller needs to walk a board instance's signals, since a component's own pins
+   * are aliases for pins inside it.
+   */
+  pathsOf(instanceId: string): readonly string[];
+  /** Compiled instance ids, in evaluation order -- paths, not document ids. */
   instanceIds(): readonly string[];
   /** Def ids of the expanded instances, in evaluation order. */
   instanceDefs(): readonly string[];
@@ -138,6 +162,12 @@ interface NetInternals {
   readonly instances: readonly CompiledInstance[];
   readonly outputPins: readonly OutputPin[];
   readonly readRegions: readonly ReadRegion[];
+  /** Compiled path -> leaf, for resolving a document id that a component shadows. */
+  readonly byKey: ReadonlyMap<string, CompiledInstance>;
+  /** Compiled path -> the outer instance it belongs to. */
+  readonly origins: ReadonlyMap<string, string>;
+  /** Outer instance id -> the leaf that carries its pins. */
+  readonly roots: ReadonlyMap<string, CompiledInstance>;
 }
 
 /** Ties a netlist to the storage `compile` built for it, without a public field. */
@@ -163,7 +193,8 @@ function contiguousRun(drive: Int32Array, base: number, width: number): number {
 }
 
 /**
- * Capacity for `graph`, derived from the circuit instead of the table default.
+ * Capacity for a flattened document, derived from the circuit instead of the
+ * table default.
  *
  * `createSignalTable`'s 65,536-slot default cannot hold the spec's
  * 20,000-instance budget: 20,000 two-input gates occupy 60,000 slots and a
@@ -177,23 +208,94 @@ function contiguousRun(drive: Int32Array, base: number, width: number): number {
  * `compile` allocates from. Sizing this from the def widths would reserve less
  * than the allocation loop and the regions actually take, and the table would
  * overrun on a circuit that is perfectly legal.
+ *
+ * IT COUNTS LEAVES, NOT INSTANCES. A custom component occupies no slots of its
+ * own -- `compile` emits its body instead -- so reserving for the component would
+ * over-reserve by everything it contains, and would not cover a body that
+ * contains another component at all.
  */
-function capacityFor(graph: Graph, registry: Registry): number {
-  const driven = new Set<string>();
-  for (const wire of graph.wires) driven.add(`${wire.to.inst}.${wire.to.port}`);
+function capacityFor(ops: readonly FlatOp[], registry: Registry): number {
   let slots = 0;
   let regions = 0;
-  for (const inst of graph.instances) {
+  for (const op of ops) {
     // `validateGraph` has already rejected unknown def ids, so `get` cannot throw.
-    const def = registry.get(inst.def);
+    const def = registry.get(op.inst.def);
     for (const pin of def.inputs) {
-      const width = effectiveWidth(inst, pin);
+      const width = effectiveWidth(op.inst, pin);
       slots += width;
-      if (width > 1 && driven.has(`${inst.id}.${pin.id}`)) regions += width;
+      // EVERY wide input pin is reserved for a possible region, not only the
+      // driven ones. A pin narrower than its driver needs no region and one the
+      // caller drives directly needs none either, but the reservation has to
+      // cover the worst case -- `alloc` throws rather than growing, so an
+      // under-reservation is a circuit that cannot compile at all.
+      if (width > 1) regions += width;
     }
-    for (const pin of def.outputs) slots += effectiveWidth(inst, pin);
+    for (const pin of def.outputs) slots += effectiveWidth(op.inst, pin);
   }
   return Math.max(MIN_CAPACITY, Math.ceil(slots * 1.25) + regions + 16);
+}
+
+/** One leaf of a flattened document: an instance, and the graph it came from. */
+interface FlatOp {
+  /** Compiled path: the instance id, prefixed by the components that contain it. */
+  readonly path: string;
+  /** The outermost instance this leaf belongs to; equal to `path` at the root. */
+  readonly origin: string;
+  readonly inst: Instance;
+  /** The graph `inst` lives in, so its wires are found without a second walk. */
+  readonly graph: Graph;
+}
+
+/**
+ * Walks a document into the flat list of instances that will actually run.
+ *
+ * A CUSTOM COMPONENT IS A NAME, NOT A BOX: `compile` never emits one. It emits
+ * what its body contains, once per instance of the component, and that is what
+ * makes two instances of one component independent -- the leaves are distinct, so
+ * `Simulation` allocates state per leaf (`#state` is indexed like `instances`),
+ * and each instance's registers are its own without a single line of code that
+ * knows what a component is.
+ *
+ * Paths are the identity, so the walk refuses what cannot be addressed: a cycle
+ * would not terminate (`validateGraph` refuses it first, and this throws rather
+ * than trusting that), and an instance id containing the separator would collide
+ * with an instance inside a component.
+ *
+ * The cycle guard is the CHAIN, not a global visited set: the same component used
+ * by two different components is a legal diamond, while a component that contains
+ * itself -- however long the way round -- is not.
+ */
+function flattenForCompile(graph: Graph, registry: Registry): FlatOp[] {
+  const ops: FlatOp[] = [];
+  const walk = (g: Graph, prefix: string, origin: string, chain: ReadonlySet<string>): void => {
+    for (const inst of g.instances) {
+      const path = `${prefix}${inst.id}`;
+      const def = registry.get(inst.def);
+      const body = def.body;
+      if (!body) {
+        ops.push({ path, origin: origin === '' ? path : origin, inst, graph: g });
+        continue;
+      }
+      if (chain.has(def.id)) {
+        throw new CircuitValidationError([
+          {
+            severity: 'error',
+            code: 'recursive-blueprint',
+            inst: path,
+            message: {
+              zh: `自定义元件 ${def.name.zh}（${def.id}）的电路里含它自己，无法展开`,
+              en: `Custom component ${def.name.en} (${def.id}) contains itself and cannot be expanded`,
+            },
+          },
+        ]);
+      }
+      const inner = new Set(chain);
+      inner.add(def.id);
+      walk(body, `${path}${PATH_SEPARATOR}`, origin === '' ? path : origin, inner);
+    }
+  };
+  walk(graph, '', '', new Set());
+  return ops;
 }
 
 /**
@@ -216,17 +318,42 @@ export function compile(graph: Graph, registry: Registry): Netlist {
   );
   if (errors.length > 0) throw new CircuitValidationError(errors);
 
-  const table = createSignalTable(capacityFor(graph, registry));
+  const ops = flattenForCompile(graph, registry);
+  const table = createSignalTable(capacityFor(ops, registry));
   const instances: CompiledInstance[] = [];
+  /**
+   * Compiled path -> its leaf, so a wire can be resolved in one lookup.
+   *
+   * THE KEY IS THE PATH, and a path is what makes two instances of one component
+   * differ. Two `bp1` instances both have an inner `i1`; only `i3/i1` and `i7/i1`
+   * tell them apart, and the storage each owns is allocated per PATH (see
+   * `Simulation`'s state array), which is the whole of what "each instance of a
+   * component has its own state" means.
+   */
+  const byKey = new Map<string, CompiledInstance>();
+  /**
+   * Outer instance id -> the compiled instance that carries its pins.
+   *
+   * For a leaf that is the leaf itself; for a custom component it is the FIRST
+   * instance of its body, because a component has no pins of its own -- its
+   * surface is an alias for pins inside it.
+   */
+  const roots = new Map<string, CompiledInstance>();
+  /** Compiled path -> the outer instance it belongs to. */
+  const origins = new Map<string, string>();
   const refs = new Map<string, string>();
-  const byId = new Map<string, CompiledInstance>();
+  /** Outer instance id -> every path compiled inside it, itself first. */
+  const pathsOfRoot = new Map<string, string[]>();
   const outputBases = new Map<string, number>();
   const outputPins: OutputPin[] = [];
+  const inputBases = new Map<string, number>();
   const inputWidths = new Map<string, number>();
   const outputWidths = new Map<string, number>();
+  /** Compiled path -> real pin key, for a custom component's declared pins. */
+  const aliases = new Map<string, string>();
 
-  for (const inst of graph.instances) {
-    const def = registry.get(inst.def);
+  for (const op of ops) {
+    const def = registry.get(op.inst.def);
     // A storage element publishes what it holds through its own `evaluate` (see
     // `Simulation.#publishState`), so one without it could never put its state on
     // a pin. That is a defect in the DEF rather than in the circuit, and this is
@@ -250,7 +377,7 @@ export function compile(graph: Graph, registry: Registry): Netlist {
         {
           severity: 'error',
           code: 'invalid-params',
-          inst: inst.id,
+          inst: op.path,
           message: {
             zh: `${def.id}: 存储元件必须声明 evaluate() 才能发布其所存的值`,
             en: `${def.id}: a storage element must declare evaluate() to publish what it holds`,
@@ -258,23 +385,26 @@ export function compile(graph: Graph, registry: Registry): Netlist {
         },
       ]);
     }
-    const inWidths = def.inputs.map((pin) => effectiveWidth(inst, pin));
-    const outWidths = def.outputs.map((pin) => effectiveWidth(inst, pin));
+    const inWidths = def.inputs.map((pin) => effectiveWidth(op.inst, pin));
+    const outWidths = def.outputs.map((pin) => effectiveWidth(op.inst, pin));
     const inputs = inWidths.map((width) => table.alloc(width));
-    def.inputs.forEach((pin, i) => inputWidths.set(`${inst.id}.${pin.id}`, inWidths[i]!));
+    def.inputs.forEach((pin, i) => {
+      inputWidths.set(`${op.path}.${pin.id}`, inWidths[i]!);
+      inputBases.set(`${op.path}.${pin.id}`, inputs[i]!);
+    });
     const outPin: number[] = [];
     const outputs = outWidths.map((width, i) => {
       const pin = def.outputs[i]!;
       const base = table.alloc(width);
-      outputBases.set(`${inst.id}.${pin.id}`, base);
-      outputWidths.set(`${inst.id}.${pin.id}`, width);
+      outputBases.set(`${op.path}.${pin.id}`, base);
+      outputWidths.set(`${op.path}.${pin.id}`, width);
       outPin.push(outputPins.length);
       outputPins.push({ base, width });
       return base;
     });
     const compiled: CompiledInstance = {
-      key: inst.id,
-      origin: inst.id,
+      key: op.path,
+      origin: op.origin,
       def,
       inputs,
       inputWidths: inWidths,
@@ -282,9 +412,85 @@ export function compile(graph: Graph, registry: Registry): Netlist {
       outputWidths: outWidths,
       outPin,
     };
-    refs.set(inst.id, inst.id);
-    byId.set(inst.id, compiled);
+    // The FIRST leaf of an outer instance owns its pins. A custom component
+    // contributes several leaves but only one root, and that is the one whose
+    // pins the component's surface aliases.
+    if (!roots.has(op.origin)) roots.set(op.origin, compiled);
+    byKey.set(op.path, compiled);
+    origins.set(op.path, op.origin);
+    refs.set(op.path, op.origin);
+    const paths = pathsOfRoot.get(op.origin);
+    if (paths) paths.push(op.path);
+    else pathsOfRoot.set(op.origin, [op.path]);
     instances.push(compiled);
+  }
+
+  /** The compiled key a wire's endpoint names, following a component's surface. */
+  const realKey = (instanceId: string, port: string): string =>
+    aliases.get(`${instanceId}.${port}`) ?? `${instanceId}.${port}`;
+
+  /**
+   * The base and width of one pin, as compiled.
+   *
+   * `left` picks the side: an output for a driver, an input for a destination.
+   * `null` for a pin that does not exist -- an endpoint `validateGraph` has
+   * already refused, so the wire is skipped rather than crashing the compile.
+   */
+  const pinAt = (
+    instanceId: string,
+    port: string,
+    left: boolean,
+  ): { base: number; width: number; key: string } | null => {
+    const key = realKey(instanceId, port);
+    const base = left ? outputBases.get(key) : inputBases.get(key);
+    const width = left ? outputWidths.get(key) : inputWidths.get(key);
+    if (base === undefined || width === undefined) return null;
+    return { base, width, key };
+  };
+
+  /**
+   * A CUSTOM COMPONENT'S BOUNDARY, declared before the wires are resolved.
+   *
+   * A component's declared pin IS a body pin: an input stands for the body pin it
+   * drives, an output for the body pin it reads. Aliasing the two is what makes
+   * the surface work with no new concept in the kernel -- a wire to `i3.a` drives
+   * the same slots a wire to `i3/i1.a` would, and a reader of `i3.out` reads the
+   * body's own output slots -- and it has to happen BEFORE the wires, because the
+   * wire loop resolves both ends through `realKey`.
+   *
+   * An input's slots are shared with the body pin too, rather than copied: the
+   * body pin's `drive` entries already point at whatever drives it from inside the
+   * body, and the outer wire overwrites them for the bits it covers. An input the
+   * body does not drive and the outer circuit does not wire therefore reads 0 --
+   * the same answer an unwired pin has everywhere else.
+   */
+  for (const inst of graph.instances) {
+    const def = registry.has(inst.def) ? registry.get(inst.def) : null;
+    const body = def?.body;
+    if (!body) continue;
+    const component = graph.customComponents.find((entry) => entry.id === inst.def);
+    const binds = component?.binds;
+    const owner = roots.get(inst.id);
+    if (!binds || !owner) continue;
+
+    def.inputs.forEach((pin, index) => {
+      const bind = binds.inputs[pin.id];
+      if (!bind) return;
+      const scope = `${inst.id}.${pin.id}`;
+      inputBases.set(scope, owner.inputs[index]!);
+      inputWidths.set(scope, owner.inputWidths[index]!);
+      aliases.set(scope, `${inst.id}/${bind.inst}.${bind.port}`);
+    });
+    def.outputs.forEach((pin) => {
+      const bind = binds.outputs[pin.id];
+      if (!bind) return;
+      const scope = `${inst.id}.${pin.id}`;
+      const target = pinAt(`${inst.id}/${bind.inst}`, bind.port, true);
+      if (!target) return;
+      outputBases.set(scope, target.base);
+      outputWidths.set(scope, target.width);
+      aliases.set(scope, target.key);
+    });
   }
 
   // Start from the identity so an unwired input reads its own (zero) slot, then
@@ -295,20 +501,64 @@ export function compile(graph: Graph, registry: Registry): Netlist {
   // which the kernel never writes.
   const drive = new Int32Array(table.size);
   for (let slot = 0; slot < drive.length; slot += 1) drive[slot] = slot;
-  for (const wire of graph.wires) {
-    const from = byId.get(wire.from.inst);
-    const to = byId.get(wire.to.inst);
-    if (!from || !to) continue; // unknown endpoints are a fatal issue, already thrown
-    const fromPin = from.def.outputs.findIndex((p) => p.id === wire.from.port);
-    const toPin = to.def.inputs.findIndex((p) => p.id === wire.to.port);
-    if (fromPin < 0 || toPin < 0) continue; // unknown ports are fatal too
-    const fromBase = from.outputs[fromPin]!;
-    const toBase = to.inputs[toPin]!;
-    // Both sides resolved per instance: a driver and a pin may each be wider (or
-    // narrower) than their def declares.
-    const width = Math.min(from.outputWidths[fromPin]!, to.inputWidths[toPin]!);
-    for (let bit = 0; bit < width; bit += 1) drive[toBase + bit] = fromBase + bit;
+  // ONE PASS PER GRAPH, because a component's body has wires of its own and they
+  // are just as real as the ones the player drew on the board. Both passes do the
+  // same thing; they differ only in how an endpoint is addressed -- an outer wire
+  // names an outer instance (through its surface alias for a component), a body
+  // wire names a leaf by its compiled path.
+  const graphs = new Set<Graph>([graph, ...graph.customComponents.map((c) => c.body)]);
+  /** `graph` + instance id -> the leaf that instance compiled to, in that graph. */
+  const leafPath = new Map<Graph, Map<string, string>>();
+  for (const op of ops) {
+    const within = op.path.slice(op.path.lastIndexOf(PATH_SEPARATOR) + 1);
+    const paths = leafPath.get(op.graph) ?? new Map<string, string>();
+    if (!paths.has(within)) paths.set(within, op.path);
+    leafPath.set(op.graph, paths);
   }
+  /**
+   * One pin of one instance of a BODY graph, addressed by its compiled path.
+   *
+   * The body's own wires name the body's instances, so the path is
+   * `<component instance>/<instance>.<pin>` -- which is exactly what the
+   * allocation loop keyed its maps by. `null` for anything the walk did not emit,
+   * which `validateGraph` has already reported.
+   */
+  const bodyPin = (
+    g: Graph,
+    id: string,
+    port: string,
+    left: boolean,
+  ): { base: number; width: number } | null => {
+    const path = leafPath.get(g)?.get(id);
+    if (path === undefined) return null;
+    const key = `${path}.${port}`;
+    const base = left ? outputBases.get(key) : inputBases.get(key);
+    const width = left ? outputWidths.get(key) : inputWidths.get(key);
+    if (base === undefined || width === undefined) return null;
+    return { base, width };
+  };
+  for (const g of graphs) {
+    const outer = g === graph;
+    for (const wire of g.wires) {
+      const from = outer
+        ? pinAt(wire.from.inst, wire.from.port, true)
+        : bodyPin(g, wire.from.inst, wire.from.port, true);
+      const to = outer
+        ? pinAt(wire.to.inst, wire.to.port, false)
+        : bodyPin(g, wire.to.inst, wire.to.port, false);
+      if (!from || !to) continue;
+      // Both sides resolved per instance: a driver and a pin may each be wider (or
+      // narrower) than their def declares.
+      const width = Math.min(from.width, to.width);
+      for (let bit = 0; bit < width; bit += 1) drive[to.base + bit] = from.base + bit;
+    }
+  }
+
+  // A component's input pin shares the body pin's slots AND its base (see the
+  // boundary pass above), so its `drive` entries ARE the body pin's -- written by
+  // the wire loop, which resolved both. Nothing has to be copied for the unwired
+  // case either: an unwired pin's `drive` entry is the identity, so it reads the
+  // slot nothing writes, which is the same 0 a leaf's unwired input reads.
 
   // `drive` answers "which single slot drives this bit", which is all a per-bit
   // read needs. A caller reads a *range* instead (`read(inputBase(key), width)`),
@@ -337,15 +587,29 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     }
   }
 
+  // A COMPONENT'S INPUT PIN ALIASES THE BODY PIN'S READ REGION, and that is the
+  // one place the alias has to be written twice: `readBases` is the map
+  // `inputBase` hands a range-reading caller, and the body pin's entry in it may
+  // be a materialised region rather than its own slots. Without this the
+  // component's pin would read its own slots -- which nothing drives -- and a
+  // level that read it as a range would see zeros where the body sees a value.
+  for (const [scope, key] of aliases) {
+    if (!inputBases.has(key)) continue;
+    const base = readBases.get(key) ?? inputBases.get(key)!;
+    readBases.set(scope, base);
+  }
+
   const instanceIds = instances.map((i) => i.key);
   const instanceDefs = instances.map((i) => i.def.id);
   const baseOf = (map: Map<string, number>, kind: string, key: string): number => {
-    const base = map.get(key);
+    const [instanceId, ...rest] = key.split('.');
+    const base = map.get(key) ?? map.get(realKey(instanceId ?? '', rest.join('.')));
     if (base === undefined) throw new Error(`no such ${kind} pin: ${key}`);
     return base;
   };
   const widthOf = (map: Map<string, number>, kind: string, key: string): number => {
-    const width = map.get(key);
+    const [instanceId, ...rest] = key.split('.');
+    const width = map.get(key) ?? map.get(realKey(instanceId ?? '', rest.join('.')));
     if (width === undefined) throw new Error(`no such ${kind} pin: ${key}`);
     return width;
   };
@@ -359,11 +623,12 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     outputBase: (key) => baseOf(outputBases, 'output', key),
     inputWidth: (key) => widthOf(inputWidths, 'input', key),
     outputWidth: (key) => widthOf(outputWidths, 'output', key),
+    pathsOf: (instanceId) => pathsOfRoot.get(instanceId) ?? [],
     instanceIds: () => instanceIds,
     instanceDefs: () => instanceDefs,
     outputKeys: () => [...outputBases.keys()],
   };
-  INTERNALS.set(net, { table, instances, outputPins, readRegions });
+  INTERNALS.set(net, { table, instances, outputPins, readRegions, byKey, origins, roots });
   return net;
 }
 
@@ -745,6 +1010,34 @@ export class Simulation {
 }
 
 /**
+ * Total NAND-equivalent gates of a document, with every custom component expanded.
+ *
+ * THE GATE METRIC (spec §5.4: "电路 + 自定义组件 + 宽位组件全部展开后，NAND 等价门
+ * 的总数"). It lives here rather than in `levels/grader.ts` because it walks the
+ * same flattening `compile` and `delayOf` walk: one definition of "the parts a
+ * document contains", so a component cannot cost one thing to the compiler and
+ * another to the score.
+ *
+ * `gateCost` is read per LEAF. A custom component's own def states 0 and its body
+ * is counted instead -- charging the component as well would charge the same
+ * gates twice, and pricing the component as one NAND would let a player hide a
+ * circuit inside it for free.
+ *
+ * A def that states no `gateCost` falls back to `cost`, which is a real case
+ * rather than a legacy default: a rail, a level connector, a wire-like packer and
+ * the storage elements are zero on both metrics (see `ComponentDef.gateCost`).
+ */
+export function gateCostOf(graph: Graph, registry: Registry): number {
+  let total = 0;
+  for (const op of flattenForCompile(graph, registry)) {
+    if (!registry.has(op.inst.def)) continue;
+    const def = registry.get(op.inst.def);
+    total += def.gateCost ?? def.cost;
+  }
+  return total;
+}
+
+/**
  * Longest combinational path, counted in base-gate delays.
  *
  * Linear-time DAG longest path: Kahn's algorithm for a topological order, then a
@@ -757,33 +1050,93 @@ export class Simulation {
  * shows up in the tick metric instead.
  */
 export function delayOf(graph: Graph, registry: Registry): number {
-  const count = graph.instances.length;
+  // THE LEAVES ARE THE NODES, for the same reason they are in `compile`: a custom
+  // component is a name for a circuit, so the path through it is a path through
+  // the parts inside it. Measuring the component as one node of cost 0 would
+  // report a delay that ignores everything the player put in it -- a wrapper that
+  // made a circuit cheaper by hiding it, which is the opposite of the spec's rule
+  // that flattening a component cannot change what it costs.
+  const ops = flattenForCompile(graph, registry);
+  const count = ops.length;
   if (count === 0) return 0;
-
-  const index = new Map<string, number>();
-  graph.instances.forEach((inst, i) => index.set(inst.id, i));
 
   const cost = new Int32Array(count);
   const sequential = new Uint8Array(count);
+  /** Component id -> its definition, for reading a boundary's binding table. */
+  const byId = new Map(graph.customComponents.map((entry) => [entry.id, entry]));
+  /** Compiled path -> node index. */
+  const at = new Map<string, number>();
+  /** Outer instance id -> the node that carries its pins (its first leaf). */
+  const rootOf = new Map<string, number>();
+  /** Compiled path -> the DEF of the body instance it came from. */
+  const defOf = new Map<string, ComponentDef>();
   for (let i = 0; i < count; i += 1) {
+    const op = ops[i]!;
+    at.set(op.path, i);
+    if (!rootOf.has(op.origin)) rootOf.set(op.origin, i);
     // Unknown defs cannot reach here on a validated graph; skipping them keeps a
     // half-built document from throwing out of a metrics function.
-    const def = registry.has(graph.instances[i]!.def)
-      ? registry.get(graph.instances[i]!.def)
-      : null;
+    const def = registry.has(op.inst.def) ? registry.get(op.inst.def) : null;
+    if (def) defOf.set(op.path, def);
     cost[i] = def?.cost ?? 0;
     sequential[i] = def?.sequential ? 1 : 0;
   }
 
+  /**
+   * Where each custom component's declared OUTPUT pin lands, by leaf path.
+   *
+   * A wire drawn to `bp.out` reads the body pin `bp`'s surface binds to `out`,
+   * which is not usually the component's first leaf -- so an edge drawn to the
+   * root would start from the wrong place, and on a deep body it could hide the
+   * longest path entirely. Input pins need no equivalent map: their slots ARE the
+   * root leaf's input slots, so the root is where a wire to one lands.
+   */
+  const boundOutput = new Map<string, number>();
+  for (const op of ops) {
+    const cut = op.path.lastIndexOf(PATH_SEPARATOR);
+    if (cut < 0) continue;
+    const scope = op.path.slice(0, cut);
+    const owner = at.get(scope);
+    if (owner === undefined) continue;
+    const component = byId.get(defOf.get(scope)?.id ?? '');
+    for (const bind of Object.values(component?.binds.outputs ?? {})) {
+      const target = at.get(`${scope}${PATH_SEPARATOR}${bind.inst}.${bind.port}`);
+      if (target !== undefined) boundOutput.set(scope, target);
+    }
+  }
+
   const outgoing: number[][] = Array.from({ length: count }, () => []);
   const inDegree = new Int32Array(count);
-  for (const wire of graph.wires) {
-    const from = index.get(wire.from.inst);
-    const to = index.get(wire.to.inst);
-    if (from === undefined || to === undefined) continue;
-    if (sequential[from] === 1 || sequential[to] === 1) continue;
+  const edge = (from: number | undefined, to: number | undefined): void => {
+    if (from === undefined || to === undefined) return;
+    if (sequential[from] === 1 || sequential[to] === 1) return;
     outgoing[from]!.push(to);
     inDegree[to] = inDegree[to]! + 1;
+  };
+
+  for (const graphOfOps of new Set(ops.map((op) => op.graph))) {
+    /** Instance id -> the node it is compiled to, within THIS graph. */
+    const node = new Map<string, number>();
+    for (let i = 0; i < count; i += 1) {
+      const op = ops[i]!;
+      if (op.graph === graphOfOps) node.set(op.path.slice(op.path.lastIndexOf(PATH_SEPARATOR) + 1), i);
+    }
+    // A wire is drawn between OUTER instances of one graph, so each end is the
+    // node that carries that instance's pins: the instance itself for a leaf, and
+    // for a custom component the body leaf its surface reaches -- the bound body
+    // pin for an output, the component's own node (which the boundary shares its
+    // input slots with) for an input.
+    const source = (id: string): number | undefined =>
+      boundOutput.get(pathOf(id)) ?? node.get(id);
+    const sink = (id: string): number | undefined => node.get(id) ?? boundOutput.get(pathOf(id));
+    /** The compiled path of an outer instance of this graph. */
+    function pathOf(id: string): string {
+      const index = node.get(id);
+      return index === undefined ? '' : ops[index]!.path;
+    }
+    for (const wire of graphOfOps.wires) {
+      edge(source(wire.from.inst), sink(wire.to.inst));
+    }
   }
 
   // `delay[i]` is the longest combinational delay arriving at instance i's
