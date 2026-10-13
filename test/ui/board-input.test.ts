@@ -40,6 +40,7 @@ function board(): { store: Store<AppState>; stack: CommandStack; graph: Graph } 
     dev: false,
     programs: {},
     blueprints: {},
+    editing: null,
     metrics: null,
     lastGrade: null,
     status: null,

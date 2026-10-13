@@ -102,6 +102,17 @@ export interface AppState {
    */
   blueprints: BlueprintLibrary;
   /**
+   * The component whose BODY is open on the board, or `null` for the board itself.
+   *
+   * EDITING A COMPONENT IS EDITING A GRAPH, and the board already edits graphs --
+   * the camera, the marquee, the undo stack, the palette all work on whatever
+   * `graph` holds. So "open a component" is a graph swap rather than a second
+   * editor, and this field is what every panel reads to know which graph that is:
+   * the breadcrumb shows it, the toolbar wraps into it, and leaving restores the
+   * board the player came from.
+   */
+  editing: string | null;
+  /**
    * What the circuit on the board costs, measured as it is edited.
    *
    * A MEASUREMENT, NOT A VERDICT, and it is a separate field from `lastGrade`

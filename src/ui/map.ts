@@ -80,8 +80,7 @@ export function mountMap(
         label.className = 'map-tile-name';
         label.textContent = `${level.name.zh}${record?.stars ? ` ${'★'.repeat(record.stars)}` : ''}`;
         tile.append(order0, label);
-        if (level.id === current.id) tile.classList.add('map-tile-current');
-        if (record?.passed) tile.style.color = THEME.success;
+        if (level.id === current.id) tile.classList.add('map-tile-current');        if (record?.passed) tile.style.color = THEME.success;
         else if (!unlocked) tile.style.color = THEME.textMuted;
         tile.addEventListener('click', () => onSelect(level.id));
         grid.append(tile);

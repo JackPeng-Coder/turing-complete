@@ -246,6 +246,44 @@ button { font-family: inherit; }
 .overlay > * { pointer-events: auto; }
 .overlay-left { top: 12px; left: 12px; width: 204px; display: flex; flex-direction: column; gap: 6px; }
 .overlay-tools { top: 12px; left: 228px; }
+/* The player's own components, under the tool grid: the wrap button is a tool,
+   and what it makes is the list that belongs beside it. No width of its own --
+   it takes the column the grid already occupies, so the two read as one panel. */
+.overlay-tools .blueprints { margin-top: 10px; }
+.blueprints { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; }
+.blueprints-note { margin: 0; padding: 0 10px; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+.blueprints-warn { margin: 0; padding: 0 10px; font-size: 11px; line-height: 1.5; color: var(--hot); }
+.blueprints-count { color: var(--text-muted); letter-spacing: 0; }
+.blueprints-crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--hot);
+}
+.blueprints-crumb > span:first-child { flex: 1 1 auto; }
+.blueprints-name { display: flex; flex-direction: column; gap: 4px; padding: 0 10px; }
+.blueprints-pins { display: flex; flex-direction: column; gap: 2px; padding: 0 10px; }
+.blueprints-group { font-size: 11px; letter-spacing: 0.14em; color: var(--neon); }
+.blueprints-pins code { font-size: 11px; color: var(--text-muted); }
+.blueprints-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px; }
+.blueprints-list { list-style: none; margin: 0; padding: 0; }
+.blueprints-row { border-top: 1px solid var(--hair); padding: 4px 0; }
+.blueprints-btn {
+  border: 1px solid var(--hair);
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.blueprints-btn:hover { color: var(--hot); }
+.blueprints-btn:disabled { color: var(--text-muted); cursor: default; border-color: transparent; }
+.blueprints-wrap { margin: 0 10px; text-align: left; }
+.blueprints-pick { border: 0; text-align: left; width: 100%; }
+.blueprints-confirm { color: var(--hot); border-color: var(--hot); }
 .overlay-parts { top: 12px; right: 12px; bottom: calc(var(--test-h) + 12px); width: 218px; }
 .overlay-tests { left: 0; right: 0; bottom: 0; }
 /* The chevron rides just above the test panel. Because its `bottom` is measured
@@ -290,8 +328,10 @@ button { font-family: inherit; }
    you are looking at -- and it is why no panel needs a shadow to look raised. */
 .card,
 .palette,
-.truth-table { background: var(--slab); }
-.card { border: 1px solid var(--hair); }
+.truth-table,
+.blueprints { background: var(--slab); }
+.card,
+.blueprints { border: 1px solid var(--hair); }
 .card-head {
   display: flex;
   align-items: center;

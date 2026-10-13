@@ -986,3 +986,77 @@ test('a save written before the 2.x realignment keeps its stars', async ({ page 
   await expect(page.locator('.map-tile').nth(4)).toContainText('★');
   await page.screenshot({ path: 'test-results/smoke-migrated-save.png' });
 });
+
+/**
+ * A component the player built, on the board and running.
+ *
+ * THE SAVE CARRIES THE COMPONENT, which is what makes this a browser test rather
+ * than a unit test: the library travels through `localStorage`, through
+ * `migrate`, into the composed registry, and then out onto the board as a part the
+ * palette offers. The wrap gesture itself is pinned by unit tests (the canvas
+ * geometry of a band-select is not worth re-deriving here); what this adds is that
+ * a component SURVIVES a reload and still runs.
+ */
+test('a saved component is offered in the palette and runs on the board', async ({ page }) => {
+  // A NOT gate built from a NAND and a `not`: two parts, one input, one output.
+  const body = {
+    instances: [
+      { id: 'i1', def: 'nand', x: 0, y: 0, rot: 0, params: {} },
+      { id: 'i2', def: 'not', x: 160, y: 0, rot: 0, params: {} },
+    ],
+    wires: [{ id: 'w1', from: { inst: 'i1', port: 'out' }, to: { inst: 'i2', port: 'a' } }],
+    customComponents: [],
+  };
+  const def = {
+    id: 'bp1',
+    name: { zh: '反相器', en: 'Inverter' },
+    inputs: [{ id: 'a', width: 1 }],
+    outputs: [{ id: 'out', width: 1 }],
+    binds: {
+      inputs: { a: { inst: 'i1', port: 'a' } },
+      outputs: { out: { inst: 'i2', port: 'out' } },
+    },
+    body,
+  };
+  const levels: Record<string, { passed: boolean; best: null; stars: number }> = {};
+  for (const id of LEVEL_ORDER.slice(0, 1)) levels[id] = { passed: true, best: null, stars: 3 };
+  await page.addInitScript(
+    ([key, json]) => globalThis.localStorage.setItem(key, json),
+    [
+      STORAGE_KEY,
+      JSON.stringify({ version: 1, levels, programs: {}, blueprints: { bp1: { name: def.name, def } } }),
+    ] as const,
+  );
+
+  // `?dev=1` is what offers every definition the level lists plus the player's
+  // own components; an ordinary level keeps its own palette, because the palette
+  // IS the puzzle (a chapter-1 level must not hand out an inverter a player built
+  // in the sandbox). The component is still in the panel's list either way.
+  await page.goto('/?dev=1');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('与非门');
+
+  await expect(page.locator('.palette')).toContainText('反相器');
+  await expect(page.locator('.blueprints')).toContainText('反相器');
+
+  // Drop it on the board and wire a constant through it into a NAND. No level
+  // pins are used because `?dev=1` reaches for the SANDBOX palette, which leaves
+  // the `level_input`/`level_output` plumbing out: a board with no level has no
+  // pins for them to bind, and the catalog behind them is the same one the
+  // sandbox offers.
+  const { cx, cy } = await boardCentre(page);
+  const row = cy + 120;
+  // Scoped to the tray: the panel lists the same component, and a page-wide role
+  // lookup would find both buttons and refuse to guess.
+  await page.locator('.palette').getByRole('button', { name: '反相器', exact: true }).click();
+  await page.mouse.click(cx - 40, row);
+  await place(page, '高电平', cx - 160, row);
+  await place(page, '与非门', cx + 160, row);
+  await dragWire(page, cx - 160 + 72, row, cx - 100, row);
+  await dragWire(page, cx + 20, row, cx + 160, row);
+  // The component's own output is wired, so the circuit it contains is part of a
+  // running board: `未通过` is the level's verdict, and this is not the level's
+  // circuit -- what matters is that the board still simulates.
+  await expect(page.locator('.shell-metrics')).toContainText('延迟');
+  await page.screenshot({ path: 'test-results/smoke-blueprint.png' });
+});

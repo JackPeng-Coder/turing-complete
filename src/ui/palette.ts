@@ -1,6 +1,8 @@
 import type { AppState, Store } from '../app/store';
-import { paletteDefsFor } from '../app/progress';
+import { paletteDefsFor, sandboxPaletteDefs } from '../app/progress';
 import { LEVELS } from '../levels/index';
+import { isSandbox } from '../levels/sandbox';
+import { libraryIds } from '../levels/blueprints';
 import type { ComponentCategory } from '../core/registry';
 import { partCodeOf } from './board/markings';
 import { THEME } from './theme';
@@ -70,10 +72,17 @@ export function mountPalette(
   const slots = new Map<string, HTMLButtonElement>();
 
   const render = (): void => {
-    const { level, progress, registry, dev, armed } = store.get();
-    const available = paletteDefsFor(progress, LEVELS, level, dev).filter((defId) =>
-      registry.has(defId),
-    );
+    const { level, progress, registry: registry0, dev, armed, blueprints } = store.get();
+    // THE SANDBOX PALETTE IS DERIVED FROM THE REGISTRY, not from the level: a
+    // sandbox has no puzzle to design around, so it offers every base part plus
+    // the player's own (see `sandboxPaletteDefs`). `?dev=1` reaches for the same
+    // thing -- it is the flag that opens every gate -- while an ordinary level
+    // keeps its own list, because a level's palette is the puzzle.
+    const offered =
+      dev || isSandbox(level)
+        ? sandboxPaletteDefs(registry0, libraryIds(blueprints))
+        : paletteDefsFor(progress, LEVELS, level, dev);
+    const available = offered.filter((defId) => registry0.has(defId));
     const key = `${level.id}|${available.join(',')}`;
 
     if (key !== shown) {
@@ -89,7 +98,7 @@ export function mountPalette(
       } else {
         let lastCategory: ComponentCategory | null = null;
         for (const defId of available) {
-          const def = registry.get(defId);
+          const def = registry0.get(defId);
           if (def.category !== lastCategory) {
             lastCategory = def.category;
             const group = document.createElement('div');

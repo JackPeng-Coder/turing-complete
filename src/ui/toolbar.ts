@@ -13,6 +13,12 @@ export interface ToolbarOptions {
   onStop(): void;
   /** Start or stop playing the level's test cases one at a time. */
   onToggleTest(): void;
+  /**
+   * Wrap the current selection into a component. `null` while nothing is
+   * selected, which is also when the button is disabled -- an enabled control
+   * that cannot act is worse than one that says why it cannot.
+   */
+  onWrapSelection(): void;
 }
 
 export interface ToolbarState {
@@ -22,6 +28,8 @@ export interface ToolbarState {
   readonly testing: boolean;
   /** The clock's rate, as the original labels it: `10Hz`. */
   readonly rate: string;
+  /** Board instances selected, so the wrap button can count them. */
+  readonly selected: number;
 }
 
 /**
@@ -72,7 +80,9 @@ export function mountToolbar(
   // The bin is where a player looks for "how do I get rid of this", so it is
   // where the board's own shortcut belongs.
   trash.title = '删除选中 · 在画板上右键可直接删除元件或导线';
-  grid.append(zoomIn, zoomOut, test, step, run, grow(), fit, stop, gridToggle, trash);
+  const wrapBtn = button('封装为元件', 'wrap', () => options.onWrapSelection());
+  wrapBtn.title = '把选中的元件封装成一个自制元件（先按住 Ctrl 在画板上框选）';
+  grid.append(zoomIn, zoomOut, test, step, run, grow(), fit, stop, gridToggle, wrapBtn, trash);
 
   return {
     render(state: ToolbarState): void {
@@ -85,6 +95,11 @@ export function mountToolbar(
       test.replaceChildren(iconSvg(state.testing ? 'stop' : 'test'));
       test.setAttribute('aria-label', state.testing ? '停止测试' : '测试');
       test.title = state.testing ? '停止测试' : '测试：逐个播放本关用例，最后给出判定';
+      wrapBtn.disabled = state.selected === 0;
+      wrapBtn.title =
+        state.selected === 0
+          ? '封装为元件：先在画板上按住 Ctrl 框选若干元件'
+          : `把选中的 ${state.selected} 个元件封装成一个自制元件`;
     },
   };
 }

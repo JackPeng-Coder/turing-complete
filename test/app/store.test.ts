@@ -121,6 +121,7 @@ describe('AppState through createStore', () => {
     dev: false,
     programs: {},
     blueprints: {},
+    editing: null,
     metrics: null,
     lastGrade: null,
     status: null,

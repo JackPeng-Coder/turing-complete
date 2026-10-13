@@ -1,7 +1,7 @@
 import './ui/style.css';
 import { createRegistry } from './core/registry';
 import { BASE_DEFS } from './core/defs/index';
-import { emptyGraph } from './core/graph';
+import { emptyGraph, cloneGraph, type Graph } from './core/graph';
 import { getLevel, LEVEL_ORDER } from './levels/index';
 import { graphFromBoard } from './levels/board';
 import { createStore, type AppState, type Store } from './app/store';
@@ -10,6 +10,8 @@ import { grade } from './levels/grader';
 import { loadProgress, saveProgress } from './persist/storage';
 import { applyGrade, resumePointOf, type Progress } from './app/progress';
 import { composeRegistry } from './levels/blueprints';
+import { mountBlueprintPanel } from './ui/blueprint';
+import { applyWrap, planWrap, type WrapPlan } from './levels/wrap';
 import { devModeFrom } from './app/dev';
 import { mountShell } from './ui/shell';
 import { mountPalette } from './ui/palette';
@@ -68,6 +70,7 @@ const store: Store<AppState> = createStore<AppState>({
   // the editor, the checks and the save all read the same text.
   programs: progress.programs,
   blueprints: progress.blueprints,
+  editing: null,
   metrics: null,
   lastGrade: null,
   status: null,
@@ -247,7 +250,13 @@ if (app) {
   };
 
   const paintTools = (): void => {
-    toolbar.render({ running, grid: gridOn, testing, rate: RATES[rateIndex]!.label });
+    toolbar.render({
+      running,
+      grid: gridOn,
+      testing,
+      rate: RATES[rateIndex]!.label,
+      selected: store.get().selected.length,
+    });
   };
 
   /** Re-reads the display into `view`. Paints nothing: callers decide when. */
@@ -889,6 +898,207 @@ if (app) {
     activeCase = null;
     measure();
     refreshBench();
+    // A body edit is also a library edit: the component the player is inside
+    // holds the graph they are drawing, so the two move together.
+    if (store.get().editing !== null) syncBody();
+  };
+
+  /**
+   * The panel's handlers, kept in one object so the mount stays readable.
+   *
+   * They are built here rather than passed one by one because they share the
+   * draft state above them: the confirm step is `commitWrap`, which needs BOTH the
+   * plan the panel is showing and the name its inputs hold.
+   */
+  const blueprintOptions = {
+    draft: (): WrapPlan | null => wrapDraft,
+    selection: (): number => store.get().selected.length,
+    draftName: (): { zh: string; en: string } => draftName,
+    onDraftName: (name: { zh: string; en: string }): void => {
+      draftName = name;
+    },
+    onConfirm: (): void => {
+      if (wrapDraft) commitWrap(wrapDraft, draftName);
+      blueprintPanel.render();
+    },
+    onCancel: (): void => {
+      wrapDraft = null;
+      blueprintPanel.render();
+      paint();
+    },
+    onStartWrap: (): void => startWrap(),
+    onRename: (id: string, name: { zh: string; en: string }): void => renameBlueprint(id, name),
+    onDelete: (id: string): boolean => deleteBlueprint(id),
+    onEnter: (id: string): void => enterBlueprint(id),
+    onLeave: (): void => leaveBlueprint(),
+  };
+
+  // -------------------------------------------------------------------------
+  // the player's own components
+  // -------------------------------------------------------------------------
+
+  /** The wrap being drafted in the panel, or `null`. Nothing has moved yet. */
+  let wrapDraft: WrapPlan | null = null;
+  let draftName = { zh: '', en: '' };
+
+  /** The graph on the board right now and the library it is measured against. */
+  const graphWithRegistry = (): {
+    graph: Graph;
+    blueprints: Progress['blueprints'];
+  } => {
+    const { graph, blueprints } = store.get();
+    return { graph, blueprints };
+  };
+
+  /**
+   * Writes a wrapped document into the app in one step.
+   *
+   * ONE COMMAND FOR TWO CHANGES. A wrap moves instances off the board and adds a
+   * definition to the library, and those halves are useless apart -- an undo that
+   * restored the board but left the component behind would be a state the player
+   * cannot describe. `CommandStack` takes the library with the command for exactly
+   * this, and `main.ts` is the only place that knows both values.
+   */
+  const commitWrap = (plan: WrapPlan, name: { zh: string; en: string }): void => {
+    const { graph, blueprints } = graphWithRegistry();
+    const next = applyWrap(graph, blueprints, { ...plan, component: { ...plan.component, name } });
+    const beforeGraph = graph;
+    const beforeLibrary = blueprints;
+    const afterGraph = next.graph;
+    const afterLibrary = next.library;
+
+    stack.push(
+      {
+        label: `wrap ${plan.component.id}`,
+        do: (g) => Object.assign(g, afterGraph),
+        undo: (g) => Object.assign(g, beforeGraph),
+        blueprints: afterLibrary,
+        blueprintsBefore: beforeLibrary,
+      },
+      graph,
+    );
+    wrapDraft = null;
+    draftName = { zh: '', en: '' };
+    store.set({
+      graph: afterGraph,
+      registry: composeRegistry(registry, afterLibrary),
+      blueprints: afterLibrary,
+    });
+    progress = { ...progress, blueprints: afterLibrary };
+    saveProgress(progress);
+    graphRevision += 1;
+    dropPlayerRun();
+    rebuild();
+    measure();
+    paintTools();
+  };
+
+  const startWrap = (): void => {
+    const { graph, blueprints, selected } = store.get();
+    const plan = planWrap(graph, store.get().registry, blueprints, selected);
+    if (!plan) return;
+    wrapDraft = plan;
+    draftName = { ...plan.component.name };
+    blueprintPanel.render();
+  };
+
+  /** Opens a component's body on the board: the same board, a different graph. */
+  const enterBlueprint = (id: string): void => {
+    const entry = store.get().blueprints[id];
+    if (!entry) return;
+    // The body is edited as a graph of its own, so it gets its own history and the
+    // board's is dropped: a command from the board would be replayed against a
+    // document it does not describe.
+    stack.clear();
+    graphRevision += 1;
+    dropPlayerRun();
+    store.set({
+      graph: cloneGraph(entry.def.body),
+      editing: id,
+      selected: [],
+      armed: null,
+      metrics: null,
+      lastGrade: null,
+      status: null,
+    });
+    rebuild();
+    fitView();
+    measure();
+    paintTools();
+  };
+
+  const syncBody = (): void => {
+    const { editing, graph, blueprints } = store.get();
+    if (editing === null) return;
+    const entry = blueprints[editing];
+    if (!entry) return;
+    const nextLibrary = {
+      ...blueprints,
+      [editing]: { name: { ...entry.name }, def: { ...entry.def, body: graph } },
+    };
+    // THE REGISTRY IS LEFT ALONE HERE. Composing it per keystroke would be work
+    // for nothing: the display on screen is the body being edited, and the
+    // composed registry is rebuilt on the way out (`leaveBlueprint`) and on every
+    // wrap, which is when a definition has to be resolvable again.
+    store.set({ blueprints: nextLibrary });
+    progress = { ...progress, blueprints: nextLibrary };
+    saveProgress(progress);
+  };
+
+  const leaveBlueprint = (): void => {
+    syncBody();
+    // The registry is recomposed on the way out: a component edited while its own
+    // body was on the board has a new circuit, and every instance of it on the
+    // board has to resolve against the new one.
+    store.set({ registry: composeRegistry(registry, store.get().blueprints) });
+    stack.clear();
+    graphRevision += 1;
+    dropPlayerRun();
+    store.set({
+      graph: level.board ? graphFromBoard(level.id, level.board) : emptyGraph(level.id),
+      editing: null,
+      selected: [],
+      armed: null,
+      metrics: null,
+      lastGrade: null,
+    });
+    rebuild();
+    measure();
+    paintTools();
+  };
+
+  const renameBlueprint = (id: string, name: { zh: string; en: string }): void => {
+    const { blueprints } = store.get();
+    const entry = blueprints[id];
+    if (!entry) return;
+    const nextLibrary = {
+      ...blueprints,
+      [id]: { name: { ...name }, def: { ...entry.def, name: { ...name } } },
+    };
+    store.set({ blueprints: nextLibrary, registry: composeRegistry(registry, nextLibrary) });
+    progress = { ...progress, blueprints: nextLibrary };
+    saveProgress(progress);
+  };
+
+  /**
+   * Removes a component, refusing while the board still uses it.
+   *
+   * A REFUSAL RATHER THAN A CASCADE: deleting the instances that use it would be
+   * the app deciding which parts of a circuit the player did not mean to keep. The
+   * instance ids are what makes the check possible -- a component is referenced by
+   * `inst.def`, so the answer is one scan.
+   */
+  const deleteBlueprint = (id: string): boolean => {
+    const { blueprints, graph } = store.get();
+    if (graph.instances.some((inst) => inst.def === id)) return false;
+    const nextLibrary: Record<string, (typeof blueprints)[string]> = {};
+    for (const [key, entry] of Object.entries(blueprints)) {
+      if (key !== id) nextLibrary[key] = entry;
+    }
+    store.set({ blueprints: nextLibrary, registry: composeRegistry(registry, nextLibrary) });
+    progress = { ...progress, blueprints: nextLibrary };
+    saveProgress(progress);
+    return true;
   };
 
   const mapRender = mountMap(mapScreen, store, openLevel);
@@ -925,6 +1135,7 @@ if (app) {
   // the palette on the right, the readout on the left, the test cases along the
   // bottom, and the board underneath all of them.
   mountPalette(partsOverlay, store, onPickPart);
+  const blueprintPanel = mountBlueprintPanel(toggleOverlay, store, blueprintOptions);
   const truth = mountTruthTable(testsOverlay, store, {
     live: levelOutputs,
     active: () => activeCase,
@@ -991,6 +1202,7 @@ if (app) {
       paintTools();
     },
     onToggleTest: toggleTest,
+    onWrapSelection: startWrap,
   });
 
   /**
@@ -1030,6 +1242,10 @@ if (app) {
   store.subscribe(() => {
     paint();
     refreshBench();
+    // The toolbar's wrap button counts the selection, and the marquee commits it
+    // through the store -- so the count has to follow a selection change, which is
+    // not a board edit and so does not come through `onChange`.
+    paintTools();
   });
   globalThis.addEventListener('resize', paint);
 

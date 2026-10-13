@@ -159,7 +159,15 @@ export type IconName =
   | 'grid'
   | 'trash'
   | 'test'
-  | 'fit';
+  | 'fit'
+  /**
+   * A dashed box inside a solid one: the wrap gesture -- take what is selected
+   * and make one part of it. Dashed because the selection is still loose parts
+   * until it is committed.
+   */
+  | 'wrap'
+  | 'download'
+  | 'upload';
 
 /** Stroke-only 24x24 glyphs, so a button's colour drives the whole icon. */
 const ICON_PATHS: Record<IconName, string> = {
@@ -178,6 +186,9 @@ const ICON_PATHS: Record<IconName, string> = {
   // A clipboard with a tick on it: the level's cases, run one at a time.
   test: 'M9 4h6v3H9zM7 5H5v15h14V5h-2M9 13l2 2 4-4',
   fit: 'M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5',
+  wrap: 'M4 4h16v16H4zM8 9h8v6H8z',
+  download: 'M12 4v11M8 11l4 4 4-4M5 20h14',
+  upload: 'M12 16V5M8 9l4-4 4 4M5 20h14',
 };
 
 export function iconSvg(name: IconName): SVGSVGElement {
