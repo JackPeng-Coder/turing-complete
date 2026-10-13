@@ -44,7 +44,7 @@ export function blueprintDef(component: CustomComponentDef): ComponentDef {
     gateCost: 0,
     sequential: false,
     stateBytes: 0,
-    body: component.body,
+    body: component,
   };
 }
 

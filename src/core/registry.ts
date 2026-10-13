@@ -1,4 +1,4 @@
-import type { Graph } from './graph';
+import type { CustomComponentDef } from './graph';
 import type { PortValue } from './signal';
 
 export type ComponentCategory =
@@ -129,10 +129,15 @@ export interface ComponentDef {
    * two instances sharing a single bit of state.
    *
    * `cost` and `gateCost` are 0 on such a def: its price is the sum of what its
-   * body contains, computed by `gateCost`/`delayOf` as they expand it, so
+   * body contains, computed by `gateCostOf`/`delayOf` as they expand it, so
    * charging anything here would charge the wire AND the gates inside it.
+   *
+   * THE WHOLE DEFINITION, not just the graph inside it: the surface (which pins
+   * the component has, and which body pin each one binds to) is what `compile`
+   * resolves a wire through, so a def carrying only its body would know what the
+   * component computes and not what its pins are.
    */
-  readonly body?: Graph;
+  readonly body?: CustomComponentDef;
 }
 
 export interface Registry {

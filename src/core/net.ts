@@ -2,6 +2,7 @@ import { CircuitValidationError, UnstableCircuitError } from './errors';
 import {
   PATH_SEPARATOR,
   validateGraph,
+  type CustomComponentDef,
   type Graph,
   type GraphIssue,
   type Instance,
@@ -247,6 +248,27 @@ interface FlatOp {
 }
 
 /**
+ * A component's definition, from the document or from the registry.
+ *
+ * A DOCUMENT MAY INSTANCE A COMPONENT IT DOES NOT CARRY, which is the ordinary
+ * case in this app: the definitions live in the player's library
+ * (`Progress.blueprints`) and the document references them by id, exactly as it
+ * references `nand`. The registry a document compiles against is composed from
+ * that library (`levels/blueprints.ts`), so `ComponentDef.body` is where the
+ * definition is at run time; `graph.customComponents` is the copy a circuit FILE
+ * carries so an exported file stands on its own. Both are read, the document's
+ * copy winning, so neither route can be the only one that works.
+ */
+function componentDefs(graph: Graph, registry: Registry): Map<string, CustomComponentDef> {
+  const defs = new Map<string, CustomComponentDef>();
+  for (const def of registry.all()) {
+    if (def.body) defs.set(def.id, def.body);
+  }
+  for (const component of graph.customComponents) defs.set(component.id, component);
+  return defs;
+}
+
+/**
  * Walks a document into the flat list of instances that will actually run.
  *
  * A CUSTOM COMPONENT IS A NAME, NOT A BOX: `compile` never emits one. It emits
@@ -255,6 +277,10 @@ interface FlatOp {
  * `Simulation` allocates state per leaf (`#state` is indexed like `instances`),
  * and each instance's registers are its own without a single line of code that
  * knows what a component is.
+ *
+ * The walk follows the INSTANCES, not the document's `customComponents` array: a
+ * component's body may instance another component, and the definitions are looked
+ * up as the walk reaches them (`componentDefs`).
  *
  * Paths are the identity, so the walk refuses what cannot be addressed: a cycle
  * would not terminate (`validateGraph` refuses it first, and this throws rather
@@ -266,32 +292,32 @@ interface FlatOp {
  * itself -- however long the way round -- is not.
  */
 function flattenForCompile(graph: Graph, registry: Registry): FlatOp[] {
+  const components = componentDefs(graph, registry);
   const ops: FlatOp[] = [];
   const walk = (g: Graph, prefix: string, origin: string, chain: ReadonlySet<string>): void => {
     for (const inst of g.instances) {
       const path = `${prefix}${inst.id}`;
-      const def = registry.get(inst.def);
-      const body = def.body;
-      if (!body) {
+      const component = components.get(inst.def);
+      if (!component) {
         ops.push({ path, origin: origin === '' ? path : origin, inst, graph: g });
         continue;
       }
-      if (chain.has(def.id)) {
+      if (chain.has(inst.def)) {
         throw new CircuitValidationError([
           {
             severity: 'error',
             code: 'recursive-blueprint',
             inst: path,
             message: {
-              zh: `自定义元件 ${def.name.zh}（${def.id}）的电路里含它自己，无法展开`,
-              en: `Custom component ${def.name.en} (${def.id}) contains itself and cannot be expanded`,
+              zh: `自定义元件 ${component.name.zh}（${component.id}）的电路里含它自己，无法展开`,
+              en: `Custom component ${component.name.en} (${component.id}) contains itself and cannot be expanded`,
             },
           },
         ]);
       }
       const inner = new Set(chain);
-      inner.add(def.id);
-      walk(body, `${path}${PATH_SEPARATOR}`, origin === '' ? path : origin, inner);
+      inner.add(inst.def);
+      walk(component.body, `${path}${PATH_SEPARATOR}`, origin === '' ? path : origin, inner);
     }
   };
   walk(graph, '', '', new Set());
@@ -466,12 +492,10 @@ export function compile(graph: Graph, registry: Registry): Netlist {
    */
   for (const inst of graph.instances) {
     const def = registry.has(inst.def) ? registry.get(inst.def) : null;
-    const body = def?.body;
-    if (!body) continue;
-    const component = graph.customComponents.find((entry) => entry.id === inst.def);
+    const component = def?.body;
     const binds = component?.binds;
     const owner = roots.get(inst.id);
-    if (!binds || !owner) continue;
+    if (!def || !binds || !owner) continue;
 
     def.inputs.forEach((pin, index) => {
       const bind = binds.inputs[pin.id];
@@ -506,7 +530,11 @@ export function compile(graph: Graph, registry: Registry): Netlist {
   // same thing; they differ only in how an endpoint is addressed -- an outer wire
   // names an outer instance (through its surface alias for a component), a body
   // wire names a leaf by its compiled path.
-  const graphs = new Set<Graph>([graph, ...graph.customComponents.map((c) => c.body)]);
+  //
+  // THE GRAPHS COME FROM THE LEAVES, not from `graph.customComponents`: a body can
+  // belong to a component that lives only in the library, and enumerating the
+  // document's own array would then miss every wire inside it.
+  const graphs = new Set<Graph>(ops.map((op) => op.graph));
   /** `graph` + instance id -> the leaf that instance compiled to, in that graph. */
   const leafPath = new Map<Graph, Map<string, string>>();
   for (const op of ops) {
