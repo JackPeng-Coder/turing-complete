@@ -55,9 +55,16 @@ towards a working CPU.
   measurement and updates as you edit; whether the circuit is *correct* is what the test run says.
 - **Progress saved to `localStorage`**, so a refresh keeps your stars.
 - A **chapter map** for navigating levels and seeing what is unlocked.
+- **A sandbox**: a board with no puzzle, no test cases and no verdict, holding every part the game has.
+  It is reached from the map and is always open. What you build there is saved as you draw it and can
+  be exported to a `.json` circuit file and imported back — the only way work leaves the browser.
+- **Components of your own.** Band-select parts (Ctrl+drag), press 封装为元件, and the selection becomes
+  one part: the wires crossing its edge become its pins, and it joins the palette so the next circuit
+  can use it. 编辑内部 opens it again on the same board. Cost is measured through the expansion, so
+  wrapping a circuit never makes it cheaper.
 
-Chapters 5–7 (the Symphony CPU, functions, the assembly challenges and the sandbox) are planned but not
-built yet.
+Chapters 5–7 (the Symphony CPU, functions, the assembly challenges, and the peripherals) are planned but
+not built yet.
 
 ## Interface
 
@@ -162,12 +169,13 @@ bring it back.
 src/
   core/     simulator: signals, component registry + definitions, graph/netlist, settle & tick
   asm/      the assembler and its ISA: field ranges, addressing modes, operands, program images
-  levels/   LevelSpec types, the campaign table, checks, grader, and content/ (56 levels: chapters 1–4)
+  levels/   LevelSpec types, the campaign table, checks, grader, content/ (chapters 1–4), the
+            sandbox spec, and the custom-component library and wrap
   app/      application state, command/undo stack, progress, and the shared viewport types
   ui/       the board's chrome: top bar, palette, clock + I/O readout, tool grid, test cases,
-            chapter map, and the Canvas board (see ui/board/)
+            chapter map, the components panel, and the Canvas board (see ui/board/)
   ui/board/ the board itself: camera and hit testing, wire routing, painting, live signals
-  persist/  localStorage save and load
+  persist/  localStorage save and load, the sandbox circuit, and the `tc-circuit` file format
 test/       Vitest unit and level tests, the convention assertions, and the Playwright smoke spec
 tools/      the SDD PowerShell helpers that build a phase workspace and its briefs, and the
             session-transcript readers (tools/transcript-digest.mjs, transcript-timeline.mjs)
@@ -181,7 +189,9 @@ anything starts to — that file is this project's linter, because no linter is 
 
 ## Contributing / scope
 
-Phases 0–3 cover chapters 1–4, which is **56 of the campaign's 93 levels**. The campaign follows the
+Phases 0–3 cover chapters 1–4, which is **56 of the campaign's 93 levels**, and the phase that followed
+delivered the **sandbox** together with **player-built components** — the two things the spec called for
+outside the campaign (spec §3.4, §7, §8.1). The campaign follows the
 **2.x** structure of the game (13/26/10/7/26/7/4 chapters, Symphony in place of LEG, 2–64-bit
 widths); the table that fixes it is [`src/levels/campaign.ts`](src/levels/campaign.ts), and
 `test/levels/campaign-shape.test.ts` holds every level to it. The remaining chapters 5–7 are listed

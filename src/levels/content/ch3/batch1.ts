@@ -565,13 +565,14 @@ export const CH3_BATCH1: readonly LevelSpec[] = [
    * line, which is about modularising a circuit into reusable parts.
    *
    * AUTHORED, and a REBUILD -- the second divergence in this chapter, recorded
-   * here because the source's own reading of this level cannot be built yet.
-   * Encapsulating a selection into a custom component is spec §3.4's blueprint,
-   * and blueprints ship with the phase-3 editor. Rather than leave the slot
-   * empty, this level teaches the part of that idea a single level can: one
-   * control word driving several destinations at once, with the two destinations
-   * deliberately out of step so that "fan the control bits out" cannot be done
-   * by wiring the whole word to both.
+   * here because the source's own reading of this level teaches a mechanic this
+   * level cannot: encapsulating a selection into a custom component is spec
+   * §3.4's blueprint, which was expected with the phase-3 editor and shipped in
+   * the phase after it (the wrap is a toolbar action on the board, not a level).
+   * Rather than leave the slot empty, this level teaches the part of that idea a
+   * single level can: one control word driving several destinations at once, with
+   * the two destinations deliberately out of step so that "fan the control bits
+   * out" cannot be done by wiring the whole word to both.
    *
    * The lesson is the one a module boundary has to get right anyway: a part that
    * publishes two ports must derive each from the fields it needs, not from the
