@@ -178,7 +178,7 @@ src/
   persist/  localStorage save and load, the sandbox circuit, and the `tc-circuit` file format
 test/       Vitest unit and level tests, the convention assertions, and the Playwright smoke spec
 tools/      the SDD PowerShell helpers that build a phase workspace and its briefs, and the
-            session-transcript readers (tools/transcript-digest.mjs, transcript-timeline.mjs)
+            session-transcript readers and the visual check (tools/*.mjs)
 docs/       the design spec, the phase plans, and the per-chapter level provenance
 ```
 

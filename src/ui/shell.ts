@@ -1,5 +1,6 @@
 import type { AppState, Store } from '../app/store';
 import { scoreOf } from '../levels/grader';
+import { isSandbox } from '../levels/sandbox';
 import { THEME } from './theme';
 
 export interface ShellOptions {
@@ -103,7 +104,12 @@ export function mountShell(
   const render = (): void => {
     const { level, lastGrade, metrics: measured, status: message, dev: devOn } = store.get();
     dev.hidden = !devOn;
-    index.textContent = `${level.chapter}-${level.index}`;
+    // THE SANDBOX HAS NO ADDRESS. It is not a chapter and has no index, so
+    // `0-0` -- the numbers its spec carries as placeholders -- would be an
+    // address that means nothing, in the slot a player reads addresses from. It
+    // gets its own word there instead, in the same boxed style, and the name
+    // beside it stays where every screen's name is.
+    index.textContent = isSandbox(level) ? '沙盒' : `${level.chapter}-${level.index}`;
     name.textContent = level.name.zh;
     status.textContent = message ? message.zh : '';
     if (!hint.hidden) hint.textContent = level.hint.zh;

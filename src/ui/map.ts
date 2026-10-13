@@ -89,20 +89,39 @@ export function mountMap(
       section.append(band);
     }
 
-    // THE SANDBOX IS NOT A CHAPTER, so it is not a band: nothing gates it, it has
-    // no stars and no chapter number, and a tile in the grid would sit among levels
-    // it is not a level of. It is the one door that is always open, and it belongs
-    // at the end of the map where a player who has finished a chapter looks next.
+    // THE SANDBOX IS NOT A CHAPTER, but it is the same KIND of thing to a player:
+    // somewhere to go. So it gets the chapter band's own shape -- a key column on
+    // the left, a door on the right -- rather than a button dropped under the last
+    // grid, which read as an afterthought and broke the page's left edge.
     const sandbox = document.createElement('section');
-    sandbox.className = 'map-sandbox';
+    sandbox.className = 'map-chapter map-sandbox';
+    const key = document.createElement('div');
+    key.className = 'map-chapter-key';
+    const mark = document.createElement('b');
+    mark.textContent = '自由';
+    const size = document.createElement('span');
+    size.textContent = '沙盒';
+    const note = document.createElement('span');
+    note.textContent = '无判定';
+    key.append(mark, size, note);
+
+    const body = document.createElement('div');
+    body.className = 'map-sandbox-body';
     const enter = document.createElement('button');
     enter.type = 'button';
     enter.className = 'map-sandbox-open';
-    enter.textContent = '沙盒 · 自由建造';
+    const line = document.createElement('span');
+    line.className = 'map-sandbox-name';
+    line.textContent = '自由建造';
+    const detail = document.createElement('span');
+    detail.className = 'map-sandbox-note';
+    detail.textContent = '整个元件目录 · 电路存盘 · 可导出成文件';
+    enter.append(line, detail);
     enter.title = '没有题目、没有判定：拿任何元件搭任何东西，电路一直在跑';
     enter.addEventListener('click', () => onSelect(SANDBOX_ID));
     if (current.id === SANDBOX_ID) enter.classList.add('map-tile-current');
-    sandbox.append(enter);
+    body.append(enter);
+    sandbox.append(key, body);
     section.append(sandbox);
   };
   store.subscribe(render);

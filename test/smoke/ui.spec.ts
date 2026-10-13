@@ -1074,7 +1074,7 @@ test('the sandbox builds freely, does not grade, and keeps the circuit', async (
   await page.goto('/');
   await page.getByRole('button', { name: '开始' }).click();
   await page.getByRole('button', { name: '章节地图' }).click();
-  await page.getByRole('button', { name: '沙盒 · 自由建造' }).click();
+  await page.getByRole('button', { name: '自由建造' }).click();
 
   await expect(page.locator('.shell-bar')).toContainText('沙盒');
   // The whole catalog, not a level's list: the wide and CPU families are here.
@@ -1098,6 +1098,6 @@ test('the sandbox builds freely, does not grade, and keeps the circuit', async (
   // The app opens on the resume point, so the sandbox is reached again through the
   // map -- and the board it holds is the one that was left.
   await page.getByRole('button', { name: '章节地图' }).click();
-  await page.getByRole('button', { name: '沙盒 · 自由建造' }).click();
+  await page.getByRole('button', { name: '自由建造' }).click();
   await expect(page.locator('.shell-metrics')).toContainText('延迟 1');
 });

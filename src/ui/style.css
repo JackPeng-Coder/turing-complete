@@ -245,46 +245,80 @@ button { font-family: inherit; }
 .overlay { position: absolute; pointer-events: none; z-index: 2; }
 .overlay > * { pointer-events: auto; }
 .overlay-left { top: 12px; left: 12px; width: 204px; display: flex; flex-direction: column; gap: 6px; }
-.overlay-tools { top: 12px; left: 228px; }
-/* The player's own components, under the tool grid: the wrap button is a tool,
-   and what it makes is the list that belongs beside it. No width of its own --
-   it takes the column the grid already occupies, so the two read as one panel. */
+/* The tool column: two 46px cells wide, and everything that belongs to the tools
+   -- the components panel under them -- takes that same width, so the column
+   reads as one instrument rather than a grid with a scrap of paper beneath it. */
+.overlay-tools { top: 12px; left: 228px; width: 98px; }
 .overlay-tools .blueprints { margin-top: 10px; }
-.blueprints { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; }
-.blueprints-note { margin: 0; padding: 0 10px; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
-.blueprints-warn { margin: 0; padding: 0 10px; font-size: 11px; line-height: 1.5; color: var(--hot); }
-.blueprints-count { color: var(--text-muted); letter-spacing: 0; }
-.blueprints-crumb {
-  display: flex;
-  align-items: center;
+/* TWO COLUMNS, like the tool grid: 98px has no room for a paragraph, so the prose
+   spans both cells and the actions split into them. */
+.blueprints {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
-  padding: 6px 10px;
-  font-size: 11px;
+  padding-bottom: 8px;
+}
+.blueprints > .card-head { grid-column: 1 / -1; }
+.blueprints-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 8px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.blueprints-warn {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 8px;
+  font-size: 10px;
+  line-height: 1.45;
   color: var(--hot);
 }
-.blueprints-crumb > span:first-child { flex: 1 1 auto; }
-.blueprints-name { display: flex; flex-direction: column; gap: 4px; padding: 0 10px; }
-.blueprints-pins { display: flex; flex-direction: column; gap: 2px; padding: 0 10px; }
-.blueprints-group { font-size: 11px; letter-spacing: 0.14em; color: var(--neon); }
-.blueprints-pins code { font-size: 11px; color: var(--text-muted); }
-.blueprints-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px; }
-.blueprints-list { list-style: none; margin: 0; padding: 0; }
-.blueprints-row { border-top: 1px solid var(--hair); padding: 4px 0; }
-.blueprints-btn {
+.blueprints-count { color: var(--text-muted); letter-spacing: 0; }
+.blueprints-crumb {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--hot);
+}
+.blueprints-name { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; padding: 0 8px; }
+.blueprints-name input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
   border: 1px solid var(--hair);
-  background: transparent;
+  background: var(--slab-lit);
   color: var(--text);
   font-family: inherit;
   font-size: 11px;
-  padding: 4px 8px;
+}
+.blueprints-pins { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
+.blueprints-group { font-size: 10px; letter-spacing: 0.14em; color: var(--neon); }
+.blueprints-pins code { font-size: 10px; color: var(--text-muted); overflow-wrap: anywhere; }
+.blueprints-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px; }
+.blueprints-list { grid-column: 1 / -1; list-style: none; margin: 0; padding: 0; }
+.blueprints-row { border-top: 1px solid var(--hair); padding: 4px 0; }
+.blueprints-row:first-child { border-top: 0; }
+.blueprints-btn {
+  border: 1px solid var(--hair);
+  background: var(--slab);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1.2;
+  padding: 4px 6px;
   cursor: pointer;
 }
-.blueprints-btn:hover { color: var(--hot); }
-.blueprints-btn:disabled { color: var(--text-muted); cursor: default; border-color: transparent; }
-.blueprints-wrap { margin: 0 10px; text-align: left; }
-.blueprints-pick { border: 0; text-align: left; width: 100%; }
-.blueprints-confirm { color: var(--hot); border-color: var(--hot); }
-.overlay-parts { top: 12px; right: 12px; bottom: calc(var(--test-h) + 12px); width: 218px; }
+.blueprints-btn:hover { border-color: var(--hot); color: var(--hot); }
+.blueprints-btn:disabled { color: #3b4d5e; cursor: not-allowed; }
+.blueprints-wrap { grid-column: 1 / -1; margin: 0 8px; text-align: left; line-height: 1.3; }
+.blueprints-pick { border: 0; background: transparent; text-align: left; width: 100%; padding: 4px 8px; }
+.blueprints-confirm { border-color: var(--hot); color: var(--hot); }.overlay-parts { top: 12px; right: 12px; bottom: calc(var(--test-h) + 12px); width: 218px; }
 .overlay-tests { left: 0; right: 0; bottom: 0; }
 /* The chevron rides just above the test panel. Because its `bottom` is measured
    from `--test-h`, collapsing the panel carries the button down with it. */
@@ -330,6 +364,9 @@ button { font-family: inherit; }
 .palette,
 .truth-table,
 .blueprints { background: var(--slab); }
+/* The components panel carries a border like a card, but not the same one: it sits
+   under the tool grid rather than beside it, so its top edge is shared with the
+   grid's last row (see `.overlay-tools .blueprints`). */
 .card,
 .blueprints { border: 1px solid var(--hair); }
 .card-head {
@@ -837,6 +874,34 @@ button { font-family: inherit; }
   color: var(--void);
   border-right-color: var(--hot);
 }
+
+/* ------------------------------------------------------------- the sandbox -- */
+/* The sandbox wears the chapter band's own geometry -- key on the left, a door on
+   the right -- because that is what it is to a player: somewhere to go, at the end
+   of the list. What it does NOT wear is a chapter's key: `自由` is not a number,
+   and the door is not gated, so nothing here dims. */
+.map-sandbox { padding-bottom: 20px; }
+.map-sandbox .map-chapter-key b { font-size: 15px; letter-spacing: 0.12em; }
+.map-sandbox-body { display: flex; }
+.map-sandbox-open {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  padding: 10px 14px;
+  min-width: 0;
+  background: var(--slab);
+  border: 1px solid var(--hair);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: border-color 90ms linear, background-color 90ms linear;
+}
+.map-sandbox-open:hover { background: var(--slab-lit); border-color: var(--hot); }
+.map-sandbox-name { color: var(--neon-dim); font-size: 14px; }
+.map-sandbox-note { font-size: 11px; color: var(--text-muted); letter-spacing: 0.02em; }
 
 /* ----------------------------------------------------------- pass dialog -- */
 /* The original's own panel: a titled bar, a summary on the left, the medal and
