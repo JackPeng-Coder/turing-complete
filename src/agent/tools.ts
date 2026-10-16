@@ -48,12 +48,25 @@ export interface ToolSpec {
   readonly description: string;
   readonly parameters: JsonSchema;
   run(args: ToolArgs, context: ToolContext): unknown | Promise<unknown>;
+  /**
+   * One line for the PLAYER, from a result the model is about to read as JSON.
+   *
+   * THE TWO AUDIENCES ARE NOT THE SAME. The model needs `{"id":"i1","x":160}` --
+   * it has to name that part in its next call -- and a person watching needs
+   * "在 (160,160) 放了与非门（i1）". Rendering the JSON for the player is what makes
+   * a working panel read like a debug console, and rendering prose for the model
+   * is what makes it guess. So the result stays JSON and this function, when a
+   * tool has one, says the same thing in a sentence.
+   */
+  present?(result: unknown, args: ToolArgs): string | undefined;
 }
 
 /** What goes back to the model: JSON text, always, success or refusal. */
 export interface ToolOutcome {
   readonly ok: boolean;
   readonly text: string;
+  /** The same outcome as one line of Chinese, when the tool knows how to say it. */
+  readonly note: string;
 }
 
 /** The tools as the API wants to see them; the description schema is the same one. */
@@ -158,18 +171,35 @@ export async function runTool(
   context: ToolContext,
 ): Promise<ToolOutcome> {
   const checked = checkArguments(spec, rawArguments);
-  if (!checked.ok) return { ok: false, text: JSON.stringify({ ok: false, error: checked.error }) };
+  if (!checked.ok) {
+    return {
+      ok: false,
+      text: JSON.stringify({ ok: false, error: checked.error }),
+      note: checked.error,
+    };
+  }
   try {
     const result = await spec.run(checked.args, context);
     const value = result === undefined ? {} : result;
-    return { ok: true, text: JSON.stringify({ ok: true, result: value }) };
+    let note = '';
+    if (spec.present !== undefined) {
+      try {
+        note = spec.present(value, checked.args) ?? '';
+      } catch {
+        // A presentation bug must never fail the step it is describing: the
+        // circuit changed, and the log falls back to the raw result.
+        note = '';
+      }
+    }
+    return { ok: true, text: JSON.stringify({ ok: true, result: value }), note };
   } catch (cause) {
     if (cause instanceof ToolError) {
-      return { ok: false, text: JSON.stringify({ ok: false, error: cause.message }) };
+      return { ok: false, text: JSON.stringify({ ok: false, error: cause.message }), note: cause.message };
     }
     return {
       ok: false,
       text: JSON.stringify({ ok: false, error: `工具 ${spec.name} 内部出错：${describe(cause)}` }),
+      note: `工具 ${spec.name} 内部出错：${describe(cause)}`,
     };
   }
 }

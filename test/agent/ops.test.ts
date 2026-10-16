@@ -343,6 +343,47 @@ describe('driving the level and the editor', () => {
   });
 });
 
+describe('what the player reads while it works', () => {
+  it('says each step in one line, not in JSON', async () => {
+    const fixture = makeTestHost();
+    const raw = (name: string, args: unknown) =>
+      runTool(toolOf(fixture, name), JSON.stringify(args), { signal: SIGNAL });
+
+    expect((await raw('place_part', { defId: 'nand', x: 16, y: 32 })).note).toBe(
+      '在 (16, 32) 放了 与非门（i1）',
+    );
+    await raw('place_part', { defId: 'not', x: 160, y: 32 });
+    expect((await raw('connect_pins', { fromInst: 'i1', fromPort: 'out', toInst: 'i2', toPort: 'a' })).note).toBe(
+      '把 i1.out 接到 i2.a',
+    );
+    expect((await raw('delete_part', { id: 'i2' })).note).toBe('删掉 i2，连带 1 根导线');
+    expect((await raw('undo_last', {})).note).toBe('撤销一步');
+    expect((await raw('select_parts', { ids: ['i1'] })).note).toBe('选中 i1');
+    expect((await raw('select_parts', { ids: [] })).note).toBe('清空选择');
+    expect((await raw('set_input', { pin: 'b', value: 15 })).note).toBe('把输入 b 设为 15');
+  });
+
+  it('says a refusal the same way, so a failure is not a paragraph of braces', async () => {
+    const fixture = makeTestHost();
+    const outcome = await runTool(
+      toolOf(fixture, 'place_part'),
+      JSON.stringify({ defId: 'xor', x: 0, y: 0 }),
+      { signal: SIGNAL },
+    );
+    expect(outcome.ok).toBe(false);
+    expect(outcome.note).toContain('没有元件类型');
+    expect(outcome.note).not.toContain('{');
+  });
+
+  it('has a line for every tool, so none of them prints its raw result', () => {
+    const fixture = makeTestHost();
+    const missing = circuitTools(fixture.host)
+      .filter((spec) => spec.present === undefined)
+      .map((spec) => spec.name);
+    expect(missing).toEqual([]);
+  });
+});
+
 describe('arguments the model got wrong', () => {
   it('answers a missing required argument with a correction', async () => {
     const fixture = makeTestHost();

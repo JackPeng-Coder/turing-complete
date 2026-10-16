@@ -98,7 +98,7 @@ function copyWire(wire: Wire): Wire {
 
 /** The whole tool list, bound to one host. */
 export function circuitTools(host: AgentHost): ToolSpec[] {
-  return [
+  const tools: ToolSpec[] = [
     {
       name: 'read_board',
       description:
@@ -586,4 +586,85 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
       },
     },
   ];
+
+  /**
+   * THE PLAYER'S LINE FOR EACH TOOL, kept out of the tool objects.
+   *
+   * A presenter is a pure function of what the tool returned and what it was
+   * asked, so it belongs beside the list rather than inside each entry -- and
+   * writing them as one table is what makes it obvious at a glance which tools
+   * have nothing to say (none of them, as it turns out: a row that reads
+   * `read_board · {"mode":"level","dev":false,…}` is a row nobody can use).
+   */
+  const nameOf = (defId: string): string =>
+    host.parts().find((part) => part.id === defId)?.nameZh ?? defId;
+
+  const presenters: Record<string, (result: unknown, args: ToolArgs) => string> = {
+    read_board: () => {
+      const board = host.snapshot();
+      return `看了一眼电路：${board.parts.length} 个元件、${board.wires.length} 根导线`;
+    },
+    list_parts: () =>
+      `列出可用元件：${host
+        .parts()
+        .filter((part) => !part.hidden)
+        .map((part) => part.nameZh)
+        .join('、')}`,
+    place_part: (result) => {
+      const placed = result as { id: string; defId: string; x: number; y: number };
+      return `在 (${placed.x}, ${placed.y}) 放了 ${nameOf(placed.defId)}（${placed.id}）`;
+    },
+    move_part: (result) => {
+      const moved = result as { id: string; x: number; y: number };
+      return `把 ${moved.id} 移到 (${moved.x}, ${moved.y})`;
+    },
+    connect_pins: (result) => {
+      const wire = result as { from: string; to: string };
+      return `把 ${wire.from} 接到 ${wire.to}`;
+    },
+    delete_wire: (_result, args) => `删掉导线 ${stringArg(args, 'wireId')}`,
+    delete_part: (result) => {
+      const removed = result as { id: string; removedWires: number };
+      return removed.removedWires > 0
+        ? `删掉 ${removed.id}，连带 ${removed.removedWires} 根导线`
+        : `删掉 ${removed.id}`;
+    },
+    undo_last: () => '撤销一步',
+    redo_last: () => '重做一步',
+    run_circuit: () => '让时钟跑起来',
+    pause_circuit: () => '暂停时钟',
+    step_clock: () => '走一个时钟边沿',
+    reset_circuit: () => '停止并复位',
+    run_tests: (result) => (result as { summary: string }).summary,
+    export_circuit: (result) => `导出电路（${(result as { text: string }).text.length} 个字符）`,
+    import_circuit: (result) => {
+      const imported = result as { parts: number; wires: number };
+      return `导入电路：${imported.parts} 个元件、${imported.wires} 根导线`;
+    },
+    select_parts: (_result, args) => {
+      const ids = stringArrayArg(args, 'ids');
+      return ids.length === 0 ? '清空选择' : `选中 ${ids.join('、')}`;
+    },
+    wrap_selection: (result) => {
+      const wrapped = result as { id: string; name: string };
+      return `封装成「${wrapped.name}」（${wrapped.id}）`;
+    },
+    enter_component: (_result, args) => `打开 ${stringArg(args, 'id')} 的内部电路`,
+    leave_component: () => '回到外面的电路',
+    rename_component: (result) => {
+      const renamed = result as { id: string; name: string };
+      return `把 ${renamed.id} 改名为「${renamed.name}」`;
+    },
+    delete_component: (_result, args) => `删掉自定义元件 ${stringArg(args, 'id')}`,
+    set_input: (result) => {
+      const driven = result as { pin: string; value: number };
+      return `把输入 ${driven.pin} 设为 ${driven.value}`;
+    },
+    set_program: (result) => `写入程序（${(result as { lines: number }).lines} 行）`,
+  };
+
+  return tools.map((tool) => {
+    const present = presenters[tool.name];
+    return present === undefined ? tool : { ...tool, present };
+  });
 }

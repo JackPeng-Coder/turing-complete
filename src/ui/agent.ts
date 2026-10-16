@@ -319,7 +319,9 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
         const target = row ?? { name: event.name, state: 'end' as const, ok: true, summary: '' };
         target.state = 'end';
         target.ok = event.ok ?? true;
-        target.summary = summarise(event.text ?? '');
+        // The tool's own sentence when it has one; the raw result is for the
+        // model, not for the person watching the board.
+        target.summary = event.note ?? summarise(event.text ?? '');
         if (row === undefined) current.tools.push(target);
         status = target.ok ? `已完成 ${event.name}` : `${event.name} 失败：${target.summary}`;
       }

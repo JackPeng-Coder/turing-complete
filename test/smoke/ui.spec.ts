@@ -1238,7 +1238,8 @@ test('the agent builds what it was asked for, one visible step at a time', async
   // ...and the board is what changed: two NANDs, priced by the readout that
   // measures every edit, because the agent's edit went through `onChange`.
   await expect(page.locator('.shell-metrics')).toContainText('门 2 个');
-  await expect(page.locator('.agent-tool').first()).toContainText('"id":"i1"');
+  // The row says what happened in a sentence, not in the JSON the model read.
+  await expect(page.locator('.agent-tool').first()).toHaveText('place_part · 在 (160, 160) 放了 与非门（i1）');
   await page.screenshot({ path: 'test-results/smoke-agent-build.png' });
 
   // Its work is the player's to undo: one Ctrl+Z takes the last part back.

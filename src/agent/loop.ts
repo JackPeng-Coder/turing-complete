@@ -43,7 +43,16 @@ export const MAX_STEPS = 16;
 export type AgentEvent =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'step'; readonly index: number }
-  | { readonly kind: 'tool'; readonly phase: 'start' | 'end'; readonly callId: string; readonly name: string; readonly ok?: boolean; readonly text?: string }
+  | {
+      readonly kind: 'tool';
+      readonly phase: 'start' | 'end';
+      readonly callId: string;
+      readonly name: string;
+      readonly ok?: boolean;
+      readonly text?: string;
+      /** The same result as one line of Chinese, for the panel to show. */
+      readonly note?: string;
+    }
   | { readonly kind: 'error'; readonly message: string; readonly detail: string };
 
 export type StopReason = 'done' | 'aborted' | 'error' | 'capped';
@@ -186,6 +195,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
                 ok: false,
                 error: `没有名为 ${call.name} 的工具。可用的工具：${toolNames(tools)}`,
               }),
+              note: `没有名为 ${call.name} 的工具`,
             }
           : await runTool(spec, call.arguments, { signal });
       history.push({ role: 'tool', tool_call_id: call.id, content: outcome.text });
@@ -196,6 +206,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
         name: call.name,
         ok: outcome.ok,
         text: outcome.text,
+        note: outcome.note,
       });
       // THE VISIBLE STEP. The command has already been applied and painted by the
       // host; this is what holds the frame long enough for a person to see which

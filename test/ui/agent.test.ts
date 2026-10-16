@@ -197,6 +197,31 @@ describe('a conversation', () => {
     expect(tool.className).toContain('agent-tool-end');
   });
 
+  it('shows the tool’s own sentence when it has one', async () => {
+    const scripted = (options: RunOptions): Promise<RunResult> => {
+      options.onEvent?.({ kind: 'step', index: 0 });
+      options.onEvent?.({ kind: 'tool', phase: 'start', callId: 'c1', name: 'place_part' });
+      options.onEvent?.({
+        kind: 'tool',
+        phase: 'end',
+        callId: 'c1',
+        name: 'place_part',
+        ok: true,
+        text: JSON.stringify({ ok: true, result: { id: 'i1', defId: 'nand', x: 16, y: 32 } }),
+        note: '在 (16, 32) 放了 与非门（i1）',
+      });
+      return Promise.resolve(DONE([...options.messages]));
+    };
+    const { stage } = mount(CONFIG, scripted);
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
+    stage.querySelector<HTMLTextAreaElement>('.agent-input')!.value = '放一个与非门';
+    clickButton(stage, '发送');
+    await tick();
+    expect(stage.querySelector('.agent-tool')!.textContent).toBe(
+      'place_part · 在 (16, 32) 放了 与非门（i1）',
+    );
+  });
+
   it('shows a failed tool as a failure with the refusal it was given', async () => {
     const scripted = (options: RunOptions): Promise<RunResult> => {
       options.onEvent?.({ kind: 'step', index: 0 });
