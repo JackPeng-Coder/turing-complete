@@ -1164,3 +1164,84 @@ test('the agent asks for its API information on a first run, and only once', asy
   await expect(page.locator('.agent-input')).toBeVisible();
   await page.screenshot({ path: 'test-results/smoke-agent.png' });
 });
+
+/** One frame of an OpenAI-compatible streamed completion. */
+function agentChunk(delta: unknown, finish?: string): string {
+  const choice = finish === undefined ? { index: 0, delta } : { index: 0, delta, finish_reason: finish };
+  return `data: ${JSON.stringify({ choices: [choice] })}\n\n`;
+}
+
+/** One streamed tool call, arguments whole -- the client's own fragmentation is
+ * covered by `test/agent/client.test.ts`, and what is under test HERE is the
+ * browser: a real fetch, a real stream, and the board on the other side of it. */
+function agentCall(index: number, id: string, name: string, args: unknown): string {
+  return agentChunk({
+    tool_calls: [{ index, id, type: 'function', function: { name, arguments: JSON.stringify(args) } }],
+  });
+}
+
+/**
+ * THE WHOLE FEATURE, END TO END, AGAINST A SCRIPTED MODEL.
+ *
+ * A model is the one thing a test cannot supply honestly, so this one is faked at
+ * the network boundary and nothing else is: the browser makes a real request, the
+ * client reads a real `text/event-stream`, the loop runs the tools it was asked
+ * for, and the circuit on the board is the evidence. What the test is really
+ * asserting is the promise the feature makes -- a sentence in, a circuit out, and
+ * one visible step per action -- and that it goes through the player's own
+ * undoable commands rather than a private path.
+ *
+ * THE ENDPOINT IS SAME-ORIGIN ON PURPOSE. A cross-origin one would make the
+ * browser send a preflight and enforce CORS, which is a fact about the provider
+ * rather than about this program; the mock lives at `/mock/v1` on the preview
+ * server so the request that leaves the panel is an ordinary one.
+ */
+test('the agent builds what it was asked for, one visible step at a time', async ({ page }) => {
+  const rounds = [
+    [
+      agentCall(0, 'call_1', 'place_part', { defId: 'nand', x: 160, y: 160 }),
+      agentCall(1, 'call_2', 'place_part', { defId: 'nand', x: 340, y: 160 }),
+      agentChunk({}, 'tool_calls'),
+      'data: [DONE]\n\n',
+    ].join(''),
+    [agentChunk({ content: '放好了：两个与非门。' }), agentChunk({}, 'stop'), 'data: [DONE]\n\n'].join(''),
+  ];
+  let served = 0;
+  await page.route('**/mock/v1/chat/completions', async (route) => {
+    const body = rounds[Math.min(served, rounds.length - 1)]!;
+    served += 1;
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body });
+  });
+
+  await seedProgress(page, 2); // level 3 is the first one whose palette offers a NAND
+  await page.goto('/');
+  const setup = page.locator('.agent-setup');
+  const fields = setup.locator('.agent-field input');
+  await fields.nth(0).fill('http://127.0.0.1:4173/mock/v1');
+  await fields.nth(1).fill('sk-test');
+  await fields.nth(2).fill('mock-model');
+  await setup.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(setup).toBeHidden();
+  await page.getByRole('button', { name: '开始' }).click();
+
+  // Saving the settings opens the panel; the toggle would close it again.
+  if (!(await page.locator('.agent-input').isVisible())) await page.locator('.agent-toggle').click();
+  await page.locator('.agent-input').fill('放两个与非门');
+  await page.getByRole('button', { name: '发送' }).click();
+
+  // Two actions, two rows, each with the result the tool actually returned.
+  await expect(page.locator('.agent-tool')).toHaveCount(2);
+  await expect(page.locator('.agent-tool').first()).toContainText('place_part');
+  await expect(page.locator('.agent-text').last()).toContainText('放好了');
+  await expect(page.locator('.agent-status')).toHaveText('完成');
+
+  // ...and the board is what changed: two NANDs, priced by the readout that
+  // measures every edit, because the agent's edit went through `onChange`.
+  await expect(page.locator('.shell-metrics')).toContainText('门 2 个');
+  await expect(page.locator('.agent-tool').first()).toContainText('"id":"i1"');
+  await page.screenshot({ path: 'test-results/smoke-agent-build.png' });
+
+  // Its work is the player's to undo: one Ctrl+Z takes the last part back.
+  await page.keyboard.press('Control+z');
+  await expect(page.locator('.shell-metrics')).toContainText('门 1 个');
+});

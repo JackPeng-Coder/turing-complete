@@ -45,4 +45,20 @@
   - `pnpm build` → 干净（`tsc --noEmit` + vite build，dist 270 kB / gzip 92.6 kB）
   - `pnpm test` → **60 文件 1623 用例全通过**（原 54/1537；新增 6 文件 86 用例）
   - `pnpm smoke` → **25 通过（27.7 s），exit 0**（原 24 个用例 + 新增的 agent 首次配置用例）
+- 12:39 补上**端到端**那一条：`test/smoke/ui.spec.ts` 新增"the agent builds what it was asked for"，
+  用 `page.route` 把一个脚本化的模型挂在**同源**的 `/mock/v1/chat/completions` 上
+  （跨域会引入预检和 CORS，那是"对方的策略"而不是这个程序的事实），于是浏览器发的是真请求、
+  客户端读的是真 `text/event-stream`、循环跑的是真工具、板子上留下的是真电路：
+  两个 `place_part` → 读数变成 `门 2 个`，日志里两行工具结果，末行文本"放好了"；
+  再按一次 Ctrl+Z，读数回到 `门 1 个`——**agent 的改动就在玩家自己的撤销栈里**。
+  调试过程中它先失败了一次，失败本身是好事：脚本让 level 1 放 `nand`，而第 1 关的
+  `allowedComponents` 只有 `const_on`/`const_off`/`level_input`/`level_output`，
+  工具如实拒绝并列出可用元件——这正是 A3 里"agent 只能用这一关给你的元件"的证据。
+  测试改成 `seedProgress(page, 2)` 打开第 3 关（第一个给 `nand` 的关卡）。
+- 12:41 最终工作区三门禁重跑：`pnpm build` exit 0；`pnpm test` **60 文件 1623 用例**；
+  `pnpm smoke` **26 通过（28.3 s）exit 0**。
+- 12:34 推送成功：`7853235..f4f30c6 master -> master`，用 JackPengCoder 账户
+  （`origin` 改成 `https://JackPeng-Coder@github.com/...`，让 git 的凭据查找命中
+  Windows 凭据里已有的 `git:https://JackPeng-Coder@github.com`；此前 `origin` 不带用户名，
+  查找的 target 对不上，GCM 于是要弹窗而 `GIT_TERMINAL_PROMPT=0` 下直接失败）。
 
