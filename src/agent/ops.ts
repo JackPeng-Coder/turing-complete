@@ -30,7 +30,7 @@ import {
   type Wire,
 } from '../core/graph';
 import type { AgentHost, PartInfo } from './host';
-import { ToolError, numberArg, stringArg, type ToolSpec, type ToolArgs } from './tools';
+import { ToolError, numberArg, optionalString, stringArg, stringArrayArg, type ToolSpec, type ToolArgs } from './tools';
 
 /** A bit of schema, so every tool's parameters read the same way. */
 const TEXT = (description: string): { type: 'string'; description: string } => ({
@@ -416,6 +416,173 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
         const outcome = host.loadCircuit(stringArg(args, 'text'));
         if (!outcome.ok) throw new ToolError(`导入失败：${outcome.error ?? '未知原因'}`);
         return { parts: outcome.parts ?? 0, wires: outcome.wires ?? 0 };
+      },
+    },
+    {
+      name: 'select_parts',
+      description:
+        '选中若干元件（等于 Ctrl+拖拽框选）。选中不改变电路，但它是「封装为元件」的前提，也会让这些元件亮起选中框，方便玩家看清你在说哪些。传空数组就是清空选择。',
+      parameters: {
+        type: 'object',
+        properties: {
+          ids: {
+            type: 'array',
+            description: '要选中的元件 id 列表，例如 ["i1","i2"]',
+            items: { type: 'string' },
+          },
+        },
+        required: ['ids'],
+        additionalProperties: false,
+      },
+      run: (args: ToolArgs) => {
+        const ids = stringArrayArg(args, 'ids');
+        const placement = placementOf(host);
+        for (const id of ids) instanceOf(placement, id);
+        host.select(ids);
+        return { selected: ids };
+      },
+    },
+    {
+      name: 'wrap_selection',
+      description:
+        '把当前选中的元件封装成一个自定义元件（等于 封装为元件 → 确定）。跨过选区边界的导线会变成它的引脚。返回新元件的 id。至少需要两个元件，而且必须有导线跨过边界。',
+      parameters: {
+        type: 'object',
+        properties: {
+          nameZh: TEXT('这个元件的中文名，例如「半加器」'),
+          nameEn: TEXT('英文名；不填就用中文名'),
+        },
+        required: ['nameZh'],
+        additionalProperties: false,
+      },
+      run: (args: ToolArgs) => {
+        const nameZh = stringArg(args, 'nameZh');
+        const nameEn = optionalString(args, 'nameEn') ?? nameZh;
+        const id = host.wrapSelection({ zh: nameZh, en: nameEn });
+        if (id === null) {
+          const count = host.snapshot().selected.length;
+          throw new ToolError(
+            `这 ${count} 个元件无法封装：至少要有两个元件，而且得有导线跨过选区边界（那才是它的引脚）。先用 select_parts 选好再试`,
+          );
+        }
+        return { id, name: nameZh };
+      },
+    },
+    {
+      name: 'enter_component',
+      description:
+        '打开一个自定义元件的内部电路（等于 编辑内部）。之后的 place_part / connect_pins 等操作都会改这个元件的实现，而不是外面的电路。改完记得 leave_component。',
+      parameters: {
+        type: 'object',
+        properties: { id: TEXT('自定义元件 id，例如 bp1') },
+        required: ['id'],
+        additionalProperties: false,
+      },
+      run: (args: ToolArgs) => {
+        const id = stringArg(args, 'id');
+        if (!host.enterComponent(id)) throw new ToolError(`没有自定义元件 ${id}`);
+        return { editing: id };
+      },
+    },
+    {
+      name: 'leave_component',
+      description: '从自定义元件内部返回外面的电路（等于 返回）。',
+      parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+      run: () => {
+        host.leaveComponent();
+        return { editing: null };
+      },
+    },
+    {
+      name: 'rename_component',
+      description: '给一个自定义元件改名（等于 重命名）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: TEXT('自定义元件 id'),
+          nameZh: TEXT('新的中文名'),
+          nameEn: TEXT('新的英文名；不填就用中文名'),
+        },
+        required: ['id', 'nameZh'],
+        additionalProperties: false,
+      },
+      run: (args: ToolArgs) => {
+        const id = stringArg(args, 'id');
+        const nameZh = stringArg(args, 'nameZh');
+        const nameEn = optionalString(args, 'nameEn') ?? nameZh;
+        if (!host.renameComponent(id, { zh: nameZh, en: nameEn })) {
+          throw new ToolError(`没有自定义元件 ${id}`);
+        }
+        return { id, name: nameZh };
+      },
+    },
+    {
+      name: 'delete_component',
+      description:
+        '删掉一个自定义元件（等于 删除）。如果电路上还有它的实例，会被拒绝——先把那些实例删掉。',
+      parameters: {
+        type: 'object',
+        properties: { id: TEXT('自定义元件 id') },
+        required: ['id'],
+        additionalProperties: false,
+      },
+      run: (args: ToolArgs) => {
+        const id = stringArg(args, 'id');
+        if (!host.deleteComponent(id)) {
+          throw new ToolError(`${id} 不能删：电路上还有它的实例，或者它本来就不存在`);
+        }
+        return { id };
+      },
+    },
+    {
+      name: 'set_input',
+      description:
+        '给关卡的一个输入引脚设定数值（等于点击读数面板里的那一行，用来手动驱动半成品电路）。位宽决定范围。',
+      parameters: {
+        type: 'object',
+        properties: {
+          pin: TEXT('输入引脚 id，例如 a'),
+          value: {
+            type: 'integer',
+            description: '要驱动的整数值；超过位宽会被拒绝',
+          },
+        },
+        required: ['pin', 'value'],
+        additionalProperties: false,
+      },
+      run: (args: ToolArgs) => {
+        const pin = stringArg(args, 'pin');
+        const value = numberArg(args, 'value');
+        const input = host.snapshot().inputs.find((candidate) => candidate.id === pin);
+        if (!input) {
+          const known = host.snapshot().inputs.map((candidate) => candidate.id).join('、');
+          throw new ToolError(`本关没有输入引脚 ${pin}。有：${known === '' ? '（没有）' : known}`);
+        }
+        const max = input.width >= 31 ? Number.MAX_SAFE_INTEGER : 2 ** input.width - 1;
+        if (!Number.isInteger(value) || value < 0 || value > max) {
+          throw new ToolError(`引脚 ${pin} 是 ${input.width} 位，取值只能是 0 到 ${max}`);
+        }
+        host.setInput(pin, value);
+        return { pin, value };
+      },
+    },
+    {
+      name: 'set_program',
+      description:
+        '写这条关卡的程序文本（等于在汇编编辑器里打字）。只有在会给程序判分的关卡上才可用；文本要先汇编通过，判定才可能通过。',
+      parameters: {
+        type: 'object',
+        properties: { text: TEXT('完整的程序文本，可以多行') },
+        required: ['text'],
+        additionalProperties: false,
+      },
+      run: (args: ToolArgs) => {
+        if (!host.snapshot().expectsProgram) {
+          throw new ToolError('这一关不给程序判分：编辑器根本没有挂出来，写程序也没用');
+        }
+        const text = stringArg(args, 'text');
+        host.setProgram(text);
+        return { lines: text.split('\n').length };
       },
     },
   ];

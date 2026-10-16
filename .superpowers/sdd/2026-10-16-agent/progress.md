@@ -61,4 +61,18 @@
   （`origin` 改成 `https://JackPeng-Coder@github.com/...`，让 git 的凭据查找命中
   Windows 凭据里已有的 `git:https://JackPeng-Coder@github.com`；此前 `origin` 不带用户名，
   查找的 target 对不上，GCM 于是要弹窗而 `GIT_TERMINAL_PROMPT=0` 下直接失败）。
+- 12:45 **补第二批工具，把 A3 的"所有操作"再推近一步**。第一批只覆盖"当前电路 + 运行/测试 +
+  导入导出"，缺口是**自制元件**与**程序文本**这两条人手路径。第二批加八条，全部走人手同一条路：
+  `select_parts`（框选，也是封装的前提）、`wrap_selection`（封装为元件，plan 由 `planWrap` 出、
+  `null` 原样透传成拒绝）、`enter_component`/`leave_component`（编辑内部/返回）、
+  `rename_component`、`delete_component`（拒绝逻辑仍是 `deleteBlueprint` 的那一次扫描）、
+  `set_input`（驱动关卡输入，位宽越界会被拒）、`set_program`（写程序文本，没有程序判分的关卡直接拒）。
+  为了让模型能自己判断，`read_board` 多报三样：`components`（库 + 每种的实例数）、
+  `inputs`（引脚、位宽、当前值）、`program` 与 `expectsProgram`。
+  仍然**不做**的：导航（开关卡/回地图/开沙盒）、进度（跳关/通关/清档）、视图（平移缩放、网格、
+  框选手势本身）。前两类是裁决里就排除的，第三类是视图不是电路。
+- 12:47 第二批之后门禁重跑：`pnpm build` exit 0；`pnpm test` **60 文件 1633 用例**；
+  `pnpm smoke` **26 通过（28.6 s）exit 0**。测试里那一批新用例全部走假 host：
+  封装成功的返回、封装失败的"边界"解释、进入/改名/返回的顺序、删除被拒的透传、
+  位宽越界、没有程序判分的关卡拒绝写程序。
 

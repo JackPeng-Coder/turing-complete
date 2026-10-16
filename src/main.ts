@@ -1481,6 +1481,21 @@ if (app) {
         issues,
         status: state.status,
         briefZh: narrativeFor(open.id).before.zh,
+        components: Object.entries(state.blueprints).map(([id, entry]) => ({
+          id,
+          nameZh: entry.name.zh,
+          nameEn: entry.name.en,
+          inputs: entry.def.inputs.map((pin) => pin.id),
+          outputs: entry.def.outputs.map((pin) => pin.id),
+          instances: state.graph.instances.filter((inst) => inst.def === id).length,
+        })),
+        inputs: open.io.inputs.map((pin) => ({
+          id: pin.id,
+          width: pin.width,
+          value: vector[pin.id] ?? 0,
+        })),
+        program: state.programs[open.id] ?? '',
+        expectsProgram: levelExpectsProgram(open),
       };
     },
     // The grid is the theme's, not this module's: the agent layer may not import
@@ -1503,6 +1518,40 @@ if (app) {
       const redone = stack.redo(store.get().graph);
       if (redone) onChange();
       return redone;
+    },
+    select: (ids) => store.set({ selected: [...ids] }),
+    // The wrap is done the way the panel does it: plan first, then the one
+    // command that moves the circuit and the library together. `null` is
+    // `planWrap`'s own refusal, passed through rather than guessed at.
+    wrapSelection: (name) => {
+      const { graph, registry: reg, blueprints, selected } = store.get();
+      const plan = planWrap(graph, reg, blueprints, selected);
+      if (plan === null) return null;
+      const id = plan.component.id;
+      commitWrap(plan, { zh: name.zh, en: name.en });
+      return id;
+    },
+    enterComponent: (id) => {
+      if (store.get().blueprints[id] === undefined) return false;
+      enterBlueprint(id);
+      return true;
+    },
+    leaveComponent: () => {
+      leaveBlueprint();
+    },
+    renameComponent: (id, name) => {
+      if (store.get().blueprints[id] === undefined) return false;
+      renameBlueprint(id, { zh: name.zh, en: name.en });
+      return true;
+    },
+    // The refusal is `deleteBlueprint`'s: it is the same scan that keeps a hand
+    // from deleting a component the board is still using.
+    deleteComponent: (id) => deleteBlueprint(id),
+    setInput: (pinId, value) => {
+      driveTo({ ...vector, [pinId]: value });
+    },
+    setProgram: (text) => {
+      onProgramEdit(text);
     },
     run: () => {
       running = true;

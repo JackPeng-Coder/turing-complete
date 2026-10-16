@@ -43,6 +43,10 @@ export function systemPrompt(snapshot: BoardSnapshot): string {
 - 不要制造「自己接回自己」的环；要存一位就用 delay、reg 这类存储元件。
 - 搭完之后，关卡里用 run_tests 判定；沙盒里用 read_board 复核结构问题（未接线的输入、多重驱动）。
 - 如果一直失败，先 read_board 看结构问题，再改一处、再试，不要盲目重复同样的操作。
+- 要做自己的元件：先 select_parts 选中，再 wrap_selection 起名。想改它的内部就 enter_component，
+  改完必须 leave_component 回到外面的电路——在里面的时候，你的每一步都在改那个元件的实现。
+- 关卡要求写程序时用 set_program 写完整文本；它会自动汇编，能不能通过要看 run_tests 的结果。
+- 想手动驱动半成品电路观察波形，用 set_input 给输入引脚赋值。
 
 回答方式：用中文，简短。说清你做了什么、结果如何；不要输出工具调用的 JSON，也不要把参数念一遍。`;
 }

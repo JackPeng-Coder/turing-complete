@@ -239,6 +239,110 @@ describe('reading the board', () => {
   });
 });
 
+describe('components of your own', () => {
+  it('selects parts -- which is what puts the ring around them and what a wrap needs', async () => {
+    const fixture = makeTestHost();
+    await call(fixture, 'place_part', { defId: 'nand', x: 0, y: 0 });
+    await call(fixture, 'place_part', { defId: 'not', x: 160, y: 0 });
+    const { ok, body } = await call(fixture, 'select_parts', { ids: ['i1', 'i2'] });
+    expect(ok).toBe(true);
+    expect(body.result.selected).toEqual(['i1', 'i2']);
+    expect(fixture.focus).toEqual(['i1', 'i2']);
+  });
+
+  it('refuses to select an id that is not on the board', async () => {
+    const fixture = makeTestHost();
+    const { ok, body } = await call(fixture, 'select_parts', { ids: ['i9'] });
+    expect(ok).toBe(false);
+    expect(body.error).toContain('i9');
+  });
+
+  it('wraps the selection under a name and reports the new component', async () => {
+    const fixture = makeTestHost();
+    const { ok, body } = await call(fixture, 'wrap_selection', { nameZh: '半加器', nameEn: 'Half adder' });
+    expect(ok).toBe(true);
+    expect(body.result).toEqual({ id: 'bp2', name: '半加器' });
+    expect(fixture.calls).toContain('wrap');
+  });
+
+  it('explains a wrap that cannot happen instead of doing nothing', async () => {
+    const fixture = makeTestHost();
+    fixture.wrapResult = null;
+    await call(fixture, 'place_part', { defId: 'nand', x: 0, y: 0 });
+    await call(fixture, 'select_parts', { ids: ['i1'] });
+    const { ok, body } = await call(fixture, 'wrap_selection', { nameZh: '半加器' });
+    expect(ok).toBe(false);
+    expect(body.error).toContain('边界');
+    expect(body.error).toContain('select_parts');
+  });
+
+  it('enters a component, renames it, and leaves again', async () => {
+    const fixture = makeTestHost();
+    expect((await call(fixture, 'enter_component', { id: 'bp1' })).ok).toBe(true);
+    expect((await call(fixture, 'enter_component', { id: 'nope' })).ok).toBe(false);
+    expect((await call(fixture, 'rename_component', { id: 'bp1', nameZh: '全加器' })).ok).toBe(true);
+    expect((await call(fixture, 'leave_component', {})).ok).toBe(true);
+    expect(fixture.calls).toEqual(['enter:bp1', 'enter:nope', 'rename:bp1', 'leave']);
+  });
+
+  it('deletes a component, and passes the refusal through when the board uses it', async () => {
+    const fixture = makeTestHost();
+    expect((await call(fixture, 'delete_component', { id: 'bp1' })).ok).toBe(true);
+    fixture.deleteRefused = true;
+    const refused = await call(fixture, 'delete_component', { id: 'bp1' });
+    expect(refused.ok).toBe(false);
+    expect(refused.body.error).toContain('实例');
+  });
+});
+
+describe('driving the level and the editor', () => {
+  it('sets an input pin within its width', async () => {
+    const fixture = makeTestHost();
+    const one = await call(fixture, 'set_input', { pin: 'a', value: 1 });
+    expect(one.ok).toBe(true);
+    expect(fixture.driven.a).toBe(1);
+    // `b` is four bits wide, so fifteen fits and sixteen does not.
+    expect((await call(fixture, 'set_input', { pin: 'b', value: 15 })).ok).toBe(true);
+    const tooBig = await call(fixture, 'set_input', { pin: 'b', value: 16 });
+    expect(tooBig.ok).toBe(false);
+    expect(tooBig.body.error).toContain('4 位');
+    const missing = await call(fixture, 'set_input', { pin: 'z', value: 0 });
+    expect(missing.ok).toBe(false);
+    expect(missing.body.error).toContain('没有输入引脚');
+  });
+
+  it('writes the program text on a level that grades one', async () => {
+    const fixture = makeTestHost();
+    const { ok, body } = await call(fixture, 'set_program', { text: 'LDI 1\nOUT' });
+    expect(ok).toBe(true);
+    expect(body.result.lines).toBe(2);
+    expect(fixture.program).toBe('LDI 1\nOUT');
+  });
+
+  it('refuses to write a program where the editor is not mounted', async () => {
+    const fixture = makeTestHost();
+    fixture.expectsProgram = false;
+    const { ok, body } = await call(fixture, 'set_program', { text: 'LDI 1' });
+    expect(ok).toBe(false);
+    expect(body.error).toContain('不给程序判分');
+  });
+
+  it('reports what the board holds: components, inputs, program', async () => {
+    const fixture = makeTestHost();
+    await call(fixture, 'place_part', { defId: 'nand', x: 0, y: 0 });
+    await call(fixture, 'set_input', { pin: 'a', value: 1 });
+    await call(fixture, 'set_program', { text: 'NOP' });
+    const board = await call(fixture, 'read_board', {});
+    expect(board.body.result.components[0]).toMatchObject({ id: 'bp1', instances: 0 });
+    expect(board.body.result.inputs).toEqual([
+      { id: 'a', width: 1, value: 1 },
+      { id: 'b', width: 4, value: 0 },
+    ]);
+    expect(board.body.result.program).toBe('NOP');
+    expect(board.body.result.expectsProgram).toBe(true);
+  });
+});
+
 describe('arguments the model got wrong', () => {
   it('answers a missing required argument with a correction', async () => {
     const fixture = makeTestHost();

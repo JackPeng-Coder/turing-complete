@@ -65,12 +65,14 @@ towards a working CPU.
 - **A built-in agent you can talk to.** Fill in an API address, a key and a model once — the request
   goes straight from the browser to that endpoint, so the app still ships **no runtime dependency and
   no server** — then describe what you want in Chinese and watch it happen. The agent calls one
-  operation at a time (place a part, wire two pins, move or delete an instance, undo, run the clock,
-  step it, press 测试, export or import the circuit) and the board holds a frame between steps so each
-  one is visible. Its edits go through the same command stack as your own, so Ctrl+Z walks back
-  through them, and it may place exactly the parts the level's palette is offering you. The key is
-  kept in `localStorage` under `tc.agent.v1` — 设置 can forget it, and the first-run card can be
-  dismissed with 以后再说, because the game plays fine without any of it.
+  operation at a time: place, move, wire, disconnect, delete, select, 封装 as a component, open a
+  component's circuit and edit it, rename or delete one, undo and redo, drive an input pin, run the
+  clock, step it, press 测试, write the program text, and export or import the circuit. The board holds
+  a frame between steps, so each one is visible, and the part just touched wears the selection ring.
+  Its edits go through the same command stack as your own, so Ctrl+Z walks back through them, and it
+  may place exactly the parts the level's palette is offering you. The key is kept in `localStorage`
+  under `tc.agent.v1` — 设置 can forget it, and the first-run card can be dismissed with 以后再说,
+  because the game plays fine without any of it.
 
 Chapters 5–7 (the Symphony CPU, functions, the assembly challenges, and the peripherals) are planned but
 not built yet.
@@ -131,6 +133,9 @@ What it will not do, and why:
   it is what the model is offered, and nothing outside it is reachable.
 - **It cannot place parts the level does not offer you.** The tool's palette is derived from the same
   two functions the parts tray uses, so a level's puzzle is not bypassed by asking nicely.
+- **It does not pan, zoom, toggle the grid or band-select.** Those are the view, not the circuit: an
+  agent that could move the camera could put the board somewhere you did not ask for it, and every one
+  of them is one gesture away.
 - **It only speaks OpenAI-compatible `chat/completions`** with streaming. Anthropic's messages API
   needs a browser-specific header and is not wired up; every other provider that speaks the OpenAI
   shape — including the DeepSeek, Moonshot and Zhipu endpoints — works.

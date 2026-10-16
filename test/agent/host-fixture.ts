@@ -23,6 +23,18 @@ export interface TestHost {
   readonly calls: string[];
   /** Overrides the test run's answer. */
   testResult: { ran: boolean; passed: boolean | null; summary: string };
+  /** The components the fixture pretends the player has built. */
+  componentIds: string[];
+  /** What `wrapSelection` returns; `null` is the refusal `planWrap` would give. */
+  wrapResult: string | null;
+  /** When true, `deleteComponent` refuses the way a referenced component does. */
+  deleteRefused: boolean;
+  /** The values `setInput` has driven, by pin id. */
+  readonly driven: Record<string, number>;
+  /** The last text `setProgram` was given. */
+  program: string;
+  /** Whether the level grades a program, i.e. whether the editor is mounted. */
+  expectsProgram: boolean;
 }
 
 const PARTS: readonly PartInfo[] = [
@@ -71,6 +83,12 @@ export function makeTestHost(): TestHost {
     focus,
     calls,
     testResult: { ran: true, passed: true, summary: '全部用例通过' },
+    componentIds: ['bp1'],
+    wrapResult: 'bp2',
+    deleteRefused: false,
+    driven: {},
+    program: '',
+    expectsProgram: true,
     host: {
       graph: () => graph,
       parts: () => PARTS,
@@ -96,6 +114,20 @@ export function makeTestHost(): TestHost {
         issues: [],
         status: null,
         briefZh: null,
+        components: fixture.componentIds.map((id) => ({
+          id,
+          nameZh: `元件${id}`,
+          nameEn: id,
+          inputs: ['a'],
+          outputs: ['out'],
+          instances: graph.instances.filter((inst) => inst.def === id).length,
+        })),
+        inputs: [
+          { id: 'a', width: 1, value: fixture.driven.a ?? 0 },
+          { id: 'b', width: 4, value: fixture.driven.b ?? 0 },
+        ],
+        program: fixture.program,
+        expectsProgram: fixture.expectsProgram,
       }),
       // The board's real grid, so a test that checks snapping checks the number
       // the theme actually uses.
@@ -108,6 +140,36 @@ export function makeTestHost(): TestHost {
       },
       undo: () => stack.undo(graph),
       redo: () => stack.redo(graph),
+      select: (ids) => {
+        focus.length = 0;
+        focus.push(...ids);
+        calls.push('select');
+      },
+      wrapSelection: () => {
+        calls.push('wrap');
+        return fixture.wrapResult;
+      },
+      enterComponent: (id) => {
+        calls.push(`enter:${id}`);
+        return fixture.componentIds.includes(id);
+      },
+      leaveComponent: () => void calls.push('leave'),
+      renameComponent: (id) => {
+        calls.push(`rename:${id}`);
+        return fixture.componentIds.includes(id);
+      },
+      deleteComponent: (id) => {
+        calls.push(`delete:${id}`);
+        return !fixture.deleteRefused && fixture.componentIds.includes(id);
+      },
+      setInput: (pin, value) => {
+        calls.push(`input:${pin}`);
+        fixture.driven[pin] = value;
+      },
+      setProgram: (text) => {
+        calls.push('program');
+        fixture.program = text;
+      },
       run: () => void calls.push('run'),
       pause: () => void calls.push('pause'),
       stepOnce: () => void calls.push('step'),

@@ -93,6 +93,10 @@ function checkProperty(
         return `参数 ${key} 应该是整数`;
       }
       return null;
+    case 'array':
+      return Array.isArray(value) && value.every((item) => typeof item === 'string')
+        ? null
+        : `参数 ${key} 应该是字符串数组`;
     default:
       if (typeof value !== 'number' || !Number.isFinite(value)) return `参数 ${key} 应该是数字`;
       return null;
@@ -177,6 +181,10 @@ export function stringArg(args: ToolArgs, key: string): string {
 
 export function numberArg(args: ToolArgs, key: string): number {
   return args[key] as number;
+}
+
+export function stringArrayArg(args: ToolArgs, key: string): string[] {
+  return args[key] as string[];
 }
 
 export function optionalString(args: ToolArgs, key: string): string | undefined {

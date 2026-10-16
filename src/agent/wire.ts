@@ -27,10 +27,12 @@ export interface JsonSchema {
 }
 
 export interface JsonSchemaProperty {
-  readonly type: 'string' | 'number' | 'integer' | 'boolean';
+  readonly type: 'string' | 'number' | 'integer' | 'boolean' | 'array';
   readonly description: string;
   /** When present, the only values accepted. */
   readonly enum?: readonly string[];
+  /** For `array` only, and only strings: a list of instance ids, never objects. */
+  readonly items?: { readonly type: 'string' };
 }
 
 /** A tool as the model sees it: name, description, parameters. Nothing else. */

@@ -74,6 +74,22 @@ export interface BoardSnapshot {
   readonly status: { readonly zh: string; readonly en: string } | null;
   /** The level's own description, when it has one, so the agent knows the goal. */
   readonly briefZh: string | null;
+  /** The component library: what the palette offers on top of the base catalog. */
+  readonly components: readonly {
+    readonly id: string;
+    readonly nameZh: string;
+    readonly nameEn: string;
+    readonly inputs: readonly string[];
+    readonly outputs: readonly string[];
+    /** How many of this component are on the board right now. */
+    readonly instances: number;
+  }[];
+  /** The level's input pins and the value each is currently driven with. */
+  readonly inputs: readonly { readonly id: string; readonly width: number; readonly value: number }[];
+  /** The player's program text for this level; `''` when there is none. */
+  readonly program: string;
+  /** Whether the level grades a program at all, so the agent knows to write one. */
+  readonly expectsProgram: boolean;
 }
 
 /** What a test run ended in. `ran: false` means the level had nothing to play. */
@@ -120,6 +136,33 @@ export interface AgentHost {
   /** 撤销 / 重做, the player's own history. */
   undo(): boolean;
   redo(): boolean;
+  /**
+   * 选择: makes `ids` the selection, the way a marquee or a click does.
+   *
+   * Not an edit and not on the undo stack -- it is what 封装 as a component
+   * operates on, and what puts the operator's magenta ring around the parts the
+   * agent is talking about.
+   */
+  select(ids: readonly string[]): void;
+  /**
+   * 封装为元件: turns the selection into a named component and returns its id.
+   *
+   * `null` when the selection cannot become a component (fewer than two parts,
+   * nothing crossing its edge, a name already taken): the refusal is
+   * `planWrap`'s, and this method does not second-guess it.
+   */
+  wrapSelection(name: { zh: string; en: string }): string | null;
+  /** 编辑内部 / 返回: opens a component's circuit on the board, or leaves it. */
+  enterComponent(id: string): boolean;
+  leaveComponent(): void;
+  /** 重命名 a component; false when there is no such component. */
+  renameComponent(id: string, name: { zh: string; en: string }): boolean;
+  /** 删除 a component, refused while the board still uses it. */
+  deleteComponent(id: string): boolean;
+  /** Drives one of the level's input pins, as clicking its bit cells does. */
+  setInput(pinId: string, value: number): void;
+  /** The player's program text for this level, as the editor writes it. */
+  setProgram(text: string): void;
   /** 运行 / 暂停 / 单步 / 停止并复位. */
   run(): void;
   pause(): void;
