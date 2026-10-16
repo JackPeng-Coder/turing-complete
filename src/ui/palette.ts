@@ -1,7 +1,6 @@
 import type { AppState, Store } from '../app/store';
-import { paletteDefsFor, sandboxPaletteDefs } from '../app/progress';
+import { offeredDefsFor } from '../app/progress';
 import { LEVELS } from '../levels/index';
-import { isSandbox } from '../levels/sandbox';
 import { libraryIds } from '../levels/blueprints';
 import type { ComponentCategory } from '../core/registry';
 import { partCodeOf } from './board/markings';
@@ -73,15 +72,13 @@ export function mountPalette(
 
   const render = (): void => {
     const { level, progress, registry: registry0, dev, armed, blueprints } = store.get();
-    // THE SANDBOX PALETTE IS DERIVED FROM THE REGISTRY, not from the level: a
-    // sandbox has no puzzle to design around, so it offers every base part plus
-    // the player's own (see `sandboxPaletteDefs`). `?dev=1` reaches for the same
-    // thing -- it is the flag that opens every gate -- while an ordinary level
-    // keeps its own list, because a level's palette is the puzzle.
-    const offered =
-      dev || isSandbox(level)
-        ? sandboxPaletteDefs(registry0, libraryIds(blueprints))
-        : paletteDefsFor(progress, LEVELS, level, dev);
+    // THE ONE RULE (`offeredDefsFor`), not a copy of it: the agent's palette is
+    // derived from the same function, so the tray and the assistant cannot
+    // disagree about what is on offer. The sandbox palette is derived from the
+    // registry rather than from a level because a sandbox has no puzzle to design
+    // around; `?dev=1` reaches for the same complete set on any board, and the
+    // level's own connectors ride along -- see `offeredDefsFor`.
+    const offered = offeredDefsFor(progress, LEVELS, level, dev, registry0, libraryIds(blueprints));
     const available = offered.filter((defId) => registry0.has(defId));
     const key = `${level.id}|${available.join(',')}`;
 

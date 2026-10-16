@@ -22,7 +22,15 @@ export interface TestHost {
   readonly focus: string[];
   readonly calls: string[];
   /** Overrides the test run's answer. */
-  testResult: { ran: boolean; passed: boolean | null; summary: string };
+  testResult: { ran: boolean; passed: boolean | null; summary: string; failures?: readonly { inputs: Record<string, number>; expected: Record<string, number>; actual: Record<string, number>; tick: number }[] };
+  /**
+   * The connector ids the fixture hands out, by def id.
+   *
+   * A real level binds `IN_a` and `OUT` by name, so the fixture can too -- which
+   * is what makes "a connector placed through the agent binds to the level" a
+   * testable claim rather than a comment.
+   */
+  connectors: Record<string, { id: string; width: number }>;
   /** The components the fixture pretends the player has built. */
   componentIds: string[];
   /** What `wrapSelection` returns; `null` is the refusal `planWrap` would give. */
@@ -83,6 +91,7 @@ export function makeTestHost(): TestHost {
     focus,
     calls,
     testResult: { ran: true, passed: true, summary: '全部用例通过' },
+    connectors: { level_output: { id: 'OUT', width: 1 }, level_in: { id: 'IN_a', width: 1 } },
     componentIds: ['bp1'],
     wrapResult: 'bp2',
     deleteRefused: false,
@@ -128,10 +137,18 @@ export function makeTestHost(): TestHost {
         ],
         program: fixture.program,
         expectsProgram: fixture.expectsProgram,
+        outputs: [{ id: 'out', width: 1, value: null }],
       }),
       // The board's real grid, so a test that checks snapping checks the number
       // the theme actually uses.
       snap: (x, y) => ({ x: Math.round(x / 8) * 8, y: Math.round(y / 8) * 8 }),
+      connectorFor: (defId) => {
+        const connector = fixture.connectors[defId];
+        if (connector === undefined) return null;
+        // Once placed, the level has no more of that pin -- the same `undefined`
+        // the real `levelIoPlacement` gives a hand.
+        return graph.instances.some((inst) => inst.id === connector.id) ? null : connector;
+      },
       apply: (command, ids) => {
         stack.push(command, graph);
         applied.push(command.label);
@@ -176,7 +193,7 @@ export function makeTestHost(): TestHost {
       reset: () => void calls.push('reset'),
       test: () => {
         calls.push('test');
-        return Promise.resolve(fixture.testResult);
+        return Promise.resolve({ ...fixture.testResult, failures: fixture.testResult.failures ?? [] });
       },
       circuitText: () => JSON.stringify({ instances: graph.instances, wires: graph.wires }),
       loadCircuit: () => ({ ok: true, parts: 0, wires: 0 }),

@@ -50,6 +50,16 @@ export interface ChatResult {
 /** What the panel can show while the answer is still arriving. */
 export type ChatDelta =
   | { readonly kind: 'text'; readonly text: string }
+  /**
+   * The model's own reasoning, on the models that stream it.
+   *
+   * A SEPARATE CHANNEL FROM THE ANSWER, because it is a separate thing: it can be
+   * thousands of characters of "let me check the pins again", it arrives BEFORE
+   * the answer, and it is the part a reader wants folded away once the work is
+   * done. Mixing it into `content` would put it in the conversation history too,
+   * where it does not belong.
+   */
+  | { readonly kind: 'reasoning'; readonly text: string }
   | { readonly kind: 'tool'; readonly index: number; readonly name?: string };
 
 /**
@@ -259,6 +269,11 @@ export async function streamChat(options: ChatOptions): Promise<ChatResult> {
       if (delta?.content) {
         content += delta.content;
         onDelta?.({ kind: 'text', text: delta.content });
+      }
+      // Deliberately NOT added to `content`: reasoning is shown and then folded,
+      // and the conversation the model gets back must not carry it.
+      if (delta?.reasoning_content) {
+        onDelta?.({ kind: 'reasoning', text: delta.reasoning_content });
       }
       for (const fragment of delta?.tool_calls ?? []) {
         const entry = calls.get(fragment.index) ?? { id: '', name: '', args: '' };

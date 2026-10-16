@@ -122,9 +122,11 @@ The board's gestures:
 The agent panel is opened with the `Agent` button in the gap between the tool column and the middle of
 the board, and it is available on every board screen — an ordinary level, the sandbox, and `?dev=1`.
 Type what you want in Chinese and press 发送 (Enter sends, Shift+Enter is a newline). While it works,
-each step is a row in the log — `place_part…`, then `place_part · {"id":"i7"}` — and each one is a
+each step is a row in the log — `place_part · 在 (160, 160) 放了 与非门（i1）` — and each one is a
 frame on the board: the parts appear one at a time, and the part just touched wears the selection ring
-so you can see where the last action landed.
+so you can see where the last action landed. Above the rows, the model's own reasoning scrolls through
+a six-line window as it is written and then folds to `▸ 思考 · N 行`, one click from being read again;
+the step that answers rather than acts keeps its sentence open.
 
 What it will not do, and why:
 

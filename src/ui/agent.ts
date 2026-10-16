@@ -46,9 +46,28 @@ interface ToolRow {
   summary: string;
 }
 
+/**
+ * One step of the model's work, as the log holds it.
+ *
+ * `thought` and `text` are kept apart because they are read differently: the
+ * reasoning is the long part that only matters WHILE it is being written, and the
+ * answer is the short part that matters after. Keeping them apart is also what
+ * lets the block fold away without taking the answer with it.
+ */
+interface AgentEntry {
+  readonly kind: 'agent';
+  thought: string;
+  text: string;
+  readonly tools: ToolRow[];
+  /** Still arriving. A live step shows a few lines; a finished one folds. */
+  live: boolean;
+  /** The player opened the folded block, and it stays open across renders. */
+  opened: boolean;
+}
+
 type Entry =
   | { readonly kind: 'user'; readonly text: string }
-  | { readonly kind: 'agent'; text: string; readonly tools: ToolRow[]; thinking: boolean }
+  | AgentEntry
   | { readonly kind: 'notice'; readonly text: string; readonly tone: 'info' | 'error' };
 
 export interface AgentPanelOptions {
@@ -98,8 +117,15 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
   const entries: Entry[] = [];
   /** The conversation as the API sees it: no system message, which the loop adds. */
   const history: WireMessage[] = [];
-  let current: Extract<Entry, { kind: 'agent' }> | null = null;
-  let body: HTMLElement | null = null;
+  let current: AgentEntry | null = null;
+  /**
+   * The body of the step that is being written right now.
+   *
+   * A reference rather than a re-render per token: the tail of the stream is what
+   * is visible, so each delta only has to extend the text and keep the box
+   * scrolled to the bottom.
+   */
+  let liveBody: HTMLElement | null = null;
   let controller: AbortController | null = null;
   let busy = false;
   let status = '';
@@ -221,12 +247,60 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
 
   // ------------------------------------------------------------------ render --
 
+  /** A step with nothing in it yet. */
+  const newAgentEntry = (): AgentEntry => ({
+    kind: 'agent',
+    thought: '',
+    text: '',
+    tools: [],
+    live: true,
+    opened: false,
+  });
+
+  /** Everything the model has said in this step, reasoning first. */
+  const streamOf = (entry: AgentEntry): string =>
+    [entry.thought, entry.text].filter((part) => part !== '').join('\n');
+
+  /**
+   * The foldable block a step's prose lives in.
+   *
+   * WHILE IT IS BEING WRITTEN it is a fixed-height window onto the last few
+   * lines: a model thinking out loud produces far more text than a panel can
+   * show, and the only part worth watching is the newest. ONCE THE STEP IS DONE
+   * it folds to one line -- the reasoning has served its purpose the moment the
+   * work it describes is on the board -- and the player can open it again by
+   * clicking the header. An `article` of a thousand words that nobody asked to
+   * keep is what makes a log unreadable.
+   */
+  function thinkBlock(text: string, entry: AgentEntry, live: boolean): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = live ? 'agent-think agent-think-live' : 'agent-think';
+    const head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'agent-think-head';
+    const lines = text === '' ? 0 : text.split('\n').length;
+    head.textContent = live ? '思考中…' : `${entry.opened ? '▾' : '▸'} 思考 · ${lines} 行`;
+    const bodyEl = document.createElement('p');
+    bodyEl.className = 'agent-think-body';
+    bodyEl.textContent = text;
+    if (!live) {
+      bodyEl.hidden = !entry.opened;
+      head.addEventListener('click', () => {
+        entry.opened = !entry.opened;
+        render();
+      });
+    }
+    wrap.append(head, bodyEl);
+    if (live) liveBody = bodyEl;
+    return wrap;
+  }
+
   const render = (): void => {
     const config = options.config();
     const ready = isConfigured(config);
 
     log.textContent = '';
-    body = null;
+    liveBody = null;
     for (const entry of entries) {
       if (entry.kind === 'user') {
         const line = document.createElement('article');
@@ -244,15 +318,24 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
       }
       const line = document.createElement('article');
       line.className = 'agent-line agent-reply';
-      const text = document.createElement('p');
-      text.className = 'agent-text';
-      text.textContent = entry.text;
-      line.append(text);
-      if (entry.thinking && entry.text === '' && entry.tools.length === 0) {
-        const thinking = document.createElement('p');
-        thinking.className = 'agent-thinking';
-        thinking.textContent = '正在思考…';
-        line.append(thinking);
+      const stream = streamOf(entry);
+      const worked = entry.tools.length > 0;
+      if (entry.live) {
+        line.append(thinkBlock(stream, entry, true));
+      } else if (worked) {
+        // The step touched the board, so its prose was working talk: folded,
+        // whatever it said, because the tool rows underneath now say more.
+        if (stream !== '') line.append(thinkBlock(stream, entry, false));
+      } else {
+        // The step called no tool, so this is the ANSWER. Its reasoning folds
+        // above it and the sentence itself stays where it can be read.
+        if (entry.thought !== '') line.append(thinkBlock(entry.thought, entry, false));
+        if (entry.text !== '') {
+          const text = document.createElement('p');
+          text.className = 'agent-text';
+          text.textContent = entry.text;
+          line.append(text);
+        }
       }
       for (const tool of entry.tools) {
         const row = document.createElement('div');
@@ -261,12 +344,6 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
         line.append(row);
       }
       log.append(line);
-      if (current === entry) body = text;
-    }
-    if (body === null && current !== null && current.text !== '') {
-      // The text arrived before any structure change; make sure it is on screen.
-      const last = log.lastElementChild?.querySelector('.agent-text');
-      if (last instanceof HTMLElement) body = last;
     }
     log.scrollTop = log.scrollHeight;
 
@@ -279,39 +356,63 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
     statusLine.classList.toggle('agent-status-bad', status.startsWith('出错'));
   };
 
-  /** Appends streamed prose without rebuilding the log. */
-  const appendText = (text: string): void => {
+  /**
+   * Extends the step being written, without rebuilding the log.
+   *
+   * The box is re-filled rather than appended to because reasoning and answer are
+   * two fields of one window: whichever arrives second has to appear under the
+   * first, and recomputing a few kilobytes of text is cheaper than tracking which
+   * end of the stream the cursor is on.
+   */
+  const appendStream = (text: string, field: 'thought' | 'text'): void => {
     if (current === null) {
-      current = { kind: 'agent', text: '', tools: [], thinking: false };
+      current = newAgentEntry();
       entries.push(current);
       render();
     }
-    current.text += text;
-    if (body === null) render();
-    else body.append(document.createTextNode(text));
+    current[field] += text;
+    current.live = true;
+    if (liveBody === null) render();
+    else {
+      liveBody.textContent = streamOf(current);
+      liveBody.scrollTop = liveBody.scrollHeight;
+    }
     log.scrollTop = log.scrollHeight;
+  };
+
+  /** Marks the step in flight as finished: its prose folds from here on. */
+  const settle = (): void => {
+    if (current !== null) current.live = false;
   };
 
   // ------------------------------------------------------------------ events --
 
   const handleEvent = (event: AgentEvent): void => {
     if (event.kind === 'step') {
-      current = { kind: 'agent', text: '', tools: [], thinking: true };
+      settle();
+      current = newAgentEntry();
       entries.push(current);
       status = '正在请求模型…';
       render();
       return;
     }
     if (event.kind === 'text') {
-      appendText(event.text);
+      appendStream(event.text, 'text');
+      return;
+    }
+    if (event.kind === 'thinking') {
+      appendStream(event.text, 'thought');
       return;
     }
     if (event.kind === 'tool') {
       if (current === null) {
-        current = { kind: 'agent', text: '', tools: [], thinking: false };
+        current = newAgentEntry();
         entries.push(current);
       }
       if (event.phase === 'start') {
+        // The prose was the run-up to this call, so it folds now and the row
+        // below it takes over as the record of what happened.
+        settle();
         current.tools.push({ name: event.name, state: 'start', ok: true, summary: '' });
         status = `正在执行 ${event.name}…`;
       } else {
@@ -363,6 +464,7 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
         history.push(...result.messages);
         if (result.stopped === 'aborted') status = '已停止';
         else if (result.stopped === 'error') status = '出错，见上面的提示';
+        else if (result.stopped === 'stuck') status = '连着被拒绝了，先停下来了';
         else if (result.stopped === 'capped') status = '达到步数上限，先停下来了';
         else status = '完成';
       })
@@ -372,6 +474,7 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
         status = `出错：${message}`;
       })
       .finally(() => {
+        settle();
         busy = false;
         controller = null;
         current = null;

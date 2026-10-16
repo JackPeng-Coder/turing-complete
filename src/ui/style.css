@@ -1175,7 +1175,38 @@ button { font-family: inherit; }
 }
 .agent-reply { border-left: 2px solid var(--neon-dim); padding-left: 8px; }
 .agent-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.agent-thinking { margin: 2px 0 0; font-size: 11px; color: var(--text-muted); }
+/* THE FOLDABLE BLOCK a step's prose lives in. While the model is writing, only
+   the newest lines are worth watching, so the body is a fixed-height window --
+   six lines -- pinned to its own bottom. When the step is done the block closes
+   to its header, because the reasoning has served its purpose the moment the work
+   it describes is on the board; clicking the header opens it again. */
+.agent-think { margin: 2px 0 4px; padding-left: 8px; border-left: 2px solid var(--hair-lit); }
+.agent-think-head {
+  display: block;
+  width: 100%;
+  padding: 0 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-think-head:hover { color: var(--neon); }
+.agent-think-live .agent-think-head { color: var(--neon); cursor: default; }
+.agent-think-body {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Six lines of 1.5 line-height: the tail of the stream, and nothing older. */
+.agent-think-live .agent-think-body { max-height: 9em; overflow-y: auto; }
+.agent-think-body[hidden] { display: none; }
 .agent-tool { margin-top: 3px; font-size: 11px; color: var(--text-muted); overflow-wrap: anywhere; }
 .agent-tool-start { color: var(--neon); }
 .agent-tool-bad { color: var(--off); }

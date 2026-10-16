@@ -109,28 +109,29 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
     {
       name: 'list_parts',
       description:
-        '列出当前可以放置的元件类型及其全部引脚（id、位宽）。放置前用 pin 的 id 来连线。',
+        '列出当前可以放置的元件类型及其全部引脚（id、位宽）。放置前用 pin 的 id 来连线。注意「关卡输入/关卡输出」也是普通元件：把它们放进电路，电路才和关卡接上。',
       parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
       run: () =>
-        host
-          .parts()
-          .filter((part) => !part.hidden)
-          .map((part) => ({
-            id: part.id,
-            nameZh: part.nameZh,
-            nameEn: part.nameEn,
-            category: part.category,
-            inputs: part.inputs.map((pin) => ({ id: pin.id, width: pin.width })),
-            outputs: part.outputs.map((pin) => ({ id: pin.id, width: pin.width })),
-          })),
+        // THE PALETTE, VERBATIM. Whatever the parts tray offers is what the agent
+        // may place, connectors included -- they are ordinary parts a player drops
+        // like any other, and hiding them from this list is what left a real
+        // session unable to connect its circuit to the level at all.
+        host.parts().map((part) => ({
+          id: part.id,
+          nameZh: part.nameZh,
+          nameEn: part.nameEn,
+          category: part.category,
+          inputs: part.inputs.map((pin) => ({ id: pin.id, width: pin.width })),
+          outputs: part.outputs.map((pin) => ({ id: pin.id, width: pin.width })),
+        })),
     },
     {
       name: 'place_part',
-      description: `在电路板上放一个元件。坐标是世界像素，会被对齐到网格；原点在左上，x 向右、y 向下。元件大约 72×72，引脚在左右两侧，所以两个元件之间水平至少留 96、垂直至少留 96，否则会叠在一起。返回新元件的 id。${BOARD_HELP}`,
+      description: `在电路板上放一个元件。坐标是世界像素，会被对齐到网格；原点在左上，x 向右、y 向下。元件大约 72×72，引脚在左右两侧，所以两个元件之间水平至少留 96、垂直至少留 96，否则会叠在一起。返回新元件的 id（关卡输入/输出会拿到关卡固定的 id，例如 IN_a / OUT，不用管你传的坐标和名字）。${BOARD_HELP}`,
       parameters: {
         type: 'object',
         properties: {
-          defId: TEXT('元件类型 id，例如 nand / not / and / or'),
+          defId: TEXT('元件类型 id，例如 nand / not / and / or / const_on / level_output'),
           x: NUM('元件中心的横坐标（世界像素）'),
           y: NUM('元件中心的纵坐标（世界像素）'),
         },
@@ -142,28 +143,39 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
         const placement = placementOf(host);
         const def = placement.defs.get(defId);
         if (!def) {
-          const known = [...placement.defs.values()]
-            .filter((part) => !part.hidden)
-            .map((part) => part.id)
-            .join('、');
-          throw new ToolError(`没有元件类型「${defId}」。可用的有：${known}`);
-        }
-        if (def.category === 'level') {
+          // A CAP, NOT THE WHOLE CATALOGUE. A wall of fifty ids is expensive to
+          // read, it is the same wall on every retry, and a model that is guessing
+          // names will keep guessing -- what it needs is the pointer to the list
+          // and the count, not the list itself.
+          const known = [...placement.defs.values()].map((part) => part.id);
+          const sample = known.slice(0, 12).join('、');
           throw new ToolError(
-            '关卡的输入/输出连接器由关卡自己摆好，不能手工放置；直接连到已有的 IN_… / OUT 元件上',
+            `没有元件类型「${defId}」。可用的一共 ${known.length} 种，例如 ${sample}。` +
+              `不要再猜名字：先 list_parts 看完整列表和每个元件的引脚`,
           );
         }
-        if (def.hidden) throw new ToolError(`元件类型「${defId}」不对玩家开放`);
         const at = host.snap(numberArg(args, 'x'), numberArg(args, 'y'));
+        // A LEVEL CONNECTOR TAKES THE ID THE LEVEL BINDS BY. `compile` matches a
+        // level's pins to instances called `IN_<pin>` and `OUT`, so a connector
+        // added under a minted id would sit on the board looking right and never
+        // be read -- an unfixable circuit that tests as "2 cases failed" with no
+        // hint why. The host answers with the same `levelIoPlacement` a hand
+        // placement uses, and `null` means "name it yourself".
+        const connector = host.connectorFor(defId);
         // THE ID IS MINTED HERE, not inside `do`: a command has to be repeatable
         // (it runs again on every redo), so everything it does must be decided
         // before it is pushed -- see `app/commands.ts`.
-        const id = nextId('i', placement.graph.instances);
+        const id = connector?.id ?? nextId('i', placement.graph.instances);
+        const width = connector?.width;
         host.apply(
           {
             label: `agent add ${defId}`,
             do: (g) => {
-              addInstance(g, defId, at.x, at.y, id);
+              const inst = addInstance(g, defId, at.x, at.y, id);
+              // The binding is the id AND the width: a level pin is only as wide
+              // as the level declares it, and `compile` refuses a connector whose
+              // width disagrees.
+              if (width !== undefined) inst.params.width = width;
             },
             undo: (g) => {
               removeInstance(g, id);
@@ -556,7 +568,15 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
         const input = host.snapshot().inputs.find((candidate) => candidate.id === pin);
         if (!input) {
           const known = host.snapshot().inputs.map((candidate) => candidate.id).join('、');
-          throw new ToolError(`本关没有输入引脚 ${pin}。有：${known === '' ? '（没有）' : known}`);
+          const outs = host
+            .snapshot()
+            .outputs.map((candidate) => candidate.id)
+            .join('、');
+          throw new ToolError(
+            known === ''
+              ? `本关没有输入引脚（${pin} 不是）。这一关没有输入，需要驱动的是输出：${outs}——把电路接到 level_output 元件上`
+              : `本关没有输入引脚 ${pin}。有：${known}`,
+          );
         }
         const max = input.width >= 31 ? Number.MAX_SAFE_INTEGER : 2 ** input.width - 1;
         if (!Number.isInteger(value) || value < 0 || value > max) {
@@ -635,7 +655,23 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
     pause_circuit: () => '暂停时钟',
     step_clock: () => '走一个时钟边沿',
     reset_circuit: () => '停止并复位',
-    run_tests: (result) => (result as { summary: string }).summary,
+    run_tests: (result) => {
+      const outcome = result as {
+        summary: string;
+        failures: readonly {
+          tick: number;
+          expected: Readonly<Record<string, number>>;
+          actual: Readonly<Record<string, number>>;
+        }[];
+      };
+      const first = outcome.failures[0];
+      if (first === undefined) return outcome.summary;
+      const pins = Object.keys(first.expected).map(
+        (pin) => `${pin} 期望 ${first.expected[pin]}、实际 ${first.actual[pin] ?? '未知'}`,
+      );
+      const rest = outcome.failures.length > 1 ? `，还有 ${outcome.failures.length - 1} 个用例不符` : '';
+      return `第 ${first.tick} 拍 ${pins.join('，')}${rest}`;
+    },
     export_circuit: (result) => `导出电路（${(result as { text: string }).text.length} 个字符）`,
     import_circuit: (result) => {
       const imported = result as { parts: number; wires: number };

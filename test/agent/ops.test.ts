@@ -39,11 +39,28 @@ describe('placing a part', () => {
     expect(fixture.graph.instances).toEqual([]);
   });
 
-  it('refuses level plumbing, which the level places itself', async () => {
+  it('places a level connector under the id the level binds by', async () => {
+    // A REAL LEVEL MATCHES ITS PINS BY INSTANCE NAME. A connector dropped as `i1`
+    // would sit on the board looking right and never be read -- a circuit that
+    // tests as "failed" with no hint why. This is the bug a real session hit.
     const fixture = makeTestHost();
-    const { ok, body } = await call(fixture, 'place_part', { defId: 'level_in', x: 0, y: 0 });
-    expect(ok).toBe(false);
-    expect(body.error).toContain('关卡');
+    const { ok, body } = await call(fixture, 'place_part', { defId: 'level_in', x: 40, y: 40 });
+    expect(ok).toBe(true);
+    expect(body.result.id).toBe('IN_a');
+    expect(fixture.graph.instances[0]).toMatchObject({ id: 'IN_a', def: 'level_in' });
+    // The width travels with the id: the level declares it, not the caller.
+    expect(fixture.graph.instances[0]!.params.width).toBe(1);
+    fixture.host.undo();
+    expect(fixture.graph.instances).toEqual([]);
+  });
+
+  it('names an ordinary part itself, and a spare connector too', async () => {
+    const fixture = makeTestHost();
+    const first = await call(fixture, 'place_part', { defId: 'level_in', x: 0, y: 0 });
+    expect(first.body.result.id).toBe('IN_a');
+    // Every pin of the level is placed now, so the next one is an ordinary part.
+    const spare = await call(fixture, 'place_part', { defId: 'level_in', x: 160, y: 0 });
+    expect(spare.body.result.id).toBe('i1');
   });
 
   it('mints a fresh id after an undo, rather than reusing a live one', async () => {
@@ -199,7 +216,45 @@ describe('the clock and the test run', () => {
     fixture.testResult = { ran: true, passed: false, summary: '第 3 个用例不符' };
     const { ok, body } = await call(fixture, 'run_tests', {});
     expect(ok).toBe(true);
-    expect(body.result).toEqual({ ran: true, passed: false, summary: '第 3 个用例不符' });
+    expect(body.result).toEqual({
+      ran: true,
+      passed: false,
+      summary: '第 3 个用例不符',
+      failures: [],
+    });
+  });
+
+  it('hands back WHICH case failed and by how much, which is the whole feedback loop', async () => {
+    const fixture = makeTestHost();
+    fixture.testResult = {
+      ran: true,
+      passed: false,
+      summary: '未通过：2 个用例不符',
+      failures: [
+        {
+          inputs: {},
+          expected: { out: 1 },
+          actual: { out: 0 },
+          tick: 2,
+        },
+        {
+          inputs: {},
+          expected: { out: 1 },
+          actual: { out: 0 },
+          tick: 3,
+        },
+      ],
+    };
+    const { ok, body } = await call(fixture, 'run_tests', {});
+    expect(ok).toBe(true);
+    expect(body.result.failures[0]).toMatchObject({ tick: 2, expected: { out: 1 }, actual: { out: 0 } });
+    // ...and the player's line says the same thing in one sentence.
+    const raw = await runTool(
+      toolOf(fixture, 'run_tests'),
+      '{}',
+      { signal: SIGNAL },
+    );
+    expect(raw.note).toBe('第 2 拍 out 期望 1、实际 0，还有 1 个用例不符');
   });
 });
 
@@ -231,7 +286,14 @@ describe('reading the board', () => {
     expect(board.body.result.parts[0]).toMatchObject({ id: 'i1', def: 'nand', nameZh: '与非门' });
 
     const parts = await call(fixture, 'list_parts', {});
-    expect(parts.body.result.map((part: { id: string }) => part.id)).toEqual(['nand', 'not']);
+    // THE WHOLE PALETTE, connectors included: whatever the parts tray offers is
+    // what the agent may place, and the level's own connectors are ordinary parts
+    // a player drops like any other.
+    expect(parts.body.result.map((part: { id: string }) => part.id)).toEqual([
+      'nand',
+      'not',
+      'level_in',
+    ]);
     expect(parts.body.result[0].inputs).toEqual([
       { id: 'a', width: 1 },
       { id: 'b', width: 1 },
@@ -338,6 +400,9 @@ describe('driving the level and the editor', () => {
       { id: 'a', width: 1, value: 1 },
       { id: 'b', width: 4, value: 0 },
     ]);
+    // What the circuit has to DRIVE: a session that could only see its inputs
+    // went looking for the level's output in the wrong place.
+    expect(board.body.result.outputs).toEqual([{ id: 'out', width: 1, value: null }]);
     expect(board.body.result.program).toBe('NOP');
     expect(board.body.result.expectsProgram).toBe(true);
   });

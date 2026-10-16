@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { AgentError, streamChat, type ChatResult } from '../../src/agent/client';
 import type { AgentConfig } from '../../src/agent/config';
-import { MAX_STEPS, runAgent, type AgentEvent } from '../../src/agent/loop';
-import type { ToolSpec } from '../../src/agent/tools';
+import { MAX_REFUSALS, MAX_STEPS, runAgent, type AgentEvent } from '../../src/agent/loop';
+import { ToolError, type ToolSpec } from '../../src/agent/tools';
 import type { WireMessage } from '../../src/agent/wire';
 import { makeTestHost } from './host-fixture';
 
@@ -268,6 +268,69 @@ describe('failing', () => {
       message: 'API key 被拒绝（HTTP 401）',
       detail: 'Authentication Fails',
     });
+  });
+
+  it('stops after three refusals in a row, instead of watching the same wall ten more times', async () => {
+    const host = makeTestHost();
+    const refusing: ToolSpec = {
+      name: 'poke',
+      description: 'always refuses',
+      parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+      run: () => {
+        throw new ToolError('没有元件类型「lv_in」');
+      },
+    };
+    const { chat } = scripted([
+      { content: '', toolCalls: [callOf('poke')], finishReason: 'tool_calls' },
+    ]);
+    const { signal } = context();
+    const events: AgentEvent[] = [];
+    const result = await runAgent({
+      config: CONFIG,
+      host: host.host,
+      messages: [],
+      signal,
+      chat,
+      tools: [refusing],
+      onEvent: (event) => events.push(event),
+    });
+    expect(result.stopped).toBe('stuck');
+    expect(result.steps).toBe(MAX_REFUSALS);
+    expect(events.some((event) => event.kind === 'error' && event.message.includes('连续 3 次'))).toBe(
+      true,
+    );
+  });
+
+  it('does not count a refusal that a later success clears', async () => {
+    const host = makeTestHost();
+    const tool = recorder();
+    let n = 0;
+    const flaky: ToolSpec = {
+      ...tool.spec,
+      run: (args, ctx) => {
+        n += 1;
+        if (n === 1) throw new ToolError('第一次不行');
+        return tool.spec.run(args, ctx);
+      },
+    };
+    const { chat } = scripted([
+      {
+        content: '',
+        toolCalls: [callOf('poke', '{"at":1}'), callOf('poke', '{"at":2}'), callOf('poke', '{"at":3}')],
+        finishReason: 'tool_calls',
+      },
+      { content: '好了', toolCalls: [], finishReason: 'stop' },
+    ]);
+    const { signal } = context();
+    const result = await runAgent({
+      config: CONFIG,
+      host: host.host,
+      messages: [],
+      signal,
+      chat,
+      tools: [flaky],
+    });
+    expect(result.stopped).toBe('done');
   });
 
   it('caps a run that never stops asking for tools', async () => {

@@ -3,6 +3,7 @@ import type { GradeResult, Metrics } from '../levels/grader';
 import type { Registry } from '../core/registry';
 import type { LevelSpec } from '../levels/spec';
 import type { BlueprintLibrary } from '../levels/blueprints';
+import { isSandbox } from '../levels/sandbox';
 
 export interface LevelRecord {
   readonly passed: boolean;
@@ -221,6 +222,48 @@ export function sandboxPaletteDefs(
     if (seen.has(id)) continue;
     seen.add(id);
     offered.push(id);
+  }
+  return offered;
+}
+
+/**
+ * The parts a board offers, whichever board it is.
+ *
+ * ONE RULE, TWO CALLERS. The parts tray draws this list and the agent places from
+ * it, and two copies of "what is on offer" is exactly how the tray and the
+ * assistant drift apart -- so both call this, and a change here is a change
+ * everywhere.
+ *
+ * `dev` reaches for the sandbox's complete set on ANY board: that is what the flag
+ * promises, and `?dev=1` on level 1 really does hand you an 8-bit adder.
+ *
+ * AND THE LEVEL'S OWN CONNECTORS COME WITH IT. The sandbox set has no plumbing in
+ * it -- `sandboxPaletteDefs` drops `category: 'level'` -- which is right for a
+ * sandbox and wrong for a level, because a level binds its circuit to its pins
+ * through those two parts. Without this clause `?dev=1` on a four-bit level is a
+ * board whose inputs cannot be placed by anyone, hand or assistant: a real
+ * session spent its whole step budget asking for `level_input` under a dozen
+ * guessed names, and got "no such part" a dozen times.
+ */
+export function offeredDefsFor(
+  progress: Progress,
+  levels: readonly LevelSpec[],
+  level: LevelSpec,
+  dev: boolean,
+  registry: Registry,
+  extra: readonly string[] = [],
+): string[] {
+  if (!dev && !isSandbox(level)) return paletteDefsFor(progress, levels, level, false);
+  const offered = sandboxPaletteDefs(registry, extra);
+  if (isSandbox(level)) return offered;
+  const seen = new Set(offered);
+  const connectors = [
+    { id: 'level_input', wanted: level.io.inputs.length > 0 },
+    { id: 'level_output', wanted: level.io.outputs.length > 0 },
+  ];
+  for (const connector of connectors) {
+    if (!connector.wanted || seen.has(connector.id) || !registry.has(connector.id)) continue;
+    offered.push(connector.id);
   }
   return offered;
 }

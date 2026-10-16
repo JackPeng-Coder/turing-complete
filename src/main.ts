@@ -8,7 +8,7 @@ import { createStore, type AppState, type Store } from './app/store';
 import { CommandStack } from './app/commands';
 import { grade } from './levels/grader';
 import { loadProgress, saveProgress } from './persist/storage';
-import { applyGrade, paletteDefsFor, resumePointOf, sandboxPaletteDefs, type Progress } from './app/progress';
+import { applyGrade, offeredDefsFor, resumePointOf, type Progress } from './app/progress';
 import { composeRegistry, libraryClosure, libraryIds, referencedComponents } from './levels/blueprints';
 import { mountBlueprintPanel } from './ui/blueprint';
 import { applyWrap, planWrap, type WrapPlan } from './levels/wrap';
@@ -29,7 +29,7 @@ import { GRID } from './ui/theme';
 import { mountMap } from './ui/map';
 import { narrativeFor } from './ui/narrative';
 import { renderBoard, type BoardView } from './ui/board/render';
-import { attachBoardInput, deleteSelection } from './ui/board/interact';
+import { attachBoardInput, deleteSelection, levelIoPlacement } from './ui/board/interact';
 import { createDisplay, type DisplaySimulation, type SignalSnapshot } from './ui/board/signals';
 import { instanceRect, screenToWorld, type Point } from './ui/board/view';
 import { levelExpectsProgram, playerProgramFormat, testCases, type TestPlan } from './levels/checks';
@@ -1369,11 +1369,11 @@ if (app) {
 
   const offeredDefIds = (): string[] => {
     const { level: current, progress: prog, registry: reg, dev: devOn, blueprints } = store.get();
-    const offered =
-      devOn || isSandbox(current)
-        ? sandboxPaletteDefs(reg, libraryIds(blueprints))
-        : paletteDefsFor(prog, LEVELS, current, devOn);
-    return offered.filter((defId) => reg.has(defId));
+    // The same function the parts tray calls, so "what the agent may place" is
+    // "what the player is being offered" by construction rather than by intent.
+    return offeredDefsFor(prog, LEVELS, current, devOn, reg, libraryIds(blueprints)).filter((defId) =>
+      reg.has(defId),
+    );
   };
 
   /**
@@ -1394,6 +1394,7 @@ if (app) {
         ran: false,
         passed: null,
         summary: NO_CASES_NOTE.sandbox.zh,
+        failures: [],
       });
     }
     return new Promise<TestOutcome>((resolve) => {
@@ -1410,7 +1411,18 @@ if (app) {
             : grade.passed
               ? `通过：门数 ${grade.metrics.gate}，延迟 ${grade.metrics.delay}，${grade.stars} 星`
               : `未通过：${grade.failures.length} 个用例不符`;
-        resolve({ ran: true, passed: grade?.passed ?? null, summary });
+        // WHICH CASES, AND BY HOW MUCH. The count alone is a verdict with no
+        // information in it: expected-versus-actual is what turns "wrong" into an
+        // edit. Capped, because a fuzz level can fail hundreds of cases and the
+        // first few carry the pattern.
+        const failures = (grade?.failures ?? []).slice(0, 8).map((failure) => ({
+          inputs: failure.inputs,
+          expected: failure.expected,
+          actual: failure.actual,
+          tick: failure.tick,
+          ...(failure.detail === undefined ? {} : { detail: failure.detail }),
+        }));
+        resolve({ ran: true, passed: grade?.passed ?? null, summary, failures });
       };
       unsubscribe = store.subscribe(() => {
         if (!testing) finish();
@@ -1494,6 +1506,15 @@ if (app) {
           width: pin.width,
           value: vector[pin.id] ?? 0,
         })),
+        // What the circuit is supposed to DRIVE, with whatever the last settle
+        // read there -- the other half of "what does this level want", and the
+        // half a session that could only see its inputs went looking for in the
+        // wrong place.
+        outputs: open.io.outputs.map((pin) => {
+          const live = levelOutputs();
+          const value = live === null ? undefined : live[pin.id];
+          return { id: pin.id, width: pin.width, value: value === undefined ? null : value };
+        }),
         program: state.programs[open.id] ?? '',
         expectsProgram: levelExpectsProgram(open),
       };
@@ -1501,6 +1522,11 @@ if (app) {
     // The grid is the theme's, not this module's: the agent layer may not import
     // `ui/`, so the one number it needs is handed to it here.
     snap: (x, y) => ({ x: Math.round(x / GRID) * GRID, y: Math.round(y / GRID) * GRID }),
+    // A level binds its pins to instances named `IN_<pin>` / `OUT`, and the rule
+    // that hands those names out lives in `ui/board/interact.ts` -- the agent gets
+    // the same answer a hand gets, or `null`.
+    connectorFor: (defId) =>
+      levelIoPlacement(store.get().level, store.get().graph, defId) ?? null,
     apply: (command, focus) => {
       stack.push(command, store.get().graph);
       // Selecting what just changed is what makes a step WATCHABLE: the magenta

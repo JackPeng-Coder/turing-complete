@@ -3,11 +3,15 @@ import {
   applyGrade,
   emptyProgress,
   isUnlocked,
+  offeredDefsFor,
   paletteDefsFor,
   resumePointOf,
   unlockedComponents,
 } from '../../src/app/progress';
 import type { Progress } from '../../src/app/progress';
+import { createRegistry } from '../../src/core/registry';
+import { BASE_DEFS } from '../../src/core/defs/index';
+import { SANDBOX_LEVEL } from '../../src/levels/sandbox';
 import type { GradeResult } from '../../src/levels/grader';
 import type { LevelSpec } from '../../src/levels/spec';
 
@@ -224,6 +228,51 @@ describe('paletteDefsFor', () => {
   it('adds a passed level rewards to the next level palette', () => {
     const p = applyGrade(emptyProgress(), level, pass);
     expect(paletteDefsFor(p, levels, other)).toEqual(['nand', 'not', 'level_input', 'level_output']);
+  });
+});
+
+describe('offeredDefsFor', () => {
+  const registry = createRegistry(BASE_DEFS);
+  const sandbox = SANDBOX_LEVEL;
+
+  it('is the level’s own list on an ordinary level', () => {
+    const offered = offeredDefsFor(emptyProgress(), levels, other, false, registry);
+    expect(offered).toContain('nand');
+    expect(offered).not.toContain('add8');
+  });
+
+  it('reaches for the complete set under ?dev=1, on any board', () => {
+    const offered = offeredDefsFor(emptyProgress(), levels, other, true, registry);
+    expect(offered).toContain('add8');
+    expect(offered).toContain('ram8');
+  });
+
+  it('brings the level’s own connectors with it, which the sandbox set has no room for', () => {
+    // WITHOUT THIS CLAUSE `?dev=1` ON A LEVEL IS A BOARD NOBODY CAN WIRE UP: the
+    // sandbox set drops `category: 'level'`, and a level binds its circuit to its
+    // pins through exactly those two parts. A real session asked for `level_input`
+    // under twenty guessed names and was refused twenty times.
+    const wired: LevelSpec = {
+      ...other,
+      io: { inputs: [{ id: 'a', width: 1 }], outputs: [{ id: 'out', width: 1 }] },
+    };
+    const offered = offeredDefsFor(emptyProgress(), levels, wired, true, registry);
+    expect(offered).toContain('level_input');
+    expect(offered).toContain('level_output');
+  });
+
+  it('adds only the connectors the level actually declares', () => {
+    const noInputs: LevelSpec = { ...other, io: { inputs: [], outputs: [{ id: 'out', width: 1 }] } };
+    const offered = offeredDefsFor(emptyProgress(), levels, noInputs, true, registry);
+    expect(offered).toContain('level_output');
+    expect(offered).not.toContain('level_input');
+  });
+
+  it('leaves the sandbox palette alone: a sandbox has no pins to connect to', () => {
+    const offered = offeredDefsFor(emptyProgress(), levels, sandbox, true, registry);
+    expect(offered).toContain('add8');
+    expect(offered).not.toContain('level_input');
+    expect(offered).not.toContain('level_output');
   });
 });
 

@@ -86,6 +86,12 @@ export interface BoardSnapshot {
   }[];
   /** The level's input pins and the value each is currently driven with. */
   readonly inputs: readonly { readonly id: string; readonly width: number; readonly value: number }[];
+  /** The level's output pins: what the circuit has to drive, and what it reads. */
+  readonly outputs: readonly {
+    readonly id: string;
+    readonly width: number;
+    readonly value: number | null;
+  }[];
   /** The player's program text for this level; `''` when there is none. */
   readonly program: string;
   /** Whether the level grades a program at all, so the agent knows to write one. */
@@ -96,7 +102,24 @@ export interface BoardSnapshot {
 export interface TestOutcome {
   readonly ran: boolean;
   readonly passed: boolean | null;
+  /** One line for the player: "未通过：第 2 拍期望 out=1…". */
   readonly summary: string;
+  /**
+   * WHICH CASES FAILED, and what they expected against what they read.
+   *
+   * This is the whole feedback loop. "未通过：2 个用例不符" tells a model that it
+   * is wrong and nothing else, so its only move is to guess again -- which is
+   * exactly what a real session did for sixteen steps: place a part, test, read
+   * "2 failed", place another part. Expected-versus-actual turns that into an
+   * edit: the answer is the difference between two numbers it can see.
+   */
+  readonly failures: readonly {
+    readonly inputs: Readonly<Record<string, number>>;
+    readonly expected: Readonly<Record<string, number>>;
+    readonly actual: Readonly<Record<string, number>>;
+    readonly tick: number;
+    readonly detail?: string;
+  }[];
 }
 
 export interface ImportOutcome {
@@ -124,6 +147,19 @@ export interface AgentHost {
   snapshot(): BoardSnapshot;
   /** Rounds a coordinate to the board's grid; the theme owns the grid size. */
   snap(x: number, y: number): { x: number; y: number };
+  /**
+   * The id and width a LEVEL CONNECTOR must be placed with, or `null`.
+   *
+   * A level binds its circuit by instance id -- `IN_a`, `OUT` -- so a connector
+   * dropped under a name the graph's own allocator chose (`i7`) never binds and
+   * makes the level unpassable. `ui/board/interact.ts` is where that rule lives,
+   * and this is the same function: the agent places a connector exactly as a hand
+   * does, id and width together, or not at all.
+   *
+   * `null` means "an ordinary part, name it yourself" AND "every pin of this
+   * level is already placed", which is the same answer the hand gets.
+   */
+  connectorFor(defId: string): { id: string; width: number } | null;
   /**
    * Applies one command as ONE VISIBLE STEP.
    *

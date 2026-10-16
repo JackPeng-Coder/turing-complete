@@ -182,8 +182,11 @@ describe('a conversation', () => {
         name: 'place_part',
         ok: true,
         text: JSON.stringify({ ok: true, result: { id: 'i1' } }),
+        note: '在 (16, 32) 放了 与非门（i1）',
       });
       options.onEvent?.({ kind: 'text', text: '与非门。' });
+      options.onEvent?.({ kind: 'step', index: 1 });
+      options.onEvent?.({ kind: 'text', text: '搭好了。' });
       return Promise.resolve(DONE([...options.messages]));
     };
     const { stage } = mount(CONFIG, scripted);
@@ -191,10 +194,72 @@ describe('a conversation', () => {
     stage.querySelector<HTMLTextAreaElement>('.agent-input')!.value = '搭一个与非门';
     clickButton(stage, '发送');
     await tick();
-    expect(stage.querySelector('.agent-text')!.textContent).toBe('先放一个与非门。');
+    // The step that called a tool is folded; the step that answered is not.
+    const folded = stage.querySelector('.agent-think:not(.agent-think-live)')!;
+    expect(folded.querySelector('.agent-think-head')!.textContent).toBe('▸ 思考 · 1 行');
+    expect(folded.querySelector<HTMLElement>('.agent-think-body')!.hidden).toBe(true);
+    expect(folded.querySelector('.agent-think-body')!.textContent).toBe('先放一个与非门。');
+    expect(stage.querySelector('.agent-text')!.textContent).toBe('搭好了。');
     const tool = stage.querySelector('.agent-tool')!;
-    expect(tool.textContent).toBe('place_part · {"id":"i1"}');
+    expect(tool.textContent).toBe('place_part · 在 (16, 32) 放了 与非门（i1）');
     expect(tool.className).toContain('agent-tool-end');
+  });
+
+  it('shows the tail while it is writing, and folds the block when the step ends', async () => {
+    let finish: () => void = () => {};
+    const scripted = (options: RunOptions): Promise<RunResult> =>
+      new Promise<RunResult>((resolve) => {
+        finish = () => resolve(DONE([...options.messages]));
+        options.onEvent?.({ kind: 'step', index: 0 });
+        options.onEvent?.({ kind: 'thinking', text: '先看看板子上有什么。' });
+        options.onEvent?.({ kind: 'text', text: '再决定放什么。' });
+      });
+    const { stage } = mount(CONFIG, scripted);
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
+    stage.querySelector<HTMLTextAreaElement>('.agent-input')!.value = '想想';
+    clickButton(stage, '发送');
+    await tick();
+
+    // MID-STREAM: one open window holding the reasoning and the narration, with
+    // a header that says it is still being written.
+    const live = stage.querySelector<HTMLElement>('.agent-think-live')!;
+    expect(live).not.toBeNull();
+    expect(live.querySelector('.agent-think-head')!.textContent).toBe('思考中…');
+    const liveBody = live.querySelector<HTMLElement>('.agent-think-body')!;
+    expect(liveBody.hidden).toBe(false);
+    expect(liveBody.textContent).toBe('先看看板子上有什么。\n再决定放什么。');
+
+    // WHEN THE STEP ENDS it calls no tool, so this is the ANSWER: the reasoning
+    // folds above it and the sentence stays readable.
+    finish();
+    await tick();
+    expect(stage.querySelector('.agent-think-live')).toBeNull();
+    const body = stage.querySelector<HTMLElement>('.agent-think-body')!;
+    expect(body.hidden).toBe(true);
+    expect(body.textContent).toBe('先看看板子上有什么。');
+    expect(stage.querySelector('.agent-think-head')!.textContent).toBe('▸ 思考 · 1 行');
+    expect(stage.querySelector('.agent-text')!.textContent).toBe('再决定放什么。');
+  });
+
+  it('opens a folded block when its header is clicked', async () => {
+    const scripted = (options: RunOptions): Promise<RunResult> => {
+      options.onEvent?.({ kind: 'step', index: 0 });
+      options.onEvent?.({ kind: 'text', text: '看一看。' });
+      options.onEvent?.({ kind: 'tool', phase: 'start', callId: 'c1', name: 'read_board' });
+      return Promise.resolve(DONE([...options.messages]));
+    };
+    const { stage } = mount(CONFIG, scripted);
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
+    stage.querySelector<HTMLTextAreaElement>('.agent-input')!.value = '看看';
+    clickButton(stage, '发送');
+    await tick();
+    const head = stage.querySelector<HTMLButtonElement>('.agent-think-head')!;
+    expect(head.textContent).toBe('▸ 思考 · 1 行');
+    head.click();
+    await tick();
+    const opened = stage.querySelector<HTMLButtonElement>('.agent-think-head')!;
+    expect(opened.textContent).toBe('▾ 思考 · 1 行');
+    expect(stage.querySelector<HTMLElement>('.agent-think-body')!.hidden).toBe(false);
   });
 
   it('shows the tool’s own sentence when it has one', async () => {

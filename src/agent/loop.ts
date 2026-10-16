@@ -39,9 +39,24 @@ import type { WireMessage } from './wire';
  */
 export const MAX_STEPS = 16;
 
+/**
+ * Refused tool calls in a row before the run gives up.
+ *
+ * THE FAILURE THIS PREVENTS IS EXPENSIVE AND PREDICTABLE. A real session spent
+ * its entire budget asking for a part under twenty different guessed names --
+ * `level_input`, `input`, `in`, `lv_in`, `level_io_in`… -- each answered by a
+ * correct refusal, none of them read. Three is where "wrong" stops looking like a
+ * mistake and starts looking like a misunderstanding, and the player is better
+ * served by being told than by watching the same wall of text go by ten more
+ * times.
+ */
+export const MAX_REFUSALS = 3;
+
 /** What the panel draws while a run is in flight. */
 export type AgentEvent =
   | { readonly kind: 'text'; readonly text: string }
+  /** The model's reasoning, on the models that stream it -- folded away when done. */
+  | { readonly kind: 'thinking'; readonly text: string }
   | { readonly kind: 'step'; readonly index: number }
   | {
       readonly kind: 'tool';
@@ -55,7 +70,7 @@ export type AgentEvent =
     }
   | { readonly kind: 'error'; readonly message: string; readonly detail: string };
 
-export type StopReason = 'done' | 'aborted' | 'error' | 'capped';
+export type StopReason = 'done' | 'aborted' | 'error' | 'capped' | 'stuck';
 
 export interface RunOptions {
   readonly config: AgentConfig;
@@ -127,6 +142,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   const pause = options.sleep ?? sleep;
   const history: WireMessage[] = [...options.messages];
   let steps = 0;
+  let refusals = 0;
 
   const stop = (stopped: StopReason, error: AgentError | null = null): RunResult => ({
     messages: history,
@@ -153,6 +169,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
         ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
         onDelta: (delta: ChatDelta) => {
           if (delta.kind === 'text') onEvent?.({ kind: 'text', text: delta.text });
+          else if (delta.kind === 'reasoning') onEvent?.({ kind: 'thinking', text: delta.text });
         },
       });
     } catch (cause) {
@@ -208,6 +225,15 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
         text: outcome.text,
         note: outcome.note,
       });
+      refusals = outcome.ok ? 0 : refusals + 1;
+      if (refusals >= MAX_REFUSALS) {
+        onEvent?.({
+          kind: 'error',
+          message: `连续 ${MAX_REFUSALS} 次操作被拒绝，先停下来。最后一次说的是：${outcome.note}。可以把要求说得更具体一点，或者先让我看清现状`,
+          detail: '',
+        });
+        return stop('stuck');
+      }
       // THE VISIBLE STEP. The command has already been applied and painted by the
       // host; this is what holds the frame long enough for a person to see which
       // part appeared (requirement A5). The pace is the player's setting, and
