@@ -1093,6 +1093,149 @@ button { font-family: inherit; }
 }
 .briefing button:hover { background: var(--hot); color: var(--void); }
 
+/* ----------------------------------------------------------------- the agent --
+   The conversation lives in the gap between the tool column (which ends at 326px)
+   and the middle of the board, and it is a floating card like every other panel:
+   closed, the board keeps its width; open, it is on top of it. The column is a
+   flex box down to the test panel so the log scrolls while the composer stays put. */
+.overlay-agent {
+  top: 12px;
+  left: 336px;
+  bottom: calc(var(--test-h) + 12px);
+  width: min(400px, 40vw);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.agent-toggle {
+  border: 1px solid var(--hot);
+  background: var(--slab);
+  color: var(--hot);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.agent-toggle:hover { background: var(--slab-lit); }
+/* Not set up is a warning, not an error: the game is fully playable without it. */
+.agent-toggle-warn { border-color: var(--amber); color: var(--amber); }
+.agent-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px;
+  border: 1px solid var(--hair);
+  background: var(--slab);
+}
+.agent-card[hidden] { display: none; }
+.agent-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--hair);
+}
+.agent-title { flex: 1 1 auto; font-size: 11px; letter-spacing: 0.2em; color: var(--neon); }
+.agent-btn {
+  border: 1px solid var(--hair);
+  background: var(--slab-lit);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.agent-btn:hover { border-color: var(--hot); color: var(--hot); }
+.agent-btn:disabled { color: #3b4d5e; border-color: var(--hair); cursor: not-allowed; }
+.agent-btn-go { border-color: var(--hot); color: var(--hot); }
+.agent-btn-quiet { border-color: transparent; color: var(--text-muted); }
+.agent-log {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px;
+}
+.agent-line { margin: 0; font-size: 12px; line-height: 1.5; }
+/* The player's own words wear the operator's colour and the agent's the
+   instrument's, exactly as the rest of the chrome does. */
+.agent-user {
+  border-left: 2px solid var(--hot);
+  padding-left: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-reply { border-left: 2px solid var(--neon-dim); padding-left: 8px; }
+.agent-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-thinking { margin: 2px 0 0; font-size: 11px; color: var(--text-muted); }
+.agent-tool { margin-top: 3px; font-size: 11px; color: var(--text-muted); overflow-wrap: anywhere; }
+.agent-tool-start { color: var(--neon); }
+.agent-tool-bad { color: var(--off); }
+.agent-notice { font-size: 11px; padding-left: 8px; }
+.agent-info { color: var(--text-muted); }
+.agent-error { color: var(--off); }
+.agent-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--hair);
+}
+.agent-input {
+  width: 100%;
+  resize: vertical;
+  padding: 6px;
+  border: 1px solid var(--hair);
+  background: var(--slab-lit);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.agent-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.agent-status { flex: 1 1 auto; font-size: 10px; color: var(--text-muted); }
+.agent-status-bad { color: var(--off); }
+/* The first-run card is a modal: it dims the bench and takes the pointer, because
+   the one thing it asks for cannot be answered anywhere else on the screen.
+   IT SITS ABOVE THE BRIEFING (`z-index: 10`) rather than under it. A first launch
+   raises the level's briefing at the same moment, and a setup card underneath it
+   would be a card nobody can answer: the question has to be the topmost thing on
+   screen, and the briefing is still there to read once it is answered. */
+.overlay-agent-setup {
+  inset: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  background: rgba(4, 7, 13, 0.72);
+}
+.overlay-agent-setup[hidden] { display: none; }
+.agent-setup { width: min(430px, 92vw); flex: 0 0 auto; }
+.agent-setup[hidden] { display: none; }
+.agent-setup .agent-head { border-bottom: 1px solid var(--hair); }
+.agent-field { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text-muted); }
+.agent-field input,
+.agent-field select {
+  padding: 5px 6px;
+  border: 1px solid var(--hair);
+  background: var(--slab-lit);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+.agent-field small { font-size: 10px; line-height: 1.4; color: var(--text-muted); }
+.agent-note { margin: 0; font-size: 10px; line-height: 1.5; color: var(--text-muted); }
+.agent-setup .agent-actions { padding-top: 2px; }
+
 /* Accessibility floor: nothing moves that does not have to. */
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

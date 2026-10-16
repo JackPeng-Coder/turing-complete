@@ -1,15 +1,15 @@
 import './ui/style.css';
 import { createRegistry } from './core/registry';
 import { BASE_DEFS } from './core/defs/index';
-import { emptyGraph, cloneGraph, type Graph } from './core/graph';
-import { getLevel, LEVEL_ORDER } from './levels/index';
+import { emptyGraph, cloneGraph, validateGraph, type Graph } from './core/graph';
+import { getLevel, LEVELS, LEVEL_ORDER } from './levels/index';
 import { graphFromBoard } from './levels/board';
 import { createStore, type AppState, type Store } from './app/store';
 import { CommandStack } from './app/commands';
 import { grade } from './levels/grader';
 import { loadProgress, saveProgress } from './persist/storage';
-import { applyGrade, resumePointOf, type Progress } from './app/progress';
-import { composeRegistry, libraryClosure, referencedComponents } from './levels/blueprints';
+import { applyGrade, paletteDefsFor, resumePointOf, sandboxPaletteDefs, type Progress } from './app/progress';
+import { composeRegistry, libraryClosure, libraryIds, referencedComponents } from './levels/blueprints';
 import { mountBlueprintPanel } from './ui/blueprint';
 import { applyWrap, planWrap, type WrapPlan } from './levels/wrap';
 import { SANDBOX_ID, SANDBOX_LEVEL, isSandbox } from './levels/sandbox';
@@ -22,6 +22,10 @@ import { mountTruthTable, TEST_DEMO_LIMIT } from './ui/truthTable';
 import { mountIoPanel } from './ui/ioPanel';
 import { showResult } from './ui/result';
 import { mountToolbar } from './ui/toolbar';
+import { mountAgentPanel, type AgentPanel } from './ui/agent';
+import { loadAgentConfig, type AgentConfig } from './agent/config';
+import type { AgentHost, BoardSnapshot, TestOutcome } from './agent/host';
+import { GRID } from './ui/theme';
 import { mountMap } from './ui/map';
 import { narrativeFor } from './ui/narrative';
 import { renderBoard, type BoardView } from './ui/board/render';
@@ -1339,6 +1343,216 @@ if (app) {
     onWrapSelection: startWrap,
     onExportCircuit: exportCircuit,
     onImportCircuit: importCircuit,
+  });
+
+  // ---------------------------------------------------------------------------
+  // the agent
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The natural-language assistant, wired to the application it operates.
+   *
+   * EVERYTHING HERE IS A HAND'S ROUTE. `apply` pushes onto the player's own undo
+   * stack and then calls `onChange`, which is exactly what a mouse edit does --
+   * so an agent edit is measured, repainted, undoable and saved by the same code
+   * as a hand edit, and there is no second way to change a circuit that could
+   * drift from the first. `run`/`pause`/`stepOnce`/`reset` are the toolbar's
+   * buttons; `test` is 测试; `circuitText` and `loadCircuit` are 导出/导入.
+   *
+   * The palette it may place is the palette the PLAYER has: `offeredDefIds` calls
+   * the same two functions the parts tray does, so `?dev=1` and the sandbox open
+   * everything up and an ordinary level still hands the agent only the parts that
+   * level allows. That is what keeps "the agent can do what a person can do" from
+   * quietly becoming "the agent can do more".
+   */
+  let agentConfig: AgentConfig | null = loadAgentConfig();
+
+  const offeredDefIds = (): string[] => {
+    const { level: current, progress: prog, registry: reg, dev: devOn, blueprints } = store.get();
+    const offered =
+      devOn || isSandbox(current)
+        ? sandboxPaletteDefs(reg, libraryIds(blueprints))
+        : paletteDefsFor(prog, LEVELS, current, devOn);
+    return offered.filter((defId) => reg.has(defId));
+  };
+
+  /**
+   * Plays the level's cases and resolves with the verdict.
+   *
+   * The run is a demonstration with timers, so this waits for it instead of
+   * returning "started": an agent told only that a run began would go on to
+   * "fix" a circuit it has no verdict about. The subscription is set up BEFORE
+   * `startTest`, because a level whose cases cannot be played finishes inside
+   * that call -- after it, there would be no notification left to wait for.
+   */
+  const agentTest = (): Promise<TestOutcome> => {
+    const current = store.get().level;
+    if (isSandbox(current)) {
+      store.set({ status: NO_CASES_NOTE.sandbox });
+      paintTools();
+      return Promise.resolve({
+        ran: false,
+        passed: null,
+        summary: NO_CASES_NOTE.sandbox.zh,
+      });
+    }
+    return new Promise<TestOutcome>((resolve) => {
+      let done = false;
+      let unsubscribe: () => void = () => {};
+      const finish = (): void => {
+        if (done) return;
+        done = true;
+        unsubscribe();
+        const grade = store.get().lastGrade;
+        const summary =
+          grade === null
+            ? '没有拿到判定'
+            : grade.passed
+              ? `通过：门数 ${grade.metrics.gate}，延迟 ${grade.metrics.delay}，${grade.stars} 星`
+              : `未通过：${grade.failures.length} 个用例不符`;
+        resolve({ ran: true, passed: grade?.passed ?? null, summary });
+      };
+      unsubscribe = store.subscribe(() => {
+        if (!testing) finish();
+      });
+      startTest();
+      if (!testing) finish();
+    });
+  };
+
+  const agentHost: AgentHost = {
+    graph: () => store.get().graph,
+    parts: () => {
+      const reg = store.get().registry;
+      return offeredDefIds().map((defId) => {
+        const def = reg.get(defId);
+        return {
+          id: def.id,
+          nameZh: def.name.zh,
+          nameEn: def.name.en,
+          category: def.category,
+          hidden: def.hidden === true,
+          inputs: def.inputs,
+          outputs: def.outputs,
+        };
+      });
+    },
+    snapshot: (): BoardSnapshot => {
+      const state = store.get();
+      const open = state.level;
+      // Only the ERRORS: a half-built circuit is full of dangling-input warnings
+      // by design, and reciting them every step would bury the one thing an agent
+      // needs to know -- whether what it just did made the circuit invalid.
+      const issues = validateGraph(state.graph, state.registry)
+        .filter((issue) => issue.severity === 'error')
+        .map((issue) => ({ severity: 'error' as const, message: issue.message.zh }));
+      return {
+        mode: isSandbox(open) ? 'sandbox' : 'level',
+        dev: state.dev,
+        level: { id: open.id, nameZh: open.name.zh, nameEn: open.name.en },
+        editing: state.editing,
+        parts: state.graph.instances.map((inst) => ({
+          id: inst.id,
+          def: inst.def,
+          nameZh: state.registry.has(inst.def) ? state.registry.get(inst.def).name.zh : inst.def,
+          x: inst.x,
+          y: inst.y,
+          params: inst.params,
+        })),
+        wires: state.graph.wires.map((wire) => ({
+          id: wire.id,
+          from: { ...wire.from },
+          to: { ...wire.to },
+        })),
+        selected: [...state.selected],
+        running,
+        testing,
+        metrics:
+          state.metrics === null
+            ? null
+            : { gates: state.metrics.gate, delay: state.metrics.delay },
+        grade:
+          state.lastGrade === null
+            ? null
+            : {
+                passed: state.lastGrade.passed,
+                summary: `${state.lastGrade.failures.length} 个用例不符`,
+              },
+        issues,
+        status: state.status,
+        briefZh: narrativeFor(open.id).before.zh,
+      };
+    },
+    // The grid is the theme's, not this module's: the agent layer may not import
+    // `ui/`, so the one number it needs is handed to it here.
+    snap: (x, y) => ({ x: Math.round(x / GRID) * GRID, y: Math.round(y / GRID) * GRID }),
+    apply: (command, focus) => {
+      stack.push(command, store.get().graph);
+      // Selecting what just changed is what makes a step WATCHABLE: the magenta
+      // ring says which part of the board the last action touched. Not an edit,
+      // so it is not on the undo stack.
+      if (focus !== undefined) store.set({ selected: [...focus] });
+      onChange();
+    },
+    undo: () => {
+      const undone = stack.undo(store.get().graph);
+      if (undone) onChange();
+      return undone;
+    },
+    redo: () => {
+      const redone = stack.redo(store.get().graph);
+      if (redone) onChange();
+      return redone;
+    },
+    run: () => {
+      running = true;
+      startClock();
+      paintTools();
+    },
+    pause: () => {
+      running = false;
+      stopClock();
+      paintTools();
+    },
+    stepOnce: step,
+    reset: () => {
+      running = false;
+      stopClock();
+      dropPlayerRun();
+      rebuild();
+      paint();
+      io.render();
+      refreshBench();
+      paintTools();
+    },
+    test: agentTest,
+    circuitText: () =>
+      serializeCircuit(
+        store.get().graph,
+        libraryClosure(store.get().blueprints, referencedComponents(store.get().graph)),
+      ),
+    loadCircuit: (text) => {
+      const parsed = parseCircuit(text, store.get().blueprints);
+      if ('error' in parsed) return { ok: false, error: parsed.error.zh };
+      // The same path the toolbar's 导入 uses, so an imported circuit is treated
+      // identically however it arrived.
+      applyImportedFile(text);
+      return { ok: true, parts: parsed.graph.instances.length, wires: parsed.graph.wires.length };
+    },
+  };
+
+  let agentPanel: AgentPanel | null = null;
+  agentPanel = mountAgentPanel(stage, {
+    host: agentHost,
+    config: () => agentConfig,
+    onSave: (config) => {
+      agentConfig = config;
+      agentPanel?.render();
+    },
+    onClear: () => {
+      agentConfig = null;
+      agentPanel?.render();
+    },
   });
 
   /**

@@ -90,9 +90,9 @@ function withoutComments(source: string): string {
 // The layer rule
 // ---------------------------------------------------------------------------
 
-type Layer = 'core' | 'asm' | 'levels' | 'persist' | 'app' | 'ui';
+type Layer = 'core' | 'asm' | 'levels' | 'persist' | 'app' | 'agent' | 'ui';
 
-const LAYERS: readonly string[] = ['core', 'asm', 'levels', 'persist', 'app', 'ui'];
+const LAYERS: readonly string[] = ['core', 'asm', 'levels', 'persist', 'app', 'agent', 'ui'];
 
 function isLayer(name: string | undefined): name is Layer {
   return name !== undefined && LAYERS.includes(name);
@@ -108,7 +108,11 @@ function isLayer(name: string | undefined): name is Layer {
  * `app/`. What is enforced is the part that matters: nothing imports upwards.
  *
  * The order is `core <- asm <- levels <- app <- ui`, with `persist` beside
- * `app` (it reads `app/progress` to build an empty save).
+ * `app` (it reads `app/progress` to build an empty save) and `agent` beside it
+ * too. `agent/` drives the application the way a player does, through an
+ * interface the composition root implements (`agent/host.ts`), so it reads
+ * `app/` and below and never the chrome -- `ui/agent.ts` is the only file that
+ * imports the other way, exactly as `ui/` imports everything else.
  */
 const MAY_IMPORT: Readonly<Record<Layer, readonly Layer[]>> = {
   core: ['core'],
@@ -116,7 +120,8 @@ const MAY_IMPORT: Readonly<Record<Layer, readonly Layer[]>> = {
   levels: ['core', 'asm', 'levels'],
   persist: ['core', 'asm', 'levels', 'app', 'persist'],
   app: ['core', 'asm', 'levels', 'persist', 'app'],
-  ui: ['core', 'asm', 'levels', 'persist', 'app', 'ui'],
+  agent: ['core', 'asm', 'levels', 'persist', 'app', 'agent'],
+  ui: ['core', 'asm', 'levels', 'persist', 'app', 'agent', 'ui'],
 };
 
 /** `src/core/defs/wide.ts` -> `core`; `src/main.ts` -> null (the root composes). */

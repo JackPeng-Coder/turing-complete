@@ -60,6 +60,24 @@ async function seedProgress(
   );
 }
 
+/**
+ * Opens the app and walks past the agent's first-run card.
+ *
+ * THE CARD IS A DOOR EVERY FIRST VISIT GOES THROUGH, and every test is a first
+ * visit: a Playwright context starts with an empty `localStorage`, so the app
+ * asks for API information before the board can be touched, and the card takes
+ * the pointer while it is up. Dismissing it in one helper keeps that fact in one
+ * place -- and it is the same click a player makes, not a special test path.
+ */
+async function open(page: Page, url: string): Promise<void> {
+  await page.goto(url);
+  const card = page.locator('.agent-setup');
+  if (await card.isVisible()) {
+    await card.getByRole('button', { name: '以后再说' }).click();
+    await expect(card).toBeHidden();
+  }
+}
+
 /** Centre of the board canvas, in page coordinates. */
 async function boardCentre(page: Page): Promise<{ cx: number; cy: number }> {
   const box = (await page.locator('canvas.board').boundingBox())!;
@@ -110,7 +128,7 @@ async function runTests(page: Page): Promise<void> {
 }
 
 test('level 1 is playable end to end and shows its pass dialog', async ({ page }) => {
-  await page.goto('/');
+  await open(page, '/');
   // The briefing overlay covers the board, so it has to go before the canvas
   // can be touched at all. Photographed first: it is the screen a level opens
   // on, and nothing else in this suite ever sees it.
@@ -163,7 +181,7 @@ test('level 1 is playable end to end and shows its pass dialog', async ({ page }
  * verdict to reopen anything.
  */
 test('the pass dialog appears once, and does not come back on the next edit', async ({ page }) => {
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
 
   const { cx, cy } = await placeParts(page);
@@ -191,7 +209,7 @@ test('the pass dialog appears once, and does not come back on the next edit', as
  * without a word, so a failing run has to produce a red cell and no prose.
  */
 test('a failing run says so with a red cell, not a wall of text', async ({ page }) => {
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
 
   const { cx, cy } = await boardCentre(page);
@@ -214,7 +232,7 @@ test('a failing run says so with a red cell, not a wall of text', async ({ page 
 });
 
 test('the pass dialog leads to the next level', async ({ page }) => {
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
 
   const { cx, cy } = await placeParts(page);
@@ -229,7 +247,7 @@ test('the pass dialog leads to the next level', async ({ page }) => {
 });
 
 test('progress survives a reload and unlocks the next level', async ({ page }) => {
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
 
   const { cx, cy } = await placeParts(page);
@@ -270,7 +288,7 @@ test('progress survives a reload and unlocks the next level', async ({ page }) =
  */
 test('level 14 lays its sixteen cases out as columns, then plays them', async ({ page }) => {
   await seedProgress(page, 13);
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('二进制速算');
 
@@ -393,7 +411,7 @@ async function peakWhite(page: Page, x: number, y: number, width: number, height
  */
 test('a wire is routed around a gate, not through it', async ({ page }) => {
   await seedProgress(page, 13);
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('二进制速算');
 
@@ -428,7 +446,7 @@ test('a wire is routed around a gate, not through it', async ({ page }) => {
  * bring both the part and its wire back.
  */
 test('right-click removes the part under the pointer, undoably', async ({ page }) => {
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
 
   const { cx, cy } = await placeParts(page);
@@ -452,7 +470,7 @@ test('right-click removes the part under the pointer, undoably', async ({ page }
  * says so, loudly, and one click puts it back.
  */
 test('?dev=1 opens every level, and says so', async ({ page }) => {
-  await page.goto('/?dev=1');
+  await open(page, '/?dev=1');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-dev')).toBeVisible();
 
@@ -494,7 +512,7 @@ test('?dev=1 opens every level, and says so', async ({ page }) => {
  * `?dev=1` opens level 49, whose palette lists every part in the game.
  */
 test('the packers are blue funnels that hold their pins', async ({ page }) => {
-  await page.goto('/?dev=1');
+  await open(page, '/?dev=1');
   await page.getByRole('button', { name: '开始' }).click();
   await page.getByRole('button', { name: '章节地图' }).click();
   await page.locator('.map-tile').nth(48).click();
@@ -527,7 +545,7 @@ test('the packers are blue funnels that hold their pins', async ({ page }) => {
  * a drag has to be given back, which is what the ✕ is for.
  */
 test('the armed part is lit in the tray and carried under the pointer', async ({ page }) => {
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   const { cx, cy } = await boardCentre(page);
 
@@ -553,7 +571,7 @@ test('the armed part is lit in the tray and carried under the pointer', async ({
  * both parts in one gesture and the bin takes them both away.
  */
 test('ctrl+drag bands the parts it sweeps over', async ({ page }) => {
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   const { cx, cy } = await placeParts(page);
   // The probe sits in the source's body: painted green while it is there.
@@ -589,7 +607,7 @@ test('ctrl+drag bands the parts it sweeps over', async ({ page }) => {
  */
 test('a level input shows the number it drives, like an output', async ({ page }) => {
   await seedProgress(page, 15);
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('奇数计数技术');
 
@@ -610,7 +628,7 @@ test('chapter 2 is reachable: level 14 opens once chapter 1 is passed', async ({
   // thirteen levels of mouse work, and this test is about the join, not about
   // chapter 1's puzzles.
   await seedProgress(page, 13);
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
 
   await expect(page.locator('.shell-bar')).toContainText('二进制速算');
@@ -643,7 +661,7 @@ test('a chapter-2 level opens and grades end to end', async ({ page }) => {
   // (`a XOR inv`) -- four parts and three wires, the smallest chapter-2 circuit a
   // mouse can build, and a real chapter-2 level rather than a synthetic one.
   await seedProgress(page, 27);
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('可控反相器');
 
@@ -686,7 +704,7 @@ test('the last chapter-2 level opens: level 39 is reachable', async ({ page }) =
   // 37 passed: the resume point is the chapter's last level. Reaching it proves
   // the join reaches the end of the chapter, not just its first batch.
   await seedProgress(page, 38);
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('计数器');
 
@@ -715,7 +733,7 @@ test('the last chapter-2 level opens: level 39 is reachable', async ({ page }) =
  */
 test('a sequential level replays its steps and reads every one of them', async ({ page }) => {
   await seedProgress(page, 16);
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('循环依赖');
 
@@ -737,7 +755,7 @@ test('chapter 3 is reachable: level 40 opens once chapter 2 is passed', async ({
   // first chapter-3 level. Before the chapter was appended to the level list this
   // test failed at the resume point itself, which is the point of it.
   await seedProgress(page, 39);
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('逻辑整合');
 
@@ -765,7 +783,7 @@ test('chapter 3 ends with a level that mounts its program check: level 49', asyn
   // that the `program` check kind (level data + `checks.ts`) is wired into the app
   // rather than only into the unit tests.
   await seedProgress(page, 48);
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('图灵完备');
 
@@ -821,7 +839,7 @@ test('chapter 4 grades a hand-written program: level 50', async ({ page }) => {
   // 49 passed -- every level of chapters 1 to 3 -- so the resume point is
   // chapter 4's first level. Reaching it is what this walk is here to prove.
   await seedProgress(page, 49);
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('打孔编程');
 
@@ -889,7 +907,7 @@ test('chapter 4 grades a hand-written program: level 50', async ({ page }) => {
  */
 test('chapter 4 resets the board without losing the program: level 50', async ({ page }) => {
   await seedProgress(page, 49, { 'ch4-50-punchcard-programming': LEVEL_50_PROGRAM });
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('打孔编程');
 
@@ -974,7 +992,7 @@ test('a save written before the 2.x realignment keeps its stars', async ({ page 
     ] as const,
   );
 
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('或门');
 
@@ -1032,7 +1050,7 @@ test('a saved component is offered in the palette and runs on the board', async 
   // own components; an ordinary level keeps its own palette, because the palette
   // IS the puzzle (a chapter-1 level must not hand out an inverter a player built
   // in the sandbox). The component is still in the panel's list either way.
-  await page.goto('/?dev=1');
+  await open(page, '/?dev=1');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('与非门');
 
@@ -1071,7 +1089,7 @@ test('a saved component is offered in the palette and runs on the board', async 
  * LEAVES something: the circuit is written as it is drawn and comes back.
  */
 test('the sandbox builds freely, does not grade, and keeps the circuit', async ({ page }) => {
-  await page.goto('/');
+  await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await page.getByRole('button', { name: '章节地图' }).click();
   await page.getByRole('button', { name: '自由建造' }).click();
@@ -1100,4 +1118,49 @@ test('the sandbox builds freely, does not grade, and keeps the circuit', async (
   await page.getByRole('button', { name: '章节地图' }).click();
   await page.getByRole('button', { name: '自由建造' }).click();
   await expect(page.locator('.shell-metrics')).toContainText('延迟 1');
+});
+
+/**
+ * THE AGENT ASKS ONCE, AND NEVER LOCKS THE GAME.
+ *
+ * The first-run card is the whole of the agent's onboarding: a browser with no
+ * `tc.agent.v1` is asked for an address, a key and a model, and it takes the
+ * pointer while it is up -- which is why every other test in this file walks past
+ * it first. What matters here is the other half: answering it is remembered (a
+ * reload goes straight to the board), and a player who dismisses it can still
+ * build circuits by hand, with the agent sitting there saying it is not
+ * configured yet.
+ *
+ * Nothing here reaches the network. The send is deliberately made with no
+ * settings, which is the one path that must NOT call out: it asks for the
+ * settings instead.
+ */
+test('the agent asks for its API information on a first run, and only once', async ({ page }) => {
+  await page.goto('/');
+  const setup = page.locator('.agent-setup');
+  await expect(setup).toBeVisible();
+  await expect(page.locator('.agent-toggle')).toContainText('未配置');
+
+  await setup.getByRole('button', { name: '以后再说' }).click();
+  await expect(setup).toBeHidden();
+
+  // Answered once, remembered: a reload opens on the level, not on the question.
+  await page.reload();
+  await expect(setup).toBeHidden();
+  await expect(page.getByRole('button', { name: '开始' })).toBeVisible();
+
+  // The panel opens from its own button, and a send with no settings asks for
+  // them rather than calling anything.
+  await page.getByRole('button', { name: '开始' }).click();
+  await page.locator('.agent-toggle').click();
+  await expect(page.locator('.agent-card').first()).toBeVisible();
+  await page.locator('.agent-input').fill('放一个与非门，两个输入都接上高电平');
+  await page.getByRole('button', { name: '发送' }).click();
+  await expect(setup).toBeVisible();
+  await expect(page.locator('.agent-status')).toContainText('先填好 API 信息');
+
+  await setup.getByRole('button', { name: '以后再说' }).click();
+  await expect(setup).toBeHidden();
+  await expect(page.locator('.agent-input')).toBeVisible();
+  await page.screenshot({ path: 'test-results/smoke-agent.png' });
 });

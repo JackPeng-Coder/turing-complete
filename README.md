@@ -62,6 +62,15 @@ towards a working CPU.
   one part: the wires crossing its edge become its pins, and it joins the palette so the next circuit
   can use it. 编辑内部 opens it again on the same board. Cost is measured through the expansion, so
   wrapping a circuit never makes it cheaper.
+- **A built-in agent you can talk to.** Fill in an API address, a key and a model once — the request
+  goes straight from the browser to that endpoint, so the app still ships **no runtime dependency and
+  no server** — then describe what you want in Chinese and watch it happen. The agent calls one
+  operation at a time (place a part, wire two pins, move or delete an instance, undo, run the clock,
+  step it, press 测试, export or import the circuit) and the board holds a frame between steps so each
+  one is visible. Its edits go through the same command stack as your own, so Ctrl+Z walks back
+  through them, and it may place exactly the parts the level's palette is offering you. The key is
+  kept in `localStorage` under `tc.agent.v1` — 设置 can forget it, and the first-run card can be
+  dismissed with 以后再说, because the game plays fine without any of it.
 
 Chapters 5–7 (the Symphony CPU, functions, the assembly challenges, and the peripherals) are planned but
 not built yet.
@@ -105,6 +114,30 @@ The board's gestures:
 | Click a palette slot | Arm that part: the slot stays lit and a translucent copy follows the pointer, on the grid, at the size and position it will land |
 | Click the board while armed | Place a copy, and stay armed so you can stamp several |
 | The ✕ in the palette's plate, or Esc | Put the part back down, which gives the plain drag back to the board |
+
+### The agent
+
+The agent panel is opened with the `Agent` button in the gap between the tool column and the middle of
+the board, and it is available on every board screen — an ordinary level, the sandbox, and `?dev=1`.
+Type what you want in Chinese and press 发送 (Enter sends, Shift+Enter is a newline). While it works,
+each step is a row in the log — `place_part…`, then `place_part · {"id":"i7"}` — and each one is a
+frame on the board: the parts appear one at a time, and the part just touched wears the selection ring
+so you can see where the last action landed.
+
+What it will not do, and why:
+
+- **It cannot touch your progress.** No level is opened, passed, skipped or cleared by the agent, and
+  the campaign's stars change only when *you* press 测试 on a circuit. The tool list is the contract:
+  it is what the model is offered, and nothing outside it is reachable.
+- **It cannot place parts the level does not offer you.** The tool's palette is derived from the same
+  two functions the parts tray uses, so a level's puzzle is not bypassed by asking nicely.
+- **It only speaks OpenAI-compatible `chat/completions`** with streaming. Anthropic's messages API
+  needs a browser-specific header and is not wired up; every other provider that speaks the OpenAI
+  shape — including the DeepSeek, Moonshot and Zhipu endpoints — works.
+- **The key is stored in this browser, in the clear.** There is no server to hold it: `localStorage`
+  under `tc.agent.v1`, readable by any script on this origin. 设置 forgets it.
+- **It is not a chat memory.** The conversation lasts for the session; a reload starts a new one. The
+  circuit is what persists, and it persists the way it always has.
 
 ## Running it
 
@@ -172,8 +205,10 @@ src/
   levels/   LevelSpec types, the campaign table, checks, grader, content/ (chapters 1–4), the
             sandbox spec, and the custom-component library and wrap
   app/      application state, command/undo stack, progress, and the shared viewport types
+  agent/    the built-in assistant: the tool list it may call, the operations behind them, the
+            OpenAI-compatible streaming client, its settings, and the run loop
   ui/       the board's chrome: top bar, palette, clock + I/O readout, tool grid, test cases,
-            chapter map, the components panel, and the Canvas board (see ui/board/)
+            chapter map, the components panel, the agent panel, and the Canvas board (see ui/board/)
   ui/board/ the board itself: camera and hit testing, wire routing, painting, live signals
   persist/  localStorage save and load, the sandbox circuit, and the `tc-circuit` file format
 test/       Vitest unit and level tests, the convention assertions, and the Playwright smoke spec
@@ -183,9 +218,11 @@ docs/       the design spec, the phase plans, and the per-chapter level provenan
 ```
 
 Dependencies run one way: `core` ← `asm` ← `levels` ← `app` ← `ui`, with `persist` reading `app` to
-build an empty save. Nothing imports upwards, and `test/conventions.test.ts` fails the build if
-anything starts to — that file is this project's linter, because no linter is pinned (see
-`AGENTS.md` for why, along with the four rules that shape everything else).
+build an empty save and `agent` reading `app` to drive it the way a player does — the chrome imports
+`agent`, never the other way, and `agent/` may not import `ui/` at all. Nothing imports upwards, and
+`test/conventions.test.ts` fails the build if anything starts to — that file is this project's linter,
+because no linter is pinned (see `AGENTS.md` for why, along with the four rules that shape everything
+else).
 
 ## Contributing / scope
 
