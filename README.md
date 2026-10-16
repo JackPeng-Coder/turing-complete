@@ -195,8 +195,10 @@ outside the campaign (spec §3.4, §7, §8.1). The campaign follows the
 **2.x** structure of the game (13/26/10/7/26/7/4 chapters, Symphony in place of LEG, 2–64-bit
 widths); the table that fixes it is [`src/levels/campaign.ts`](src/levels/campaign.ts), and
 `test/levels/campaign-shape.test.ts` holds every level to it. The remaining chapters 5–7 are listed
-in [`GAME_RESEARCH_2026-10-03.md`](GAME_RESEARCH_2026-10-03.md) §5; the phase they will be built in
-is not decided yet. [`RESEARCH.md`](RESEARCH.md) records where the two research documents disagree
+in [`GAME_RESEARCH_2026-10-03.md`](GAME_RESEARCH_2026-10-03.md) §5, and the scope and acceptance
+criteria for the phases that will build them are in
+[`docs/superpowers/plans/2026-10-16-turing-complete-chapters-5-7.md`](docs/superpowers/plans/2026-10-16-turing-complete-chapters-5-7.md).
+[`RESEARCH.md`](RESEARCH.md) records where the two research documents disagree
 and which one this project follows for what.
 
 The record of how it was built is committed too. [`.superpowers/sdd/`](.superpowers/sdd/) holds one
