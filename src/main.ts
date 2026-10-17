@@ -430,10 +430,15 @@ if (app) {
     else driveQuiet(item.inputs);
     while ((snapshot?.tick ?? 0) < item.tick) {
       display?.tick();
-      if (demonstrating) {
-        sample();
-        paint();
-      }
+      // THE FAST PHASE STILL HAS TO SAMPLE. The loop's own condition reads
+      // `snapshot.tick`, so a fast phase that ticked without reading left the
+      // snapshot on the old tick and the loop never ended: a script with more
+      // than `TEST_DEMO_LIMIT` cases froze the tab at the first fast case
+      // (513-step `ch2-38-little-box` at case 33). Painting is what the fast
+      // phase skips, not reading -- and the case's recorded outputs need the
+      // read too.
+      sample();
+      if (demonstrating) paint();
     }
     testResults[testStep] = levelOutputs();
     testStep += 1;

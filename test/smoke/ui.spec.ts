@@ -724,6 +724,31 @@ test('the last chapter-2 level opens: level 39 is reachable', async ({ page }) =
 });
 
 /**
+ * A RUN LONGER THAN THE DEMONSTRATION USED TO HANG THE TAB.
+ *
+ * Past `TEST_DEMO_LIMIT` (32 cases) the run stops painting the board -- that is
+ * deliberate, the table only shows twenty columns. It also used to stop
+ * SAMPLING, and the inner "clock until this case's tick" loop waits on the
+ * sampled snapshot, so from case 33 on the loop ran forever with `snapshot.tick`
+ * frozen. Level 38 (`方寸之间`) is the level that found it: its script is 513
+ * steps (256 writes and 256 read-backs), so its thirty-third case is inside the
+ * fast phase and an empty board -- every case fails, nothing else goes wrong --
+ * locks the page.
+ */
+test('a level with hundreds of cases finishes its run: level 38', async ({ page }) => {
+  await seedProgress(page, 37);
+  await open(page, '/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('方寸之间');
+
+  await runTests(page);
+  // The empty board fails every step, which is fine: this asserts that the
+  // VERDICT ARRIVES. On the bug it never does -- case 33 hangs the page.
+  await expect(page.locator('.truth-table h2')).toHaveText('未通过', { timeout: 20000 });
+  await page.screenshot({ path: 'test-results/smoke-ch2-level38-run.png' });
+});
+
+/**
  * A `script` LEVEL IS THE OTHER SHAPE OF TEST, and the run has to replay it
  * rather than reset between its cases: its steps are one run, so step 3 reads a
  * register step 2 clocked. Sixteen levels passed puts the resume point on
