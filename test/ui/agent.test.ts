@@ -30,6 +30,7 @@ const NO_STATS: RunStats = {
   decodeMs: 0,
   decodeTokens: 0,
   usage: null,
+  costCny: null,
 };
 
 const DONE = (messages: RunOptions['messages']): RunResult => ({
@@ -249,6 +250,7 @@ describe('a conversation', () => {
       decodeMs: 2_000,
       decodeTokens: 40,
       usage: { input: 1_200, output: 40, total: 1_240, cacheRead: 1_000 },
+      costCny: 0.00042,
     };
     const scripted = (options: RunOptions): Promise<RunResult> => {
       options.onEvent?.({ kind: 'step', index: 0 });
@@ -269,14 +271,16 @@ describe('a conversation', () => {
     await tick();
 
     const row = stage.querySelector('.agent-run-stats')!;
-    // The four readings, in the order DSH's composer pills show them.
-    expect(row.textContent).toBe('2.4s · 1.2k tok · 20 tok/s · 缓存 83%');
+    // The four readings, in the order DSH's composer pills show them, plus the
+    // estimated cost from the published DeepSeek prices.
+    expect(row.textContent).toBe('2.4s · 1.2k tok · 20 tok/s · 缓存 83% · ¥0.0004');
     expect(row.getAttribute('title')).toContain('输入 1,200 tok');
     expect(row.getAttribute('title')).toContain('首字平均 0.3s');
+    expect(row.getAttribute('title')).toContain('估算费用 ¥0.0004');
 
     const total = stage.querySelector('.agent-session-stats')!;
     expect(total.hasAttribute('hidden')).toBe(false);
-    expect(total.textContent).toBe('累计 1 次 · 1 步 · 1.2k tok · 20 tok/s · 缓存 83%');
+    expect(total.textContent).toBe('累计 1 次 · 1 步 · 1.2k tok · 20 tok/s · 缓存 83% · ¥0.0004');
   });
 
   it('shows time alone when the provider reports no usage', async () => {
@@ -287,6 +291,7 @@ describe('a conversation', () => {
       decodeMs: 0,
       decodeTokens: 0,
       usage: null,
+      costCny: null,
     };
     const scripted = (options: RunOptions): Promise<RunResult> =>
       Promise.resolve({
@@ -307,6 +312,44 @@ describe('a conversation', () => {
     expect(stage.querySelector('.agent-run-stats')!.textContent).toBe('1.2s');
     expect(stage.querySelector('.agent-run-stats')!.getAttribute('title')).toContain('没有返回用量');
     expect(stage.querySelector('.agent-session-stats')!.textContent).toBe('累计 1 次 · 1 步');
+  });
+
+  it('shows the readings live, while the request is still running', async () => {
+    const liveStats: RunStats = {
+      llmMs: 900,
+      ttftMs: 200,
+      ttftSteps: 1,
+      decodeMs: 600,
+      decodeTokens: 30,
+      usage: { input: 500, output: 30, total: 530, cacheRead: 200 },
+      costCny: 0.0002,
+    };
+    let release: ((result: RunResult) => void) | null = null;
+    const scripted = (options: RunOptions): Promise<RunResult> => {
+      options.onEvent?.({ kind: 'progress', stats: liveStats, steps: 1 });
+      return new Promise<RunResult>((resolve) => {
+        release = resolve;
+      });
+    };
+    const { stage } = mount(CONFIG, scripted);
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
+    const input = stage.querySelector<HTMLTextAreaElement>('.agent-input')!;
+    input.value = '搭一个与非门';
+    clickButton(stage, '发送');
+    await tick();
+
+    // The totaliser is already live: elapsed time, the step count, the tokens and
+    // the cost of the step that has settled -- not a line that waits for the run.
+    const total = stage.querySelector('.agent-session-stats')!;
+    expect(total.hasAttribute('hidden')).toBe(false);
+    expect(total.textContent).toContain('运行中');
+    expect(total.textContent).toContain('1 步');
+    expect(total.textContent).toContain('530 tok');
+    expect(total.textContent).toContain('¥0.0002');
+
+    release!({ messages: [{ role: 'user', content: '搭一个与非门' }], stopped: 'done', error: null, steps: 1, stats: liveStats });
+    await tick();
+    expect(stage.querySelector('.agent-session-stats')!.textContent).toContain('累计 1 次');
   });
 
   it('shows the streamed answer and each tool row with its result', async () => {

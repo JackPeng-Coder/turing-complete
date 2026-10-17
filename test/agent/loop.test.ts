@@ -378,6 +378,7 @@ describe('failing', () => {
       },
     ]);
     const { signal } = context();
+    const events: AgentEvent[] = [];
     const result = await runAgent({
       config: CONFIG,
       host: host.host,
@@ -385,6 +386,7 @@ describe('failing', () => {
       signal,
       chat,
       tools: [tool.spec],
+      onEvent: (event) => events.push(event),
     });
     expect(result.stopped).toBe('done');
     // One usage object per step, summed: the panel gets one row per request.
@@ -394,6 +396,40 @@ describe('failing', () => {
     expect(result.stats.ttftSteps).toBe(1);
     expect(result.stats.decodeTokens).toBe(20);
     expect(result.stats.decodeMs).toBeGreaterThanOrEqual(0);
+    // The test model is not on the price list: no guessed cost.
+    expect(result.stats.costCny).toBeNull();
+
+    // A progress event at each step start and each step's usage: the panel can
+    // show the readings while the request is still going.
+    const progress = events.filter((event) => event.kind === 'progress');
+    expect(progress.length).toBeGreaterThanOrEqual(4);
+    const last = progress[progress.length - 1]!;
+    expect(last.kind === 'progress' && last.stats.usage).toEqual(result.stats.usage);
+    expect(last.kind === 'progress' && last.steps).toBe(2);
+  });
+
+  it('prices a run from the published DeepSeek table', async () => {
+    const host = makeTestHost();
+    const { chat } = scripted([
+      {
+        content: '完成',
+        toolCalls: [],
+        finishReason: 'stop',
+        usage: { input: 1_000, output: 100, total: 1_100, cacheRead: 0 },
+      },
+    ]);
+    const { signal } = context();
+    const result = await runAgent({
+      config: { ...CONFIG, model: 'deepseek-flash' },
+      host: host.host,
+      messages: [],
+      signal,
+      chat,
+    });
+    expect(result.stopped).toBe('done');
+    // Peak or idle depending on the hour the test runs; both are published rates.
+    expect(result.stats.costCny).toBeGreaterThan(0);
+    expect(result.stats.costCny).toBeLessThan(0.01);
   });
 
   it('reports no usage rather than zeros when the provider sends none', async () => {

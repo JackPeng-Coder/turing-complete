@@ -96,3 +96,11 @@
 - **测试**：`format.test.ts`（10 条）；客户端 usage 两种方言、缺失为 null、请求体含 `stream_options`；循环把两轮 usage 相加；面板单测两行文案与「无 usage 只显示时间」；smoke e2e 的 mock 带 usage 帧，断言 `1.2k tok`、`缓存 83%`、`累计 1 次`。
 - **限制**：不显示费用（没有价目表）；会话累计不持久化，刷新归零（像仪表），请求级行留在日志里。
 - 门禁：`build` exit 0（293.78 kB / gzip 100.69 kB）、`test` 63 文件 / **1678 通过**、`smoke` **30 通过 + 2 跳过**。
+
+### 追加（2026-10-17，用户要求「实时显示」+ 参考 DeepSeek 价目表）
+
+- **实时**：循环在每一步开始与结束各发一个 `progress` 事件（`{ stats, steps }`）；面板在忙碌时用 200 ms 定时器重绘总计量（不重建日志），所以请求一开始就有「运行中 · 3.2s · 2 步 · …」，token / 速度 / 缓存 / 费用随每个 step 的 usage 帧更新。结束落成「累计 …」，并把该次最终数字写进日志行。
+- **费用**：新增 `src/agent/pricing.ts`，价目表取自 <https://api-docs.deepseek.com/zh-cn/quick_start/pricing/>（2026-10-17）：`deepseek-flash` 高峰 缓存命中 0.04 / 未命中 2 / 输出 8 元每百万 tokens，`deepseek-v4-pro` 0.30 / 9 / 27；空闲时段（北京时间工作日 9–12、14–18 之外）半价。**节假日未建模**（无法内置会过期的日历），节假日的工作日按高峰价计——偏保守的估算，不是账单。按三桶计价，无缓存数字时按未命中；模型不在表内则不显示费用。
+- 展示：请求行与会话累计都追加 `¥` 金额；tooltip 注明「估算费用（按 DeepSeek 价目表）」。
+- 测试：`pricing.test.ts`（9 条：峰谷、表、三桶计价、无缓存按未命中、未知模型）；面板新增「运行中」实时行单测；smoke 新增 `the agent shows its readings while the request is still running`（mock 延迟 1.2 s，断言出现「运行中」、结束后出现 820 tok 与 ¥）。
+- 门禁：`build` exit 0（295.79 kB / gzip 101.46 kB）、`test` 64 文件 / **1690 通过**、`smoke` **31 通过 + 2 跳过**。

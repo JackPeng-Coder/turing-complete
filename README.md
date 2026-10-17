@@ -143,10 +143,14 @@ default, `0` for no limit. When a request reaches the limit the log ends with a 
 sends the same conversation again with a fresh budget: a long build is one click from finishing rather
 than a retyped request.
 
-Each finished request also carries its readings under the reply — `2.4s · 1.2k tok · 20 tok/s · 缓存
-83%` — and the panel keeps a running total under the log. The token counts come from the provider's own
-usage frame (the request asks for one) and the times from the wall clock; a provider that reports no
-usage gets a time-only reading, never invented zeroes.
+The readings are **live**: the totaliser under the log starts ticking the moment a request begins and
+updates at every step — elapsed time, steps, tokens, output speed, cache share and estimated cost — so a
+long build is never a blank wait. Each finished request also leaves its own row under the reply
+(`2.4s · 1.2k tok · 20 tok/s · 缓存 83% · ¥0.0004`). Token counts come from the provider's own usage
+frame (the request asks for one) and the times from the wall clock; a provider that reports no usage
+gets a time-only reading, never invented zeroes. The cost is estimated from DeepSeek's published price
+list — CNY per million tokens, with the documented half-price idle windows (Chinese public holidays are
+not modelled, so a holiday weekday is priced at peak) — and is shown only for models on that list.
 
 What it will not do, and why:
 

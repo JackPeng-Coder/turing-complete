@@ -38,6 +38,7 @@ import { runAgent, type AgentEvent, type RunStats } from '../agent/loop';
 import type { WireMessage } from '../agent/wire';
 import {
   formatCacheHitPercent,
+  formatCost,
   formatDuration,
   formatExactTokens,
   formatSpeed,
@@ -154,6 +155,8 @@ function runDetail(stats: RunStats): string {
     lines.push(`输出 ${formatExactTokens(stats.usage.output)} tok`);
     lines.push(`合计 ${formatExactTokens(stats.usage.total)} tok`);
   }
+  const cost = formatCost(stats.costCny);
+  if (cost !== null) lines.push(`估算费用 ${cost}（按 DeepSeek 价目表）`);
   return lines.join('\n');
 }
 
@@ -183,6 +186,15 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   let busy = false;
   let status = '';
   /**
+   * The in-flight run's readings, so the totaliser is live rather than final.
+   *
+   * The loop emits a `progress` event at every step boundary; the panel sums
+   * those with the settled runs and ticks the elapsed time between events.
+   */
+  let live: { readonly stats: RunStats; readonly steps: number } | null = null;
+  let liveStartedAt = 0;
+  let liveTimer: ReturnType<typeof setInterval> | null = null;
+  /**
    * The readings, summed over this panel's lifetime.
    *
    * NOT PERSISTED, and not part of the conversation: it is a totalising counter
@@ -200,6 +212,7 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     output: 0,
     total: 0,
     cacheRead: null as number | null,
+    costCny: null as number | null,
   };
 
   // THE RAIL BUTTON IS ICON-ONLY, because the rail is 48px wide: its accessible
@@ -376,6 +389,59 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     return wrap;
   }
 
+  /**
+   * The totaliser under the log: settled between runs, live during one.
+   *
+   * DURING A RUN the elapsed time comes from this panel's clock and ticks every
+   * 200 ms; the tokens, speed, cache share and cost come from the loop's progress
+   * events at each step boundary -- a provider sends its usage frame with the
+   * answer, so per-step is the finest honest granularity for tokens.
+   */
+  const renderTotals = (): void => {
+    const running = busy;
+    const liveStats = live?.stats ?? null;
+    const elapsed = running
+      ? Math.max(0, (globalThis.performance?.now() ?? Date.now()) - liveStartedAt)
+      : 0;
+    const input = totals.input + (liveStats?.usage?.input ?? 0);
+    const total = totals.total + (liveStats?.usage?.total ?? 0);
+    const decodeTokens = totals.decodeTokens + (liveStats?.decodeTokens ?? 0);
+    const decodeMs = totals.decodeMs + (liveStats?.decodeMs ?? 0);
+    const steps = totals.steps + (live?.steps ?? 0);
+    const cacheReads = [totals.cacheRead, liveStats?.usage?.cacheRead ?? null];
+    const cacheRead = cacheReads.some((value) => value !== null)
+      ? cacheReads.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+      : null;
+    const costs = [totals.costCny, liveStats?.costCny ?? null];
+    const cost = costs.some((value) => value !== null)
+      ? costs.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+      : null;
+
+    const parts: string[] = [];
+    if (running) {
+      parts.push('运行中', formatDuration(elapsed) ?? '…', `${steps} 步`);
+    } else {
+      parts.push(`累计 ${totals.runs} 次 · ${totals.steps} 步`);
+    }
+    if (total > 0) parts.push(`${formatTokens(total)} tok`);
+    const speed = formatSpeed(decodeTokens, decodeMs);
+    if (speed !== null) parts.push(speed);
+    const cache = formatCacheHitPercent(cacheRead, input);
+    if (cache !== null) parts.push(`缓存 ${cache}%`);
+    const costText = formatCost(cost);
+    if (costText !== null) parts.push(costText);
+
+    sessionStats.hidden = !running && totals.runs === 0;
+    sessionStats.textContent = parts.join(' · ');
+    sessionStats.title = [
+      running ? '本次请求进行中' : `请求 ${totals.runs} 次 · 模型调用 ${totals.steps} 步`,
+      `输入 ${formatExactTokens(input)} tok`,
+      `输出 ${formatExactTokens(Math.max(0, total - input))} tok`,
+      `合计 ${formatExactTokens(total)} tok`,
+      ...(costText === null ? [] : [`估算费用 ${costText}（按 DeepSeek 价目表）`]),
+    ].join('\n');
+  };
+
   const render = (): void => {
     const config = options.config();
     const ready = isConfigured(config);
@@ -466,25 +532,7 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     statusLine.textContent = status;
     statusLine.classList.toggle('agent-status-bad', status.startsWith('出错'));
 
-    // The totaliser: the same readings, summed. It says nothing until a run has
-    // finished, because a session with no measurements is not a zero row.
-    sessionStats.hidden = totals.runs === 0;
-    if (totals.runs > 0) {
-      const parts = [`累计 ${totals.runs} 次 · ${totals.steps} 步`];
-      if (totals.total > 0) parts.push(`${formatTokens(totals.total)} tok`);
-      const speed = formatSpeed(totals.decodeTokens, totals.decodeMs);
-      if (speed !== null) parts.push(speed);
-      const cache = formatCacheHitPercent(totals.cacheRead, totals.input);
-      if (cache !== null) parts.push(`缓存 ${cache}%`);
-      sessionStats.textContent = parts.join(' · ');
-      sessionStats.title = [
-        `请求 ${totals.runs} 次 · 模型调用 ${totals.steps} 步`,
-        `模型耗时 ${formatDuration(totals.llmMs) ?? '—'}`,
-        `输入 ${formatExactTokens(totals.input)} tok`,
-        `输出 ${formatExactTokens(totals.output)} tok`,
-        `合计 ${formatExactTokens(totals.total)} tok`,
-      ].join('\n');
-    }
+    renderTotals();
   };
 
   /**
@@ -519,6 +567,11 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   // ------------------------------------------------------------------ events --
 
   const handleEvent = (event: AgentEvent): void => {
+    if (event.kind === 'progress') {
+      live = { stats: event.stats, steps: event.steps };
+      renderTotals();
+      return;
+    }
     if (event.kind === 'step') {
       settle();
       current = newAgentEntry();
@@ -575,6 +628,14 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   /** One run of the loop, shared by 发送 and the cap's 继续执行 button. */
   const startRun = (config: AgentConfig): void => {
     busy = true;
+    live = null;
+    liveStartedAt = globalThis.performance?.now() ?? Date.now();
+    if (liveTimer !== null) clearInterval(liveTimer);
+    // The clock is this panel's; the tokens arrive on progress events. A timer
+    // only while a run is in flight is also why a settled panel costs nothing.
+    liveTimer = setInterval(() => {
+      if (busy) renderTotals();
+    }, 200);
     status = '正在请求模型…';
     render();
     controller = new AbortController();
@@ -605,6 +666,9 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
             totals.cacheRead = (totals.cacheRead ?? 0) + result.stats.usage.cacheRead;
           }
         }
+        if (result.stats.costCny !== null) {
+          totals.costCny = (totals.costCny ?? 0) + result.stats.costCny;
+        }
         if (result.stopped === 'aborted') status = '已停止';
         else if (result.stopped === 'error') status = '出错，见上面的提示';
         else if (result.stopped === 'stuck') status = '连着被拒绝了，先停下来了';
@@ -617,6 +681,9 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
         status = `出错：${message}`;
       })
       .finally(() => {
+        if (liveTimer !== null) clearInterval(liveTimer);
+        liveTimer = null;
+        live = null;
         settle();
         busy = false;
         controller = null;

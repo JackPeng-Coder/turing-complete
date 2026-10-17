@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatCacheHitPercent,
+  formatCost,
   formatDuration,
   formatExactTokens,
   formatSpeed,
@@ -72,13 +73,24 @@ describe('a run’s one-line reading', () => {
         decodeMs: 2_000,
         decodeTokens: 40,
         usage: { input: 1_200, output: 40, total: 1_240, cacheRead: 1_000 },
+        costCny: 0.00042,
       }),
-    ).toBe('2.4s · 1.2k tok · 20 tok/s · 缓存 83%');
+    ).toBe('2.4s · 1.2k tok · 20 tok/s · 缓存 83% · ¥0.0004');
   });
 
   it('leaves out whatever was not measured', () => {
     expect(
       summariseRun({ llmMs: 1_200, decodeMs: 0, decodeTokens: 0, usage: null }),
     ).toBe('1.2s');
+  });
+});
+
+describe('cost', () => {
+  it('shows enough decimals to see a cheap request, and a floor below them', () => {
+    expect(formatCost(null)).toBeNull();
+    expect(formatCost(0)).toBeNull();
+    expect(formatCost(0.00042)).toBe('¥0.0004');
+    expect(formatCost(0.00001)).toBe('<¥0.0001');
+    expect(formatCost(1.234)).toBe('¥1.23');
   });
 });

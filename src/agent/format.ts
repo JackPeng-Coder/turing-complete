@@ -59,12 +59,13 @@ export function formatCacheHitPercent(cacheRead: number | null, input: number): 
   return rounded < 100 ? String(rounded) : percent.toFixed(1);
 }
 
-/** The one-line reading of a request: `2.4s · 1.2k tok · 21 tok/s · 缓存 87%`. */
+/** The one-line reading of a request: `2.4s · 1.2k tok · 21 tok/s · 缓存 87% · ¥0.0004`. */
 export function summariseRun(stats: {
   readonly llmMs: number;
   readonly decodeMs: number;
   readonly decodeTokens: number;
   readonly usage: TokenUsage | null;
+  readonly costCny?: number | null;
 }): string {
   const parts: string[] = [];
   const duration = formatDuration(stats.llmMs);
@@ -76,7 +77,23 @@ export function summariseRun(stats: {
     const cache = formatCacheHitPercent(stats.usage.cacheRead, stats.usage.input);
     if (cache !== null) parts.push(`缓存 ${cache}%`);
   }
+  const cost = formatCost(stats.costCny ?? null);
+  if (cost !== null) parts.push(cost);
   return parts.join(' · ');
+}
+
+/**
+ * `¥0.0004`, `¥1.23` -- CNY, with enough places to see a cheap request.
+ *
+ * Four decimals below a yuan because a small circuit costs a fraction of one;
+ * below ¥0.0001 the text says so rather than printing a row of zeroes. A missing
+ * cost (unknown model, or no usage reported) is `null` and is left out of the row.
+ */
+export function formatCost(cny: number | null): string | null {
+  if (cny === null || !Number.isFinite(cny) || cny <= 0) return null;
+  if (cny < 0.0001) return '<¥0.0001';
+  if (cny < 1) return `¥${cny.toFixed(4)}`;
+  return `¥${cny.toFixed(2)}`;
 }
 
 /** `999`, `1.2k` with no zero tail -- `1.0k` reads as a rounded value it is not. */

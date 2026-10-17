@@ -28,6 +28,7 @@ import { AgentError, streamChat, type ChatDelta, type FetchLike, type TokenUsage
 import { DEFAULT_MAX_STEPS, type AgentConfig } from './config';
 import type { AgentHost } from './host';
 import { circuitTools } from './ops';
+import { costOf } from './pricing';
 import { systemPrompt } from './prompt';
 import { findTool, runTool, toolNames, toolWire, type ToolSpec } from './tools';
 import type { WireMessage } from './wire';
@@ -60,6 +61,9 @@ export type AgentEvent =
   /** The model's reasoning, on the models that stream it -- folded away when done. */
   | { readonly kind: 'thinking'; readonly text: string }
   | { readonly kind: 'step'; readonly index: number }
+  /** The run's readings so far, emitted at every step boundary so the panel can
+   * show time and tokens while the request is still going. */
+  | { readonly kind: 'progress'; readonly stats: RunStats; readonly steps: number }
   /** The budget ran out. The panel draws this as a line with 继续执行 beside it. */
   | { readonly kind: 'cap'; readonly limit: number }
   | {
@@ -116,6 +120,8 @@ export interface RunStats {
   readonly decodeTokens: number;
   /** The provider's sums, or `null` when it never reported any. */
   readonly usage: TokenUsage | null;
+  /** What the provider's published prices make those tokens cost, in CNY. */
+  readonly costCny: number | null;
 }
 
 export interface RunResult {
@@ -194,6 +200,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   let outputTokens = 0;
   let totalTokens = 0;
   let cacheRead: number | null = null;
+  let costCny: number | null = null;
 
   const stats = (): RunStats => ({
     llmMs,
@@ -204,6 +211,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     usage: sawUsage
       ? { input: inputTokens, output: outputTokens, total: totalTokens, cacheRead }
       : null,
+    costCny,
   });
 
   const stop = (stopped: StopReason, error: AgentError | null = null): RunResult => ({
@@ -221,6 +229,9 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     const system: WireMessage = { role: 'system', content: systemPrompt(host.snapshot()) };
     steps += 1;
     onEvent?.({ kind: 'step', index });
+    // The step count updates the instant a step starts; the token clauses update
+    // again when the answer's usage frame lands (below).
+    onEvent?.({ kind: 'progress', stats: stats(), steps });
 
     let result;
     const startedAt = now();
@@ -265,7 +276,13 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
         decodeMs += Math.max(0, endedAt - firstAt);
         decodeTokens += usage.output;
       }
+      // Priced per step, at the hour the step was paid for: peak and idle differ.
+      const stepCost = costOf(config.model, usage, new Date());
+      if (stepCost !== null) costCny = (costCny ?? 0) + stepCost;
     }
+    // The readings just changed: tokens, speed, cache and cost are now visible
+    // while the request is still running rather than only when it ends.
+    onEvent?.({ kind: 'progress', stats: stats(), steps });
 
     const calls = result.toolCalls;
     history.push({

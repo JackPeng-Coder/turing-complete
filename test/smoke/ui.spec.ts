@@ -1425,6 +1425,56 @@ test('the agent builds what it was asked for, one visible step at a time', async
 });
 
 /**
+ * THE READINGS ARE LIVE, NOT A POST-MORTEM.
+ *
+ * The mock holds the answer for over a second, which is a normal model call. While
+ * it is held the totaliser must already say 运行中 and tick; when the answer lands
+ * the same figures settle into 累计 and the request's row gains its token count and
+ * estimated cost (priced from the DeepSeek table).
+ */
+test('the agent shows its readings while the request is still running', async ({ page }) => {
+  const body = [
+    agentChunk({ content: '好了' }),
+    agentChunk({}, 'stop'),
+    agentUsage({
+      prompt_tokens: 800,
+      completion_tokens: 20,
+      total_tokens: 820,
+      prompt_cache_hit_tokens: 600,
+    }),
+    'data: [DONE]\n\n',
+  ].join('');
+  await page.route('**/mock/v1/chat/completions', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body });
+  });
+
+  await seedProgress(page, 2);
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await page.locator('.agent-toggle').click();
+  await page.locator('.agent-card').getByRole('button', { name: '设置', exact: true }).click();
+  const setup = page.locator('.agent-setup');
+  const fields = setup.locator('.agent-field input');
+  await fields.nth(0).fill('http://127.0.0.1:4173/mock/v1');
+  await fields.nth(1).fill('sk-test');
+  await fields.nth(2).fill('deepseek-flash');
+  await setup.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(setup).toBeHidden();
+
+  await page.locator('.agent-input').fill('放一个与非门');
+  await page.getByRole('button', { name: '发送' }).click();
+
+  // While the answer is still being produced: the totaliser is already running.
+  await expect(page.locator('.agent-session-stats')).toContainText('运行中');
+  await expect(page.locator('.agent-status')).toHaveText('完成', { timeout: 10_000 });
+  await expect(page.locator('.agent-run-stats')).toContainText('820 tok');
+  await expect(page.locator('.agent-run-stats')).toContainText('¥');
+  await expect(page.locator('.agent-session-stats')).toContainText('累计 1 次');
+  await page.screenshot({ path: 'test-results/smoke-agent-live-stats.png' });
+});
+
+/**
  * THE STEP BUDGET IS A SETTING, AND RUNNING OUT IS NOT A DEAD END.
  *
  * The mock asks for one tool call per round and the player sets the budget to
