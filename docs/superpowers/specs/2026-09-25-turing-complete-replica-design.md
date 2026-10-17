@@ -422,6 +422,8 @@ turing-complete/
 
 > **沙盒与蓝图已完成（2026-10-13）**，按用户要求**先于第 5 章**交付：沙盒（自由建造、全元件、无判定、`tc.sandbox.v1` 自动存档、`tc-circuit` 导入导出）与自定义组件（框选封装、进入内部编辑、门数/延迟穿透计分）都已落地。因此原表的阶段 6 只剩「第 7 章 4 关 + 外设」；**沙盒的验收标准——「可自由构建并导出」——由 `test/persist/circuit.test.ts` 与 smoke 用例「the sandbox builds freely, does not grade, and keeps the circuit」共同承担**。构建记录在 `.superpowers/sdd/2026-10-13-sandbox-blueprints/`。
 
+> **内置 Agent 已完成（2026-10-16）**，是用户追加的需求，不是原作玩法，因此不占阶段号：OpenAI 兼容的流式客户端（浏览器直连、零运行时依赖）、一张工具面（当前电路 + 运行/单步/复位/测试 + 自制元件 + 程序文本 + 导入导出）、首次启动的配置卡片（`tc.agent.v1`）、思考折叠与工具行的中文一行。范围与验收见 [`2026-10-16-turing-complete-agent-phase.md`](../plans/2026-10-16-turing-complete-agent-phase.md)，构建记录在 `.superpowers/sdd/2026-10-16-agent/`。
+
 每个阶段结束由我跑完整回归，并向你报告实际测试输出（不是「应该能跑」）。
 
 ---

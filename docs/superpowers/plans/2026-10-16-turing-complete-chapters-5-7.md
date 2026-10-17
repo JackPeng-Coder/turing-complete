@@ -2,8 +2,8 @@
 
 Spec: `docs/superpowers/specs/2026-09-25-turing-complete-replica-design.md`（§12 阶段表）
 关卡表：`GAME_RESEARCH_2026-10-03.md` §5 的「第 5 / 第 6 / 第 7 章」三表（2.x 基线）
-已交付部分的记录：`.superpowers/sdd/2026-10-13-sandbox-blueprints/progress.md`
-基线（2026-10-16 实测）：`pnpm test` 54 文件 / 1537 通过 · `pnpm build` 干净 · `pnpm smoke` 24 通过
+已交付部分的记录：`.superpowers/sdd/2026-10-13-sandbox-blueprints/progress.md`、`.superpowers/sdd/2026-10-16-agent/progress.md`
+基线（2026-10-17 复核）：`pnpm test` 60 文件 / 1648 通过 · `pnpm build` 干净（`dist` 282 kB / gzip 97 kB）· `pnpm smoke` 26 通过（2 条真模型用例在无 `DEEPSEEK_API_KEY` 时跳过）
 
 **这份文件只写「还剩什么、做到什么算完成」。** 具体怎么做的设计（ISA、位宽机制、外设渲染、
 检查器形态）不在里面：那是每期启动时那期计划的职责。
@@ -12,7 +12,8 @@ Spec: `docs/superpowers/specs/2026-09-25-turing-complete-replica-design.md`（§
 
 - 已交付：第 1–4 章 **56 关**（13/26/10/7）、OVERTURE 汇编器、汇编 IDE 与调试器、
   `program` / `custom` 检查器、**沙盒**（自由建造、全元件、无判定、自动存档、`tc-circuit`
-  导入导出）、**自制元件**（框选封装、进入内部编辑、门数/延迟穿透计分）。
+  导入导出）、**自制元件**（框选封装、进入内部编辑、门数/延迟穿透计分）、
+  **内置 Agent**（自然语言操作电路，首次配置一次，2026-10-16）。
 - 剩余：第 5–7 章 **37 关**（26 + 7 + 4），以及原计划与它们同批的分支设施（宽位、外设）。
 - 目标总量：**93 关**。
 
