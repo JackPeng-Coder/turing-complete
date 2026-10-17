@@ -343,6 +343,9 @@ describe('a conversation', () => {
     const total = stage.querySelector('.agent-session-stats')!;
     expect(total.hasAttribute('hidden')).toBe(false);
     expect(total.textContent).toContain('运行中');
+    // The live clock keeps a decimal even on a whole second, so the row's width
+    // does not change on the tick that lands on `3s`.
+    expect(total.textContent).toMatch(/运行中 · \d+\.\d+s/);
     expect(total.textContent).toContain('1 步');
     expect(total.textContent).toContain('530 tok');
     expect(total.textContent).toContain('¥0.0002');

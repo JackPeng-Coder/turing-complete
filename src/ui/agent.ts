@@ -40,6 +40,7 @@ import {
   formatCacheHitPercent,
   formatCost,
   formatDuration,
+  formatElapsed,
   formatExactTokens,
   formatSpeed,
   formatTokens,
@@ -419,7 +420,7 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
 
     const parts: string[] = [];
     if (running) {
-      parts.push('运行中', formatDuration(elapsed) ?? '…', `${steps} 步`);
+      parts.push('运行中', formatElapsed(elapsed) ?? '…', `${steps} 步`);
     } else {
       parts.push(`累计 ${totals.runs} 次 · ${totals.steps} 步`);
     }

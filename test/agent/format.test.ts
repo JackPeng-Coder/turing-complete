@@ -3,6 +3,7 @@ import {
   formatCacheHitPercent,
   formatCost,
   formatDuration,
+  formatElapsed,
   formatExactTokens,
   formatSpeed,
   formatTokens,
@@ -33,6 +34,15 @@ describe('durations', () => {
     expect(formatDuration(2_400)).toBe('2.4s');
     expect(formatDuration(60_000)).toBe('1m0s');
     expect(formatDuration(162_000)).toBe('2m42s');
+  });
+
+  it('keeps the live clock at a constant width, so the row cannot jitter', () => {
+    // `3.0s`, not `3s`: a shorter tick would shift every clause after it.
+    expect(formatElapsed(3_000)).toBe('3.0s');
+    expect(formatElapsed(2_900)).toBe('2.9s');
+    expect(formatElapsed(9_400)).toBe('9.4s');
+    expect(formatElapsed(60_000)).toBe('1m00s');
+    expect(formatElapsed(162_000)).toBe('2m42s');
   });
 });
 

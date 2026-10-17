@@ -38,6 +38,23 @@ export function formatDuration(ms: number): string | null {
 }
 
 /**
+ * The running clock under 运行中: ALWAYS one decimal, and always one width.
+ *
+ * A settled duration can drop a zero tail (`3s`) because nothing redraws it. The
+ * live one cannot: at 2.9s the row says `2.9s` and a moment later `3s`, which is a
+ * character shorter and shifts every clause after it by one glyph on every tick.
+ * So the live clock keeps `.0`, and pads the seconds past a minute for the same
+ * reason.
+ */
+export function formatElapsed(ms: number): string | null {
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const seconds = ms / 1_000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)}m${String(whole % 60).padStart(2, '0')}s`;
+}
+
+/**
  * `20 tok/s`, or `null` while there is no window to divide by.
  *
  * A WINDOW SHORTER THAN 50 ms IS NOT A MEASUREMENT. Some providers (and any
