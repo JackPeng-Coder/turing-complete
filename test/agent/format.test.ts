@@ -46,6 +46,12 @@ describe('speed', () => {
     expect(formatSpeed(0, 2_000)).toBeNull();
     expect(formatSpeed(40, 0)).toBeNull();
   });
+
+  it('says nothing when the window is too short to measure', () => {
+    // A buffered answer collapses the decode window: 40 tokens in 20 ms would
+    // print 2000 tok/s, which is the transport talking, not the model.
+    expect(formatSpeed(40, 20)).toBeNull();
+  });
 });
 
 describe('cache-hit share', () => {

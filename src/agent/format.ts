@@ -37,9 +37,17 @@ export function formatDuration(ms: number): string | null {
   return `${Math.floor(whole / 60)}m${whole % 60}s`;
 }
 
-/** `20 tok/s`, or `null` while there is no window to divide by. */
+/**
+ * `20 tok/s`, or `null` while there is no window to divide by.
+ *
+ * A WINDOW SHORTER THAN 50 ms IS NOT A MEASUREMENT. Some providers (and any
+ * buffering proxy) hand the whole answer over in one burst, so the decode window
+ * collapses to a few milliseconds and the division reports tens of thousands of
+ * tokens a second that the model never produced. Below the floor the clause is
+ * left out rather than printing a number that is an artefact of the transport.
+ */
 export function formatSpeed(tokens: number, ms: number): string | null {
-  if (!Number.isFinite(tokens) || !Number.isFinite(ms) || tokens <= 0 || ms <= 0) return null;
+  if (!Number.isFinite(tokens) || !Number.isFinite(ms) || tokens <= 0 || ms < 50) return null;
   return `${Math.max(1, Math.round(tokens / (ms / 1_000)))} tok/s`;
 }
 
