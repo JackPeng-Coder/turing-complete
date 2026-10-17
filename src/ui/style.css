@@ -27,12 +27,12 @@
    round because its POINT carries the value (see `.bit`). A circle that means
    something survives; a 10px corner radius that means nothing does not.
 
-   THE BOARD IS FULL BLEED. The canvas fills the whole stage and every panel
-   floats over it as an overlay, which is how the original composes its board:
-   the circuit runs under the clock card and the test panel rather than being
-   boxed in beside them. Overlays are `pointer-events: none` containers with
-   interactive cards inside, so a click in the gap between two panels reaches the
-   board underneath. */
+   THE WORKBENCH IS DOCKED. The board is the document in the middle, the parts
+   tray and the component library are a sidebar on its left, the assistant is a
+   sidebar on its right, the level's cases and the programming bench are a panel
+   under it, and the activity rail at the far left says which view the first
+   sidebar is showing. Every panel is in flow: a tool beside the board rather than
+   a translucent layer over it, so no panel can cover a wire being drawn. */
 :root {
   color-scheme: dark;
   /* Two faces, two jobs. Monospace is the instrument -- every label, every
@@ -67,13 +67,15 @@
   --text: #d7e6f5;
   --text-muted: #6b8aa8;
 
-  /* Height of the bottom test panel. The parts panel above it has to leave
-     exactly this much room, so both read it from here rather than guessing. The
-     panel is one row per pin and two rows per output pin -- four inputs and four
-     outputs is twelve rows, the tallest shape in the game -- so it is worth
-     three tenths of the board. It still scrolls when a level has more pins than
-     this holds. */
-  --test-h: clamp(150px, 30vh, 300px);
+  /* The docks' own measurements. The sidebars have fixed widths -- the parts
+     tray needs a name plus a hint per row, and the conversation needs a line
+     long enough to read -- while the board takes whatever is left. */
+  --primary-w: 252px;
+  --secondary-w: 348px;
+  /* Height of the bottom panel. It holds four tabs: the level's cases, the
+     program, the debugger, and the I/O readout, and it is worth three tenths of
+     the workbench. It still scrolls when a level has more pins than this holds. */
+  --panel-h: clamp(180px, 34vh, 340px);
 
   /* THE SIGNATURE: a scale of 1px ticks. It replaces the drop shadow as the
      thing that finishes an edge, and it is used in exactly the two places where
@@ -240,16 +242,147 @@ button { font-family: inherit; }
    coordinates. */
 .board { display: block; width: 100%; height: 100%; background: var(--void); touch-action: none; cursor: crosshair; }
 
-/* Floating panels. The container takes no pointer events so the board stays
-   clickable through the gaps. */
+/* The one floating thing left: the agent's settings modal. */
 .overlay { position: absolute; pointer-events: none; z-index: 2; }
 .overlay > * { pointer-events: auto; }
-.overlay-left { top: 12px; left: 12px; width: 204px; display: flex; flex-direction: column; gap: 6px; }
-/* The tool column: two 46px cells wide, and everything that belongs to the tools
-   -- the components panel under them -- takes that same width, so the column
-   reads as one instrument rather than a grid with a scrap of paper beneath it. */
-.overlay-tools { top: 12px; left: 228px; width: 98px; }
-.overlay-tools .blueprints { margin-top: 10px; }
+
+/* -------------------------------------------------------------- workbench -- */
+/* Five docks. The rail and both sidebars run the full height; the bottom panel
+   sits under the editor only, the way a terminal does in a code editor. */
+.workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 48px var(--primary-w) minmax(0, 1fr) var(--secondary-w);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "activity primary editor secondary"
+    "activity primary panel secondary";
+}
+.workspace.secondary-collapsed { grid-template-columns: 48px var(--primary-w) minmax(0, 1fr) 0; }
+.workspace.secondary-collapsed .sidebar-secondary { display: none; }
+.activity {
+  grid-area: activity;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0;
+  background: var(--slab);
+  border-right: 1px solid var(--hair);
+}
+.activity-btn {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.activity-btn:hover { color: var(--hot); border-color: var(--hair-lit); }
+.activity-btn svg { width: 20px; height: 20px; display: block; }
+.activity-btn[hidden] { display: none; }
+.activity-slot { display: flex; flex-direction: column; gap: 2px; }
+.sidebar {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--slab);
+  overflow: hidden;
+}
+.sidebar-primary { grid-area: primary; border-right: 1px solid var(--hair); }
+.sidebar-secondary { grid-area: secondary; border-left: 1px solid var(--hair); }
+.sidebar-tabs { flex: 0 0 auto; display: flex; gap: 1px; border-bottom: 1px solid var(--hair); }
+.sidebar-tab {
+  flex: 1 1 auto;
+  padding: 7px 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  cursor: pointer;
+}
+.sidebar-tab[aria-pressed='true'] { color: var(--neon); border-bottom-color: var(--neon); }
+.sidebar-tab:hover { color: var(--text); }
+.sidebar-section { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.sidebar-section[hidden] { display: none; }
+.editor { grid-area: editor; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.editor-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--slab);
+  border-bottom: 1px solid var(--hair);
+}
+.editor-tools .tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.bottom-panel {
+  grid-area: panel;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--slab);
+  border-top: 1px solid var(--hair-lit);
+}
+.panel-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  border-bottom: 1px solid var(--hair);
+}
+.panel-tab {
+  padding: 5px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+}
+.panel-tab[aria-pressed='true'] { color: var(--neon); border-bottom-color: var(--neon); }
+.panel-tab:hover { color: var(--text); }
+.panel-tab[hidden] { display: none; }
+.panel-views { flex: 1 1 auto; min-height: 0; height: var(--panel-h); overflow: hidden; }
+.bottom-panel.collapsed .panel-views { display: none; }
+.panel-view { height: 100%; min-height: 0; overflow: auto; }
+.panel-view[hidden] { display: none; }
+.status-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 12px;
+  height: 26px;
+  background: var(--slab);
+  border-top: 1px solid var(--hair);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.status-bar .shell-status { padding-left: 0; max-width: none; flex: 1 1 auto; }
+.status-bar .shell-metrics { flex: 0 0 auto; }
+/* The I/O readout makes its cards sit side by side in the panel, so the clock
+   and the level's pins are read in one glance rather than scrolled through. */
+.io-panel { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; align-content: flex-start; }
+/* It is a fixed strip under the palette, not a third tab: driving an input bit
+   is part of wiring, so it stays in view while the parts tray does. */
+.sidebar-io {
+  flex: 0 0 auto;
+  max-height: 42%;
+  overflow-y: auto;
+  border-top: 1px solid var(--hair);
+}
 /* TWO COLUMNS, like the tool grid: 98px has no room for a paragraph, so the prose
    spans both cells and the actions split into them. */
 .blueprints {
@@ -318,38 +451,20 @@ button { font-family: inherit; }
 .blueprints-btn:disabled { color: #3b4d5e; cursor: not-allowed; }
 .blueprints-wrap { grid-column: 1 / -1; margin: 0 8px; text-align: left; line-height: 1.3; }
 .blueprints-pick { border: 0; background: transparent; text-align: left; width: 100%; padding: 4px 8px; }
-.blueprints-confirm { border-color: var(--hot); color: var(--hot); }.overlay-parts { top: 12px; right: 12px; bottom: calc(var(--test-h) + 12px); width: 218px; }
-.overlay-tests { left: 0; right: 0; bottom: 0; }
-/* The chevron rides just above the test panel. Because its `bottom` is measured
-   from `--test-h`, collapsing the panel carries the button down with it. */
-.overlay-toggle { left: 14px; bottom: calc(var(--test-h) + 6px); }
-/* The programming bench: the assembly editor and the debugger, right of centre.
-   It clears the parts tray instead of covering it, and stops above the test panel
-   exactly as the tray does. Mounted only while the level grades a program the
-   player wrote -- see the panel rules near the end of this file. */
-.overlay-bench {
-  top: 12px;
-  right: 244px;
-  bottom: calc(var(--test-h) + 12px);
-  width: min(430px, 38vw);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  overflow-y: auto;
-}
-.board-stage.collapsed { --test-h: 0px; }
-/* `box-sizing: border-box` floors a zero height at the padding, so a collapsed
-   panel would still show a strip of itself. The padding has to go with the
-   height. */
-.board-stage.collapsed .truth-table { padding: 0; border-width: 0; overflow: hidden; }
+.blueprints-confirm { border-color: var(--hot); color: var(--hot); }
+/* The bottom panel's chevron: the panel takes three tenths of the workbench, and
+   a player wiring a big circuit wants that height back. */
 .panel-toggle {
-  width: 40px;
-  height: 22px;
-  border: 1px solid var(--hair);
-  background: var(--slab);
+  margin-left: auto;
+  align-self: center;
+  margin-right: 6px;
+  width: 30px;
+  height: 20px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-muted);
   font-family: inherit;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1;
   cursor: pointer;
 }
@@ -364,9 +479,9 @@ button { font-family: inherit; }
 .palette,
 .truth-table,
 .blueprints { background: var(--slab); }
-/* The components panel carries a border like a card, but not the same one: it sits
-   under the tool grid rather than beside it, so its top edge is shared with the
-   grid's last row (see `.overlay-tools .blueprints`). */
+/* The components panel carries a border like a card, but not the same one: it is
+   the primary sidebar's second view rather than a card under the palette, so its
+   edge is the sidebar's own hairline. */
 .card,
 .blueprints { border: 1px solid var(--hair); }
 .card-head {
@@ -564,7 +679,7 @@ button { font-family: inherit; }
    is measured against what the level asked for. */
 .truth-table {
   position: relative;
-  height: var(--test-h);
+  height: 100%;
   padding: 16px 24px 18px;
   overflow: auto;
   text-align: center;
@@ -652,16 +767,13 @@ button { font-family: inherit; }
 .truth-table th { color: var(--text-muted); font-weight: 500; font-size: 12px; }
 
 /* ------------------------------------------------------ programming bench -- */
-/* THE EDITOR AND THE DEBUGGER, in one column over the board's right half.
+/* THE EDITOR AND THE DEBUGGER, one per tab in the bottom panel.
 
-   The role of the `汇编 IDE` row in the spec's UI table, and the reason it is a
-   column of its own: the board screen is where a program is watched, so the text
-   and the machine's state sit over the circuit rather than on a screen of their
-   own. It is mounted only while the level grades a program the player wrote
-   (`levelExpectsProgram`), so levels 1-49 keep the board they have always had.
-
-   The column's own geometry is at `.overlay-bench` with the other overlays; what
-   follows is the two cards it holds. */
+   The role of the `汇编 IDE` row in the spec's UI table: the board screen is where
+   a program is watched, so the text and the machine's state sit under the circuit
+   rather than on a screen of their own. They are mounted only while the level
+   grades a program the player wrote (`levelExpectsProgram`), so levels 1-49 keep
+   the board they have always had. */
 .ide, .debug {
   display: flex;
   flex-direction: column;
@@ -1094,33 +1206,10 @@ button { font-family: inherit; }
 .briefing button:hover { background: var(--hot); color: var(--void); }
 
 /* ----------------------------------------------------------------- the agent --
-   The conversation lives in the gap between the tool column (which ends at 326px)
-   and the middle of the board, and it is a floating card like every other panel:
-   closed, the board keeps its width; open, it is on top of it. The column is a
-   flex box down to the test panel so the log scrolls while the composer stays put. */
-.overlay-agent {
-  top: 12px;
-  left: 336px;
-  bottom: calc(var(--test-h) + 12px);
-  width: min(400px, 40vw);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-}
-.agent-toggle {
-  border: 1px solid var(--hot);
-  background: var(--slab);
-  color: var(--hot);
-  font-family: inherit;
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  padding: 6px 10px;
-  cursor: pointer;
-}
-.agent-toggle:hover { background: var(--slab-lit); }
-/* Not set up is a warning, not an error: the game is fully playable without it. */
-.agent-toggle-warn { border-color: var(--amber); color: var(--amber); }
+   The conversation is the secondary sidebar's whole content. Its rail button is
+   styled with the other rail buttons; the warning colour is the one thing it adds
+   to itself, because not being set up is a fact about the assistant. */
+.agent-toggle-warn { color: var(--amber); }
 .agent-card {
   display: flex;
   flex-direction: column;
@@ -1241,6 +1330,7 @@ button { font-family: inherit; }
    would be a card nobody can answer: the question has to be the topmost thing on
    screen, and the briefing is still there to read once it is answered. */
 .overlay-agent-setup {
+  position: fixed;
   inset: 0;
   z-index: 15;
   display: flex;
@@ -1266,6 +1356,22 @@ button { font-family: inherit; }
 .agent-field small { font-size: 10px; line-height: 1.4; color: var(--text-muted); }
 .agent-note { margin: 0; font-size: 10px; line-height: 1.5; color: var(--text-muted); }
 .agent-setup .agent-actions { padding-top: 2px; }
+
+/* The panel's own line about a missing configuration: a fact, not a dialog. */
+.agent-setup-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--hair);
+  background: var(--slab);
+  color: var(--amber);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.agent-setup-hint[hidden] { display: none; }
+.agent-setup-hint span { flex: 1 1 auto; }
+.agent-setup-hint button { flex: 0 0 auto; white-space: nowrap; }
 
 /* Accessibility floor: nothing moves that does not have to. */
 @media (prefers-reduced-motion: reduce) {

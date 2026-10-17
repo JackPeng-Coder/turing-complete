@@ -54,15 +54,17 @@ test('the agent passes a level by talking to a real model', async ({ page }) => 
   });
 
   await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  // The settings are inside the panel now: open it, then open its settings.
+  await page.locator('.agent-toggle').click();
+  await page.locator('.agent-card').getByRole('button', { name: '设置', exact: true }).click();
   const setup = page.locator('.agent-setup');
   const fields = setup.locator('.agent-field input');
   await fields.nth(0).fill('https://api.deepseek.com');
   await fields.nth(1).fill(KEY);
   await fields.nth(2).fill('deepseek-chat');
   await setup.getByRole('button', { name: '保存', exact: true }).click();
-  await page.getByRole('button', { name: '开始' }).click();
 
-  await page.locator('.agent-toggle').click();
   // The exact sentence a real session was given: no detail beyond "do the task".
   await page.locator('.agent-input').fill('帮我完成任务');
   await page.getByRole('button', { name: '发送' }).click();
@@ -106,13 +108,15 @@ test('the agent can place a level’s own connectors under ?dev=1', async ({ pag
   });
 
   await page.goto('/?dev=1');
+  await page.getByRole('button', { name: '开始' }).click();
+  await page.locator('.agent-toggle').click();
+  await page.locator('.agent-card').getByRole('button', { name: '设置', exact: true }).click();
   const setup = page.locator('.agent-setup');
   const fields = setup.locator('.agent-field input');
   await fields.nth(0).fill('https://api.deepseek.com');
   await fields.nth(1).fill(KEY);
   await fields.nth(2).fill('deepseek-chat');
   await setup.getByRole('button', { name: '保存', exact: true }).click();
-  await page.getByRole('button', { name: '开始' }).click();
 
   // The tray itself is the first thing that was missing.
   await expect(page.getByRole('button', { name: '关卡输入', exact: true })).toBeVisible();

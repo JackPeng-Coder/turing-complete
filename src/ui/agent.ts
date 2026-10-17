@@ -14,10 +14,11 @@
  * has finished the row is the record of it -- so the result line is kept, not
  * cleared.
  *
- * THE SETTINGS CARD OPENS ITSELF ON A FIRST RUN, and can be dismissed. A player
- * who only wants to build circuits by hand must not be locked out of the game by
- * a feature they have not set up; the panel says what is missing and stays out of
- * the way until 发送 is pressed.
+ * THE PANEL REPORTS A MISSING CONFIGURATION; IT DOES NOT INTERRUPT FOR ONE. A
+ * first run used to open the settings over the board, which put a question the
+ * player had not asked for in front of the thing they came to do. Now the panel
+ * carries one line -- 还没有配置 API -- with a button to the settings, and the
+ * board is never covered. The game plays fine without any of it.
  *
  * STREAMING TEXT IS APPENDED, NOT RE-RENDERED. The log is rebuilt whenever its
  * shape changes and a text delta is one `appendData` on a node that already
@@ -25,18 +26,16 @@
  * whole conversation sixty times a second.
  */
 import {
-  STEP_CHOICES,
   clearAgentConfig,
   emptyConfig,
   isConfigured,
-  markSetupSeen,
   saveAgentConfig,
-  setupSeen,
   type AgentConfig,
 } from '../agent/config';
 import type { AgentHost } from '../agent/host';
 import { runAgent, type AgentEvent } from '../agent/loop';
 import type { WireMessage } from '../agent/wire';
+import { iconSvg } from './shell';
 
 /** One tool call, as a row in the log. */
 interface ToolRow {
@@ -70,6 +69,14 @@ type Entry =
   | AgentEntry
   | { readonly kind: 'notice'; readonly text: string; readonly tone: 'info' | 'error' };
 
+/** The two places a panel lives in the workbench: its rail button and its dock. */
+export interface AgentPanelHosts {
+  /** The activity rail, where the button that opens the panel goes. */
+  readonly toggle: HTMLElement;
+  /** The secondary sidebar, where the conversation is docked. */
+  readonly sidebar: HTMLElement;
+}
+
 export interface AgentPanelOptions {
   readonly host: AgentHost;
   /** The settings as they stand, or `null` when the player has never set them. */
@@ -78,6 +85,8 @@ export interface AgentPanelOptions {
   readonly onSave: (config: AgentConfig) => void;
   /** Called when the player asks for the key to be forgotten. */
   readonly onClear: () => void;
+  /** Called when the panel claims or gives back its dock. */
+  readonly onVisibility?: (open: boolean) => void;
   /** Injectable so a test can run a scripted turn without a network. */
   readonly run?: typeof runAgent;
 }
@@ -85,10 +94,12 @@ export interface AgentPanelOptions {
 export interface AgentPanel {
   /** Redraws the log, the buttons and the status line. */
   render(): void;
-  /** Opens the settings card (the boot path uses it on a first run). */
+  /** Opens the settings card (the 设置 button and a missing configuration use it). */
   openSettings(): void;
-  /** Opens the conversation card, e.g. from a keyboard shortcut. */
+  /** Opens the conversation card, e.g. from the rail. */
   open(): void;
+  /** Gives the dock back to the board. */
+  close(): void;
 }
 
 /** A tool result as one readable line, rather than the raw JSON envelope. */
@@ -112,7 +123,7 @@ function button(label: string, className: string): HTMLButtonElement {
   return element;
 }
 
-export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions): AgentPanel {
+export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptions): AgentPanel {
   const run = options.run ?? runAgent;
   const entries: Entry[] = [];
   /** The conversation as the API sees it: no system message, which the loop adds. */
@@ -130,15 +141,21 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
   let busy = false;
   let status = '';
 
-  const overlay = document.createElement('div');
-  overlay.className = 'overlay overlay-agent';
-
-  const toggle = button('Agent', 'agent-toggle');
-  toggle.setAttribute('aria-label', '打开或关闭 Agent');
+  // THE RAIL BUTTON IS ICON-ONLY, because the rail is 48px wide: its accessible
+  // name and its warning class are what say "not configured yet", and the panel
+  // itself is where that fact is explained.
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'activity-btn agent-toggle';
+  toggle.setAttribute('aria-label', 'Agent');
+  toggle.title = 'Agent';
+  toggle.append(iconSvg('agent'));
+  hosts.toggle.append(toggle);
 
   const card = document.createElement('section');
   card.className = 'agent-card';
   card.hidden = true;
+  hosts.sidebar.append(card);
 
   const head = document.createElement('header');
   head.className = 'agent-head';
@@ -168,12 +185,25 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
   actions.append(sendBtn, stopBtn, statusLine);
   compose.append(input, actions);
 
-  card.append(head, log, compose);
+  // THE PANEL'S OWN ANSWER TO "NOTHING IS CONFIGURED": a line, not a dialog.
+  // It sits above the composer, because that is where the player is about to
+  // find out that sending cannot work, and it says what to do with one button.
+  const setupHint = document.createElement('div');
+  setupHint.className = 'agent-setup-hint';
+  const setupHintText = document.createElement('span');
+  setupHintText.textContent = '还没有配置 API：填好地址、key 和模型才能发送。';
+  const setupHintOpen = button('打开设置', 'agent-btn agent-btn-quiet');
+  setupHintOpen.addEventListener('click', () => openSettings());
+  setupHint.append(setupHintText, setupHintOpen);
+  setupHint.hidden = true;
+
+  card.append(head, log, setupHint, compose);
 
   // -- the settings card, which is a card of its own so it can stand alone -----
-  // THE CARD IS NEVER HIDDEN ON ITS OWN: the overlay around it is what closes it,
-  // and a card that could be hidden inside a live overlay would be a modal that
-  // covers the screen while showing nothing to answer.
+  // THE SETTINGS CARD IS A MODAL OF ITS OWN. The conversation card's own `hidden`
+  // now means "the dock is closed", so the settings cannot ride on it; they get
+  // their own overlay, their own `hidden`, and the body as their parent -- a
+  // fixed overlay inside a collapsed sidebar could never be seen.
   const setup = document.createElement('section');
   setup.className = 'agent-card agent-setup';
 
@@ -202,23 +232,7 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
 
   const baseUrl = field('API 地址', '例如 https://api.deepseek.com，也可以直接填完整的 chat/completions 地址', 'text');
   const apiKey = field('API key', '只保存在这台浏览器的 localStorage 里，同源的脚本读得到；换机器要重填', 'password');
-  const model = field('模型', '例如 deepseek-chat', 'text');
-
-  const paceWrap = document.createElement('label');
-  paceWrap.className = 'agent-field';
-  const paceLabel = document.createElement('span');
-  paceLabel.textContent = '搭建速度';
-  const pace = document.createElement('select');
-  for (const choice of STEP_CHOICES) {
-    const option = document.createElement('option');
-    option.value = String(choice.ms);
-    option.textContent = choice.label;
-    pace.append(option);
-  }
-  const paceNote = document.createElement('small');
-  paceNote.textContent = '每条操作之间停顿多久，好让你看清每一步';
-  paceWrap.append(paceLabel, pace, paceNote);
-  setup.append(paceWrap);
+  const model = field('模型', '例如 deepseek-flash', 'text');
 
   const setupActions = document.createElement('div');
   setupActions.className = 'agent-actions';
@@ -232,10 +246,6 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
     '这个游戏没有服务器：请求由浏览器直接发给上面这个地址。对方必须允许跨域，否则会连不上（DeepSeek、Moonshot、智谱都允许）。';
   setup.append(setupActions, setupNote);
 
-  overlay.append(toggle, card);
-  // The settings card is a MODAL in its own overlay rather than another card in
-  // the column: on a first run there is nothing else to do with the panel, and a
-  // card that dims the board says "this one thing first" without a dialog API.
   const setupOverlay = document.createElement('div');
   setupOverlay.className = 'overlay overlay-agent-setup';
   setupOverlay.append(setup);
@@ -243,7 +253,7 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
   // and takes the pointer; a hidden card inside a live overlay is a screen that
   // looks closed and swallows every click on the board behind it.
   setupOverlay.hidden = true;
-  stage.append(overlay, setupOverlay);
+  document.body.append(setupOverlay);
 
   // ------------------------------------------------------------------ render --
 
@@ -347,8 +357,11 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
     }
     log.scrollTop = log.scrollHeight;
 
-    toggle.textContent = ready ? 'Agent' : 'Agent ·未配置';
+    const name = ready ? 'Agent' : 'Agent · 未配置';
+    toggle.setAttribute('aria-label', name);
+    toggle.title = name;
     toggle.classList.toggle('agent-toggle-warn', !ready);
+    setupHint.hidden = ready;
     sendBtn.disabled = busy;
     stopBtn.disabled = !busy;
     input.disabled = busy;
@@ -483,29 +496,37 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
   };
 
   const openSettings = (): void => {
+    // The settings belong to the panel, so asking for them also claims the dock.
+    open();
     const config = options.config() ?? emptyConfig();
     baseUrl.value = config.baseUrl;
     apiKey.value = config.apiKey;
     model.value = config.model;
-    pace.value = String(config.stepMs);
     setupOverlay.hidden = false;
     baseUrl.focus();
   };
 
+  const setVisible = (visible: boolean): void => {
+    card.hidden = !visible;
+    options.onVisibility?.(visible);
+  };
+
   const open = (): void => {
     setupOverlay.hidden = true;
-    card.hidden = false;
+    setVisible(true);
     render();
     input.focus();
   };
 
+  const close = (): void => {
+    setVisible(false);
+  };
+
   toggle.addEventListener('click', () => {
     if (card.hidden) open();
-    else card.hidden = true;
+    else close();
   });
-  closeBtn.addEventListener('click', () => {
-    card.hidden = true;
-  });
+  closeBtn.addEventListener('click', close);
   settingsBtn.addEventListener('click', openSettings);
   sendBtn.addEventListener('click', send);
   stopBtn.addEventListener('click', () => {
@@ -525,7 +546,6 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
       baseUrl: baseUrl.value.trim(),
       apiKey: apiKey.value.trim(),
       model: model.value.trim(),
-      stepMs: Number(pace.value),
     };
     if (!isConfigured(config)) {
       setupNote.textContent = '地址、key、模型都要填。';
@@ -539,8 +559,8 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
     render();
   });
   laterBtn.addEventListener('click', () => {
-    // Remembered, so this is a first-run question rather than an every-run one.
-    markSetupSeen();
+    // Closing without saving: the panel keeps its own line about what is
+    // missing, and the game keeps playing.
     setupOverlay.hidden = true;
     render();
   });
@@ -552,12 +572,9 @@ export function mountAgentPanel(stage: HTMLElement, options: AgentPanelOptions):
   });
 
   render();
-  // A FIRST RUN ASKS FOR THE API INFORMATION, ONCE. The panel decides, not the
-  // caller: "there is no configuration" is the panel's own fact (it is the same
-  // `isConfigured` the send button asks), and two places deciding it is one place
-  // too many. `setupSeen` is what keeps it from being asked on every reload --
-  // the card takes the pointer while it is up, so an unanswered question that
-  // came back forever would be an unplayable game.
-  if (!isConfigured(options.config()) && !setupSeen()) openSettings();
-  return { render, openSettings, open };
+  // NOTHING OPENS ITSELF. The settings are one button away, and a missing
+  // configuration is reported inside the panel, so a first run lands on the
+  // board -- the thing the player came for -- rather than on a question about an
+  // optional feature.
+  return { render, openSettings, open, close };
 }

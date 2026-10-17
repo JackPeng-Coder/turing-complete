@@ -13,18 +13,15 @@ export interface ShellOptions {
 }
 
 /**
- * The top bar: which level is open, what the player has armed in the palette,
- * what the circuit costs, and the way back to the chapter map.
+ * The top bar: which level is open and the way back to the chapter map.
  *
- * THE READOUT IS TWO FACTS, not one. `metrics` is measured on every edit -- the
- * original shows its gate and delay counters while a circuit is being drawn, and
- * so does this -- while the star or `未通过` suffix only appears once a test run
- * has produced it. A bar that said `未通过` after every wire judged a circuit
- * that was still being built.
+ * THE COST READOUT IS NOT HERE ANY MORE. It moved to the status bar along with
+ * the application's own message when the chrome became a workbench of docks: the
+ * bar says WHERE you are, the last row says what the thing on the board costs.
  *
- * It is the first flex child of the app container so the screens below it get
+ * It is the first flex child of the app container so the workbench below it gets
  * the remaining height. The level name is the original's rose, centred, with the
- * icon buttons left and the gate/delay readout right -- the original's own
+ * icon buttons left and the DEV light and hint right -- the original's own
  * arrangement, and the reason the bar is a three-column grid rather than a row:
  * a centred title in a flex row drifts as the two ends change width.
  *
@@ -47,16 +44,12 @@ export function mountShell(
   const mapButton = iconButton('章节地图', 'menu');
   mapButton.addEventListener('click', () => options.onOpenMap());
 
-  const status = document.createElement('span');
-  status.className = 'shell-status';
-
   left.append(mapButton);
   if (options.onShowBrief) {
     const briefButton = iconButton('关卡说明', 'info');
     briefButton.addEventListener('click', () => options.onShowBrief?.());
     left.append(briefButton);
   }
-  left.append(status);
 
   const title = document.createElement('h1');
   title.className = 'shell-title';
@@ -72,8 +65,6 @@ export function mountShell(
 
   const right = document.createElement('div');
   right.className = 'shell-right';
-  const metrics = document.createElement('span');
-  metrics.className = 'shell-metrics';
   const hintButton = iconButton('提示', 'bulb');
   // THE DEV LIGHT. A mode that opens every gate has to be impossible to forget:
   // a player who wandered into `?dev=1` would otherwise see a game with all
@@ -87,7 +78,7 @@ export function mountShell(
   dev.hidden = true;
   dev.title = '开发者模式：所有关卡已解锁 · 点击退出';
   dev.addEventListener('click', () => options.onExitDev?.());
-  right.append(dev, metrics, hintButton);
+  right.append(dev, hintButton);
 
   const hint = document.createElement('p');
   hint.className = 'shell-hint';
@@ -102,7 +93,7 @@ export function mountShell(
   root.prepend(bar);
 
   const render = (): void => {
-    const { level, lastGrade, metrics: measured, status: message, dev: devOn } = store.get();
+    const { level, dev: devOn } = store.get();
     dev.hidden = !devOn;
     // THE SANDBOX HAS NO ADDRESS. It is not a chapter and has no index, so
     // `0-0` -- the numbers its spec carries as placeholders -- would be an
@@ -111,9 +102,36 @@ export function mountShell(
     // beside it stays where every screen's name is.
     index.textContent = isSandbox(level) ? '沙盒' : `${level.chapter}-${level.index}`;
     name.textContent = level.name.zh;
-    status.textContent = message ? message.zh : '';
     if (!hint.hidden) hint.textContent = level.hint.zh;
+  };
+  store.subscribe(render);
+  render();
+  return { render };
+}
 
+/**
+ * The status bar: cost and verdict along the bottom, and the application's own
+ * message beside them.
+ *
+ * WHY IT IS NOT IN THE TOP BAR. The top bar says where you are -- the level's
+ * address and name -- while this line says what the thing on the board costs.
+ * A workbench puts the measured numbers where every code editor puts them: on
+ * the last row, under everything, at the size a readout wants rather than the
+ * size a title wants.
+ */
+export function mountStatus(root: HTMLElement, store: Store<AppState>): { render(): void } {
+  const bar = document.createElement('footer');
+  bar.className = 'status-bar';
+  const status = document.createElement('span');
+  status.className = 'shell-status';
+  const metrics = document.createElement('span');
+  metrics.className = 'shell-metrics';
+  bar.append(status, metrics);
+  root.append(bar);
+
+  const render = (): void => {
+    const { lastGrade, metrics: measured, status: message } = store.get();
+    status.textContent = message ? message.zh : '';
     if (!measured) {
       metrics.textContent = '尚未评测';
       metrics.style.color = THEME.textMuted;
@@ -173,7 +191,11 @@ export type IconName =
    */
   | 'wrap'
   | 'download'
-  | 'upload';
+  | 'upload'
+  /** The docks: the assistant, a program, and the settings gear. */
+  | 'agent'
+  | 'terminal'
+  | 'settings';
 
 /** Stroke-only 24x24 glyphs, so a button's colour drives the whole icon. */
 const ICON_PATHS: Record<IconName, string> = {
@@ -195,6 +217,9 @@ const ICON_PATHS: Record<IconName, string> = {
   wrap: 'M4 4h16v16H4zM8 9h8v6H8z',
   download: 'M12 4v11M8 11l4 4 4-4M5 20h14',
   upload: 'M12 16V5M8 9l4-4 4 4M5 20h14',
+  agent: 'M4 6h16v9H9l-5 4z',
+  terminal: 'M4 5h16v14H4zM7 10l3 2-3 2',
+  settings: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.4 2.1a7 7 0 0 0-1.7 1l-2.3-1-2 3.4L5 10a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.1h5l.4-2.1a7 7 0 0 0 1.7-1l2.3 1 2-3.4L19 13a7 7 0 0 0 .1-1z',
 };
 
 export function iconSvg(name: IconName): SVGSVGElement {

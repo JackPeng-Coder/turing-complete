@@ -18,7 +18,7 @@ export interface IoPanelOptions {
 }
 
 /**
- * The left-hand readout: the clock above, the level's input and output state
+ * The sidebar's readout: the clock above, the level's input and output state
  * below -- the original's own two cards, in its own order.
  *
  * IT IS ALSO THE INPUT CONTROL. Clicking a bit of a level input flips that bit
@@ -36,7 +36,7 @@ export function mountIoPanel(
   options: IoPanelOptions,
 ): { render(): void } {
   const wrap = document.createElement('div');
-  wrap.className = 'overlay overlay-left';
+  wrap.className = 'io-panel';
   const clock = mountClock(options);
   wrap.append(clock.element);
 

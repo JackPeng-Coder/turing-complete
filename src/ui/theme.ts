@@ -4,8 +4,9 @@
  * THE PALETTE IS NO LONGER THE ORIGINAL'S. It was sampled from reference
  * screenshots -- `#2e2b3c` chrome, `#353245` cards, `#364765` paper, `#ef9a23`
  * wires -- and the repository owner has since asked for a brighter, cyberpunk
- * red/green/blue scheme instead. The LAYOUT is still the original's: the same
- * full-bleed board, the same floating cards, the same pin-major test panel.
+ * red/green/blue scheme instead. The layout has also moved on: it is a workbench
+ * of docks now (see `style.css`), so the board is framed by panels rather than
+ * floating under them; the pin-major test panel is unchanged.
  *
  * EVERY COLOUR HERE OBEYS ONE RULE:
  *
@@ -18,7 +19,7 @@
  * which is a claim the app cannot make before it has run anything.
  */
 export const THEME = {
-  /** The near-black the board floats on, behind the floating panels. */
+  /** The near-black behind the board and the docks. */
   backdrop: '#04070d',
   /**
    * Board paper: a deep navy, dark enough for a lit wire to glow against.
@@ -41,9 +42,9 @@ export const THEME = {
   /** The snap grid's major line, drawn over the weave: a hint, not a fence. */
   boardGrid: '#14304c',
 
-  /** Top bar and the bottom test panel. Mirrors `--slab` in `style.css`. */
+  /** The chrome slabs: the top bar, the sidebars and the bottom panel. Mirrors `--slab` in `style.css`. */
   chrome: '#080e18',
-  /** Floating cards and tool buttons. Mirrors `--slab-lit`. */
+  /** Cards and tool buttons. Mirrors `--slab-lit`. */
   panel: '#0f1a28',
   panelHover: '#16273a',
   /** The hairline every panel is bounded by. Mirrors `--hair`. */

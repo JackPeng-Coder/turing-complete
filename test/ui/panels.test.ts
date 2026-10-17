@@ -11,7 +11,7 @@ import type { LevelSpec } from '../../src/levels/spec';
 import { grade } from '../../src/levels/grader';
 import { mountPalette } from '../../src/ui/palette';
 import { mountTruthTable } from '../../src/ui/truthTable';
-import { mountShell } from '../../src/ui/shell';
+import { mountShell, mountStatus } from '../../src/ui/shell';
 import { mountIoPanel, type IoPanelOptions } from '../../src/ui/ioPanel';
 import { mountToolbar, type ToolbarState } from '../../src/ui/toolbar';
 import { mountMap } from '../../src/ui/map';
@@ -367,6 +367,7 @@ describe('shell bar', () => {
     const store = makeStore('ch1-04-and-gate');
     const root = document.createElement('div');
     mountShell(root, store, { onOpenMap: () => {} });
+    mountStatus(root, store);
     expect(root.textContent).toContain('与门');
     expect(root.textContent).toContain('尚未评测');
 

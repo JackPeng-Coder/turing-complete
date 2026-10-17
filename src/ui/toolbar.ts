@@ -51,7 +51,8 @@ export interface ToolbarState {
 }
 
 /**
- * The tool buttons down the left, in the original's two-column grid.
+ * The tool buttons in the editor's action strip, and the strip wraps rather than
+ * scrolling: a control nobody can see is a control that does not exist.
  *
  * Every button here does something. The original's grid also carries a
  * region-select toggle, a rename pencil and a breakpoint recorder; this replica
@@ -69,7 +70,7 @@ export function mountToolbar(
   options: ToolbarOptions,
 ): { render(state: ToolbarState): void } {
   const wrap = document.createElement('div');
-  wrap.className = 'overlay overlay-tools';
+  wrap.className = 'editor-tools';
   const grid = document.createElement('div');
   grid.className = 'tools';
   wrap.append(grid);

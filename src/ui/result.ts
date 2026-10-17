@@ -25,7 +25,7 @@ export interface ResultOptions {
  *
  * A trophy appears for three stars and nothing else does: a level that passed
  * with one star has already been told it can do better by the star count in the
- * top bar, and a badge for every outcome would mean a badge for nothing.
+ * status bar, and a badge for every outcome would mean a badge for nothing.
  */
 export function showResult(
   level: LevelSpec,

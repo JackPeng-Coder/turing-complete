@@ -6,7 +6,6 @@ const CONFIG: AgentConfig = {
   baseUrl: 'https://x.test',
   apiKey: 'sk-test',
   model: 'test-model',
-  stepMs: 0,
 };
 
 /** One `data:` frame of a streamed completion. */

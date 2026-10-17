@@ -71,8 +71,8 @@ towards a working CPU.
   a frame between steps, so each one is visible, and the part just touched wears the selection ring.
   Its edits go through the same command stack as your own, so Ctrl+Z walks back through them, and it
   may place exactly the parts the level's palette is offering you. The key is kept in `localStorage`
-  under `tc.agent.v1` — 设置 can forget it, and the first-run card can be dismissed with 以后再说,
-  because the game plays fine without any of it.
+  under `tc.agent.v1` — 设置 can forget it, the panel says what is missing when it is not set up, and
+  nothing asks at startup, because the game plays fine without any of it.
 
 Chapters 5–7 (the Symphony CPU, functions, the assembly challenges, and the peripherals) are planned but
 not built yet.
@@ -85,6 +85,12 @@ and no rounded corners except the bit arrows, whose roundness carries the value,
 medal, which is a stamped disc rather than a glowing orb. `test/conventions.test.ts` asserts both
 halves of that — no shadow property anywhere, and no radius outside those two.
 
+It is a **workbench**, laid out the way a code editor is: an activity rail on the left, the parts
+tray beside it (with the component library a tab away and the clock/IO readout pinned below), the
+board as the document in the middle, the assistant in a collapsible sidebar on the right, the level's
+cases and the programming bench in a tabbed panel under the board, and the measured cost along the
+bottom in a status bar. Every panel is docked in flow, so a tool never covers a wire being drawn.
+
 Two colour axes, kept apart on purpose:
 
 - **On the board**, green is 1, red is 0, and blue is wider than one bit. That is the value rule
@@ -95,7 +101,7 @@ Two colour axes, kept apart on purpose:
   can never be mistaken for something clickable.
 
 A scale of 1px ticks finishes the two edges where something is *measured* — the cost readout in the
-top bar and the case matrix along the bottom — and appears nowhere else.
+status bar and the case matrix along the bottom — and appears nowhere else.
 
 A part is marked the way a chip is: a short uppercase mnemonic (`NAND`, `MUX`, `ADD`) with its width
 in a corner badge, so `and` and `and8` share a marking and the `8` tells them apart. The palette keeps
@@ -119,8 +125,9 @@ The board's gestures:
 
 ### The agent
 
-The agent panel is opened with the `Agent` button in the gap between the tool column and the middle of
-the board, and it is available on every board screen — an ordinary level, the sandbox, and `?dev=1`.
+The agent is a dock, not a dialog: the `Agent` button in the activity rail claims the secondary sidebar
+(the column closes and gives the board its width back), and the panel is available on every board
+screen — an ordinary level, the sandbox, and `?dev=1`.
 Type what you want in Chinese and press 发送 (Enter sends, Shift+Enter is a newline). While it works,
 each step is a row in the log — `place_part · 在 (160, 160) 放了 与非门（i1）` — and each one is a
 frame on the board: the parts appear one at a time, and the part just touched wears the selection ring

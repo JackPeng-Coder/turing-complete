@@ -33,8 +33,8 @@ await page.waitForTimeout(300);
 await page.screenshot({ path: 'test-results/look-sandbox.png' });
 console.log('shot sandbox');
 
-/** The tool column on its own, so a button's own shape is legible. */
-await page.locator('.overlay-tools').screenshot({
+/** The editor's action strip on its own, so a button's shape is legible. */
+await page.locator('.editor-tools').screenshot({
   path: 'test-results/look-tools.png',
   scale: 'css',
   timeout: 8000,

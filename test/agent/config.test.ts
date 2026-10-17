@@ -2,16 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AGENT_KEY,
   DEFAULT_MODEL,
-  DEFAULT_STEP_MS,
   chatUrl,
   clearAgentConfig,
   emptyConfig,
   isConfigured,
   loadAgentConfig,
-  markSetupSeen,
   normalizeConfig,
   saveAgentConfig,
-  setupSeen,
 } from '../../src/agent/config';
 
 /** A `localStorage` that only exists while a test asks for one. */
@@ -52,9 +49,23 @@ describe('a configuration read back from storage', () => {
         baseUrl: 'https://x.test',
         apiKey: 'sk-1',
         model: 'm',
-        stepMs: 0,
       }),
-    ).toEqual({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm', stepMs: 0 });
+    ).toEqual({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm' });
+  });
+
+  it('ignores fields a previous build stored and this one no longer has', () => {
+    // `stepMs` and `seen` were in the payload before the pace went away and the
+    // first-run card did: a browser configured then must keep its settings.
+    expect(
+      normalizeConfig({
+        version: 1,
+        baseUrl: 'https://x.test',
+        apiKey: 'sk-1',
+        model: 'm',
+        stepMs: 420,
+        seen: true,
+      }),
+    ).toEqual({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm' });
   });
 
   it('refuses another version, a non-object, and a payload with no address or model', () => {
@@ -63,11 +74,6 @@ describe('a configuration read back from storage', () => {
     expect(normalizeConfig([1, 2])).toBeNull();
     expect(normalizeConfig({ version: 1, model: 'm' })).toBeNull();
     expect(normalizeConfig({ version: 1, baseUrl: 'x' })).toBeNull();
-  });
-
-  it('falls back to the default pace rather than trusting a bad number', () => {
-    const config = normalizeConfig({ version: 1, baseUrl: 'x', model: 'm', stepMs: -5 });
-    expect(config?.stepMs).toBe(DEFAULT_STEP_MS);
   });
 });
 
@@ -83,8 +89,8 @@ describe('what counts as set up', () => {
 describe('storing the settings', () => {
   it('round-trips through the store under its own key', () => {
     stubStorage();
-    saveAgentConfig({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm', stepMs: 10 });
-    expect(loadAgentConfig()).toEqual({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm', stepMs: 10 });
+    saveAgentConfig({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm' });
+    expect(loadAgentConfig()).toEqual({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm' });
     expect(globalThis.localStorage.getItem(AGENT_KEY)).toContain('sk-1');
   });
 
@@ -123,47 +129,12 @@ describe('storing the settings', () => {
 });
 
 describe('the default configuration', () => {
-  it('names a real model and a sane pace, with no key', () => {
+  it('names the project’s own model, with no key', () => {
     const config = emptyConfig();
-    expect(config.model).toBe(DEFAULT_MODEL);
-    expect(config.stepMs).toBe(DEFAULT_STEP_MS);
+    expect(DEFAULT_MODEL).toBe('deepseek-flash');
+    expect(config.model).toBe('deepseek-flash');
+    expect(config.baseUrl).toBe('https://api.deepseek.com');
     expect(config.apiKey).toBe('');
     expect(isConfigured(config)).toBe(false);
-  });
-});
-
-describe('the first-run question', () => {
-  it('is unanswered until something answers it', () => {
-    stubStorage();
-    expect(setupSeen()).toBe(false);
-    markSetupSeen();
-    expect(setupSeen()).toBe(true);
-  });
-
-  it('is answered by saving the settings as well as by dismissing the card', () => {
-    stubStorage();
-    saveAgentConfig({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm', stepMs: 0 });
-    expect(setupSeen()).toBe(true);
-    expect(loadAgentConfig()).toEqual({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm', stepMs: 0 });
-  });
-
-  it('keeps the settings it was answered alongside', () => {
-    stubStorage();
-    saveAgentConfig({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm', stepMs: 0 });
-    markSetupSeen();
-    expect(loadAgentConfig()?.apiKey).toBe('sk-1');
-  });
-
-  it('replaces a corrupt payload rather than failing to remember', () => {
-    stubStorage({ [AGENT_KEY]: '{not json' });
-    markSetupSeen();
-    expect(setupSeen()).toBe(true);
-    expect(loadAgentConfig()).toBeNull();
-  });
-
-  it('survives having no store at all', () => {
-    vi.stubGlobal('localStorage', undefined);
-    expect(setupSeen()).toBe(false);
-    expect(() => markSetupSeen()).not.toThrow();
   });
 });

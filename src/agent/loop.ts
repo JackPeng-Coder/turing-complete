@@ -8,7 +8,7 @@
  *
  * THERE IS A STEP CAP, AND IT IS A GAME'S CAP, NOT A HARNESS'S. A coding agent
  * can run for a hundred steps because its user is asleep; here the user is
- * watching a board that is being edited at 160 ms a step, so a model that has
+ * watching a board that is being edited a step at a time, so a model that has
  * gone into a loop is not "still working", it is visibly stuck. The cap turns
  * that into a sentence the player can act on.
  *
@@ -235,15 +235,13 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
         return stop('stuck');
       }
       // THE VISIBLE STEP. The command has already been applied and painted by the
-      // host; this is what holds the frame long enough for a person to see which
-      // part appeared (requirement A5). The pace is the player's setting, and
-      // zero means "just do it".
-      if (config.stepMs > 0) {
-        try {
-          await pause(config.stepMs, signal);
-        } catch {
-          return stop('aborted');
-        }
+      // host; one macrotask is what holds the frame long enough for a person to
+      // see which part appeared (requirement A5). There is no pace setting: the
+      // step yields a frame, it does not pause.
+      try {
+        await pause(0, signal);
+      } catch {
+        return stop('aborted');
       }
     }
 

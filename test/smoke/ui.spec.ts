@@ -61,21 +61,15 @@ async function seedProgress(
 }
 
 /**
- * Opens the app and walks past the agent's first-run card.
+ * Opens the app.
  *
- * THE CARD IS A DOOR EVERY FIRST VISIT GOES THROUGH, and every test is a first
- * visit: a Playwright context starts with an empty `localStorage`, so the app
- * asks for API information before the board can be touched, and the card takes
- * the pointer while it is up. Dismissing it in one helper keeps that fact in one
- * place -- and it is the same click a player makes, not a special test path.
+ * NOTHING INTERRUPTS A FIRST VISIT any more -- the agent's settings live inside
+ * its own panel, and are asked for only when the player opens it -- so this is a
+ * plain navigation. It stays a helper because every test goes through the same
+ * door, and a future interruption belongs here rather than in forty call sites.
  */
 async function open(page: Page, url: string): Promise<void> {
   await page.goto(url);
-  const card = page.locator('.agent-setup');
-  if (await card.isVisible()) {
-    await card.getByRole('button', { name: '以后再说' }).click();
-    await expect(card).toBeHidden();
-  }
 }
 
 /** Centre of the board canvas, in page coordinates. */
@@ -826,7 +820,9 @@ test('chapter 3 ends with a level that mounts its program check: level 49', asyn
   await expect(page.getByRole('button', { name: '8 位运算器' })).toBeEnabled();
   await expect(page.getByRole('button', { name: '程序存储器' })).toBeEnabled();
   // And the program check is mounted: an empty board must grade as a failure
-  // rather than as nothing at all, which is what `missing-program` means.
+  // rather than as nothing at all, which is what `missing-program` means. The
+  // check runs the level's own program, not one the player wrote, so there is no
+  // bench here -- its verdict is the cases tab's.
   await expect(page.locator('.truth-table')).toBeVisible();
   await page.screenshot({ path: 'test-results/smoke-ch3-level49-open.png' });
 });
@@ -1146,48 +1142,75 @@ test('the sandbox builds freely, does not grade, and keeps the circuit', async (
 });
 
 /**
- * THE AGENT ASKS ONCE, AND NEVER LOCKS THE GAME.
+ * THE AGENT ASKS IN ITS PANEL, AND NEVER LOCKS THE GAME.
  *
- * The first-run card is the whole of the agent's onboarding: a browser with no
- * `tc.agent.v1` is asked for an address, a key and a model, and it takes the
- * pointer while it is up -- which is why every other test in this file walks past
- * it first. What matters here is the other half: answering it is remembered (a
- * reload goes straight to the board), and a player who dismisses it can still
- * build circuits by hand, with the agent sitting there saying it is not
- * configured yet.
- *
- * Nothing here reaches the network. The send is deliberately made with no
- * settings, which is the one path that must NOT call out: it asks for the
- * settings instead.
+ * There is no first-run card any more: a browser with no `tc.agent.v1` opens on
+ * the board, and the agent's panel carries one line -- 还没有配置 API -- with the
+ * button that opens the settings. This test is that shape: nothing covers the
+ * level, the panel is where the fact lives, and a send with no settings asks for
+ * them rather than calling anything (the one path that must not reach the network
+ * here).
  */
-test('the agent asks for its API information on a first run, and only once', async ({ page }) => {
+test('the agent says what is missing in its panel, and never over the board', async ({ page }) => {
   await page.goto('/');
-  const setup = page.locator('.agent-setup');
-  await expect(setup).toBeVisible();
-  await expect(page.locator('.agent-toggle')).toContainText('未配置');
-
-  await setup.getByRole('button', { name: '以后再说' }).click();
-  await expect(setup).toBeHidden();
-
-  // Answered once, remembered: a reload opens on the level, not on the question.
-  await page.reload();
-  await expect(setup).toBeHidden();
-  await expect(page.getByRole('button', { name: '开始' })).toBeVisible();
-
-  // The panel opens from its own button, and a send with no settings asks for
-  // them rather than calling anything.
+  await expect(page.locator('.agent-setup')).toBeHidden();
+  await expect(page.locator('.agent-toggle')).toHaveAttribute('aria-label', /未配置/);
   await page.getByRole('button', { name: '开始' }).click();
+
+  // The panel is the place that says it; nothing interrupted the level.
   await page.locator('.agent-toggle').click();
   await expect(page.locator('.agent-card').first()).toBeVisible();
+  await expect(page.locator('.agent-setup-hint')).toBeVisible();
   await page.locator('.agent-input').fill('放一个与非门，两个输入都接上高电平');
   await page.getByRole('button', { name: '发送' }).click();
-  await expect(setup).toBeVisible();
+  await expect(page.locator('.agent-setup')).toBeVisible();
   await expect(page.locator('.agent-status')).toContainText('先填好 API 信息');
 
-  await setup.getByRole('button', { name: '以后再说' }).click();
-  await expect(setup).toBeHidden();
+  await page.locator('.agent-setup').getByRole('button', { name: '以后再说' }).click();
+  await expect(page.locator('.agent-setup')).toBeHidden();
   await expect(page.locator('.agent-input')).toBeVisible();
+  // Dismissed is not configured: the panel still says what is missing.
+  await expect(page.locator('.agent-setup-hint')).toBeVisible();
   await page.screenshot({ path: 'test-results/smoke-agent.png' });
+});
+
+/**
+ * THE WORKBENCH'S SHAPE, AND THE AGENT COLUMN'S TRADE.
+ *
+ * The panels are docks, not overlays: the rail, the primary sidebar, the editor
+ * and the bottom panel are all on screen together, and the board is what grows
+ * when the secondary sidebar closes. That trade -- the assistant costs the board
+ * its width while it is open -- is the reason this test measures the canvas
+ * rather than only asserting that the column exists.
+ */
+test('the workbench docks its panels, and the agent claims its own column', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.workspace')).toBeVisible();
+  await expect(page.locator('.activity')).toBeVisible();
+  await expect(page.locator('.sidebar-primary')).toBeVisible();
+  await expect(page.locator('.bottom-panel')).toBeVisible();
+  await expect(page.locator('.status-bar')).toBeVisible();
+
+  // Closed: the board has the width the column is not using.
+  await expect(page.locator('.sidebar-secondary')).toBeHidden();
+  const before = (await page.locator('canvas.board').boundingBox())!;
+
+  await page.locator('.agent-toggle').click();
+  await expect(page.locator('.sidebar-secondary')).toBeVisible();
+  await expect(page.locator('.agent-card:not(.agent-setup)')).toBeVisible();
+  const withAgent = (await page.locator('canvas.board').boundingBox())!;
+  expect(withAgent.width).toBeLessThan(before.width);
+
+  // The panel's own ✕ is the other way to give the column back.
+  await page
+    .locator('.agent-card:not(.agent-setup)')
+    .getByRole('button', { name: '关闭 Agent 面板' })
+    .click();
+  await expect(page.locator('.sidebar-secondary')).toBeHidden();
+  const restored = (await page.locator('canvas.board').boundingBox())!;
+  expect(restored.width).toBeCloseTo(before.width, 0);
+  await page.screenshot({ path: 'test-results/smoke-workbench.png' });
 });
 
 /** One frame of an OpenAI-compatible streamed completion. */
@@ -1240,6 +1263,10 @@ test('the agent builds what it was asked for, one visible step at a time', async
 
   await seedProgress(page, 2); // level 3 is the first one whose palette offers a NAND
   await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  // The settings live in the panel now: open the panel, then its settings.
+  await page.locator('.agent-toggle').click();
+  await page.locator('.agent-card').getByRole('button', { name: '设置', exact: true }).click();
   const setup = page.locator('.agent-setup');
   const fields = setup.locator('.agent-field input');
   await fields.nth(0).fill('http://127.0.0.1:4173/mock/v1');
@@ -1247,10 +1274,8 @@ test('the agent builds what it was asked for, one visible step at a time', async
   await fields.nth(2).fill('mock-model');
   await setup.getByRole('button', { name: '保存', exact: true }).click();
   await expect(setup).toBeHidden();
-  await page.getByRole('button', { name: '开始' }).click();
 
   // Saving the settings opens the panel; the toggle would close it again.
-  if (!(await page.locator('.agent-input').isVisible())) await page.locator('.agent-toggle').click();
   await page.locator('.agent-input').fill('放两个与非门');
   await page.getByRole('button', { name: '发送' }).click();
 

@@ -12,7 +12,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mountAgentPanel } from '../../src/ui/agent';
 import type { AgentConfig } from '../../src/agent/config';
-import { setupSeen } from '../../src/agent/config';
 import type { RunOptions, RunResult } from '../../src/agent/loop';
 import { makeTestHost } from '../agent/host-fixture';
 
@@ -20,7 +19,6 @@ const CONFIG: AgentConfig = {
   baseUrl: 'https://x.test',
   apiKey: 'sk-1',
   model: 'm',
-  stepMs: 0,
 };
 
 const DONE = (messages: RunOptions['messages']): RunResult => ({
@@ -37,8 +35,8 @@ const DONE = (messages: RunOptions['messages']): RunResult => ({
  * covers the stage and takes the pointer, and a hidden card inside a live overlay
  * would be a screen that looks closed and eats every click behind it.
  */
-function setupShown(stage: HTMLElement): boolean {
-  return !stage.querySelector('.overlay-agent-setup')!.hasAttribute('hidden');
+function setupShown(): boolean {
+  return !document.querySelector('.overlay-agent-setup')!.hasAttribute('hidden');
 }
 
 function clickButton(root: ParentNode, label: string): void {  const found = [...root.querySelectorAll('button')].find(
@@ -55,101 +53,115 @@ function tick(): Promise<void> {
 function mount(config: AgentConfig | null, run?: (options: RunOptions) => Promise<RunResult>) {
   const stage = document.createElement('div');
   document.body.append(stage);
+  const rail = document.createElement('div');
+  const sidebar = document.createElement('div');
+  stage.append(rail, sidebar);
   const state = { current: config, saved: [] as AgentConfig[], cleared: 0 };
   const runs: RunOptions[] = [];
-  const panel = mountAgentPanel(stage, {
-    host: makeTestHost().host,
-    config: () => state.current,
-    onSave: (next) => {
-      state.current = next;
-      state.saved.push(next);
+  const panel = mountAgentPanel(
+    { toggle: rail, sidebar },
+    {
+      host: makeTestHost().host,
+      config: () => state.current,
+      onSave: (next) => {
+        state.current = next;
+        state.saved.push(next);
+      },
+      onClear: () => {
+        state.cleared += 1;
+        state.current = null;
+      },
+      run:
+        run ??
+        ((options) => {
+          runs.push(options);
+          return Promise.resolve(DONE([...options.messages]));
+        }),
     },
-    onClear: () => {
-      state.cleared += 1;
-      state.current = null;
-    },
-    run:
-      run ??
-      ((options) => {
-        runs.push(options);
-        return Promise.resolve(DONE([...options.messages]));
-      }),
-  });
+  );
   return { stage, panel, state, runs };
 }
 
 afterEach(() => {
   document.body.innerHTML = '';
-  // The panel writes the "we asked already" flag through the real config module,
-  // so a test that dismissed the card would otherwise hide it from the next one.
-  globalThis.localStorage?.clear();
 });
 
 describe('a first run', () => {
-  it('asks for the API information before anything else', () => {
+  it('does not interrupt the board: the panel says what is missing', () => {
     const { stage } = mount(null);
-    expect(setupShown(stage)).toBe(true);
+    // No dialog over the board on load: the settings are a button, not a gate.
+    expect(setupShown()).toBe(false);
     expect(stage.querySelector('.agent-card:not(.agent-setup)')!.hasAttribute('hidden')).toBe(true);
-    expect(stage.querySelector('.agent-toggle')!.textContent).toContain('未配置');
+    expect(stage.querySelector('.agent-toggle')!.getAttribute('aria-label')).toContain('未配置');
+
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
+    const hint = stage.querySelector<HTMLElement>('.agent-setup-hint')!;
+    expect(hint.hidden).toBe(false);
+    expect(hint.textContent).toContain('还没有配置 API');
   });
 
-  it('keeps the settings and opens the conversation once they are saved', () => {
+  it('keeps the settings and removes the hint once they are saved', () => {
     const { stage, state } = mount(null);
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
+    clickButton(stage, '设置');
     const [baseUrl, apiKey, model] = [
-      ...stage.querySelectorAll<HTMLInputElement>('.agent-setup .agent-field input'),
+      ...document.querySelectorAll<HTMLInputElement>('.agent-setup .agent-field input'),
     ];
+    expect(model!.value).toBe('deepseek-flash');
     baseUrl!.value = 'https://api.deepseek.com/';
     apiKey!.value = 'sk-secret';
-    model!.value = 'deepseek-chat';
-    clickButton(stage.querySelector('.agent-setup')!, '保存');
+    model!.value = 'deepseek-flash';
+    clickButton(document.querySelector('.agent-setup')!, '保存');
     expect(state.saved).toHaveLength(1);
     expect(state.saved[0]).toEqual({
       baseUrl: 'https://api.deepseek.com/',
       apiKey: 'sk-secret',
-      model: 'deepseek-chat',
-      stepMs: 160,
+      model: 'deepseek-flash',
     });
-    expect(setupShown(stage)).toBe(false);
+    expect(setupShown()).toBe(false);
     expect(stage.querySelector('.agent-card:not(.agent-setup)')!.hasAttribute('hidden')).toBe(false);
-    expect(stage.querySelector('.agent-toggle')!.textContent).toBe('Agent');
+    expect(stage.querySelector<HTMLElement>('.agent-setup-hint')!.hidden).toBe(true);
+    expect(stage.querySelector('.agent-toggle')!.getAttribute('aria-label')).toBe('Agent');
   });
 
   it('refuses to save an incomplete configuration', () => {
     const { stage, state } = mount(null);
-    const [baseUrl] = [...stage.querySelectorAll<HTMLInputElement>('.agent-setup .agent-field input')];
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
+    clickButton(stage, '设置');
+    const [baseUrl] = [...document.querySelectorAll<HTMLInputElement>('.agent-setup .agent-field input')];
     baseUrl!.value = 'https://api.deepseek.com';
-    clickButton(stage.querySelector('.agent-setup')!, '保存');
+    clickButton(document.querySelector('.agent-setup')!, '保存');
     expect(state.saved).toEqual([]);
-    expect(setupShown(stage)).toBe(true);
+    expect(setupShown()).toBe(true);
   });
 
   it('can be dismissed, because the game plays fine without it', () => {
     const { stage } = mount(null);
-    clickButton(stage.querySelector('.agent-setup')!, '以后再说');
-    expect(setupShown(stage)).toBe(false);
-    expect(setupSeen()).toBe(true);
-    // And a second visit is not asked again: the answer was remembered.
-    const second = mount(null);
-    expect(setupShown(second.stage)).toBe(false);
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
+    clickButton(stage, '设置');
+    clickButton(document.querySelector('.agent-setup')!, '以后再说');
+    expect(setupShown()).toBe(false);
+    // Closing is not remembering: the panel keeps saying what is missing.
+    expect(stage.querySelector<HTMLElement>('.agent-setup-hint')!.hidden).toBe(false);
   });
 
   it('forgets a stored key on request', () => {
     const { stage, state } = mount(CONFIG);
     stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
     clickButton(stage, '设置');
-    clickButton(stage.querySelector('.agent-setup')!, '清除已保存的 key');
+    clickButton(document.querySelector('.agent-setup')!, '清除已保存的 key');
     expect(state.cleared).toBe(1);
     expect(state.current).toBeNull();
   });
 
   it('opens the settings card instead of sending when nothing is configured', () => {
     const { stage, runs } = mount(null);
-    clickButton(stage.querySelector('.agent-setup')!, '以后再说');
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
     const input = stage.querySelector<HTMLTextAreaElement>('.agent-input')!;
     input.value = '放一个与非门';
     clickButton(stage, '发送');
     expect(runs).toEqual([]);
-    expect(setupShown(stage)).toBe(true);
+    expect(setupShown()).toBe(true);
   });
 });
 
@@ -368,7 +380,9 @@ describe('the toggle', () => {
   it('tells the player it is not configured yet', () => {
     const { stage } = mount(null);
     const toggle = stage.querySelector('.agent-toggle')!;
-    expect(toggle.textContent).toContain('未配置');
+    // The rail is 48px wide, so the fact lives in the accessible name and the
+    // warning class rather than in visible text.
+    expect(toggle.getAttribute('aria-label')).toContain('未配置');
     expect(toggle.className).toContain('agent-toggle-warn');
   });
 });

@@ -16,7 +16,7 @@ import { SANDBOX_ID, SANDBOX_LEVEL, isSandbox } from './levels/sandbox';
 import { circuitSignature, emptySandbox, loadSandbox, saveSandbox } from './persist/sandbox';
 import { parseCircuit, serializeCircuit } from './persist/circuit';
 import { devModeFrom } from './app/dev';
-import { mountShell } from './ui/shell';
+import { iconSvg, mountShell, mountStatus, type IconName } from './ui/shell';
 import { mountPalette } from './ui/palette';
 import { mountTruthTable, TEST_DEMO_LIMIT } from './ui/truthTable';
 import { mountIoPanel } from './ui/ioPanel';
@@ -162,8 +162,72 @@ const RATES = [
 ] as const;
 
 if (app) {
-  // The shell bar is prepended into #app and the screens fill what is left, so
-  // the screens go in first and the bar ends up above them.
+  /**
+   * THE WORKBENCH. Five docks, the shape a code editor uses: an activity bar at
+   * the far left, the primary sidebar beside it, the editor in the middle, a
+   * secondary sidebar on the right, and a bottom panel under the editor. The
+   * board is the document; every panel is a tool beside it rather than a
+   * translucent layer over it, so no panel can cover a wire a player is drawing.
+   */
+  const workspace = document.createElement('div');
+  workspace.className = 'workspace secondary-collapsed';
+
+  /** A rail button: an icon, with the name carried by the accessible label. */
+  const dockButton = (label: string, icon: IconName): HTMLButtonElement => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'activity-btn';
+    el.setAttribute('aria-label', label);
+    el.title = label;
+    el.append(iconSvg(icon));
+    return el;
+  };
+
+  const activity = document.createElement('nav');
+  activity.className = 'activity';
+  const partsButton = dockButton('元件', 'grid');
+  const componentsButton = dockButton('组件', 'wrap');
+  const casesButton = dockButton('用例', 'test');
+  const programButton = dockButton('程序', 'terminal');
+  // The assistant's own rail button is created by the panel (it has the
+  // configured state to draw); the slot keeps it in the rail's order.
+  const agentSlot = document.createElement('div');
+  agentSlot.className = 'activity-slot';
+  const settingsButton = dockButton('设置', 'settings');
+  activity.append(partsButton, componentsButton, casesButton, programButton, agentSlot, settingsButton);
+
+  const primary = document.createElement('aside');
+  primary.className = 'sidebar sidebar-primary';
+  const primaryTabs = document.createElement('div');
+  primaryTabs.className = 'sidebar-tabs';
+  const tabButton = (label: string, name: string): HTMLButtonElement => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'sidebar-tab';
+    el.dataset.view = name;
+    el.textContent = label;
+    el.setAttribute('aria-pressed', 'false');
+    return el;
+  };
+  const partsTab = tabButton('元件', 'parts');
+  const componentsTab = tabButton('组件', 'components');
+  primaryTabs.append(partsTab, componentsTab);
+  const partsSection = document.createElement('div');
+  partsSection.className = 'sidebar-section sidebar-parts';
+  partsSection.dataset.view = 'parts';
+  const componentsSection = document.createElement('div');
+  componentsSection.className = 'sidebar-section sidebar-components';
+  componentsSection.dataset.view = 'components';
+  componentsSection.hidden = true;
+  // The I/O readout is not a tab: driving a level's input bits is part of
+  // wiring, so it stays in view while the palette does. It sits under the parts
+  // tray, the way an outline sits under a file tree.
+  const ioSection = document.createElement('div');
+  ioSection.className = 'sidebar-section sidebar-io';
+  primary.append(primaryTabs, partsSection, componentsSection, ioSection);
+
+  const editor = document.createElement('main');
+  editor.className = 'editor';
   const screens = document.createElement('div');
   screens.className = 'screens';
   const boardScreen = document.createElement('div');
@@ -172,42 +236,97 @@ if (app) {
   mapScreen.className = 'screen screen-map';
   mapScreen.hidden = true;
   screens.append(boardScreen, mapScreen);
-  app.append(screens);
+  editor.append(screens);
 
-  // The board is the stage; every panel floats over it, which is how the
-  // original composes its screen. ONLY THE CANVAS IS IN FLOW: a panel left in
-  // flow would make the stage a scroll container, and a scroll into view would
-  // slide the board out from under the pointer coordinates.
+  // The editor's action strip: the board's own controls, in flow above the
+  // canvas, so they never cover a wire.
+  const editorActions = document.createElement('div');
+  editorActions.className = 'editor-actions';
+
   const stage = document.createElement('div');
   stage.className = 'board-stage';
   const canvas = document.createElement('canvas');
   canvas.className = 'board';
   stage.append(canvas);
+  boardScreen.append(editorActions, stage);
 
-  const partsOverlay = document.createElement('div');
-  partsOverlay.className = 'overlay overlay-parts';
-  const testsOverlay = document.createElement('div');
-  testsOverlay.className = 'overlay overlay-tests';
-  const toggleOverlay = document.createElement('div');
-  toggleOverlay.className = 'overlay overlay-toggle';
-  stage.append(partsOverlay, testsOverlay, toggleOverlay);
-  boardScreen.append(stage);
+  const secondary = document.createElement('aside');
+  secondary.className = 'sidebar sidebar-secondary';
 
-  // The original's chevron: the test panel takes a fifth of the board, and a
-  // player wiring a big circuit wants it back. Collapsing sets `--test-h` to
-  // zero on the stage, which moves this button down with it and lets the parts
-  // panel grow into the space -- one class, three consequences.
+  const bottom = document.createElement('section');
+  bottom.className = 'bottom-panel';
+  const bottomTabs = document.createElement('div');
+  bottomTabs.className = 'panel-tabs';
+  const panelTab = (label: string, name: string): HTMLButtonElement => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'panel-tab';
+    el.dataset.view = name;
+    el.textContent = label;
+    el.setAttribute('aria-pressed', 'false');
+    return el;
+  };
+  const casesTab = panelTab('用例', 'cases');
+  const programTab = panelTab('程序', 'program');
+  const debugTab = panelTab('调试', 'debug');
+  programTab.hidden = true;
+  debugTab.hidden = true;
   const collapse = document.createElement('button');
   collapse.type = 'button';
   collapse.className = 'panel-toggle';
   collapse.textContent = '⌄';
-  collapse.setAttribute('aria-label', '收起用例面板');
-  collapse.addEventListener('click', () => {
-    const collapsed = stage.classList.toggle('collapsed');
-    collapse.textContent = collapsed ? '⌃' : '⌄';
-    collapse.setAttribute('aria-label', collapsed ? '展开用例面板' : '收起用例面板');
+  collapse.setAttribute('aria-label', '收起下方面板');
+  bottomTabs.append(casesTab, programTab, debugTab, collapse);
+
+  const bottomViews = document.createElement('div');
+  bottomViews.className = 'panel-views';
+  const panelView = (name: string): HTMLElement => {
+    const el = document.createElement('div');
+    el.className = 'panel-view';
+    el.dataset.view = name;
+    el.hidden = name !== 'cases';
+    bottomViews.append(el);
+    return el;
+  };
+  const viewCases = panelView('cases');
+  const viewProgram = panelView('program');
+  const viewDebug = panelView('debug');
+  bottom.append(bottomTabs, bottomViews);
+
+  const panelTabs = [casesTab, programTab, debugTab];
+  const panelViews = [viewCases, viewProgram, viewDebug];
+  const showPanel = (name: string): void => {
+    bottom.classList.remove('collapsed');
+    for (const el of panelViews) el.hidden = el.dataset.view !== name;
+    for (const el of panelTabs) el.setAttribute('aria-pressed', String(el.dataset.view === name));
+  };
+  const showSidebar = (name: string): void => {
+    for (const el of [partsSection, componentsSection]) el.hidden = el.dataset.view !== name;
+    for (const el of [partsTab, componentsTab]) el.setAttribute('aria-pressed', String(el.dataset.view === name));
+  };
+
+  casesTab.addEventListener('click', () => showPanel('cases'));
+  programTab.addEventListener('click', () => showPanel('program'));
+  debugTab.addEventListener('click', () => showPanel('debug'));
+  partsTab.addEventListener('click', () => showSidebar('parts'));
+  componentsTab.addEventListener('click', () => showSidebar('components'));
+  partsButton.addEventListener('click', () => showSidebar('parts'));
+  componentsButton.addEventListener('click', () => showSidebar('components'));
+  casesButton.addEventListener('click', () => showPanel('cases'));
+  programButton.addEventListener('click', () => {
+    if (!programTab.hidden) showPanel('program');
   });
-  toggleOverlay.append(collapse);
+  settingsButton.addEventListener('click', () => agentPanel?.openSettings());
+  collapse.addEventListener('click', () => {
+    const collapsed = bottom.classList.toggle('collapsed');
+    collapse.textContent = collapsed ? '⌃' : '⌄';
+    collapse.setAttribute('aria-label', collapsed ? '展开下方面板' : '收起下方面板');
+  });
+  showPanel('cases');
+  showSidebar('parts');
+
+  workspace.append(activity, primary, editor, secondary, bottom);
+  app.append(workspace);
 
   /**
    * What the board paints beyond the store: the live pin values and the view
@@ -263,8 +382,6 @@ if (app) {
   let playerRunKey = '';
   /** Bumped by every board edit: the run is compiled from a live graph, not a copy. */
   let graphRevision = 0;
-  /** The column holding the editor and the debugger, while the level wants them. */
-  let bench: HTMLElement | null = null;
   let ide: { render(): void } | null = null;
   let debug: { render(): void } | null = null;
   /** True while the program is being stepped on a timer. */
@@ -881,15 +998,23 @@ if (app) {
    * previous level's run before the rebuild that replaces it.
    */
   const mountBench = (): void => {
-    bench?.remove();
-    bench = null;
+    viewProgram.textContent = '';
+    viewDebug.textContent = '';
     ide = null;
     debug = null;
-    if (!levelExpectsProgram(store.get().level)) return;
+    const wants = levelExpectsProgram(store.get().level);
+    programTab.hidden = !wants;
+    debugTab.hidden = !wants;
+    programButton.hidden = !wants;
+    if (!wants) {
+      if (viewProgram.hidden === false || viewDebug.hidden === false) showPanel('cases');
+      return;
+    }
+    // The bench is why this level is open: show its editor rather than making
+    // the player find the tab.
+    showPanel('program');
 
-    const column = document.createElement('div');
-    column.className = 'overlay overlay-bench';
-    ide = mountIde(column, store, {
+    ide = mountIde(viewProgram, store, {
       format: () => playerProgramFormat(store.get().level),
       onEdit: onProgramEdit,
       onAssemble: () => {
@@ -931,15 +1056,13 @@ if (app) {
           ? null
           : { bytes: playerRun.bytes, errors: playerRun.errors, ticks: playerRun.ticks },
     });
-    debug = mountDebug(column, {
+    debug = mountDebug(viewDebug, {
       registers: () => playerRun?.readRegisters() ?? null,
       pc: () => playerRun?.readPc() ?? null,
       ram: () => playerRun?.readRam() ?? null,
       halt: () => playerRun?.readHalt() ?? null,
       ticks: () => playerRun?.ticks ?? 0,
     });
-    bench = column;
-    stage.append(column);
     // A run exists from the moment the bench does, so the debugger opens on the
     // machine's own state -- the counter at its first instruction, the registers
     // empty -- rather than on a card of dashes.
@@ -1274,12 +1397,13 @@ if (app) {
       globalThis.history.replaceState(null, '', url);
     },
   });
-  // DOM order is visual order inside the stage, but every panel is an overlay:
-  // the palette on the right, the readout on the left, the test cases along the
-  // bottom, and the board underneath all of them.
-  mountPalette(partsOverlay, store, onPickPart);
-  const blueprintPanel = mountBlueprintPanel(toggleOverlay, store, blueprintOptions);
-  const truth = mountTruthTable(testsOverlay, store, {
+  mountStatus(app, store);
+  // Every panel is docked now: the palette and the component library in the
+  // primary sidebar, the test cases and the bench in the bottom panel, the
+  // assistant in the secondary sidebar.
+  mountPalette(partsSection, store, onPickPart);
+  const blueprintPanel = mountBlueprintPanel(componentsSection, store, blueprintOptions);
+  const truth = mountTruthTable(viewCases, store, {
     live: levelOutputs,
     active: () => activeCase,
     results: () => testResults,
@@ -1291,7 +1415,7 @@ if (app) {
       truth.render();
     },
   });
-  const io = mountIoPanel(stage, store, {
+  const io = mountIoPanel(ioSection, store, {
     vector: () => vector,
     outputs: levelOutputs,
     rate: () => RATES[rateIndex]!.label,
@@ -1306,7 +1430,7 @@ if (app) {
       paintTools();
     },
   });
-  const toolbar = mountToolbar(stage, {
+  const toolbar = mountToolbar(editorActions, {
     onZoom,
     onToggleGrid: () => {
       gridOn = !gridOn;
@@ -1622,18 +1746,26 @@ if (app) {
   };
 
   let agentPanel: AgentPanel | null = null;
-  agentPanel = mountAgentPanel(stage, {
-    host: agentHost,
-    config: () => agentConfig,
-    onSave: (config) => {
-      agentConfig = config;
-      agentPanel?.render();
+  agentPanel = mountAgentPanel(
+    { toggle: agentSlot, sidebar: secondary },
+    {
+      host: agentHost,
+      config: () => agentConfig,
+      onSave: (config) => {
+        agentConfig = config;
+        agentPanel?.render();
+      },
+      onClear: () => {
+        agentConfig = null;
+        agentPanel?.render();
+      },
+      // The secondary sidebar is a dock, not a floating card: opening the panel
+      // claims its column, closing it gives the column back to the board.
+      onVisibility: (open) => {
+        workspace.classList.toggle('secondary-collapsed', !open);
+      },
     },
-    onClear: () => {
-      agentConfig = null;
-      agentPanel?.render();
-    },
-  });
+  );
 
   /**
    * A click on a level input flips what it drives.

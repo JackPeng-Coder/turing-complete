@@ -6,7 +6,7 @@
  * nothing has been driven. Shape carries the value alongside colour, so the two
  * states stay apart for a player who cannot separate the red from the green.
  *
- * Shared because both the bottom test panel and the left-hand input readout draw
+ * Shared because both the bottom test panel and the sidebar's input readout draw
  * the same cell, and a second copy of the bit extraction would be a second
  * opinion about which end of a byte is bit 0.
  */

@@ -10,7 +10,6 @@ const CONFIG: AgentConfig = {
   baseUrl: 'https://x.test',
   apiKey: 'sk-test',
   model: 'test-model',
-  stepMs: 0,
 };
 
 function callOf(name: string, args = '{}'): { id: string; name: string; arguments: string } {
@@ -104,7 +103,7 @@ describe('a turn that uses a tool', () => {
     expect(events.filter((event) => event.kind === 'tool')).toHaveLength(2);
   });
 
-  it('holds each step for the configured pace', async () => {
+  it('yields one frame per step, with no pace to set', async () => {
     const host = makeTestHost();
     const tool = recorder();
     const { chat } = scripted([
@@ -114,7 +113,7 @@ describe('a turn that uses a tool', () => {
     const naps: number[] = [];
     const { signal } = context();
     const result = await runAgent({
-      config: { ...CONFIG, stepMs: 120 },
+      config: CONFIG,
       host: host.host,
       messages: [],
       signal,
@@ -126,32 +125,10 @@ describe('a turn that uses a tool', () => {
       },
     });
     expect(result.stopped).toBe('done');
-    expect(naps).toEqual([120, 120]);
+    // One macrotask per command, so the board can paint a frame and the step is
+    // visible -- and nothing longer: the pace setting is gone.
+    expect(naps).toEqual([0, 0]);
     expect(tool.calls).toEqual([{ at: 1 }, { at: 2 }]);
-  });
-
-  it('does not wait at all when the pace is zero', async () => {
-    const host = makeTestHost();
-    const tool = recorder();
-    const { chat } = scripted([
-      { content: '', toolCalls: [callOf('poke', '{"at":1}')], finishReason: 'tool_calls' },
-      { content: '完成', toolCalls: [], finishReason: 'stop' },
-    ]);
-    const naps: number[] = [];
-    const { signal } = context();
-    await runAgent({
-      config: { ...CONFIG, stepMs: 0 },
-      host: host.host,
-      messages: [],
-      signal,
-      chat,
-      tools: [tool.spec],
-      sleep: (ms) => {
-        naps.push(ms);
-        return Promise.resolve();
-      },
-    });
-    expect(naps).toEqual([]);
   });
 
   it('answers a tool it does not have with a correction, and keeps going', async () => {
