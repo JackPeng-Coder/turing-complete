@@ -9,6 +9,7 @@ import { CommandStack } from './app/commands';
 import { grade } from './levels/grader';
 import { loadProgress, saveProgress } from './persist/storage';
 import { applyGrade, offeredDefsFor, resumePointOf, type Progress } from './app/progress';
+import { nudgedInput } from './app/inputs';
 import { composeRegistry, libraryClosure, libraryIds, referencedComponents } from './levels/blueprints';
 import { mountBlueprintPanel } from './ui/blueprint';
 import { applyWrap, planWrap, type WrapPlan } from './levels/wrap';
@@ -1983,21 +1984,27 @@ if (app) {
   if (!layout.secondaryCollapsed) agentPanel.open();
 
   /**
-   * A click on a level input flips what it drives.
+   * A click on an input connector nudges what it drives.
    *
-   * One bit toggles; a wider pin counts up and wraps, because a click is a
-   * nudge and not a way to type a byte -- exact values are the readout panel's
-   * job, and it has a cell per bit. Doing nothing for every other part is
-   * deliberate: a click on a gate means select, and always has.
+   * One bit toggles; a wider pin counts up and wraps, because a click is a nudge
+   * and not a way to type a byte -- exact values are the readout panel's job, and
+   * it has a cell per bit. Doing nothing for every other part is deliberate: a
+   * click on a gate means select, and always has.
+   *
+   * THE PIN LOOKUP IS `nudgedInput`'s, not a slice of the instance id: a level's
+   * pin is `IN_<pinId>`, a sandbox connector's pin id IS the instance id, and only
+   * `boardPins` knows which board is open. Resolving the name here is what left a
+   * sandbox `IN_1` unclickable while a level's arrow worked.
    */
   const onPickInstance = (instId: string): void => {
-    if (!instId.startsWith('IN_')) return;
-    const pinId = instId.slice(3);
-    const pin = store.get().level.io.inputs.find((candidate) => candidate.id === pinId);
-    if (!pin) return;
-    const max = pin.width >= 31 ? Number.MAX_SAFE_INTEGER : 2 ** pin.width - 1;
-    const current = vector[pinId] ?? 0;
-    driveTo({ ...vector, [pinId]: current >= max ? 0 : current + 1 });
+    const state = store.get();
+    const nudged = nudgedInput(
+      boardPins(state.level, state.graph, state.registry),
+      instId,
+      vector,
+    );
+    if (nudged === null) return;
+    driveTo({ ...vector, [nudged.pinId]: nudged.value });
   };
 
   attachBoardInput(canvas, store, stack, {

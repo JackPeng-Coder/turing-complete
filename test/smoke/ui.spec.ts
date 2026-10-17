@@ -648,6 +648,11 @@ test('a level input shows the number it drives, like an output', async ({ page }
 
   // The arrow's mass, where its number is drawn.
   expect(await peakWhite(page, cx - 210, cy - 12, 40, 24)).toBeGreaterThan(150);
+  // A click on the arrow nudges the byte it drives: 8 counts up to 9. The board
+  // gesture and the panel are two controls for one value, and the sandbox's
+  // connector is the case where the gesture used to do nothing.
+  await page.mouse.click(cx - 240 + 36, cy);
+  await expect(page.locator('.io-pin .io-value').first()).toHaveText('9');
   await page.screenshot({ path: 'test-results/smoke-input-number.png' });
 });
 
@@ -1220,6 +1225,15 @@ test('the sandbox is driven and read through the connectors a player places', as
   await inputRow.locator('.bit').first().click();
   await expect(inputRow.locator('.io-value')).toHaveText('1');
   await expect(outputRow.locator('.io-value')).toHaveText('1');
+
+  // THE BOARD'S OWN GESTURE WORKS HERE TOO: a click on the connector nudges what
+  // it drives (one bit toggles; a wider pin counts up and wraps). The sandbox
+  // used to resolve the pin by slicing `IN_` and looking it up in `level.io`, so
+  // this click did nothing while the same click on a level's arrow worked.
+  await page.mouse.click(cx - 160 + 36, cy);
+  await expect(inputRow.locator('.io-value')).toHaveText('0');
+  await page.mouse.click(cx - 160 + 36, cy);
+  await expect(inputRow.locator('.io-value')).toHaveText('1');
 
   // The connector's width is the player's in a sandbox: cycle both ends to eight
   // bits and the rows follow, so a circuit built from the 8-bit family can be
