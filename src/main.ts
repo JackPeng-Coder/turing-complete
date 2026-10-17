@@ -392,9 +392,18 @@ if (app) {
     if (!layout.primaryCollapsed && !componentsSection.hidden) setLayout({ primaryCollapsed: true });
     else showSidebar('components');
   });
-  casesButton.addEventListener('click', () => showPanel('cases'));
+  // Clicking a rail button for the view that is already showing folds that dock
+  // away -- the shortcut a code editor trains into you. For the bottom panel the
+  // "already showing" view is the tab it is on: 用例 folds it from the cases tab,
+  // 程序 from the program tab, and either one re-opens it on its own view.
+  casesButton.addEventListener('click', () => {
+    if (!layout.panelCollapsed && !viewCases.hidden) setLayout({ panelCollapsed: true });
+    else showPanel('cases');
+  });
   programButton.addEventListener('click', () => {
-    if (!programTab.hidden) showPanel('program');
+    if (programTab.hidden) return;
+    if (!layout.panelCollapsed && !viewProgram.hidden) setLayout({ panelCollapsed: true });
+    else showPanel('program');
   });
   settingsButton.addEventListener('click', () => agentPanel?.openSettings());
   collapseSidebar.addEventListener('click', () => setLayout({ primaryCollapsed: true }));

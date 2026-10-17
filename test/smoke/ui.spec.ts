@@ -1272,6 +1272,15 @@ test('the docks fold, resize, and remember', async ({ page }) => {
   expect((await views.boundingBox())!.height).toBeGreaterThan(panelBefore.height + 40);
   expect(await canvasMatchesBox()).toBe(true);
 
+  // The rail's 用例 button is the panel's door: pressing it while the cases view
+  // is showing folds the panel away, and pressing it again brings the view back.
+  const casesRail = page.locator('.activity').getByRole('button', { name: '用例' });
+  await casesRail.click();
+  await expect(page.locator('.panel-views')).toBeHidden();
+  await casesRail.click();
+  await expect(page.locator('.panel-views')).toBeVisible();
+  await expect(page.locator('.panel-tab', { hasText: '用例' })).toHaveAttribute('aria-pressed', 'true');
+
   // The bottom panel folds down to its tab strip.
   const panel = page.locator('.bottom-panel');
   const expanded = (await panel.boundingBox())!;
