@@ -1234,6 +1234,21 @@ test('the docks fold, resize, and remember', async ({ page }) => {
   const widened = (await sidebar.boundingBox())!;
   expect(widened.width).toBeGreaterThan(before.width + 40);
 
+  // THE CANVAS IS A BITMAP, NOT CSS: if the backing store is not re-sized with
+  // the box, the browser stretches the old bitmap and every square in the grid
+  // becomes a rectangle. `renderBoard` re-sizes it on paint, so the layout must
+  // paint -- this is the assertion that it does.
+  const canvasMatchesBox = async (): Promise<boolean> =>
+    page.evaluate(() => {
+      const board = document.querySelector('canvas.board') as HTMLCanvasElement;
+      const dpr = devicePixelRatio;
+      return (
+        Math.abs(board.width - Math.round(board.clientWidth * dpr)) <= 1 &&
+        Math.abs(board.height - Math.round(board.clientHeight * dpr)) <= 1
+      );
+    });
+  expect(await canvasMatchesBox()).toBe(true);
+
   // The rail button of the showing view folds the sidebar away; pressing it
   // again brings the same width back.
   const rail = page.locator('.activity');
@@ -1255,6 +1270,7 @@ test('the docks fold, resize, and remember', async ({ page }) => {
   await page.mouse.move(edge.x + 300, edge.y + edge.height / 2 - 60, { steps: 8 });
   await page.mouse.up();
   expect((await views.boundingBox())!.height).toBeGreaterThan(panelBefore.height + 40);
+  expect(await canvasMatchesBox()).toBe(true);
 
   // The bottom panel folds down to its tab strip.
   const panel = page.locator('.bottom-panel');

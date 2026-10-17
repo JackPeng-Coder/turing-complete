@@ -59,3 +59,10 @@
 - **根因**：第一版只写了 `grid-template-areas` 里的 `p-split/s-split/h-split`，忘了给三个把手写 `grid-area`。它们被自动排布到隐式轨道：`h-split` 的实际盒子是 `x:1400, y:49.5, width:0, height:493.5`——在屏幕外，所以下方面板没有可拖的边；`p-split`/`s-split` 也不在各自的 4px 轨道上（之前 smoke 拖 p-split 能"生效"只是因为拖到的是把手本身，改的是变量，与位置无关）。
 - **修复**：补 `.p-split/.s-split/.h-split { grid-area: … }`。修复后实测：`p-split` x=300、w=4；`h-split` y=543、h=4；横拖 80px 后 `--panel-h` 300→380，刷新保留；`s-split` 在 Agent 打开后 x=1048、w=4。
 - **测试护栏**：smoke 的 dock 用例增加横拖断言（把手高度 < 8px、拖动后面板高度 +40px 以上）——该断言在修复前会失败。
+
+### 修正（同日，用户反馈「拉伸侧栏或下部面板时网格会随之拉伸」）
+
+- **根因**：画布是位图。`renderBoard` 用 `clientWidth/clientHeight` 设 `canvas.width/height`；拖拽只改 CSS 变量，位图还是旧尺寸，浏览器把它拉伸到新盒子——网格方格变矩形。实测：拖 +100px 后 CSS 宽 996、`canvas.width` 仍是 1096。窗口 resize 原本会 `paint()`，停靠变化不会。
+- **修复**：`applyLayout` 末尾调用 `onLayoutResize` 钩子（默认 no-op；`paint` 定义后赋值为它）。任何停靠变化都重绘画布，位图与盒子一致。
+- **红绿验证**：先临时断开钩子跑新断言 → 失败（`canvasMatchesBox()` false）；恢复后 → 通过。smoke 用例增加两条断言：拖竖边、拖横边之后 `canvas.width/height` 都必须等于 `clientWidth/Height × dpr`（±1）。
+- 门禁：`build` exit 0、62 文件 / 1655 通过、29 smoke 通过 + 2 跳过。

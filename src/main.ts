@@ -312,6 +312,20 @@ if (app) {
   // a saved payload cannot disagree about where an edge is.
   let layout = loadLayout();
 
+  /**
+   * Called after the grid's measurements change.
+   *
+   * THE CANVAS IS THE ONE THING THE GRID DOES NOT SIZE FOR US. Its backing store
+   * is a bitmap sized in `renderBoard` from `clientWidth`/`clientHeight`, so a
+   * dock drag that only moves the CSS tracks leaves the bitmap at its old size
+   * and the browser stretches it to the new box -- every square on the grid
+   * becomes a rectangle until something else happens to repaint. Window resizes
+   * already paint; layout changes now paint through here. It starts as a no-op
+   * because `paint` is defined further down and this is first applied during
+   * boot, before the board exists.
+   */
+  let onLayoutResize: () => void = () => {};
+
   /** The rail's icons show which view is showing, and whether its dock is open. */
   const syncRail = (): void => {
     partsButton.setAttribute('aria-pressed', String(!layout.primaryCollapsed && !partsSection.hidden));
@@ -334,6 +348,7 @@ if (app) {
     collapse.textContent = layout.panelCollapsed ? '⌃' : '⌄';
     collapse.setAttribute('aria-label', layout.panelCollapsed ? '展开下方面板' : '收起下方面板');
     syncRail();
+    onLayoutResize();
   };
 
   const setLayout = (patch: Partial<Layout>): void => {
@@ -512,6 +527,10 @@ if (app) {
   const paint = (): void => {
     if (!boardScreen.hidden) renderBoard(canvas, store, store.get().camera, view);
   };
+  // The dock measurements are CSS variables; the canvas is a bitmap. Every drag
+  // that moves the grid repaints through here, so the backing store is re-sized
+  // to the box instead of being stretched into it (see `onLayoutResize`).
+  onLayoutResize = paint;
 
   const paintTools = (): void => {
     toolbar.render({
