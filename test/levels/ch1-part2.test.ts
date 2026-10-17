@@ -260,6 +260,59 @@ describe('reference solutions are buildable from the palette they are graded aga
   }
 });
 
+/**
+ * The other half of the palette rule: a level does not offer the ONE part that is
+ * its whole answer.
+ *
+ * The grader cannot enforce this -- it scores any valid graph, so a native part
+ * that computes the level's function passes however the palette was drawn. The
+ * palette is the only defence, which is why it is asserted here and not left to
+ * the level's own comment. `ch1-07-always-on` is the deliberate exception: its
+ * answer IS `const_on`, and that first handshake with the power rail is the lesson.
+ */
+describe('a gate level never offers the gate it teaches', () => {
+  const dropIn: Record<string, string> = {
+    'ch1-09-xor-gate': 'xor',
+    'ch1-10-bigger-or-gate': 'or3',
+    'ch1-11-bigger-and-gate': 'and3',
+    'ch1-12-xnor-gate': 'xnor',
+  };
+
+  for (const [id, def] of Object.entries(dropIn)) {
+    it(`${id} withholds ${def}`, () => {
+      expect(byId.get(id)?.allowedComponents).not.toContain(def);
+    });
+  }
+
+  it('withholds and3 even though one instance would score all three stars', () => {
+    // The measurement behind the assertion above, so the omission cannot be
+    // "tidied" back in on the grounds that the reference already uses `and`.
+    // A single `and3` is 4 NAND equivalents on ONE node, so it matches the
+    // target's gate count and beats its delay: the palette is what keeps it out.
+    const level = byId.get('ch1-11-bigger-and-gate') as LevelSpec;
+    const droppedIn = build([
+      { kind: 'input', name: 'a' },
+      { kind: 'input', name: 'b' },
+      { kind: 'input', name: 'c' },
+      { kind: 'part', def: 'and3', id: 'g', from: ['a', 'b', 'c'] },
+      { kind: 'output', from: 'g' },
+    ]);
+    const result = grade(droppedIn, registry, level);
+    expect(result.passed).toBe(true);
+    expect(result.metrics).toEqual({ gate: 4, delay: 1, tick: 0 });
+    expect(result.stars).toBe(3);
+  });
+
+  it('hands and3 over at the level that teaches it, not three levels early', () => {
+    // The acquisition order behind the palette: `and3` used to be
+    // `ch1-08-second-cycle`'s reward, which put it in every palette from level 9
+    // on. A delay-line level has no use for a three-input AND, and the level that
+    // builds one must not have been handed it.
+    expect(byId.get('ch1-08-second-cycle')?.rewards).toBeUndefined();
+    expect(byId.get('ch1-11-bigger-and-gate')?.rewards?.components).toEqual(['and3']);
+  });
+});
+
 describe('plausible wrong circuits fail', () => {
   for (const [id, make] of Object.entries(wrong)) {
     it(id, () => {

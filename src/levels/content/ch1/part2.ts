@@ -18,6 +18,12 @@ import type { LevelSpec } from '../../spec';
  * used to be the first chapter-2 level's reward -- one chapter too late for the
  * level that consumes it.
  *
+ * `and3` MADE THE SAME MOVE, for the same reason. It used to be level 8's reward,
+ * which put the 3-Pin AND in the palette three levels before
+ * `ch1-11-bigger-and-gate` -- the level whose whole lesson is building one from
+ * two 2-input ANDs. The part is level 11's reward now, where it follows the
+ * construction instead of answering it, and levels 9-11 no longer offer it.
+ *
  * All text is original.
  */
 const IO_CONST = { inputs: [], outputs: [{ id: 'out', width: 1 }] };
@@ -88,7 +94,13 @@ export const CH1_PART2: readonly LevelSpec[] = [
     // itself -- a single delay line is still low at tick 2 and fails it (see the
     // wrong-circuit test) -- so the target has to be 3 to stay earnable.
     threeStar: { gate: 0, delay: 0, tick: 3 },
-    rewards: { components: ['and3'] },
+    // NO REWARD: `and3` used to be handed out here, and that is the defect this
+    // comment records instead of repeating. This level's lesson is two delay
+    // lines; the 3-Pin AND arrived in the palette three levels before
+    // `ch1-11-bigger-and-gate`, which asks the player to build exactly that gate.
+    // The part is level 11's reward now, so the acquisition follows the
+    // construction; levels 9 and 10 stopped offering a part their puzzles never
+    // needed, and level 11 withholds it because it IS that level's answer.
   },
   {
     id: 'ch1-09-xor-gate',
@@ -110,7 +122,6 @@ export const CH1_PART2: readonly LevelSpec[] = [
       'or',
       'const_on',
       'delay_line',
-      'and3',
       'level_input',
       'level_output',
     ],
@@ -143,7 +154,6 @@ export const CH1_PART2: readonly LevelSpec[] = [
       'or',
       'const_on',
       'delay_line',
-      'and3',
       'xor',
       'level_input',
       'level_output',
@@ -176,7 +186,6 @@ export const CH1_PART2: readonly LevelSpec[] = [
       'or',
       'const_on',
       'delay_line',
-      'and3',
       'xor',
       'or3',
       'level_input',
@@ -187,6 +196,16 @@ export const CH1_PART2: readonly LevelSpec[] = [
     // Three-star target = the reference solution's own metrics; the reference scores exactly it.
     // Gate = 4, not 2: the reference cascades two ANDs, 2 NAND equivalents each.
     threeStar: { gate: 4, delay: 2, tick: 0 },
+    // `and3` IS THIS LEVEL'S REWARD AND ITS PALETTE WITHHOLDS IT, which is the
+    // same rule `ch1-10-bigger-or-gate` follows for `or3` and `ch1-12-xnor-gate`
+    // states outright: one part that is the whole answer makes the lesson vacuous.
+    // Here the stake is visible in the metrics -- a dropped-in `and3` is 4 NAND
+    // equivalents on ONE node, so it passes the truth table at gate 4 / delay 1
+    // and scores three stars, beating the two-AND cascade's delay. `grade()` cannot
+    // separate them (any valid graph is scored), so the palette is the only thing
+    // keeping the part off the board; `test/levels/ch1-part2.test.ts` pins both
+    // halves -- the palette omits it, and the drop-in really does score 3.
+    rewards: { components: ['and3'] },
   },
 
   /**
@@ -203,9 +222,10 @@ export const CH1_PART2: readonly LevelSpec[] = [
    * gate it named.
    *
    * THE PUZZLE IS THE XOR LEVEL'S COMPLEMENT, and the palette says so: it is
-   * `ch1-09-xor-gate`'s list plus `xor` and `nor` and nothing else. Two spellings
-   * are legitimate and both pass: an XNOR built from the NAND/AND/OR/NOT family the
-   * player already holds, or `xor` followed by a NOT -- the construction the hint
+   * `ch1-09-xor-gate`'s list plus `and3` (level 11's reward), `xor` and `nor`, and
+   * nothing else. Two spellings are legitimate and both pass: an XNOR built from
+   * the NAND/AND/OR/NOT family the player already holds, or `xor` followed by a
+   * NOT -- the construction the hint
    * names first and the one the target was measured from. They are not equally
    * cheap on depth, and the measurement below says which is which. `xnor` itself is
    * NOT offered: a level's own reward is what `paletteDefsFor` adds back before the
