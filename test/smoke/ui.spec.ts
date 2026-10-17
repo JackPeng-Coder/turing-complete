@@ -503,6 +503,32 @@ test('?dev=1 opens every level, and says so', async ({ page }) => {
 });
 
 /**
+ * THE LEVEL THAT BUILDS A 3-INPUT AND IS NOT HANDED ONE.
+ *
+ * `and3` used to be level 8's reward, and every palette from level 9 on was
+ * written as the previous level's list plus a part, so 三路与门 (level 11) listed
+ * the very gate it exists to teach. A dropped-in part is one node worth 4 NAND
+ * equivalents, which scores this level's three stars -- so the answer sat on the
+ * tray for the player AND for the assistant, which asks `offeredDefsFor` for its
+ * parts. The reward moved to level 11 and the palette stopped listing it; this is
+ * the user-visible half, the unit tests being `test/levels/ch1-part2.test.ts`.
+ */
+test('the level that teaches a 3-input AND does not hand one to its tray', async ({ page }) => {
+  await seedProgress(page, 10); // chapter 1 solved up to level 10, so level 11 opens
+  await open(page, '/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('三路与门');
+
+  const tray = page.locator('.palette');
+  await expect(tray.getByRole('button', { name: '三路与门', exact: true })).toHaveCount(0);
+  // The parts the cascade is built from are on the tray, so this reads as "the
+  // answer was withheld", not as "the palette failed to draw".
+  await expect(tray.getByRole('button', { name: '与门', exact: true })).toBeEnabled();
+  await expect(tray.getByRole('button', { name: '或门', exact: true })).toBeEnabled();
+  await page.screenshot({ path: 'test-results/smoke-level11-tray.png' });
+});
+
+/**
  * THE TWO PACKERS: blue funnels, and the reason for both words.
  *
  * They were green boxes that painted themselves by `outputs[0]` -- which for a

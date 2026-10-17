@@ -128,7 +128,8 @@
 - 单个 `and3` 的实测：`passed`、`{gate:4, delay:1, tick:0}`、三星——把「调色板是唯一防线」变成可执行证据。
 - 奖励顺序：第 8 关没有 `rewards`，第 11 关的 `rewards` 是 `['and3']`。
 - 红绿：把 `'and3'` 临时塞回第 11 关列表，新断言按预期失败（`expected [ 'nand', … ] to not include 'and3'`），移除后转绿。
+- smoke（`test/smoke/ui.spec.ts`，+1）：`seedProgress(page, 10)` 把第 11 关变成续关点，断言 `.palette` 里没有「三路与门」按钮、而「与门」「或门」可用——托盘就是玩家和 Agent 实际看到的那张表；红绿同样验过（塞回 `'and3'` 后托盘上出现 1 个按钮，`toHaveCount(0)` 按预期失败）。
 
 **没动的**：`docs/superpowers/plans/2026-09-25-turing-complete-phase0.md` 里那张速览表（它本来就停在 2.x 改版之前：`ch1-08-second-tick`、第 10 关解锁 `xnor` 等，文件自己也写着「权威定义始终是关卡数据本身」），以及 `xnor` / `or3` 既有的发奖位置。
 
-**门禁**：`build` exit 0（295.94 kB / gzip 101.49 kB）、`test` 64 文件 / **1698 通过**、`smoke` **31 通过 + 2 跳过**。
+**门禁**：`build` exit 0（295.94 kB / gzip 101.49 kB）、`test` 64 文件 / **1698 通过**、`smoke` **32 通过 + 2 跳过**。
