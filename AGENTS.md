@@ -64,6 +64,14 @@ is not pinned exactly; a shadow or an unlisted rounded corner appears in the
 stylesheet; or two levels share an id. A rule worth keeping belongs there, not in
 prose.
 
+One level-data rule is enforced the same way, outside that file: **no level may
+be answered by one part of its own palette.** `test/levels/palette-answer.test.ts`
+grades every shipped level against every part it offers, every way of wiring that
+part to the level's pins, and against empty, constant-only and wire-only boards;
+the drop-ins that are the campaign's own design are an exemption table with a
+reason per row, and a row that stops firing fails the test. A level that hands
+over its own answer therefore fails the gate rather than being found by a player.
+
 ## Layout
 
 ```

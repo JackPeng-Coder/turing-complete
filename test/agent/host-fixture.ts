@@ -78,7 +78,20 @@ const PARTS: readonly PartInfo[] = [
   },
 ];
 
-export function makeTestHost(): TestHost {
+/**
+ * What the fixture lets a test change about the host.
+ *
+ * `parts` is the palette the assistant may place. It defaults to the three-part
+ * stub above; a test about a SHIPPED level's palette passes the level's own list,
+ * which is how `test/agent/palette.test.ts` asserts that a withheld answer is
+ * withheld from the model too.
+ */
+export interface HostOptions {
+  readonly parts?: readonly PartInfo[];
+}
+
+export function makeTestHost(options: HostOptions = {}): TestHost {
+  const palette: readonly PartInfo[] = options.parts ?? PARTS;
   const graph = emptyGraph('test-level');
   const stack = new CommandStack();
   const applied: string[] = [];
@@ -100,7 +113,7 @@ export function makeTestHost(): TestHost {
     expectsProgram: true,
     host: {
       graph: () => graph,
-      parts: () => PARTS,
+      parts: () => palette,
       snapshot: (): BoardSnapshot => ({
         mode: 'level',
         dev: false,
@@ -109,7 +122,7 @@ export function makeTestHost(): TestHost {
         parts: graph.instances.map((inst) => ({
           id: inst.id,
           def: inst.def,
-          nameZh: PARTS.find((part) => part.id === inst.def)?.nameZh ?? inst.def,
+          nameZh: palette.find((part) => part.id === inst.def)?.nameZh ?? inst.def,
           x: inst.x,
           y: inst.y,
           params: inst.params,
