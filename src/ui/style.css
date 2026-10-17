@@ -612,6 +612,21 @@ button { font-family: inherit; }
 .io-bits .bit { cursor: pointer; }
 .io-bits .bit:hover { outline: 2px solid var(--hot); outline-offset: 1px; }
 .io-empty { font-size: 11px; color: var(--text-muted); padding-bottom: 4px; }
+/* A sandbox connector's width chip: there the connector IS the pin, so its width
+   is the player's to choose. A level's pins are the level's contract and carry no
+   chip (see `IoPanelOptions.onCycleWidth`). */
+.io-width {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: 1px solid var(--hair);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.io-width:hover { border-color: var(--hot); color: var(--hot); }
 
 /* ---------------------------------------------------------------- toolbar -- */
 .tools { display: grid; grid-template-columns: repeat(2, 46px); gap: 6px; }

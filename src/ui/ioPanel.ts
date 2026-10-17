@@ -1,14 +1,34 @@
 import type { AppState, Store } from '../app/store';
+import { isSandbox, type BoardPins } from '../levels/sandbox';
 import type { PinSpec } from '../levels/spec';
 import { bitsOf, bitElement } from './bit';
 
 export interface IoPanelOptions {
-  /** The values the level's input pins are currently driven with. */
+  /**
+   * The pins of the board on screen.
+   *
+   * A LEVEL DECLARES THEM; A SANDBOX DOES NOT. There the pins are the connectors
+   * the player placed, so this is asked every render rather than read off the
+   * level spec once: adding or deleting a `关卡输入`/`关卡输出` changes the list,
+   * and the panel is one of the three readers that must agree with it.
+   */
+  pins(): BoardPins;
+  /** The values the board's input pins are currently driven with. */
   vector(): Readonly<Record<string, number>>;
-  /** Flips one bit of one level input pin, then re-settles. */
+  /** Flips one bit of one input pin, then re-settles. */
   onToggleBit(pinId: string, bit: number): void;
-  /** Settled values at the level's output pins, or `null` when nothing runs. */
+  /** Settled values at the board's output pins, or `null` when nothing runs. */
   outputs(): Readonly<Record<string, number>> | null;
+  /**
+   * Sandbox only: change one connector's pin width.
+   *
+   * A LEVEL'S WIDTHS ARE THE LEVEL'S CONTRACT -- the checks compare against them,
+   * so a button that changed them would be a button that changed the puzzle. In a
+   * sandbox there is no contract: the connector IS the pin, and a circuit built
+   * from the 8-bit family cannot be driven at one bit. Absent on a level, and the
+   * width chip is not drawn.
+   */
+  onCycleWidth?(pinId: string): void;
   /** The clock's rate, as the original labels it: `10Hz`. */
   rate(): string;
   /** Steps the clock to its next rate. */
@@ -53,13 +73,33 @@ export function mountIoPanel(
 
   const render = (): void => {
     const { level } = store.get();
+    const pins = options.pins();
     const vector = options.vector();
     const outputs = options.outputs();
+    // A SANDBOX HAS NO PINS UNTIL SOMETHING IS PLACED, and "尚未放置输入元件" is the
+    // wrong sentence there: nothing is missing from the level, the player just has
+    // not put a connector down yet. Say what would put a row here instead.
+    const sandbox = isSandbox(level);
+    const emptyIn = sandbox ? '放一个「关卡输入」元件来驱动电路' : '尚未放置输入元件';
+    const emptyOut = sandbox ? '放一个「关卡输出」元件来读数' : '尚未放置输出元件';
 
     clock.body.textContent = `${options.tick()} 拍 · ${options.rate()}`;
     clock.rate.textContent = options.rate();
+    // A sandbox connector's width is its own (`sandboxPins` reads it off the
+    // instance), so the chip only exists when the caller can change it.
+    const widthChip = (pin: PinSpec): HTMLElement | undefined => {
+      if (!sandbox || options.onCycleWidth === undefined) return undefined;
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'io-width';
+      chip.textContent = `${pin.width} 位`;
+      chip.title = '点击切换位宽：1 → 8 → 16 → 32 → 2 → 3 → 4 → 6';
+      chip.addEventListener('click', () => options.onCycleWidth?.(pin.id));
+      return chip;
+    };
+
     state.replaceChildren(
-      group('输入状态', level.io.inputs, '尚未放置输入元件', (pin) => {
+      group('输入状态', pins.inputs, emptyIn, (pin) => {
         const value = vector[pin.id] ?? 0;
         const bits = document.createElement('div');
         bits.className = 'io-bits';
@@ -69,16 +109,18 @@ export function mountIoPanel(
           cell.addEventListener('click', () => options.onToggleBit(pin.id, position));
           bits.append(cell);
         }
-        return { bits, value };
+        const extra = widthChip(pin);
+        return extra === undefined ? { bits, value } : { bits, value, extra };
       }),
-      group('输出状态', level.io.outputs, '尚未放置输出元件', (pin) => {
+      group('输出状态', pins.outputs, emptyOut, (pin) => {
         const value = outputs?.[pin.id];
         const bits = document.createElement('div');
         bits.className = 'io-bits';
         for (const bit of value === undefined ? unknownBits(pin.width) : bitsOf(value, pin.width)) {
           bits.append(bitElement(bit));
         }
-        return { bits, value };
+        const extra = widthChip(pin);
+        return extra === undefined ? { bits, value } : { bits, value, extra };
       }),
     );
   };
@@ -143,7 +185,7 @@ function group(
   title: string,
   pins: readonly PinSpec[],
   emptyText: string,
-  renderPin: (pin: PinSpec) => { bits: HTMLElement; value: number | undefined },
+  renderPin: (pin: PinSpec) => { bits: HTMLElement; value: number | undefined; extra?: HTMLElement },
 ): HTMLElement {
   const box = document.createElement('div');
   box.className = 'io-group';
@@ -160,7 +202,7 @@ function group(
   }
 
   for (const [position, pin] of pins.entries()) {
-    const { bits, value } = renderPin(pin);
+    const { bits, value, extra } = renderPin(pin);
     const row = document.createElement('div');
     row.className = 'io-pin';
     const name = document.createElement('div');
@@ -172,7 +214,9 @@ function group(
     // A dash, not `???`: the dots above already say the bits are unknown, and a
     // blank is what an instrument shows for a reading it does not have.
     readout.textContent = value === undefined ? '—' : String(value);
-    row.append(name, bits, readout);
+    row.append(name);
+    if (extra !== undefined) row.append(extra);
+    row.append(bits, readout);
     box.append(row);
   }
   return box;

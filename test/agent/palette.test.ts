@@ -26,6 +26,7 @@ import type { PartInfo } from '../../src/agent/host';
 import { circuitTools } from '../../src/agent/ops';
 import { findTool, runTool, type ToolSpec } from '../../src/agent/tools';
 import { getLevel, LEVELS } from '../../src/levels/index';
+import { SANDBOX_LEVEL } from '../../src/levels/sandbox';
 import { registry } from '../fixtures/build';
 import { makeTestHost } from './host-fixture';
 
@@ -110,6 +111,36 @@ describe('a withheld answer is withheld from the assistant', () => {
     const placed = await call(fixture, 'place_part', { defId: 'and', x: 0, y: 0 });
     expect(placed.ok).toBe(true);
     expect(fixture.graph.instances.map((inst) => inst.def)).toEqual(['and']);
+  });
+
+  it('offers the sandbox its connectors, so the assistant can be driven and read', async () => {
+    // THE SANDBOX HAS NO LEVEL PINS, so its palette carries the two connectors
+    // (`sandboxPaletteDefs`). Without them a session could build a circuit and
+    // then have nothing to place as an output -- the reported "怎么没有输出".
+    const palette = offeredDefsFor(emptyProgress(), LEVELS, SANDBOX_LEVEL, false, registry);
+    expect(palette).toContain('level_input');
+    expect(palette).toContain('level_output');
+
+    const fixture = makeTestHost({ parts: palette.map(partInfo) });
+    // The sandbox host names a placed connector `IN_1` / `OUT_1` (see
+    // `levelIoPlacement`), which is what `read_board` reports as a pin.
+    fixture.connectors.level_input = { id: 'IN_1', width: 1 };
+    fixture.connectors.level_output = { id: 'OUT_1', width: 1 };
+
+    expect(await listed(fixture)).toContain('level_output');
+    const placed = await call(fixture, 'place_part', { defId: 'level_output', x: 0, y: 0 });
+    expect(placed.ok).toBe(true);
+    expect(placed.body.result.id).toBe('OUT_1');
+  });
+
+  it('names the connectors in the readable step line once the board is a sandbox', async () => {
+    // The line the player reads is the tool's `note`, and on a sandbox it must not
+    // hide the two parts that make a circuit observable.
+    const palette = offeredDefsFor(emptyProgress(), LEVELS, SANDBOX_LEVEL, false, registry);
+    const fixture = makeTestHost({ parts: palette.map(partInfo), mode: 'sandbox' });
+    const outcome = await runTool(toolOf(fixture, 'list_parts'), '{}', { signal: SIGNAL });
+    expect(outcome.note).toContain('关卡输入');
+    expect(outcome.note).toContain('关卡输出');
   });
 });
 

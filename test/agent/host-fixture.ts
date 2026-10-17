@@ -88,10 +88,13 @@ const PARTS: readonly PartInfo[] = [
  */
 export interface HostOptions {
   readonly parts?: readonly PartInfo[];
+  /** What `snapshot().mode` reports. The sandbox tests need `'sandbox'`. */
+  readonly mode?: 'level' | 'sandbox';
 }
 
 export function makeTestHost(options: HostOptions = {}): TestHost {
   const palette: readonly PartInfo[] = options.parts ?? PARTS;
+  const mode = options.mode ?? 'level';
   const graph = emptyGraph('test-level');
   const stack = new CommandStack();
   const applied: string[] = [];
@@ -115,7 +118,7 @@ export function makeTestHost(options: HostOptions = {}): TestHost {
       graph: () => graph,
       parts: () => palette,
       snapshot: (): BoardSnapshot => ({
-        mode: 'level',
+        mode,
         dev: false,
         level: { id: 'test-level', nameZh: '测试关', nameEn: 'Test level' },
         editing: null,

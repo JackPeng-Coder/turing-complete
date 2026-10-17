@@ -19,7 +19,8 @@
  * types through on the way to a working circuit is usually not runnable.
  */
 import { Simulation, compile } from '../../core/net';
-import { bindLevelIo, type LevelIo } from '../../levels/checks';
+import { bindLevelIo, bindSandboxIo, type LevelIo } from '../../levels/checks';
+import { boardPins, isSandbox } from '../../levels/sandbox';
 import type { LevelSpec } from '../../levels/spec';
 import type { ProgramMachine } from '../../levels/run';
 import type { Graph } from '../../core/graph';
@@ -95,6 +96,12 @@ export function createDisplay(
   machine?: ProgramMachine | null,
 ): DisplaySimulation | null {
   const regions: OutputRegion[] = [];
+  // THE BOARD'S PINS FOR WHICHEVER BOARD THIS IS. A level declares them; a sandbox
+  // has none of its own, so its pins are the connectors the player placed there
+  // (`sandboxPins`). One list for the drive, the read and the panel -- computed
+  // here and captured, because the display is rebuilt on every graph edit and a
+  // connector added or removed is exactly such an edit.
+  const pins = boardPins(level, graph, registry);
   // Compiled in one block so that a refusal anywhere -- an unallocated pin, a
   // graph `compile` will not accept -- leaves through the same door.
   const ready = ((): { sim: Simulation; io: LevelIo } | null => {
@@ -103,7 +110,7 @@ export function createDisplay(
       // compiled pin bases are what `regions` below has to address.
       const net = machine?.net ?? compile(graph, registry);
       const sim = machine?.sim ?? new Simulation(net, registry);
-      const io = bindLevelIo(sim, net, level);
+      const io = isSandbox(level) ? bindSandboxIo(sim, net, pins) : bindLevelIo(sim, net, level);
       // ONE REGION PER COMPILED OUTPUT PIN, not per document instance. A custom
       // component compiles to the parts inside it, so the pins a board can paint
       // are `i3`'s own for a leaf and `i3/i1`'s for a component -- and the
@@ -126,7 +133,7 @@ export function createDisplay(
   const { sim, io } = ready;
 
   const driveVector = (values: Readonly<Record<string, number>>): void => {
-    for (const pin of level.io.inputs) {
+    for (const pin of pins.inputs) {
       io.writeInput(pin.id, within(values[pin.id] ?? 0, pin.width));
     }
   };
@@ -153,7 +160,7 @@ export function createDisplay(
         outputs.set(region.key, portValueToNumber(sim.read(region.base, region.width)));
       }
       const levelOutputs = new Map<string, number>();
-      for (const pin of level.io.outputs) levelOutputs.set(pin.id, io.readOutput(pin.id));
+      for (const pin of pins.outputs) levelOutputs.set(pin.id, io.readOutput(pin.id));
       return { outputs, levelOutputs, stable: true, tick };
     },
     tick(): void {

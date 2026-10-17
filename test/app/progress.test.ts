@@ -273,11 +273,18 @@ describe('offeredDefsFor', () => {
     expect(offered).not.toContain('level_output');
   });
 
-  it('leaves the sandbox palette alone: a sandbox has no pins to connect to', () => {
+  it('gives the sandbox the whole catalog plus its two connectors', () => {
+    // THE CONNECTORS ARE THE SANDBOX'S PINS. A sandbox has no `LevelSpec.io`, so the
+    // `level_input` / `level_output` a player places there are the only thing the
+    // board can be driven from and read at -- leaving them out of the palette made
+    // the sandbox a circuit nobody could observe (see `sandboxPins`).
     const offered = offeredDefsFor(emptyProgress(), levels, sandbox, true, registry);
     expect(offered).toContain('add8');
-    expect(offered).not.toContain('level_input');
-    expect(offered).not.toContain('level_output');
+    expect(offered).toContain('level_input');
+    expect(offered).toContain('level_output');
+    // Still a sandbox, not a secret level: nothing else hidden rides along.
+    const hidden = registry.all().filter((def) => def.hidden === true).map((def) => def.id);
+    expect(hidden.sort()).toEqual(['level_input', 'level_output']);
   });
 });
 

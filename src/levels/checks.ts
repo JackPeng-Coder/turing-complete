@@ -5,6 +5,7 @@ import { Simulation, compile, type Netlist } from '../core/net';
 import type { Registry } from '../core/registry';
 import { assertWidth, formatPort, maskInto, portValueToNumber } from '../core/signal';
 import { getCustomCheck } from './custom/index';
+import type { BoardPins } from './sandbox';
 import { FAILURE_REASONS } from './spec';
 import type {
   CheckFailure,
@@ -160,6 +161,70 @@ export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): Lev
     }
   }
 
+  return buildIo(sim, inputSlots, outputSlots, mismatches);
+}
+
+/**
+ * Binds a SANDBOX circuit to the connectors that are on it.
+ *
+ * A sandbox has no `LevelSpec.io`, so there is no naming convention to read: the
+ * pin id IS the instance id (`IN_1`, `OUT_1`, ...), which is what `sandboxPins`
+ * reports and what the readout, the display and the assistant all key on. The
+ * slots themselves come from the compiled circuit exactly as `bindLevelIo`'s do,
+ * including the width check -- a connector whose compiled width disagrees with
+ * the pin the board reports is a mismatch rather than a silently truncated read.
+ */
+export function bindSandboxIo(sim: Simulation, net: Netlist, pins: BoardPins): LevelIo {
+  const inputSlots = new Map<string, { base: number; width: number }>();
+  const outputSlots = new Map<string, { base: number; width: number }>();
+  const mismatches: string[] = [];
+
+  for (const pin of pins.inputs) {
+    const key = `${pin.id}.out`;
+    try {
+      const width = net.outputWidth(key);
+      if (width !== pin.width) {
+        mismatches.push(`${key} is ${width}-bit in the circuit but ${pin.width} on the board`);
+        continue;
+      }
+      inputSlots.set(pin.id, { base: net.outputBase(key), width });
+    } catch {
+      /* the connector is not in the compiled circuit: it reads as 0 */
+    }
+  }
+
+  for (const pin of pins.outputs) {
+    const key = `${pin.id}.in`;
+    try {
+      const width = net.inputWidth(key);
+      if (width !== pin.width) {
+        mismatches.push(`${key} is ${width}-bit in the circuit but ${pin.width} on the board`);
+        continue;
+      }
+      outputSlots.set(pin.id, { base: net.inputBase(key), width });
+    } catch {
+      /* the connector is not in the compiled circuit: it reads as 0 */
+    }
+  }
+
+  return buildIo(sim, inputSlots, outputSlots, mismatches);
+}
+
+/**
+ * The `LevelIo` both binders end in: the slots, plus the read/write rules.
+ *
+ * ONE OBJECT, TWO SPELLINGS. The level binder finds its slots by the `IN_`/`OUT`
+ * naming convention and the sandbox binder by instance id; everything after the
+ * lookup -- the width guard on a write, the masked read, the settle and tick
+ * forwarding -- has to be the same code, because a checker and a board that
+ * disagreed about it would disagree about what a pin is carrying.
+ */
+function buildIo(
+  sim: Simulation,
+  inputSlots: ReadonlyMap<string, { base: number; width: number }>,
+  outputSlots: ReadonlyMap<string, { base: number; width: number }>,
+  mismatches: readonly string[],
+): LevelIo {
   const io: LevelIo = {
     sim,
     reset: () => sim.reset(),

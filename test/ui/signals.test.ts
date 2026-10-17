@@ -3,6 +3,7 @@ import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { addInstance, connect, emptyGraph } from '../../src/core/graph';
 import { getLevel } from '../../src/levels/index';
+import { SANDBOX_ID, SANDBOX_LEVEL } from '../../src/levels/sandbox';
 import { graphFromBoard } from '../../src/levels/board';
 import { overtureBoard } from '../../src/levels/boards/overture';
 import { createProgramRun } from '../../src/levels/run';
@@ -126,6 +127,44 @@ describe('the board display', () => {
     const g = emptyGraph(level.id);
     addInstance(g, 'nand', 0, 0);
     expect(createDisplay(g, registry, level, {})).not.toBeNull();
+  });
+
+  /**
+   * THE SANDBOX'S DISPLAY IS DRIVEN BY ITS CONNECTORS.
+   *
+   * A sandbox spec declares no pins, so before `bindSandboxIo` there was nothing
+   * to write and nothing to read: a circuit could be built, but its answer could
+   * not be observed -- the complaint that produced this test ("怎么没有输出"). Here
+   * the pins are the placed `level_input` / `level_output`, named by instance id,
+   * and the display answers them like any level's.
+   */
+  it('drives and reads a sandbox through the connectors on it', () => {
+    const g = emptyGraph(SANDBOX_ID);
+    const input = addInstance(g, 'level_input', 0, 0, 'IN_1');
+    const gate = addInstance(g, 'not', 200, 0);
+    const out = addInstance(g, 'level_output', 400, 0, 'OUT_1');
+    connect(g, { inst: input.id, port: 'out' }, { inst: gate.id, port: 'a' });
+    connect(g, { inst: gate.id, port: 'out' }, { inst: out.id, port: 'in' });
+
+    const display = createDisplay(g, registry, SANDBOX_LEVEL, { IN_1: 1 });
+    expect(display).not.toBeNull();
+    expect(display!.read().levelOutputs.get('OUT_1')).toBe(0);
+    // The board paints the connector's own value too, by instance and port.
+    expect(display!.read().outputs.get('IN_1.out')).toBe(1);
+
+    display!.drive({ IN_1: 0 });
+    expect(display!.read().levelOutputs.get('OUT_1')).toBe(1);
+    // An input the vector does not name is driven 0, exactly as on a level.
+    display!.drive({});
+    expect(display!.read().outputs.get('IN_1.out')).toBe(0);
+  });
+
+  it('reads a sandbox output that the graph does not feed as 0, not as a crash', () => {
+    const g = emptyGraph(SANDBOX_ID);
+    addInstance(g, 'level_output', 0, 0, 'OUT_1');
+    const display = createDisplay(g, registry, SANDBOX_LEVEL, {});
+    expect(display).not.toBeNull();
+    expect(display!.read().levelOutputs.get('OUT_1')).toBe(0);
   });
 
   /**

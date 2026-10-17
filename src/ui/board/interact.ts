@@ -18,6 +18,7 @@ import {
 import type { CommandStack } from '../../app/commands';
 import type { AppState, Store } from '../../app/store';
 import type { LevelSpec } from '../../levels/spec';
+import { isSandbox } from '../../levels/sandbox';
 import { INSTANCE_HEIGHT } from '../theme';
 import { placementAt, instanceRect } from './geometry';
 import { hitTest, screenToWorld, snap, type Point } from './view';
@@ -68,6 +69,13 @@ export interface LevelIoPlacement {
  * `level_output` declare 1-bit pins, so an 8-bit level pin exists only if the
  * instance placed for it says `params.width = 8`. Guessing it back from the id
  * string would be a second, unenforced source of truth.
+ *
+ * A SANDBOX HAS NO PINS TO COUNT, and its connectors are its pins. The next free
+ * `IN_<n>` / `OUT_<n>` is handed out instead, at the def's one bit: the id
+ * matches the `IN_`/`OUT` prefix the board paints a connector's value under, and
+ * `sandboxPins` reads the instances back as the board's pin list. Without this a
+ * sandbox connector was placed as `i1`, bound to nothing, and the sidebar said
+ * "尚未放置输入元件" over a board that had a connector on it.
  */
 export function levelIoPlacement(
   level: LevelSpec,
@@ -75,6 +83,17 @@ export function levelIoPlacement(
   defId: string,
 ): LevelIoPlacement | undefined {
   const taken = new Set(graph.instances.map((inst) => inst.id));
+  if (isSandbox(level)) {
+    const prefix = defId === 'level_input' ? 'IN_' : defId === 'level_output' ? 'OUT_' : null;
+    if (prefix === null) return undefined;
+    // One bit: the def's own width. A sandbox connector is not bound to a level
+    // pin, so there is no declared width to carry. `taken` is finite, so the
+    // search terminates on the first free number.
+    for (let n = 1; ; n += 1) {
+      const id = `${prefix}${n}`;
+      if (!taken.has(id)) return { id, width: 1 };
+    }
+  }
   if (defId === 'level_input') {
     for (const pin of level.io.inputs) {
       const id = `IN_${pin.id}`;

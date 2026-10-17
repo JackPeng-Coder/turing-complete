@@ -3,7 +3,7 @@ import type { GradeResult, Metrics } from '../levels/grader';
 import type { Registry } from '../core/registry';
 import type { LevelSpec } from '../levels/spec';
 import type { BlueprintLibrary } from '../levels/blueprints';
-import { isSandbox } from '../levels/sandbox';
+import { isSandbox, SANDBOX_CONNECTORS } from '../levels/sandbox';
 
 export interface LevelRecord {
   readonly passed: boolean;
@@ -199,6 +199,12 @@ export function paletteDefsFor(
  *    game is offered here without a second list to update. Wide components are
  *    included: they are ordinary registry defs, and "16-bit" is a phase-5
  *    question about widths, not about whether the sandbox may use `add8`.
+ *  * PLUS THE TWO CONNECTORS. They are the one exception to "less the hidden
+ *    plumbing", because the sandbox has no level spec to declare pins: the
+ *    `level_input` / `level_output` a player places ARE the sandbox board's pins
+ *    (`sandboxPins`), and without them there is no way to drive a sandbox circuit
+ *    or read its answer. A level still gets them only when its own
+ *    `allowedComponents` lists them.
  *  * plus everything the campaign has handed the player, which for the base parts
  *    is already true, so the union only ever ADDS a player's own components --
  *    passed in as `extra` because a component is data (`Progress.blueprints`)
@@ -213,9 +219,13 @@ export function sandboxPaletteDefs(
   registry: Registry,
   extra: readonly string[] = [],
 ): string[] {
+  const connectors = new Set<string>(SANDBOX_CONNECTORS);
   const offered = registry
     .all()
-    .filter((def) => def.hidden !== true && def.category !== 'level')
+    .filter(
+      (def) =>
+        (def.hidden !== true && def.category !== 'level') || connectors.has(def.id),
+    )
     .map((def) => def.id);
   const seen = new Set(offered);
   for (const id of extra) {

@@ -165,3 +165,40 @@
 **没动的**：上面那 32 个「刻意的一步解」保持原样。它们是 2.x/3.x 战营的成文设计（关卡注释里逐条辩论过，批量测试里也测量过），而且大部分元件的唯一可放置位置就是它自己那一关——整体收紧等于改战营设计，不是修 bug；这条留给用户决定（结论里列了清单与代价）。
 
 **门禁**：`build` exit 0（295.94 kB / gzip 101.49 kB）、`test` 66 文件 / **1705 通过**、`smoke` **32 通过 + 2 跳过**。
+
+### 追加（2026-10-17，用户报告「沙盒里没有输出」＋ 面板停在「尚未放置输入元件」）
+
+**现象**：在沙盒里让 Agent 搭一位全加器，Agent 说「沙盒里没有任何输出引脚」；左下角读数面板一直显示「输入状态／尚未放置输入元件」「输出状态／尚未放置输出元件」，可板上明明有元件。用户问「怎么没有输出」。
+
+**根因（一处设计从未接上 + 一处过滤走了样）**：
+
+1. `sandboxPaletteDefs` 把 `hidden` 和 `category === 'level'` 的元件全部滤掉，于是 `level_input` / `level_output` 不在沙盒托盘里——但 `sandbox.ts` 自己的注释从第一天就写着「沙盒里玩家自己的 `level_input`/`level_output` 就是驱动电路的元件」。托盘不给，手和 Agent 都放不了连接器。
+2. 读数面板只读 `level.io`，而沙盒的 `io` 是空的（没有题目就没有引脚），所以「尚未放置…」永远成立；`bindLevelIo` 又按 `IN_<pin>` / `OUT` 约定绑定，沙盒里没有这套名字，就算放上去也读不到。
+
+**修复**：
+
+- 沙盒托盘加入两个连接器（`SANDBOX_CONNECTORS`），仍是同一批 registry def；关卡关卡的调色板规则不变（关卡只认自己的 `allowedComponents`）。
+- 新增 `sandboxPins(graph, registry)`：**沙盒的引脚＝板上的连接器实例**（id 即实例 id，位宽 `params.width ?? def`，按建立顺序）；`boardPins(level, graph, registry)` 成为唯一入口（关卡 → `level.io`，沙盒 → `sandboxPins`），读数面板、显示层、Agent 的 `read_board` 都改走它。
+- `levelIoPlacement` 在沙盒里给连接器发 `IN_<n>` / `OUT_<n>`（一位宽）：这个前缀正是画板给连接器画读数用的，`sandboxPins` 也能按实例 id 读回来。
+- `checks.ts` 抽出 `buildIo`（写入宽度守卫、读取掩码、settle/tick 转发），新增 `bindSandboxIo`（按实例 id 绑槽）；两个 binder 共用同一段读写规则。
+- 面板空态在沙盒里改为「放一个『关卡输入』元件来驱动电路 / 放一个『关卡输出』元件来读数」；沙盒 hint 也补了一句。
+- `rebuild()` 顺手剪掉已不在板上的引脚残留向量（删掉连接器后再放一个同名 id，不会继承旧值）。
+
+**测试**：
+
+- `test/levels/sandbox.test.ts`（7 条）：引脚＝连接器的位宽与顺序、非连接器忽略、关卡仍用 `io`、`IN_n/OUT_n` 命名、不重命名已有连接器、关卡仍按 spec 绑定、`SANDBOX_CONNECTORS` 恰好两个。
+- `test/ui/signals.test.ts` +2：沙盒显示按连接器驱动/读取（NOT 反相：`IN_1=1 → OUT_1=0`，翻转后 `1`），未接线的输出读 0。
+- `test/ui/panels.test.ts` +3：空态文案指向调色板；连接器按 id 成行（`1. IN_1` / `1. OUT_1`，两组各自编号）；点输入位回调 `('IN_1', 0)`。
+- `test/app/progress.test.ts`：沙盒托盘含两个连接器，且断言 `hidden` 的元件只有这两个（不放开别的）。
+- `test/agent/palette.test.ts` +2：沙盒 `list_parts` 含两个连接器，`place_part('level_output')` 得到 `OUT_1`；Agent 面板的可读摘要行在沙盒里不再过滤 `hidden`（那里连接器就是引脚，过滤掉会让玩家以为没有输入/输出）。
+- `src/agent/ops.ts` 的 `list_parts` 摘要按 `snapshot().mode` 决定是否列出 hidden 元件；关卡上的行为不变（引脚仍是噪音）。
+- smoke +1：`the sandbox is driven and read through the connectors a player places`——托盘有连接器、空态有提示、放 `IN_1`/`OUT_1` 直连、面板两行、点输入位后输出行变 1（截图 `test-results/smoke-sandbox-io.png`）。
+
+**位宽可调**：沙盒连接器默认一位，读数面板每行有一个「N 位」芯片，点一下按 `1 → 8 → 16 → 32 → 2 → 3 → 4 → 6` 循环（8 是一步就到：沙盒里字节电路和一位电路一样常见），改的是实例的 `params.width`，走玩家自己的撤销栈（`set width IN_1 to 8`，Ctrl+Z 可退）。关卡的引脚没有芯片——它们的分辨率是关卡契约。
+
+**测试**（续）：
+
+- `test/ui/panels.test.ts` 再加 2 条：每个连接器一个位宽芯片（`1 位` / `8 位`）且点击回传对应的 pin id；关卡上不画芯片。
+- smoke 同一条用例末尾：点两下把输入与输出都切到 `8 位`，断言两行各 8 个位格、读数仍是 1（截图见上）。
+
+**门禁**：`build` exit 0（298.74 kB / gzip 102.39 kB）、`test` 67 文件 / **1722 通过**、`smoke` **33 通过 + 2 跳过**。

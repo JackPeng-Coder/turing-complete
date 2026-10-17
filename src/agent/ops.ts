@@ -624,12 +624,16 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
       const board = host.snapshot();
       return `看了一眼电路：${board.parts.length} 个元件、${board.wires.length} 根导线`;
     },
-    list_parts: () =>
-      `列出可用元件：${host
-        .parts()
-        .filter((part) => !part.hidden)
-        .map((part) => part.nameZh)
-        .join('、')}`,
+    list_parts: () => {
+      // Hidden plumbing is noise on a LEVEL: its connectors are the level's, and
+      // the player already knows a board has pins. In a SANDBOX the connectors ARE
+      // the board's pins (`sandboxPins`), so a line that dropped them would read as
+      // "there is no input or output here" while the palette offers both -- the
+      // exact confusion this summary is supposed to prevent.
+      const sandbox = host.snapshot().mode === 'sandbox';
+      const shown = host.parts().filter((part) => sandbox || !part.hidden);
+      return `列出可用元件：${shown.map((part) => part.nameZh).join('、')}`;
+    },
     place_part: (result) => {
       const placed = result as { id: string; defId: string; x: number; y: number };
       return `在 (${placed.x}, ${placed.y}) 放了 ${nameOf(placed.defId)}（${placed.id}）`;

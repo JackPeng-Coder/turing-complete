@@ -12,7 +12,7 @@ import { applyGrade, offeredDefsFor, resumePointOf, type Progress } from './app/
 import { composeRegistry, libraryClosure, libraryIds, referencedComponents } from './levels/blueprints';
 import { mountBlueprintPanel } from './ui/blueprint';
 import { applyWrap, planWrap, type WrapPlan } from './levels/wrap';
-import { SANDBOX_ID, SANDBOX_LEVEL, isSandbox } from './levels/sandbox';
+import { SANDBOX_ID, SANDBOX_LEVEL, boardPins, isSandbox } from './levels/sandbox';
 import { circuitSignature, emptySandbox, loadSandbox, saveSandbox } from './persist/sandbox';
 import { parseCircuit, serializeCircuit } from './persist/circuit';
 import { LAYOUT_LIMITS, loadLayout, saveLayout, type Layout } from './persist/layout';
@@ -162,6 +162,18 @@ const RATES = [
   { label: '10Hz', ms: 100 },
   { label: '60Hz', ms: 16 },
 ] as const;
+
+/**
+ * The widths a sandbox connector cycles through.
+ *
+ * THE COMMON CASE FIRST, then the rest. A sandbox circuit is byte-wide about as
+ * often as it is one bit, so the ladder opens 1 -> 8 and only then walks the
+ * shipped pins' other widths: the wide family is 8 everywhere, the decoder select
+ * pins are 1/2/3, the instruction fields are 2/3/6, and 16/32 are where the
+ * stepped families would land (`createWideDefs`). A level's pins never use this
+ * -- their widths are the level's contract -- see `IoPanelOptions.onCycleWidth`.
+ */
+const PIN_WIDTHS: readonly number[] = [1, 8, 16, 32, 2, 3, 4, 6];
 
 if (app) {
   /**
@@ -785,6 +797,14 @@ if (app) {
    */
   const rebuild = (): void => {
     const { graph, registry: reg, level: current } = store.get();
+    // A SANDBOX'S PINS COME AND GO WITH ITS CONNECTORS. `vector` is keyed by pin
+    // id, and the placement recycles a freed `IN_<n>` -- so a value left behind by
+    // a deleted connector would show up on the next one that takes its name.
+    // A level's pins are fixed data, so this is a no-op there.
+    const known = new Set(boardPins(current, graph, reg).inputs.map((pin) => pin.id));
+    if (Object.keys(vector).some((id) => !known.has(id))) {
+      vector = Object.fromEntries(Object.entries(vector).filter(([id]) => known.has(id)));
+    }
     display = createDisplay(graph, reg, current, vector, ensurePlayerRun()?.machine ?? null);
     sample();
   };
@@ -1556,7 +1576,54 @@ if (app) {
       truth.render();
     },
   });
+  /**
+   * Cycles one sandbox connector's pin width.
+   *
+   * A LEVEL'S PIN WIDTHS ARE THE LEVEL'S CONTRACT, and the panel does not draw a
+   * chip for them. In a sandbox the connector IS the pin, so its width is the
+   * player's to choose -- and it has to be chooseable at all, or a circuit built
+   * from the 8-bit family cannot be driven: a one-bit connector feeding an `add8`
+   * is the "no output" defect in another form.
+   *
+   * It is an ordinary undoable edit through the player's own stack, so Ctrl+Z
+   * takes it back like any other.
+   */
+  const cyclePinWidth = (pinId: string): void => {
+    const state = store.get();
+    if (!isSandbox(state.level)) return;
+    const inst = state.graph.instances.find((entry) => entry.id === pinId);
+    if (inst === undefined) return;
+    const def = state.registry.get(inst.def);
+    const declared =
+      def.id === 'level_output' ? (def.inputs[0]?.width ?? 1) : (def.outputs[0]?.width ?? 1);
+    const current = inst.params.width ?? declared;
+    const next = PIN_WIDTHS[(PIN_WIDTHS.indexOf(current) + 1) % PIN_WIDTHS.length] ?? 1;
+    if (next === current) return;
+    stack.push(
+      {
+        label: `set width ${pinId} to ${next}`,
+        do: (g) => {
+          const target = g.instances.find((entry) => entry.id === pinId);
+          if (target !== undefined) target.params.width = next;
+        },
+        undo: (g) => {
+          const target = g.instances.find((entry) => entry.id === pinId);
+          if (target === undefined) return;
+          // The declared width is the absence of an override, not a pinned value.
+          if (current === declared) delete target.params.width;
+          else target.params.width = current;
+        },
+      },
+      state.graph,
+    );
+    onChange();
+  };
+
   const io = mountIoPanel(ioSection, store, {
+    // The board's pins, not the level's: a sandbox's pins are the connectors the
+    // player placed, and the same helper answers the display and the assistant.
+    pins: () => boardPins(store.get().level, store.get().graph, store.get().registry),
+    onCycleWidth: (pinId) => cyclePinWidth(pinId),
     vector: () => vector,
     outputs: levelOutputs,
     rate: () => RATES[rateIndex]!.label,
@@ -1728,6 +1795,10 @@ if (app) {
       const issues = validateGraph(state.graph, state.registry)
         .filter((issue) => issue.severity === 'error')
         .map((issue) => ({ severity: 'error' as const, message: issue.message.zh }));
+      // What the board reads and publishes: a level's declared pins, or a
+      // sandbox's placed connectors. Read through the one helper so the
+      // assistant's `read_board` names the same pins the sidebar does.
+      const pins = boardPins(open, state.graph, state.registry);
       return {
         mode: isSandbox(open) ? 'sandbox' : 'level',
         dev: state.dev,
@@ -1771,7 +1842,7 @@ if (app) {
           outputs: entry.def.outputs.map((pin) => pin.id),
           instances: state.graph.instances.filter((inst) => inst.def === id).length,
         })),
-        inputs: open.io.inputs.map((pin) => ({
+        inputs: pins.inputs.map((pin) => ({
           id: pin.id,
           width: pin.width,
           value: vector[pin.id] ?? 0,
@@ -1780,7 +1851,7 @@ if (app) {
         // read there -- the other half of "what does this level want", and the
         // half a session that could only see its inputs went looking for in the
         // wrong place.
-        outputs: open.io.outputs.map((pin) => {
+        outputs: pins.outputs.map((pin) => {
           const live = levelOutputs();
           const value = live === null ? undefined : live[pin.id];
           return { id: pin.id, width: pin.width, value: value === undefined ? null : value };

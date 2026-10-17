@@ -1180,6 +1180,61 @@ test('the sandbox builds freely, does not grade, and keeps the circuit', async (
 });
 
 /**
+ * A SANDBOX CIRCUIT CAN BE DRIVEN AND READ.
+ *
+ * The reported defect: a circuit built in the sandbox had no output to look at,
+ * because the sandbox's palette left the two connectors out and the sidebar said
+ * "尚未放置输入元件" over a board that could not take one. The connectors are now
+ * ordinary sandbox parts and the board's pins ARE those instances, so this walks
+ * the whole user-visible path: place an input, place an output, wire them, flip a
+ * bit in the sidebar and see the number move on the other row.
+ */
+test('the sandbox is driven and read through the connectors a player places', async ({ page }) => {
+  await open(page, '/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await page.getByRole('button', { name: '自由建造' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('沙盒');
+
+  // The palette carries the two connectors, and the sidebar says how a row would
+  // appear rather than claiming a level component is missing.
+  await expect(page.locator('.palette')).toContainText('关卡输入');
+  await expect(page.locator('.palette')).toContainText('关卡输出');
+  await expect(page.locator('.io-empty').first()).toContainText('关卡输入');
+
+  const { cx, cy } = await boardCentre(page);
+  await place(page, '关卡输入', cx - 160, cy);
+  await place(page, '关卡输出', cx + 160, cy);
+  await dragWire(page, cx - 160 + 72, cy, cx + 160, cy);
+
+  // The connectors are the board's pins now: one input row, one output row, named
+  // by the id the placement gave them.
+  await expect(page.locator('.io-pin')).toHaveCount(2);
+  await expect(page.locator('.io-pin-name').first()).toHaveText('1. IN_1');
+  await expect(page.locator('.io-pin-name').nth(1)).toHaveText('1. OUT_1');
+
+  // Flip the input: the straight wire carries it to the output row.
+  const inputRow = page.locator('.io-pin').first();
+  const outputRow = page.locator('.io-pin').nth(1);
+  await expect(inputRow.locator('.io-value')).toHaveText('0');
+  await inputRow.locator('.bit').first().click();
+  await expect(inputRow.locator('.io-value')).toHaveText('1');
+  await expect(outputRow.locator('.io-value')).toHaveText('1');
+
+  // The connector's width is the player's in a sandbox: cycle both ends to eight
+  // bits and the rows follow, so a circuit built from the 8-bit family can be
+  // driven and read too. (A level's pins carry no chip -- their widths are the
+  // puzzle, and `test/ui/panels.test.ts` asserts the absence.)
+  await inputRow.locator('.io-width').click();
+  await outputRow.locator('.io-width').click();
+  await expect(inputRow.locator('.io-width')).toHaveText('8 位');
+  await expect(inputRow.locator('.bit')).toHaveCount(8);
+  await expect(outputRow.locator('.bit')).toHaveCount(8);
+  await expect(inputRow.locator('.io-value')).toHaveText('1');
+  await page.screenshot({ path: 'test-results/smoke-sandbox-io.png' });
+});
+
+/**
  * THE AGENT ASKS IN ITS PANEL, AND NEVER LOCKS THE GAME.
  *
  * There is no first-run card any more: a browser with no `tc.agent.v1` opens on

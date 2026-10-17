@@ -7,6 +7,7 @@ import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { addInstance, connect, emptyGraph } from '../../src/core/graph';
 import { getLevel, LEVELS } from '../../src/levels/index';
+import { SANDBOX_ID, SANDBOX_LEVEL, sandboxPins } from '../../src/levels/sandbox';
 import type { LevelSpec } from '../../src/levels/spec';
 import { grade } from '../../src/levels/grader';
 import { mountPalette } from '../../src/ui/palette';
@@ -571,6 +572,9 @@ describe('io readout panel', () => {
     const root = document.createElement('div');
     const toggled: Array<[string, number]> = [];
     mountIoPanel(root, store, {
+      // The board's pins, which on a level are the level's own. A sandbox test
+      // overrides this with `sandboxPins` of a graph that has connectors on it.
+      pins: () => store.get().level.io,
       vector: () => ({}),
       outputs: () => null,
       rate: () => '10Hz',
@@ -642,6 +646,118 @@ describe('io readout panel', () => {
     const state = root.querySelectorAll('.card')[1]!;
     (root.querySelector('[aria-label="收起状态面板"]') as HTMLButtonElement).click();
     expect((state as HTMLElement).hidden).toBe(true);
+  });
+});
+
+/**
+ * THE SANDBOX'S READOUT, WHICH USED TO BE A DEAD END.
+ *
+ * `SANDBOX_LEVEL.io` is empty -- a sandbox has no puzzle to declare pins -- so the
+ * panel used to say 尚未放置输入元件 over a board that could not take a connector at
+ * all, and a player who had just built a full adder had no way to see its answer.
+ * The pins are now the connectors themselves (`sandboxPins`), so the panel has to
+ * draw them, toggle them, and say something useful before any exist.
+ */
+describe('the readout in the sandbox', () => {
+  function sandboxStore(graph = emptyGraph(SANDBOX_ID)): Store<AppState> {
+    return createStore<AppState>({
+      level: SANDBOX_LEVEL,
+      graph,
+      registry,
+      progress: emptyProgress(),
+      camera: { x: 0, y: 0, zoom: 1 },
+      selected: [],
+      dragging: null,
+      armed: null,
+      dev: false,
+      programs: {},
+      blueprints: {},
+      editing: null,
+      metrics: null,
+      lastGrade: null,
+      status: null,
+    });
+  }
+
+  function mountSandbox(
+    store: Store<AppState>,
+    overrides: Partial<IoPanelOptions> = {},
+  ): { root: HTMLElement; toggled: Array<[string, number]> } {
+    const root = document.createElement('div');
+    const toggled: Array<[string, number]> = [];
+    mountIoPanel(root, store, {
+      pins: () => sandboxPins(store.get().graph, registry),
+      vector: () => ({}),
+      outputs: () => null,
+      rate: () => '10Hz',
+      tick: () => 0,
+      onToggleBit: (pin, bit) => toggled.push([pin, bit]),
+      onCycleRate: () => {},
+      ...overrides,
+    });
+    return { root, toggled };
+  }
+
+  it('says how to get a row instead of "nothing placed"', () => {
+    // "尚未放置输入元件" claims the LEVEL is missing something. In a sandbox the
+    // level has no pins by design, so the sentence has to point at the palette.
+    const { root } = mountSandbox(sandboxStore());
+    expect(root.textContent).toContain('放一个「关卡输入」元件');
+    expect(root.textContent).toContain('放一个「关卡输出」元件');
+  });
+
+  it('draws the connectors that are on the board, by their own ids', () => {
+    const g = emptyGraph(SANDBOX_ID);
+    addInstance(g, 'level_input', 0, 0, 'IN_1');
+    addInstance(g, 'level_output', 200, 0, 'OUT_1');
+    const { root } = mountSandbox(sandboxStore(g), {
+      vector: () => ({ IN_1: 1 }),
+      outputs: () => ({ OUT_1: 0 }),
+    });
+    const rows = [...root.querySelectorAll('.io-pin')];
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.querySelector('.io-pin-name')?.textContent).toBe('1. IN_1');
+    expect(rows[0]!.querySelector('.io-value')?.textContent).toBe('1');
+    expect(rows[1]!.querySelector('.io-pin-name')?.textContent).toBe('1. OUT_1');
+    expect(rows[1]!.querySelector('.io-value')?.textContent).toBe('0');
+  });
+
+  it('toggles a sandbox input by the instance id the board uses', () => {
+    const g = emptyGraph(SANDBOX_ID);
+    addInstance(g, 'level_input', 0, 0, 'IN_1');
+    const { root, toggled } = mountSandbox(sandboxStore(g));
+    (root.querySelector('.io-pin .bit') as HTMLElement).click();
+    expect(toggled).toEqual([['IN_1', 0]]);
+  });
+
+  it('offers a width chip per connector, and asks to cycle it', () => {
+    // The connector IS the pin in a sandbox, so its width is editable -- otherwise
+    // a circuit built from the 8-bit family could not be driven at all.
+    const g = emptyGraph(SANDBOX_ID);
+    addInstance(g, 'level_input', 0, 0, 'IN_1');
+    addInstance(g, 'level_input', 0, 80, 'IN_2').params.width = 8;
+    const cycled: string[] = [];
+    const { root } = mountSandbox(sandboxStore(g), { onCycleWidth: (id) => cycled.push(id) });
+    const chips = [...root.querySelectorAll('.io-width')] as HTMLButtonElement[];
+    expect(chips.map((chip) => chip.textContent)).toEqual(['1 位', '8 位']);
+    chips[1]!.click();
+    expect(cycled).toEqual(['IN_2']);
+  });
+
+  it('draws no width chip on a level, whose pin widths are the puzzle', () => {
+    const store = makeStore('ch2-24-bit-switch');
+    const root = document.createElement('div');
+    mountIoPanel(root, store, {
+      pins: () => store.get().level.io,
+      vector: () => ({}),
+      outputs: () => null,
+      rate: () => '10Hz',
+      tick: () => 0,
+      onToggleBit: () => {},
+      onCycleRate: () => {},
+      onCycleWidth: () => {},
+    });
+    expect(root.querySelector('.io-width')).toBeNull();
   });
 });
 
