@@ -138,13 +138,19 @@ so you can see where the last action landed. Above the rows, the model's own rea
 a six-line window as it is written and then folds to `▸ 思考 · N 行`, one click from being read again;
 the step that answers rather than acts keeps its sentence open.
 
+设置 holds the API address, the key, the model and the **step limit** — 16 model calls per request by
+default, `0` for no limit. When a request reaches the limit the log ends with a 继续执行 button, which
+sends the same conversation again with a fresh budget: a long build is one click from finishing rather
+than a retyped request.
+
 What it will not do, and why:
 
 - **It cannot touch your progress.** No level is opened, passed, skipped or cleared by the agent, and
   the campaign's stars change only when *you* press 测试 on a circuit. The tool list is the contract:
   it is what the model is offered, and nothing outside it is reachable.
 - **It cannot place parts the level does not offer you.** The tool's palette is derived from the same
-  two functions the parts tray uses, so a level's puzzle is not bypassed by asking nicely.
+  function the parts tray uses, and `?dev=1` only relaxes the unlock filter — it never adds a part a
+  level's brief did not list — so a level's puzzle is not bypassed by asking nicely.
 - **It does not pan, zoom, toggle the grid or band-select.** Those are the view, not the circuit: an
   agent that could move the camera could put the board somewhere you did not ask for it, and every one
   of them is one gesture away.
@@ -207,7 +213,10 @@ Screenshots are written under `test-results/`, which Playwright wipes at the sta
 
 `?dev=1` opens every level from the chapter map and offers every part a level lists, so a level can be
 opened and built without playing up to it. It opens exactly those two gates and nothing else: it never
-writes progress, so no level is passed and no star is awarded on its account.
+writes progress, so no level is passed and no star is awarded on its account. Nor does it widen a
+level's palette: `?dev=1` on level 2 offers the NAND on that level's list, not the sandbox's 8-bit
+adder — the flag only stops hiding listed parts the campaign has not handed out yet. The agent reads
+the same list, so `?dev=1` does not turn it into a way around a level's puzzle either.
 
 While it is on, the top bar carries an amber `DEV` light — a mode that unlocks the whole game has to be
 impossible to forget — and clicking that light leaves the mode and cleans the URL, so a refresh does not

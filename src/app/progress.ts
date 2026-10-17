@@ -229,21 +229,19 @@ export function sandboxPaletteDefs(
 /**
  * The parts a board offers, whichever board it is.
  *
- * ONE RULE, TWO CALLERS. The parts tray draws this list and the agent places from
- * it, and two copies of "what is on offer" is exactly how the tray and the
- * assistant drift apart -- so both call this, and a change here is a change
- * everywhere.
+ * ONE RULE, THREE CALLERS. The parts tray draws this list, the agent's
+ * `list_parts` reports it, and `place_part` refuses anything outside it. Two
+ * copies of "what is on offer" is exactly how the tray and the assistant drift
+ * apart -- so all three call this, and a change here is a change everywhere.
  *
- * `dev` reaches for the sandbox's complete set on ANY board: that is what the flag
- * promises, and `?dev=1` on level 1 really does hand you an 8-bit adder.
- *
- * AND THE LEVEL'S OWN CONNECTORS COME WITH IT. The sandbox set has no plumbing in
- * it -- `sandboxPaletteDefs` drops `category: 'level'` -- which is right for a
- * sandbox and wrong for a level, because a level binds its circuit to its pins
- * through those two parts. Without this clause `?dev=1` on a four-bit level is a
- * board whose inputs cannot be placed by anyone, hand or assistant: a real
- * session spent its whole step budget asking for `level_input` under a dozen
- * guessed names, and got "no such part" a dozen times.
+ * DEVELOPER MODE ONLY RELAXES THE UNLOCK FILTER; IT ADDS NO PARTS. A level's
+ * `allowedComponents` IS the puzzle, and `?dev=1` merely stops hiding the listed
+ * parts the campaign has not handed out yet (`paletteDefsFor`'s `dev` parameter).
+ * A level's own connectors are on that list, so a four-bit level under `?dev=1`
+ * still offers `level_input`/`level_output`; an 8-bit adder on level 1 is not
+ * offered, to the player or to the assistant. The sandbox is the exception,
+ * because it is not a puzzle: there is no list to intersect with, so it offers
+ * every base part (see `sandboxPaletteDefs`).
  */
 export function offeredDefsFor(
   progress: Progress,
@@ -253,19 +251,8 @@ export function offeredDefsFor(
   registry: Registry,
   extra: readonly string[] = [],
 ): string[] {
-  if (!dev && !isSandbox(level)) return paletteDefsFor(progress, levels, level, false);
-  const offered = sandboxPaletteDefs(registry, extra);
-  if (isSandbox(level)) return offered;
-  const seen = new Set(offered);
-  const connectors = [
-    { id: 'level_input', wanted: level.io.inputs.length > 0 },
-    { id: 'level_output', wanted: level.io.outputs.length > 0 },
-  ];
-  for (const connector of connectors) {
-    if (!connector.wanted || seen.has(connector.id) || !registry.has(connector.id)) continue;
-    offered.push(connector.id);
-  }
-  return offered;
+  if (isSandbox(level)) return sandboxPaletteDefs(registry, extra);
+  return paletteDefsFor(progress, levels, level, dev);
 }
 
 /**

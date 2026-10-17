@@ -1358,6 +1358,17 @@ button { font-family: inherit; }
 .agent-notice { font-size: 11px; padding-left: 8px; }
 .agent-info { color: var(--text-muted); }
 .agent-error { color: var(--off); }
+/* The budget's row: the fact plus the one button that buys another budget. */
+.agent-cap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 4px 8px;
+  border-left: 2px solid var(--amber);
+  color: var(--amber);
+  font-size: 11px;
+}
+.agent-cap span { flex: 1 1 auto; }
 .agent-compose {
   display: flex;
   flex-direction: column;

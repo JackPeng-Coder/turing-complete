@@ -25,6 +25,17 @@ export const AGENT_KEY = 'tc.agent.v1';
 export const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 export const DEFAULT_MODEL = 'deepseek-flash';
 
+/**
+ * Model calls one request may make before the run stops with 'capped'.
+ *
+ * A BUDGET, NOT A LIMIT ON WHAT IS POSSIBLE. A level in this game is a handful of
+ * gates, so a turn that has not finished in sixteen rounds has misunderstood the
+ * request; the player can continue it with one button, or raise the budget in the
+ * settings. `0` means "no cap", which is offered because a sandbox that needs
+ * forty parts is a legitimate thing to ask for.
+ */
+export const DEFAULT_MAX_STEPS = 16;
+
 export interface AgentConfig {
   /** Where the API is, e.g. `https://api.deepseek.com`. */
   readonly baseUrl: string;
@@ -32,11 +43,18 @@ export interface AgentConfig {
   readonly apiKey: string;
   /** The model name to ask for, e.g. `deepseek-flash`. */
   readonly model: string;
+  /** Model calls one request may make; `0` means no cap. See `DEFAULT_MAX_STEPS`. */
+  readonly maxSteps: number;
 }
 
 /** A blank configuration, as the setup panel opens on it. */
 export function emptyConfig(): AgentConfig {
-  return { baseUrl: DEFAULT_BASE_URL, apiKey: '', model: DEFAULT_MODEL };
+  return {
+    baseUrl: DEFAULT_BASE_URL,
+    apiKey: '',
+    model: DEFAULT_MODEL,
+    maxSteps: DEFAULT_MAX_STEPS,
+  };
 }
 
 /**
@@ -84,7 +102,11 @@ export function normalizeConfig(raw: unknown): AgentConfig | null {
   const apiKey = typeof record.apiKey === 'string' ? record.apiKey : '';
   const model = typeof record.model === 'string' ? record.model : '';
   if (baseUrl === '' || model === '') return null;
-  return { baseUrl, apiKey, model };
+  const maxSteps =
+    typeof record.maxSteps === 'number' && Number.isInteger(record.maxSteps) && record.maxSteps >= 0
+      ? record.maxSteps
+      : DEFAULT_MAX_STEPS;
+  return { baseUrl, apiKey, model, maxSteps };
 }
 
 /** Best-effort load; absent, corrupt or unreadable all read as "not set up yet". */

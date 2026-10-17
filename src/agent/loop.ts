@@ -6,11 +6,13 @@
  * round that asks for none is the end of the turn. There is no separate planner,
  * no retry wrapper and no queue -- the model's own next request IS the plan.
  *
- * THERE IS A STEP CAP, AND IT IS A GAME'S CAP, NOT A HARNESS'S. A coding agent
- * can run for a hundred steps because its user is asleep; here the user is
- * watching a board that is being edited a step at a time, so a model that has
- * gone into a loop is not "still working", it is visibly stuck. The cap turns
- * that into a sentence the player can act on.
+ * THERE IS A STEP BUDGET, AND IT IS THE PLAYER'S. A coding agent can run for a
+ * hundred steps because its user is asleep; here the user is watching a board
+ * that is being edited a step at a time, so a model that has gone into a loop is
+ * not "still working", it is visibly stuck. The budget comes from the settings
+ * (`AgentConfig.maxSteps`, `0` for no cap); running out ends the run with
+ * 'capped' and the panel offers 继续执行, so a long build is one click from
+ * finishing rather than a retyped request.
  *
  * STOPPING IS IMMEDIATE AND TOTAL. One `AbortSignal` goes into `fetch` and into
  * every tool, the pause between two steps honours it, and an aborted stream is
@@ -23,7 +25,7 @@
  * what was said.
  */
 import { AgentError, streamChat, type ChatDelta, type FetchLike } from './client';
-import type { AgentConfig } from './config';
+import { DEFAULT_MAX_STEPS, type AgentConfig } from './config';
 import type { AgentHost } from './host';
 import { circuitTools } from './ops';
 import { systemPrompt } from './prompt';
@@ -31,13 +33,13 @@ import { findTool, runTool, toolNames, toolWire, type ToolSpec } from './tools';
 import type { WireMessage } from './wire';
 
 /**
- * Model calls allowed in one player request.
+ * Model calls allowed in one player request when nothing else says otherwise.
  *
- * Sixteen is a budget rather than a limit: a level in this game is a handful of
- * gates, so a turn that has not finished by then has misunderstood the request,
- * and the player is better served by being told so than by watching it continue.
+ * THE BUDGET IS THE PLAYER'S NOW (`AgentConfig.maxSteps`, default
+ * `DEFAULT_MAX_STEPS`, and `0` for no cap); this is the value a hand-built
+ * configuration falls back to, and the ceiling a fresh install starts at.
  */
-export const MAX_STEPS = 16;
+export const MAX_STEPS = DEFAULT_MAX_STEPS;
 
 /**
  * Refused tool calls in a row before the run gives up.
@@ -58,6 +60,8 @@ export type AgentEvent =
   /** The model's reasoning, on the models that stream it -- folded away when done. */
   | { readonly kind: 'thinking'; readonly text: string }
   | { readonly kind: 'step'; readonly index: number }
+  /** The budget ran out. The panel draws this as a line with 继续执行 beside it. */
+  | { readonly kind: 'cap'; readonly limit: number }
   | {
       readonly kind: 'tool';
       readonly phase: 'start' | 'end';
@@ -143,6 +147,11 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   const history: WireMessage[] = [...options.messages];
   let steps = 0;
   let refusals = 0;
+  /**
+   * This run's budget: the player's setting, `0` meaning "no cap", and the
+   * built-in default for a configuration that predates the setting.
+   */
+  const maxSteps = config.maxSteps === 0 ? null : (config.maxSteps ?? MAX_STEPS);
 
   const stop = (stopped: StopReason, error: AgentError | null = null): RunResult => ({
     messages: history,
@@ -151,7 +160,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     steps,
   });
 
-  for (let index = 0; index < MAX_STEPS; index += 1) {
+  for (let index = 0; maxSteps === null || index < maxSteps; index += 1) {
     if (signal.aborted) return stop('aborted');
     // Rebuilt every step: the board has changed under the model since the last
     // one, and the level's own description belongs next to the rules it explains.
@@ -244,16 +253,12 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
         return stop('aborted');
       }
     }
-
-    if (index === MAX_STEPS - 1) {
-      onEvent?.({
-        kind: 'error',
-        message: `这一步做得太久（已经 ${MAX_STEPS} 轮），先停下来。可以把要求说得更具体一点再试`,
-        detail: '',
-      });
-      return stop('capped');
-    }
   }
 
+  // The for-loop bound is the budget: reaching here means the last allowed round
+  // asked for tools and the next one is not ours to make. The panel turns this
+  // event into a line with 继续执行 beside it, which is the one-button way to buy
+  // another budget without retyping the request.
+  onEvent?.({ kind: 'cap', limit: maxSteps ?? 0 });
   return stop('capped');
 }

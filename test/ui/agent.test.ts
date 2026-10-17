@@ -11,7 +11,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { mountAgentPanel } from '../../src/ui/agent';
-import type { AgentConfig } from '../../src/agent/config';
+import { DEFAULT_MAX_STEPS, type AgentConfig } from '../../src/agent/config';
 import type { RunOptions, RunResult } from '../../src/agent/loop';
 import { makeTestHost } from '../agent/host-fixture';
 
@@ -19,6 +19,7 @@ const CONFIG: AgentConfig = {
   baseUrl: 'https://x.test',
   apiKey: 'sk-1',
   model: 'm',
+  maxSteps: 0,
 };
 
 const DONE = (messages: RunOptions['messages']): RunResult => ({
@@ -104,24 +105,38 @@ describe('a first run', () => {
     const { stage, state } = mount(null);
     stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
     clickButton(stage, '设置');
-    const [baseUrl, apiKey, model] = [
+    const [baseUrl, apiKey, model, stepLimit] = [
       ...document.querySelectorAll<HTMLInputElement>('.agent-setup .agent-field input'),
     ];
     expect(model!.value).toBe('deepseek-flash');
+    // A fresh install starts on the default budget, and it is editable.
+    expect(stepLimit!.value).toBe(String(DEFAULT_MAX_STEPS));
     baseUrl!.value = 'https://api.deepseek.com/';
     apiKey!.value = 'sk-secret';
     model!.value = 'deepseek-flash';
+    stepLimit!.value = '32';
     clickButton(document.querySelector('.agent-setup')!, '保存');
     expect(state.saved).toHaveLength(1);
     expect(state.saved[0]).toEqual({
       baseUrl: 'https://api.deepseek.com/',
       apiKey: 'sk-secret',
       model: 'deepseek-flash',
+      maxSteps: 32,
     });
     expect(setupShown()).toBe(false);
     expect(stage.querySelector('.agent-card:not(.agent-setup)')!.hasAttribute('hidden')).toBe(false);
     expect(stage.querySelector<HTMLElement>('.agent-setup-hint')!.hidden).toBe(true);
     expect(stage.querySelector('.agent-toggle')!.getAttribute('aria-label')).toBe('Agent');
+  });
+
+  it('can be told not to cap the run at all', () => {
+    const { stage, state } = mount(CONFIG);
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
+    clickButton(stage, '设置');
+    const inputs = [...document.querySelectorAll<HTMLInputElement>('.agent-setup .agent-field input')];
+    inputs[3]!.value = '0';
+    clickButton(document.querySelector('.agent-setup')!, '保存');
+    expect(state.saved[0]?.maxSteps).toBe(0);
   });
 
   it('refuses to save an incomplete configuration', () => {
@@ -180,6 +195,33 @@ describe('a conversation', () => {
     expect(stage.querySelector('.agent-user')!.textContent).toBe('放一个与非门，再把两个输入接上');
     expect(input.value).toBe('');
     expect(stage.querySelector('.agent-status')!.textContent).toBe('完成');
+  });
+
+  it('offers 继续执行 when the budget runs out, and the button continues the run', async () => {
+    const runs: RunOptions[] = [];
+    const scripted = (options: RunOptions): Promise<RunResult> => {
+      runs.push(options);
+      options.onEvent?.({ kind: 'cap', limit: 2 });
+      return Promise.resolve({ messages: [...options.messages], stopped: 'capped', error: null, steps: 2 });
+    };
+    const { stage } = mount({ ...CONFIG, maxSteps: 2 }, scripted);
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
+    const input = stage.querySelector<HTMLTextAreaElement>('.agent-input')!;
+    input.value = '搭一个与非门';
+    clickButton(stage, '发送');
+    await tick();
+    const cap = stage.querySelector('.agent-cap')!;
+    expect(cap.textContent).toContain('继续执行');
+    expect(cap.textContent).toContain('2 轮');
+
+    clickButton(cap, '继续执行');
+    await tick();
+    // The same conversation, with no invented user line: the second request
+    // carries exactly what the first one started with, which is what makes this
+    // a shortcut rather than a new instruction.
+    expect(runs).toHaveLength(2);
+    expect(runs[1]!.messages).toEqual([{ role: 'user', content: '搭一个与非门' }]);
+    expect(stage.querySelector('.agent-status')!.textContent).toBe('达到步数上限，先停下来了');
   });
 
   it('shows the streamed answer and each tool row with its result', async () => {

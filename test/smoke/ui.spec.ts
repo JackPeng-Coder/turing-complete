@@ -484,6 +484,15 @@ test('?dev=1 opens every level, and says so', async ({ page }) => {
   await expect(page.locator('.shell-bar')).toContainText('图灵完备');
   await expect(page.getByRole('button', { name: '8 位运算器', exact: true })).toBeEnabled();
 
+  // THE FLAG DOES NOT WIDEN A LEVEL'S PALETTE. Level 2 offers the NAND it is
+  // about and nothing else -- not the sandbox's 8-bit adder. The assistant asks
+  // the same function for its parts, so this is its limit too.
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await page.locator('.map-tile').nth(1).click();
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.getByRole('button', { name: '与非门', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '8 位加法器', exact: true })).toHaveCount(0);
+
   // One click leaves the mode, and the URL goes with it: a refresh must not
   // bring back a sandbox nobody asked for again.
   await page.locator('.shell-dev').click();
@@ -1035,6 +1044,11 @@ test('a save written before the 2.x realignment keeps its stars', async ({ page 
  * palette offers. The wrap gesture itself is pinned by unit tests (the canvas
  * geometry of a band-select is not worth re-deriving here); what this adds is that
  * a component SURVIVES a reload and still runs.
+ *
+ * WHERE IT IS OFFERED IS PART OF THE CONTRACT: a level's palette is the puzzle, so
+ * neither `?dev=1` nor the player's own library widens it. The component lives in
+ * the components panel on every screen, and the SANDBOX -- which has no puzzle --
+ * is where it can be picked up and simulated.
  */
 test('a saved component is offered in the palette and runs on the board', async ({ page }) => {
   // A NOT gate built from a NAND and a `not`: two parts, one input, one output.
@@ -1067,22 +1081,21 @@ test('a saved component is offered in the palette and runs on the board', async 
     ] as const,
   );
 
-  // `?dev=1` is what offers every definition the level lists plus the player's
-  // own components; an ordinary level keeps its own palette, because the palette
-  // IS the puzzle (a chapter-1 level must not hand out an inverter a player built
-  // in the sandbox). The component is still in the panel's list either way.
+  // `?dev=1` opens the level, but it does NOT widen that level's palette: the
+  // player's own component is not on the level's list, so the tray does not offer
+  // it. The components panel lists it either way.
   await open(page, '/?dev=1');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('与非门');
-
-  await expect(page.locator('.palette')).toContainText('反相器');
+  await expect(page.locator('.palette')).not.toContainText('反相器');
   await expect(page.locator('.blueprints')).toContainText('反相器');
 
-  // Drop it on the board and wire a constant through it into a NAND. No level
-  // pins are used because `?dev=1` reaches for the SANDBOX palette, which leaves
-  // the `level_input`/`level_output` plumbing out: a board with no level has no
-  // pins for them to bind, and the catalog behind them is the same one the
-  // sandbox offers.
+  // The sandbox is where a player's own parts belong: no puzzle, so the palette
+  // is the full set plus the library.
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await page.getByRole('button', { name: '自由建造' }).click();
+  await expect(page.locator('.palette')).toContainText('反相器');
+
   const { cx, cy } = await boardCentre(page);
   const row = cy + 120;
   // Scoped to the tray: the panel lists the same component, and a page-wide role
@@ -1094,8 +1107,7 @@ test('a saved component is offered in the palette and runs on the board', async 
   await dragWire(page, cx - 160 + 72, row, cx - 100, row);
   await dragWire(page, cx + 20, row, cx + 160, row);
   // The component's own output is wired, so the circuit it contains is part of a
-  // running board: `未通过` is the level's verdict, and this is not the level's
-  // circuit -- what matters is that the board still simulates.
+  // running board: the readout measures it, which is what "it runs" means here.
   await expect(page.locator('.shell-metrics')).toContainText('延迟');
   await page.screenshot({ path: 'test-results/smoke-blueprint.png' });
 });
@@ -1387,4 +1399,58 @@ test('the agent builds what it was asked for, one visible step at a time', async
   // Its work is the player's to undo: one Ctrl+Z takes the last part back.
   await page.keyboard.press('Control+z');
   await expect(page.locator('.shell-metrics')).toContainText('门 1 个');
+});
+
+/**
+ * THE STEP BUDGET IS A SETTING, AND RUNNING OUT IS NOT A DEAD END.
+ *
+ * The mock asks for one tool call per round and the player sets the budget to
+ * one, so the first request ends 'capped' after a single action. The log then
+ * carries 继续执行; pressing it sends the same conversation again (the mock's
+ * second round answers in prose), and the run finishes without the player
+ * retyping anything.
+ */
+test('the agent offers 继续执行 when its step budget runs out', async ({ page }) => {
+  const rounds = [
+    [
+      agentCall(0, 'call_1', 'place_part', { defId: 'nand', x: 160, y: 160 }),
+      agentChunk({}, 'tool_calls'),
+      'data: [DONE]\n\n',
+    ].join(''),
+    [agentChunk({ content: '继续完成。' }), agentChunk({}, 'stop'), 'data: [DONE]\n\n'].join(''),
+  ];
+  let served = 0;
+  await page.route('**/mock/v1/chat/completions', async (route) => {
+    const body = rounds[Math.min(served, rounds.length - 1)]!;
+    served += 1;
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body });
+  });
+
+  await seedProgress(page, 2);
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await page.locator('.agent-toggle').click();
+  await page.locator('.agent-card').getByRole('button', { name: '设置', exact: true }).click();
+  const setup = page.locator('.agent-setup');
+  const fields = setup.locator('.agent-field input');
+  await fields.nth(0).fill('http://127.0.0.1:4173/mock/v1');
+  await fields.nth(1).fill('sk-test');
+  await fields.nth(2).fill('mock-model');
+  await fields.nth(3).fill('1');
+  await setup.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(setup).toBeHidden();
+
+  await page.locator('.agent-input').fill('放一个与非门');
+  await page.getByRole('button', { name: '发送' }).click();
+
+  const cap = page.locator('.agent-cap');
+  await expect(cap).toBeVisible();
+  await expect(cap).toContainText('1 轮');
+  expect(served).toBe(1);
+
+  await cap.getByRole('button', { name: '继续执行' }).click();
+  await expect(page.locator('.agent-text').last()).toContainText('继续完成');
+  await expect(page.locator('.agent-status')).toHaveText('完成');
+  expect(served).toBe(2);
+  await page.screenshot({ path: 'test-results/smoke-agent-continue.png' });
 });

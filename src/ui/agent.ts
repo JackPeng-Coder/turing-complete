@@ -26,6 +26,7 @@
  * whole conversation sixty times a second.
  */
 import {
+  DEFAULT_MAX_STEPS,
   clearAgentConfig,
   emptyConfig,
   isConfigured,
@@ -67,7 +68,9 @@ interface AgentEntry {
 type Entry =
   | { readonly kind: 'user'; readonly text: string }
   | AgentEntry
-  | { readonly kind: 'notice'; readonly text: string; readonly tone: 'info' | 'error' };
+  | { readonly kind: 'notice'; readonly text: string; readonly tone: 'info' | 'error' }
+  /** The step budget ran out; the row carries the button that buys another one. */
+  | { readonly kind: 'cap'; readonly limit: number };
 
 /** The two places a panel lives in the workbench: its rail button and its dock. */
 export interface AgentPanelHosts {
@@ -233,6 +236,9 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   const baseUrl = field('API 地址', '例如 https://api.deepseek.com，也可以直接填完整的 chat/completions 地址', 'text');
   const apiKey = field('API key', '只保存在这台浏览器的 localStorage 里，同源的脚本读得到；换机器要重填', 'password');
   const model = field('模型', '例如 deepseek-flash', 'text');
+  const maxSteps = field('步数上限', '到达后停下，日志末尾会出现「继续执行」；0 表示不设上限', 'number');
+  maxSteps.min = '0';
+  maxSteps.step = '1';
 
   const setupActions = document.createElement('div');
   setupActions.className = 'agent-actions';
@@ -323,6 +329,21 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
         const line = document.createElement('article');
         line.className = `agent-line agent-notice agent-${entry.tone}`;
         line.textContent = entry.text;
+        log.append(line);
+        continue;
+      }
+      if (entry.kind === 'cap') {
+        // The budget ran out mid-build. The button is the shortcut: one click
+        // buys another budget for the same conversation instead of making the
+        // player retype the request.
+        const line = document.createElement('article');
+        line.className = 'agent-line agent-cap';
+        const note = document.createElement('span');
+        note.textContent =
+          entry.limit > 0 ? `达到步数上限（${entry.limit} 轮），先停下来了。` : '达到步数上限，先停下来了。';
+        const again = button('继续执行', 'agent-btn agent-btn-go');
+        again.addEventListener('click', () => continueRun());
+        line.append(note, again);
         log.append(line);
         continue;
       }
@@ -442,25 +463,20 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
       render();
       return;
     }
+    if (event.kind === 'cap') {
+      settle();
+      entries.push({ kind: 'cap', limit: event.limit });
+      status = '达到步数上限，先停下来了';
+      render();
+      return;
+    }
     entries.push({ kind: 'notice', text: event.detail === '' ? event.message : `${event.message}（${event.detail}）`, tone: 'error' });
     status = `出错：${event.message}`;
     render();
   };
 
-  const send = (): void => {
-    const config = options.config();
-    if (!isConfigured(config)) {
-      openSettings();
-      status = '先填好 API 信息';
-      render();
-      return;
-    }
-    const text = input.value.trim();
-    if (text === '' || busy) return;
-    input.value = '';
-    entries.push({ kind: 'user', text });
-    history.push({ role: 'user', content: text });
-    current = null;
+  /** One run of the loop, shared by 发送 and the cap's 继续执行 button. */
+  const startRun = (config: AgentConfig): void => {
     busy = true;
     status = '正在请求模型…';
     render();
@@ -495,6 +511,36 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
       });
   };
 
+  const send = (): void => {
+    const config = options.config();
+    if (!isConfigured(config)) {
+      openSettings();
+      status = '先填好 API 信息';
+      render();
+      return;
+    }
+    const text = input.value.trim();
+    if (text === '' || busy) return;
+    input.value = '';
+    entries.push({ kind: 'user', text });
+    history.push({ role: 'user', content: text });
+    current = null;
+    startRun(config);
+  };
+
+  /**
+   * The cap's own button: another budget for the same conversation.
+   *
+   * NO SYNTHETIC USER LINE. The history already ends with the tool result the
+   * last round asked for, so continuing is exactly the request the loop would
+   * have made had the budget been larger. The button press is the record.
+   */
+  const continueRun = (): void => {
+    const config = options.config();
+    if (!isConfigured(config) || busy) return;
+    startRun(config);
+  };
+
   const openSettings = (): void => {
     // The settings belong to the panel, so asking for them also claims the dock.
     open();
@@ -502,6 +548,7 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     baseUrl.value = config.baseUrl;
     apiKey.value = config.apiKey;
     model.value = config.model;
+    maxSteps.value = String(config.maxSteps);
     setupOverlay.hidden = false;
     baseUrl.focus();
   };
@@ -542,10 +589,12 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     event.stopPropagation();
   });
   saveBtn.addEventListener('click', () => {
+    const parsed = maxSteps.value.trim() === '' ? DEFAULT_MAX_STEPS : Math.floor(Number(maxSteps.value));
     const config: AgentConfig = {
       baseUrl: baseUrl.value.trim(),
       apiKey: apiKey.value.trim(),
       model: model.value.trim(),
+      maxSteps: Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_MAX_STEPS,
     };
     if (!isConfigured(config)) {
       setupNote.textContent = '地址、key、模型都要填。';

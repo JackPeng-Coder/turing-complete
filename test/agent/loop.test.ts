@@ -10,6 +10,7 @@ const CONFIG: AgentConfig = {
   baseUrl: 'https://x.test',
   apiKey: 'sk-test',
   model: 'test-model',
+  maxSteps: MAX_STEPS,
 };
 
 function callOf(name: string, args = '{}'): { id: string; name: string; arguments: string } {
@@ -310,7 +311,7 @@ describe('failing', () => {
     expect(result.stopped).toBe('done');
   });
 
-  it('caps a run that never stops asking for tools', async () => {
+  it('caps a run that never stops asking for tools, and says what the budget was', async () => {
     const host = makeTestHost();
     const tool = recorder();
     const { chat } = scripted([
@@ -330,6 +331,32 @@ describe('failing', () => {
     expect(result.stopped).toBe('capped');
     expect(result.steps).toBe(MAX_STEPS);
     expect(tool.calls).toHaveLength(MAX_STEPS);
-    expect(events.some((event) => event.kind === 'error' && event.message.includes('太久'))).toBe(true);
+    // The cap is an event of its own now: the panel turns it into a row with
+    // 继续执行 beside it, so the player is not left with only a complaint.
+    expect(events.filter((event) => event.kind === 'cap')).toEqual([{ kind: 'cap', limit: MAX_STEPS }]);
+    expect(events.some((event) => event.kind === 'error')).toBe(false);
+  });
+
+  it('caps at the budget the settings asked for', async () => {
+    const host = makeTestHost();
+    const tool = recorder();
+    const { chat } = scripted([
+      { content: '', toolCalls: [callOf('poke', '{"at":1}')], finishReason: 'tool_calls' },
+    ]);
+    const { signal } = context();
+    const events: AgentEvent[] = [];
+    const result = await runAgent({
+      config: { ...CONFIG, maxSteps: 3 },
+      host: host.host,
+      messages: [],
+      signal,
+      chat,
+      tools: [tool.spec],
+      onEvent: (event) => events.push(event),
+    });
+    expect(result.stopped).toBe('capped');
+    expect(result.steps).toBe(3);
+    expect(tool.calls).toHaveLength(3);
+    expect(events.filter((event) => event.kind === 'cap')).toEqual([{ kind: 'cap', limit: 3 }]);
   });
 });

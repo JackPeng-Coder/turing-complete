@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AGENT_KEY,
+  DEFAULT_MAX_STEPS,
   DEFAULT_MODEL,
   chatUrl,
   clearAgentConfig,
@@ -42,7 +43,7 @@ describe('the chat endpoint a base URL means', () => {
 });
 
 describe('a configuration read back from storage', () => {
-  it('accepts a well-formed payload', () => {
+  it('accepts a well-formed payload, filling in the default budget', () => {
     expect(
       normalizeConfig({
         version: 1,
@@ -50,7 +51,24 @@ describe('a configuration read back from storage', () => {
         apiKey: 'sk-1',
         model: 'm',
       }),
-    ).toEqual({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm' });
+    ).toEqual({
+      baseUrl: 'https://x.test',
+      apiKey: 'sk-1',
+      model: 'm',
+      maxSteps: DEFAULT_MAX_STEPS,
+    });
+  });
+
+  it('keeps a budget of zero (no cap) and a budget the player typed', () => {
+    expect(normalizeConfig({ version: 1, baseUrl: 'x', model: 'm', maxSteps: 0 })?.maxSteps).toBe(0);
+    expect(normalizeConfig({ version: 1, baseUrl: 'x', model: 'm', maxSteps: 40 })?.maxSteps).toBe(40);
+  });
+
+  it('falls back to the default budget rather than trusting a bad number', () => {
+    for (const bad of [-1, 1.5, Number.NaN, '16', null]) {
+      const config = normalizeConfig({ version: 1, baseUrl: 'x', model: 'm', maxSteps: bad });
+      expect(config?.maxSteps).toBe(DEFAULT_MAX_STEPS);
+    }
   });
 
   it('ignores fields a previous build stored and this one no longer has', () => {
@@ -65,7 +83,12 @@ describe('a configuration read back from storage', () => {
         stepMs: 420,
         seen: true,
       }),
-    ).toEqual({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm' });
+    ).toEqual({
+      baseUrl: 'https://x.test',
+      apiKey: 'sk-1',
+      model: 'm',
+      maxSteps: DEFAULT_MAX_STEPS,
+    });
   });
 
   it('refuses another version, a non-object, and a payload with no address or model', () => {
@@ -89,8 +112,13 @@ describe('what counts as set up', () => {
 describe('storing the settings', () => {
   it('round-trips through the store under its own key', () => {
     stubStorage();
-    saveAgentConfig({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm' });
-    expect(loadAgentConfig()).toEqual({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm' });
+    saveAgentConfig({ baseUrl: 'https://x.test', apiKey: 'sk-1', model: 'm', maxSteps: 4 });
+    expect(loadAgentConfig()).toEqual({
+      baseUrl: 'https://x.test',
+      apiKey: 'sk-1',
+      model: 'm',
+      maxSteps: 4,
+    });
     expect(globalThis.localStorage.getItem(AGENT_KEY)).toContain('sk-1');
   });
 
@@ -135,6 +163,7 @@ describe('the default configuration', () => {
     expect(config.model).toBe('deepseek-flash');
     expect(config.baseUrl).toBe('https://api.deepseek.com');
     expect(config.apiKey).toBe('');
+    expect(config.maxSteps).toBe(DEFAULT_MAX_STEPS);
     expect(isConfigured(config)).toBe(false);
   });
 });

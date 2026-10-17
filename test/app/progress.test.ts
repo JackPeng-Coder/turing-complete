@@ -241,17 +241,15 @@ describe('offeredDefsFor', () => {
     expect(offered).not.toContain('add8');
   });
 
-  it('reaches for the complete set under ?dev=1, on any board', () => {
+  it('offers the level’s full list under ?dev=1, and nothing beyond it', () => {
+    // Developer mode skips the unlock filter; it does not widen the puzzle.
     const offered = offeredDefsFor(emptyProgress(), levels, other, true, registry);
-    expect(offered).toContain('add8');
-    expect(offered).toContain('ram8');
+    expect(offered).toEqual([...other.allowedComponents]);
+    expect(offered).not.toContain('add8');
+    expect(offered).not.toContain('ram8');
   });
 
-  it('brings the level’s own connectors with it, which the sandbox set has no room for', () => {
-    // WITHOUT THIS CLAUSE `?dev=1` ON A LEVEL IS A BOARD NOBODY CAN WIRE UP: the
-    // sandbox set drops `category: 'level'`, and a level binds its circuit to its
-    // pins through exactly those two parts. A real session asked for `level_input`
-    // under twenty guessed names and was refused twenty times.
+  it('keeps the level’s own connectors under ?dev=1, because the level lists them', () => {
     const wired: LevelSpec = {
       ...other,
       io: { inputs: [{ id: 'a', width: 1 }], outputs: [{ id: 'out', width: 1 }] },
@@ -261,11 +259,18 @@ describe('offeredDefsFor', () => {
     expect(offered).toContain('level_output');
   });
 
-  it('adds only the connectors the level actually declares', () => {
-    const noInputs: LevelSpec = { ...other, io: { inputs: [], outputs: [{ id: 'out', width: 1 }] } };
-    const offered = offeredDefsFor(emptyProgress(), levels, noInputs, true, registry);
-    expect(offered).toContain('level_output');
+  it('does not add a connector the level never listed, even in developer mode', () => {
+    // The list is the contract: a level whose `allowedComponents` has no plumbing
+    // gets none from the flag either -- hand or assistant.
+    const noPlumbing: LevelSpec = {
+      ...other,
+      allowedComponents: other.allowedComponents.filter(
+        (id) => id !== 'level_input' && id !== 'level_output',
+      ),
+    };
+    const offered = offeredDefsFor(emptyProgress(), levels, noPlumbing, true, registry);
     expect(offered).not.toContain('level_input');
+    expect(offered).not.toContain('level_output');
   });
 
   it('leaves the sandbox palette alone: a sandbox has no pins to connect to', () => {
