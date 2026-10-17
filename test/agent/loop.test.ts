@@ -359,4 +359,60 @@ describe('failing', () => {
     expect(tool.calls).toHaveLength(3);
     expect(events.filter((event) => event.kind === 'cap')).toEqual([{ kind: 'cap', limit: 3 }]);
   });
+
+  it('sums the provider’s token accounting over the run, and times it', async () => {
+    const host = makeTestHost();
+    const tool = recorder();
+    const { chat } = scripted([
+      {
+        content: '',
+        toolCalls: [callOf('poke', '{"at":1}')],
+        finishReason: 'tool_calls',
+        usage: { input: 100, output: 10, total: 110, cacheRead: 60 },
+      },
+      {
+        content: '完成',
+        toolCalls: [],
+        finishReason: 'stop',
+        usage: { input: 200, output: 20, total: 220, cacheRead: 0 },
+      },
+    ]);
+    const { signal } = context();
+    const result = await runAgent({
+      config: CONFIG,
+      host: host.host,
+      messages: [],
+      signal,
+      chat,
+      tools: [tool.spec],
+    });
+    expect(result.stopped).toBe('done');
+    // One usage object per step, summed: the panel gets one row per request.
+    expect(result.stats.usage).toEqual({ input: 300, output: 30, total: 330, cacheRead: 60 });
+    expect(result.stats.llmMs).toBeGreaterThanOrEqual(0);
+    // Only the second step streamed prose, so only it has a decode window.
+    expect(result.stats.ttftSteps).toBe(1);
+    expect(result.stats.decodeTokens).toBe(20);
+    expect(result.stats.decodeMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('reports no usage rather than zeros when the provider sends none', async () => {
+    const host = makeTestHost();
+    const tool = recorder();
+    const { chat } = scripted([
+      { content: '', toolCalls: [callOf('poke', '{"at":1}')], finishReason: 'tool_calls' },
+      { content: '完成', toolCalls: [], finishReason: 'stop' },
+    ]);
+    const { signal } = context();
+    const result = await runAgent({
+      config: CONFIG,
+      host: host.host,
+      messages: [],
+      signal,
+      chat,
+      tools: [tool.spec],
+    });
+    expect(result.stats.usage).toBeNull();
+    expect(result.stats.decodeTokens).toBe(0);
+  });
 });

@@ -270,3 +270,70 @@ describe('failures a player has to act on', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
+
+/** The final frame `stream_options.include_usage` asks for: no choices, usage. */
+function usageFrame(usage: unknown): string {
+  return `data: ${JSON.stringify({ choices: [], usage })}\n\n`;
+}
+
+describe('token accounting', () => {
+  it('reads the DeepSeek dialect: cache hit and miss beside the prompt total', async () => {
+    const response = sseResponse([
+      frame({ content: '好' }),
+      frame({}, 'stop'),
+      usageFrame({
+        prompt_tokens: 1_200,
+        completion_tokens: 40,
+        total_tokens: 1_240,
+        prompt_cache_hit_tokens: 1_000,
+        prompt_cache_miss_tokens: 200,
+      }),
+      'data: [DONE]\n\n',
+    ]);
+    const result = await streamChat({
+      config: CONFIG,
+      messages: [],
+      fetchImpl: fetchOf(response),
+    });
+    expect(result.usage).toEqual({ input: 1_200, output: 40, total: 1_240, cacheRead: 1_000 });
+  });
+
+  it('reads the OpenAI dialect: the cached figure nested under prompt_tokens_details', async () => {
+    const response = sseResponse([
+      frame({ content: '好' }),
+      usageFrame({
+        prompt_tokens: 100,
+        completion_tokens: 10,
+        total_tokens: 110,
+        prompt_tokens_details: { cached_tokens: 60 },
+      }),
+      'data: [DONE]\n\n',
+    ]);
+    const result = await streamChat({
+      config: CONFIG,
+      messages: [],
+      fetchImpl: fetchOf(response),
+    });
+    expect(result.usage).toEqual({ input: 100, output: 10, total: 110, cacheRead: 60 });
+  });
+
+  it('is null when the provider never reports one', async () => {
+    const response = sseResponse([frame({ content: '好' }), 'data: [DONE]\n\n']);
+    const result = await streamChat({
+      config: CONFIG,
+      messages: [],
+      fetchImpl: fetchOf(response),
+    });
+    expect(result.usage).toBeNull();
+  });
+
+  it('asks the provider for the usage frame in the request body', async () => {
+    let body: unknown = null;
+    const fetchImpl: FetchLike = (_url, init) => {
+      body = JSON.parse(String(init.body));
+      return Promise.resolve(sseResponse([frame({ content: '好' }), 'data: [DONE]\n\n']));
+    };
+    await streamChat({ config: CONFIG, messages: [], fetchImpl });
+    expect(body).toMatchObject({ stream: true, stream_options: { include_usage: true } });
+  });
+});

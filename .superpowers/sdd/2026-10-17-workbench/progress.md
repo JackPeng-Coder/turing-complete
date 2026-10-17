@@ -86,3 +86,13 @@
 - 循环按配置预算运行；耗尽时发 `{ kind: 'cap', limit }` 事件（不再发一条 error 文案）。面板把它渲染成日志末尾的一行 +「继续执行」按钮；点击用**同一段对话**再跑一次（不伪造用户消息），预算重新计。
 - 测试：config（默认/坏值回退/0/正数）；loop（默认 16 与自定义 3 的 cap 事件）；面板单测（cap 行出现，点继续后第二次请求的 messages 与第一次一致）；smoke 端到端（预算设 1 → 第一次请求后出现 cap 行，点继续 → 第二次请求 → 状态「完成」）。
 - 门禁：`build` exit 0（289.97 kB / gzip 99.26 kB）、`test` 62 文件 / **1660 通过**、`smoke` **30 通过 + 2 跳过**。
+
+### 追加（2026-10-17，用户要求「像 DSH 一样显示性能与用量」）
+
+参照 DSH 的 `StatsPills` / `TurnUsagePanel`（`packages/client/ui-chat/src/client/chat/`）：请求级一行读数、会话级累计条。
+
+- **采集**：请求体加 `stream_options.include_usage`；客户端把两种 usage 方言（DeepSeek 的 `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens`、OpenAI 的 `prompt_tokens_details.cached_tokens`）归一为 `{ input, output, total, cacheRead }`；循环测每步墙钟、首字时间与解码窗口，汇总成 `RunStats`（`llmMs` / `ttftMs` / `decodeMs` / `decodeTokens` / `usage`）。
+- **展示**：每次请求结束在日志里追加一行 `.agent-run-stats`（`2.4s · 1.2k tok · 20 tok/s · 缓存 83%`，tooltip 里是精确 token、首字平均与输出速度）；日志下方 `.agent-session-stats` 累计「请求次数 · 步数 · 总 tok · 速度 · 缓存」。没有 usage 时只显示时间并注明「提供方没有返回用量」，不伪造 0。
+- **测试**：`format.test.ts`（10 条）；客户端 usage 两种方言、缺失为 null、请求体含 `stream_options`；循环把两轮 usage 相加；面板单测两行文案与「无 usage 只显示时间」；smoke e2e 的 mock 带 usage 帧，断言 `1.2k tok`、`缓存 83%`、`累计 1 次`。
+- **限制**：不显示费用（没有价目表）；会话累计不持久化，刷新归零（像仪表），请求级行留在日志里。
+- 门禁：`build` exit 0（293.78 kB / gzip 100.69 kB）、`test` 63 文件 / **1678 通过**、`smoke` **30 通过 + 2 跳过**。

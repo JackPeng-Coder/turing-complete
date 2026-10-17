@@ -1369,6 +1369,29 @@ button { font-family: inherit; }
   font-size: 11px;
 }
 .agent-cap span { flex: 1 1 auto; }
+/* The readings under a finished request, and the session totaliser. Both are
+   measurements, so they sit small and muted: the board is the thing to look at,
+   and these are the meter's numbers rather than a message. */
+.agent-run-stats {
+  margin: 2px 0 0;
+  padding-left: 8px;
+  border-left: 1px solid var(--hair);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+.agent-session-stats {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--hair);
+  color: var(--neon-dim);
+  font-size: 10.5px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+.agent-session-stats[hidden] { display: none; }
 .agent-compose {
   display: flex;
   flex-direction: column;

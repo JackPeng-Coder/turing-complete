@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mountAgentPanel } from '../../src/ui/agent';
 import { DEFAULT_MAX_STEPS, type AgentConfig } from '../../src/agent/config';
-import type { RunOptions, RunResult } from '../../src/agent/loop';
+import type { RunOptions, RunResult, RunStats } from '../../src/agent/loop';
 import { makeTestHost } from '../agent/host-fixture';
 
 const CONFIG: AgentConfig = {
@@ -22,11 +22,22 @@ const CONFIG: AgentConfig = {
   maxSteps: 0,
 };
 
+/** A run with no measured spend, for the stubs that are not about the numbers. */
+const NO_STATS: RunStats = {
+  llmMs: 0,
+  ttftMs: 0,
+  ttftSteps: 0,
+  decodeMs: 0,
+  decodeTokens: 0,
+  usage: null,
+};
+
 const DONE = (messages: RunOptions['messages']): RunResult => ({
   messages,
   stopped: 'done',
   error: null,
   steps: 1,
+  stats: NO_STATS,
 });
 
 /**
@@ -202,7 +213,13 @@ describe('a conversation', () => {
     const scripted = (options: RunOptions): Promise<RunResult> => {
       runs.push(options);
       options.onEvent?.({ kind: 'cap', limit: 2 });
-      return Promise.resolve({ messages: [...options.messages], stopped: 'capped', error: null, steps: 2 });
+      return Promise.resolve({
+        messages: [...options.messages],
+        stopped: 'capped',
+        error: null,
+        steps: 2,
+        stats: NO_STATS,
+      });
     };
     const { stage } = mount({ ...CONFIG, maxSteps: 2 }, scripted);
     stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
@@ -222,6 +239,74 @@ describe('a conversation', () => {
     expect(runs).toHaveLength(2);
     expect(runs[1]!.messages).toEqual([{ role: 'user', content: '搭一个与非门' }]);
     expect(stage.querySelector('.agent-status')!.textContent).toBe('达到步数上限，先停下来了');
+  });
+
+  it('reports what the request cost, and totals it under the log', async () => {
+    const stats: RunStats = {
+      llmMs: 2_400,
+      ttftMs: 300,
+      ttftSteps: 1,
+      decodeMs: 2_000,
+      decodeTokens: 40,
+      usage: { input: 1_200, output: 40, total: 1_240, cacheRead: 1_000 },
+    };
+    const scripted = (options: RunOptions): Promise<RunResult> => {
+      options.onEvent?.({ kind: 'step', index: 0 });
+      options.onEvent?.({ kind: 'text', text: '放好了' });
+      return Promise.resolve({
+        messages: [...options.messages],
+        stopped: 'done',
+        error: null,
+        steps: 1,
+        stats,
+      });
+    };
+    const { stage } = mount(CONFIG, scripted);
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
+    const input = stage.querySelector<HTMLTextAreaElement>('.agent-input')!;
+    input.value = '放一个与非门';
+    clickButton(stage, '发送');
+    await tick();
+
+    const row = stage.querySelector('.agent-run-stats')!;
+    // The four readings, in the order DSH's composer pills show them.
+    expect(row.textContent).toBe('2.4s · 1.2k tok · 20 tok/s · 缓存 83%');
+    expect(row.getAttribute('title')).toContain('输入 1,200 tok');
+    expect(row.getAttribute('title')).toContain('首字平均 0.3s');
+
+    const total = stage.querySelector('.agent-session-stats')!;
+    expect(total.hasAttribute('hidden')).toBe(false);
+    expect(total.textContent).toBe('累计 1 次 · 1 步 · 1.2k tok · 20 tok/s · 缓存 83%');
+  });
+
+  it('shows time alone when the provider reports no usage', async () => {
+    const stats: RunStats = {
+      llmMs: 1_200,
+      ttftMs: 0,
+      ttftSteps: 0,
+      decodeMs: 0,
+      decodeTokens: 0,
+      usage: null,
+    };
+    const scripted = (options: RunOptions): Promise<RunResult> =>
+      Promise.resolve({
+        messages: [...options.messages],
+        stopped: 'done',
+        error: null,
+        steps: 1,
+        stats,
+      });
+    const { stage } = mount(CONFIG, scripted);
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
+    const input = stage.querySelector<HTMLTextAreaElement>('.agent-input')!;
+    input.value = '放一个与非门';
+    clickButton(stage, '发送');
+    await tick();
+
+    // No invented zeroes: the request took 1.2s and that is all that is known.
+    expect(stage.querySelector('.agent-run-stats')!.textContent).toBe('1.2s');
+    expect(stage.querySelector('.agent-run-stats')!.getAttribute('title')).toContain('没有返回用量');
+    expect(stage.querySelector('.agent-session-stats')!.textContent).toBe('累计 1 次 · 1 步');
   });
 
   it('shows the streamed answer and each tool row with its result', async () => {
@@ -372,7 +457,13 @@ describe('a conversation', () => {
         message: 'API key 被拒绝（HTTP 401）',
         detail: 'Authentication Fails',
       });
-      return Promise.resolve({ messages: [...options.messages], stopped: 'error', error: null, steps: 1 });
+      return Promise.resolve({
+        messages: [...options.messages],
+        stopped: 'error',
+        error: null,
+        steps: 1,
+        stats: NO_STATS,
+      });
     };
     const { stage } = mount(CONFIG, scripted);
     stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
@@ -392,7 +483,13 @@ describe('a conversation', () => {
         new Promise<RunResult>((resolve) => {
           held = options.signal;
           options.signal.addEventListener('abort', () =>
-            resolve({ messages: [...options.messages], stopped: 'aborted', error: null, steps: 1 }),
+            resolve({
+              messages: [...options.messages],
+              stopped: 'aborted',
+              error: null,
+              steps: 1,
+              stats: NO_STATS,
+            }),
           );
         }),
     );

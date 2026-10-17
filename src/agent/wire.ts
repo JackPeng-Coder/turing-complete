@@ -67,6 +67,34 @@ export interface ChatRequest {
   readonly messages: readonly WireMessage[];
   readonly tools?: readonly WireTool[];
   readonly stream: true;
+  /**
+   * Ask the provider for a final frame carrying the token counts.
+   *
+   * OpenAI-compatible streaming omits `usage` unless this is set; without it the
+   * panel can measure time but not a single token, and the usage line would be
+   * blank on every provider that follows the spec.
+   */
+  readonly stream_options?: { readonly include_usage: true };
+}
+
+/**
+ * The provider's own accounting, in the two dialects that exist in the wild.
+ *
+ * OpenAI nests the cache figure under `prompt_tokens_details.cached_tokens`;
+ * DeepSeek (and several compatible endpoints) put `prompt_cache_hit_tokens` and
+ * `prompt_cache_miss_tokens` at the top level. Both are read, neither is
+ * required: a provider that reports only `prompt_tokens` still gives a total.
+ */
+export interface WireUsage {
+  readonly prompt_tokens?: number;
+  readonly completion_tokens?: number;
+  readonly total_tokens?: number;
+  readonly prompt_cache_hit_tokens?: number;
+  readonly prompt_cache_miss_tokens?: number;
+  readonly prompt_tokens_details?: { readonly cached_tokens?: number };
+  readonly completion_tokens_details?: { readonly reasoning_tokens?: number };
+  /** A provider that omits the counts entirely (or a `null` payload). */
+  readonly [field: string]: unknown;
 }
 
 /** One frame of the stream: the envelope, with everything optional. */
@@ -82,6 +110,8 @@ export interface StreamChunk {
   }[];
   /** Present instead of `choices` when the request failed mid-stream. */
   readonly error?: { readonly message?: string; readonly type?: string };
+  /** Token accounting, on the frame `stream_options.include_usage` asked for. */
+  readonly usage?: WireUsage | null;
 }
 
 export interface StreamToolCallDelta {

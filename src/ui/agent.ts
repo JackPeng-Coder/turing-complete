@@ -34,8 +34,16 @@ import {
   type AgentConfig,
 } from '../agent/config';
 import type { AgentHost } from '../agent/host';
-import { runAgent, type AgentEvent } from '../agent/loop';
+import { runAgent, type AgentEvent, type RunStats } from '../agent/loop';
 import type { WireMessage } from '../agent/wire';
+import {
+  formatCacheHitPercent,
+  formatDuration,
+  formatExactTokens,
+  formatSpeed,
+  formatTokens,
+  summariseRun,
+} from '../agent/format';
 import { iconSvg } from './shell';
 
 /** One tool call, as a row in the log. */
@@ -70,7 +78,9 @@ type Entry =
   | AgentEntry
   | { readonly kind: 'notice'; readonly text: string; readonly tone: 'info' | 'error' }
   /** The step budget ran out; the row carries the button that buys another one. */
-  | { readonly kind: 'cap'; readonly limit: number };
+  | { readonly kind: 'cap'; readonly limit: number }
+  /** One finished request's readings: time, tokens, speed, cache. */
+  | { readonly kind: 'run'; readonly stats: RunStats };
 
 /** The two places a panel lives in the workbench: its rail button and its dock. */
 export interface AgentPanelHosts {
@@ -118,6 +128,35 @@ function summarise(text: string): string {
   }
 }
 
+/**
+ * The tooltip of one request's row: the exact numbers the one-line reading hides.
+ *
+ * A PROVIDER THAT REPORTS NO USAGE SAYS SO rather than showing zeros: "没有返回
+ * 用量" is information, and `0 tok` would be a measurement nobody made.
+ */
+function runDetail(stats: RunStats): string {
+  const lines: string[] = [];
+  const duration = formatDuration(stats.llmMs);
+  if (duration !== null) lines.push(`模型耗时 ${duration}`);
+  if (stats.ttftSteps > 0) {
+    const ttft = formatDuration(stats.ttftMs / stats.ttftSteps);
+    if (ttft !== null) lines.push(`首字平均 ${ttft}`);
+  }
+  const speed = formatSpeed(stats.decodeTokens, stats.decodeMs);
+  if (speed !== null) lines.push(`输出速度 ${speed}`);
+  if (stats.usage === null) {
+    lines.push('提供方没有返回用量');
+  } else {
+    lines.push(`输入 ${formatExactTokens(stats.usage.input)} tok`);
+    if (stats.usage.cacheRead !== null) {
+      lines.push(`其中缓存 ${formatExactTokens(stats.usage.cacheRead)} tok`);
+    }
+    lines.push(`输出 ${formatExactTokens(stats.usage.output)} tok`);
+    lines.push(`合计 ${formatExactTokens(stats.usage.total)} tok`);
+  }
+  return lines.join('\n');
+}
+
 function button(label: string, className: string): HTMLButtonElement {
   const element = document.createElement('button');
   element.type = 'button';
@@ -143,6 +182,25 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   let controller: AbortController | null = null;
   let busy = false;
   let status = '';
+  /**
+   * The readings, summed over this panel's lifetime.
+   *
+   * NOT PERSISTED, and not part of the conversation: it is a totalising counter
+   * on the instrument, and a reload starts it at zero the way a real meter does.
+   * The per-request rows in the log keep their own numbers, so resetting the
+   * total loses nothing that was said.
+   */
+  const totals = {
+    runs: 0,
+    steps: 0,
+    llmMs: 0,
+    decodeMs: 0,
+    decodeTokens: 0,
+    input: 0,
+    output: 0,
+    total: 0,
+    cacheRead: null as number | null,
+  };
 
   // THE RAIL BUTTON IS ICON-ONLY, because the rail is 48px wide: its accessible
   // name and its warning class are what say "not configured yet", and the panel
@@ -200,7 +258,14 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   setupHint.append(setupHintText, setupHintOpen);
   setupHint.hidden = true;
 
-  card.append(head, log, setupHint, compose);
+  // THE PANEL'S TOTALISER, under the conversation: the same readings as the
+  // per-request rows, summed over this session. Hidden until there is something
+  // to count, and never a substitute for the rows themselves.
+  const sessionStats = document.createElement('div');
+  sessionStats.className = 'agent-session-stats';
+  sessionStats.hidden = true;
+
+  card.append(head, log, sessionStats, setupHint, compose);
 
   // -- the settings card, which is a card of its own so it can stand alone -----
   // THE SETTINGS CARD IS A MODAL OF ITS OWN. The conversation card's own `hidden`
@@ -347,6 +412,18 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
         log.append(line);
         continue;
       }
+      if (entry.kind === 'run') {
+        // One finished request, measured: the same four readings DSH shows,
+        // without the dialog -- the exact counts and the first-token average
+        // live in the tooltip.
+        const line = document.createElement('div');
+        line.className = 'agent-run-stats';
+        const text = summariseRun(entry.stats);
+        line.textContent = text === '' ? '本次没有计时数据' : text;
+        line.title = runDetail(entry.stats);
+        log.append(line);
+        continue;
+      }
       const line = document.createElement('article');
       line.className = 'agent-line agent-reply';
       const stream = streamOf(entry);
@@ -388,6 +465,26 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     input.disabled = busy;
     statusLine.textContent = status;
     statusLine.classList.toggle('agent-status-bad', status.startsWith('出错'));
+
+    // The totaliser: the same readings, summed. It says nothing until a run has
+    // finished, because a session with no measurements is not a zero row.
+    sessionStats.hidden = totals.runs === 0;
+    if (totals.runs > 0) {
+      const parts = [`累计 ${totals.runs} 次 · ${totals.steps} 步`];
+      if (totals.total > 0) parts.push(`${formatTokens(totals.total)} tok`);
+      const speed = formatSpeed(totals.decodeTokens, totals.decodeMs);
+      if (speed !== null) parts.push(speed);
+      const cache = formatCacheHitPercent(totals.cacheRead, totals.input);
+      if (cache !== null) parts.push(`缓存 ${cache}%`);
+      sessionStats.textContent = parts.join(' · ');
+      sessionStats.title = [
+        `请求 ${totals.runs} 次 · 模型调用 ${totals.steps} 步`,
+        `模型耗时 ${formatDuration(totals.llmMs) ?? '—'}`,
+        `输入 ${formatExactTokens(totals.input)} tok`,
+        `输出 ${formatExactTokens(totals.output)} tok`,
+        `合计 ${formatExactTokens(totals.total)} tok`,
+      ].join('\n');
+    }
   };
 
   /**
@@ -491,6 +588,23 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
       .then((result) => {
         history.length = 0;
         history.push(...result.messages);
+        // The request's own readings go into the log and the totaliser. They are
+        // appended even for an aborted or refused run: the seconds were spent,
+        // and the row is the record of what was bought for them.
+        entries.push({ kind: 'run', stats: result.stats });
+        totals.runs += 1;
+        totals.steps += result.steps;
+        totals.llmMs += result.stats.llmMs;
+        totals.decodeMs += result.stats.decodeMs;
+        totals.decodeTokens += result.stats.decodeTokens;
+        if (result.stats.usage !== null) {
+          totals.input += result.stats.usage.input;
+          totals.output += result.stats.usage.output;
+          totals.total += result.stats.usage.total;
+          if (result.stats.usage.cacheRead !== null) {
+            totals.cacheRead = (totals.cacheRead ?? 0) + result.stats.usage.cacheRead;
+          }
+        }
         if (result.stopped === 'aborted') status = '已停止';
         else if (result.stopped === 'error') status = '出错，见上面的提示';
         else if (result.stopped === 'stuck') status = '连着被拒绝了，先停下来了';

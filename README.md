@@ -143,6 +143,11 @@ default, `0` for no limit. When a request reaches the limit the log ends with a 
 sends the same conversation again with a fresh budget: a long build is one click from finishing rather
 than a retyped request.
 
+Each finished request also carries its readings under the reply — `2.4s · 1.2k tok · 20 tok/s · 缓存
+83%` — and the panel keeps a running total under the log. The token counts come from the provider's own
+usage frame (the request asks for one) and the times from the wall clock; a provider that reports no
+usage gets a time-only reading, never invented zeroes.
+
 What it will not do, and why:
 
 - **It cannot touch your progress.** No level is opened, passed, skipped or cleared by the agent, and

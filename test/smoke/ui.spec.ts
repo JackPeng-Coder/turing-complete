@@ -1332,6 +1332,11 @@ function agentCall(index: number, id: string, name: string, args: unknown): stri
   });
 }
 
+/** The final frame `stream_options.include_usage` asks for: no choices, usage. */
+function agentUsage(usage: unknown): string {
+  return `data: ${JSON.stringify({ choices: [], usage })}\n\n`;
+}
+
 /**
  * THE WHOLE FEATURE, END TO END, AGAINST A SCRIPTED MODEL.
  *
@@ -1356,7 +1361,18 @@ test('the agent builds what it was asked for, one visible step at a time', async
       agentChunk({}, 'tool_calls'),
       'data: [DONE]\n\n',
     ].join(''),
-    [agentChunk({ content: '放好了：两个与非门。' }), agentChunk({}, 'stop'), 'data: [DONE]\n\n'].join(''),
+    [
+      agentChunk({ content: '放好了：两个与非门。' }),
+      agentChunk({}, 'stop'),
+      agentUsage({
+        prompt_tokens: 1_200,
+        completion_tokens: 40,
+        total_tokens: 1_240,
+        prompt_cache_hit_tokens: 1_000,
+        prompt_cache_miss_tokens: 200,
+      }),
+      'data: [DONE]\n\n',
+    ].join(''),
   ];
   let served = 0;
   await page.route('**/mock/v1/chat/completions', async (route) => {
@@ -1394,6 +1410,13 @@ test('the agent builds what it was asked for, one visible step at a time', async
   await expect(page.locator('.shell-metrics')).toContainText('门 2 个');
   // The row says what happened in a sentence, not in the JSON the model read.
   await expect(page.locator('.agent-tool').first()).toHaveText('place_part · 在 (160, 160) 放了 与非门（i1）');
+
+  // The request's readings, DSH-style: tokens, speed and the cache share, plus a
+  // totaliser under the log. The mock sends the usage frame the request asked for.
+  await expect(page.locator('.agent-run-stats')).toContainText('1.2k tok');
+  await expect(page.locator('.agent-run-stats')).toContainText('缓存 83%');
+  await expect(page.locator('.agent-session-stats')).toContainText('累计 1 次');
+  await expect(page.locator('.agent-session-stats')).toContainText('1.2k tok');
   await page.screenshot({ path: 'test-results/smoke-agent-build.png' });
 
   // Its work is the player's to undo: one Ctrl+Z takes the last part back.

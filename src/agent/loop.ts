@@ -24,7 +24,7 @@
  * and hands the whole thing back, so a stopped run still leaves behind exactly
  * what was said.
  */
-import { AgentError, streamChat, type ChatDelta, type FetchLike } from './client';
+import { AgentError, streamChat, type ChatDelta, type FetchLike, type TokenUsage } from './client';
 import { DEFAULT_MAX_STEPS, type AgentConfig } from './config';
 import type { AgentHost } from './host';
 import { circuitTools } from './ops';
@@ -91,6 +91,33 @@ export interface RunOptions {
   readonly chat?: typeof streamChat;
 }
 
+/**
+ * What one run cost, in the four readings the panel draws.
+ *
+ * MEASURED HERE, NOT IN THE PANEL, because the run is the only place that sees
+ * both ends of a request: the clock before `chat` and the clock after it, the
+ * first streamed delta, and the provider's own token accounting. The panel gets
+ * one object and formats it.
+ *
+ * A PROVIDER THAT REPORTS NOTHING STILL GETS TIME. `usage` is `null` and
+ * `decodeTokens` is zero rather than invented, so the panel can show `2.4s` and
+ * leave the token clause out -- the same rule as the cache figure.
+ */
+export interface RunStats {
+  /** Summed request wall time (step start to the end of the streamed answer). */
+  readonly llmMs: number;
+  /** Summed time to the first streamed delta, over the steps that recorded one. */
+  readonly ttftMs: number;
+  /** How many steps carry a first-token sample, for the average in a tooltip. */
+  readonly ttftSteps: number;
+  /** Summed decode window (first delta to the end of the answer). */
+  readonly decodeMs: number;
+  /** Summed output tokens over the steps that carry both a window and a count. */
+  readonly decodeTokens: number;
+  /** The provider's sums, or `null` when it never reported any. */
+  readonly usage: TokenUsage | null;
+}
+
 export interface RunResult {
   /** The conversation including everything this run said and did. */
   readonly messages: readonly WireMessage[];
@@ -98,6 +125,8 @@ export interface RunResult {
   readonly error: AgentError | null;
   /** How many model calls the run made. */
   readonly steps: number;
+  /** Time, speed and token accounting for this run. */
+  readonly stats: RunStats;
 }
 
 /** An abort, in the one shape the rest of the file checks for. */
@@ -153,11 +182,36 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
    */
   const maxSteps = config.maxSteps === 0 ? null : (config.maxSteps ?? MAX_STEPS);
 
+  /** Wall clock, on the clock the platform actually has. */
+  const now = (): number => globalThis.performance?.now() ?? Date.now();
+  let llmMs = 0;
+  let ttftMs = 0;
+  let ttftSteps = 0;
+  let decodeMs = 0;
+  let decodeTokens = 0;
+  let sawUsage = false;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let totalTokens = 0;
+  let cacheRead: number | null = null;
+
+  const stats = (): RunStats => ({
+    llmMs,
+    ttftMs,
+    ttftSteps,
+    decodeMs,
+    decodeTokens,
+    usage: sawUsage
+      ? { input: inputTokens, output: outputTokens, total: totalTokens, cacheRead }
+      : null,
+  });
+
   const stop = (stopped: StopReason, error: AgentError | null = null): RunResult => ({
     messages: history,
     stopped,
     error,
     steps,
+    stats: stats(),
   });
 
   for (let index = 0; maxSteps === null || index < maxSteps; index += 1) {
@@ -169,6 +223,8 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     onEvent?.({ kind: 'step', index });
 
     let result;
+    const startedAt = now();
+    let firstAt: number | null = null;
     try {
       result = await chat({
         config,
@@ -177,6 +233,9 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
         signal,
         ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
         onDelta: (delta: ChatDelta) => {
+          // The first delta of any kind is the first token: the model has started
+          // answering, and the wait before it is what TTFT measures.
+          if (firstAt === null) firstAt = now();
           if (delta.kind === 'text') onEvent?.({ kind: 'text', text: delta.text });
           else if (delta.kind === 'reasoning') onEvent?.({ kind: 'thinking', text: delta.text });
         },
@@ -187,6 +246,25 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
         cause instanceof AgentError ? cause : new AgentError('请求失败', String(cause));
       onEvent?.({ kind: 'error', message: error.message, detail: error.detail });
       return stop('error', error);
+    }
+
+    const endedAt = now();
+    llmMs += Math.max(0, endedAt - startedAt);
+    if (firstAt !== null) {
+      ttftMs += Math.max(0, firstAt - startedAt);
+      ttftSteps += 1;
+    }
+    const usage = result.usage ?? null;
+    if (usage !== null) {
+      sawUsage = true;
+      inputTokens += usage.input;
+      outputTokens += usage.output;
+      totalTokens += usage.total;
+      if (usage.cacheRead !== null) cacheRead = (cacheRead ?? 0) + usage.cacheRead;
+      if (firstAt !== null) {
+        decodeMs += Math.max(0, endedAt - firstAt);
+        decodeTokens += usage.output;
+      }
     }
 
     const calls = result.toolCalls;

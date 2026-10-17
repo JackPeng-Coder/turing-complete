@@ -28,7 +28,7 @@
  */
 import { chatUrl, type AgentConfig } from './config';
 import { createSseDecoder } from './sse';
-import type { ChatRequest, StreamChunk, WireMessage, WireTool } from './wire';
+import type { ChatRequest, StreamChunk, WireMessage, WireTool, WireUsage } from './wire';
 
 /** The `fetch` shape this module needs; injectable so the tests need no network. */
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
@@ -40,11 +40,50 @@ export interface ChatToolCall {
   readonly arguments: string;
 }
 
+/**
+ * What a request cost, normalised across the two provider dialects.
+ *
+ * `input` is the whole prompt side (cached and uncached together), so
+ * `cacheRead / input` is the cache-hit share; `output` is what the model wrote.
+ * A provider that reports nothing gives `null`, and the panel then shows time
+ * and speed but not a token count -- rather than inventing one.
+ */
+export interface TokenUsage {
+  readonly input: number;
+  readonly output: number;
+  readonly total: number;
+  readonly cacheRead: number | null;
+}
+
+/** Reads an untrusted `usage` object into the one shape the panel draws. */
+export function readUsage(raw: WireUsage | null | undefined): TokenUsage | null {
+  if (raw === null || raw === undefined) return null;
+  const count = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+  const cacheRead =
+    count(raw.prompt_cache_hit_tokens) ?? count(raw.prompt_tokens_details?.cached_tokens);
+  const miss = count(raw.prompt_cache_miss_tokens);
+  const prompt =
+    count(raw.prompt_tokens) ??
+    (cacheRead !== null || miss !== null ? (cacheRead ?? 0) + (miss ?? 0) : null);
+  const output = count(raw.completion_tokens);
+  const total = count(raw.total_tokens);
+  if (prompt === null && output === null && total === null) return null;
+  return {
+    input: prompt ?? Math.max(0, (total ?? 0) - (output ?? 0)),
+    output: output ?? 0,
+    total: total ?? (prompt ?? 0) + (output ?? 0),
+    cacheRead,
+  };
+}
+
 export interface ChatResult {
   /** The assistant's prose. `''` when it only called tools, which is the norm. */
   readonly content: string;
   readonly toolCalls: readonly ChatToolCall[];
   readonly finishReason: string | null;
+  /** Token accounting, when the provider sent a usage frame. */
+  readonly usage?: TokenUsage | null;
 }
 
 /** What the panel can show while the answer is still arriving. */
@@ -151,6 +190,7 @@ interface CompletionBody {
     readonly finish_reason?: string | null;
   }[];
   readonly error?: { readonly message?: string };
+  readonly usage?: WireUsage | null;
 }
 
 function fromCompletion(raw: string): ChatResult & { readonly ignoredStream: boolean } {
@@ -180,6 +220,7 @@ function fromCompletion(raw: string): ChatResult & { readonly ignoredStream: boo
     content: choice?.message?.content ?? '',
     toolCalls: calls.filter((call) => call.name !== ''),
     finishReason: choice?.finish_reason ?? null,
+    usage: readUsage(parsed.usage),
     ignoredStream: true,
   };
 }
@@ -204,6 +245,7 @@ export async function streamChat(options: ChatOptions): Promise<ChatResult> {
     messages,
     ...(tools && tools.length > 0 ? { tools } : {}),
     stream: true,
+    stream_options: { include_usage: true },
   };
 
   let response: Response;
@@ -247,6 +289,7 @@ export async function streamChat(options: ChatOptions): Promise<ChatResult> {
   const sse = createSseDecoder();
   let content = '';
   let finishReason: string | null = null;
+  let usage: TokenUsage | null = null;
   const calls = new Map<number, { id: string; name: string; args: string }>();
   let done = false;
 
@@ -264,6 +307,10 @@ export async function streamChat(options: ChatOptions): Promise<ChatResult> {
       return;
     }
     if (chunk.error) throw new AgentError('模型接口在流中报错', chunk.error.message ?? '');
+    // The usage frame is the last one and carries no choices; read it before the
+    // choices loop so a provider that sends both is handled the same way.
+    const counted = readUsage(chunk.usage);
+    if (counted !== null) usage = counted;
     for (const choice of chunk.choices ?? []) {
       const delta = choice.delta;
       if (delta?.content) {
@@ -330,5 +377,5 @@ export async function streamChat(options: ChatOptions): Promise<ChatResult> {
     throw new AgentError('接口没有返回任何内容：确认这个地址支持流式 chat/completions');
   }
 
-  return { content, toolCalls, finishReason };
+  return { content, toolCalls, finishReason, usage };
 }
