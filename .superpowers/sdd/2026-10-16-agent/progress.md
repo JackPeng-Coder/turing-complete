@@ -133,3 +133,17 @@
     `$env:DEEPSEEK_API_KEY='sk-…'; pnpm smoke -g "real model"`，或 `-g "own connectors"`。
   - 未提交的临时文件已清掉（`live*.txt`），预览端口 4173 已释放。
 
+## 收尾复核（2026-10-17，用户拉取后）
+
+- 用户 `git pull` 后本地快进到 `1874419`（15 个提交：沙盒/自制元件、内置 Agent、第 5–7 章路线图、
+  会话记录阅读工具）。控制器在新主机实跑三门禁，**全绿**：
+  - `pnpm build` exit 0 —— 84 模块，`dist/assets/index-*.js` 282.09 kB / gzip 96.86 kB
+  - `pnpm test` **60 文件 / 1648 用例全通过**（22.4 s）
+  - `pnpm smoke` **26 通过 / 2 跳过（28.9 s），exit 0**；跳过的两条正是 `agent-live.spec.ts`
+    （无 `DEEPSEEK_API_KEY` 时自动 skip）
+- 因此上面「最后一次完整的绿门禁早于本批最后两处测试文件改动」的保留意见**解除**：`1874419` 本身即绿。
+- **仍未验证的唯一一项**：真模型端到端（`-g "real model"` / `-g "own connectors"`）。本机没有 key，
+  未跑；有 key 时一条命令即可补上，所以它是环境缺口，不是代码缺口。
+- 文档对齐（同日 docs 提交）：README（标题、交付范围、session-archive 段）、AGENTS.md（layer、layout、
+  第 5–7 章状态、transcript 段）、spec §12（Agent 一期注）、第 5–7 章路线图（基线数字与已交付清单）。
+
