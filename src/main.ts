@@ -15,6 +15,7 @@ import { applyWrap, planWrap, type WrapPlan } from './levels/wrap';
 import { SANDBOX_ID, SANDBOX_LEVEL, isSandbox } from './levels/sandbox';
 import { circuitSignature, emptySandbox, loadSandbox, saveSandbox } from './persist/sandbox';
 import { parseCircuit, serializeCircuit } from './persist/circuit';
+import { LAYOUT_LIMITS, loadLayout, saveLayout, type Layout } from './persist/layout';
 import { devModeFrom } from './app/dev';
 import { iconSvg, mountShell, mountStatus, type IconName } from './ui/shell';
 import { mountPalette } from './ui/palette';
@@ -22,6 +23,7 @@ import { mountTruthTable, TEST_DEMO_LIMIT } from './ui/truthTable';
 import { mountIoPanel } from './ui/ioPanel';
 import { showResult } from './ui/result';
 import { mountToolbar } from './ui/toolbar';
+import { mountSplitter, type SplitterOptions } from './ui/splitter';
 import { mountAgentPanel, type AgentPanel } from './ui/agent';
 import { loadAgentConfig, type AgentConfig } from './agent/config';
 import type { AgentHost, BoardSnapshot, TestOutcome } from './agent/host';
@@ -170,7 +172,7 @@ if (app) {
    * translucent layer over it, so no panel can cover a wire a player is drawing.
    */
   const workspace = document.createElement('div');
-  workspace.className = 'workspace secondary-collapsed';
+  workspace.className = 'workspace';
 
   /** A rail button: an icon, with the name carried by the accessible label. */
   const dockButton = (label: string, icon: IconName): HTMLButtonElement => {
@@ -211,7 +213,13 @@ if (app) {
   };
   const partsTab = tabButton('元件', 'parts');
   const componentsTab = tabButton('组件', 'components');
-  primaryTabs.append(partsTab, componentsTab);
+  const collapseSidebar = document.createElement('button');
+  collapseSidebar.type = 'button';
+  collapseSidebar.className = 'sidebar-collapse';
+  collapseSidebar.textContent = '«';
+  collapseSidebar.title = '收起侧栏';
+  collapseSidebar.setAttribute('aria-label', '收起侧栏');
+  primaryTabs.append(partsTab, componentsTab, collapseSidebar);
   const partsSection = document.createElement('div');
   partsSection.className = 'sidebar-section sidebar-parts';
   partsSection.dataset.view = 'parts';
@@ -295,14 +303,63 @@ if (app) {
 
   const panelTabs = [casesTab, programTab, debugTab];
   const panelViews = [viewCases, viewProgram, viewDebug];
-  const showPanel = (name: string): void => {
-    bottom.classList.remove('collapsed');
+
+  // ---------------------------------------------------------------- layout --
+  // The docks' measurements live in `tc.layout.v1`: a player who widened the
+  // parts tray wants it wide on the next launch, and one who collapsed the
+  // assistant wants it collapsed. `applyLayout` is the ONLY writer of the CSS
+  // variables the grid is built from, so the splitters, the collapse buttons and
+  // a saved payload cannot disagree about where an edge is.
+  let layout = loadLayout();
+
+  /** The rail's icons show which view is showing, and whether its dock is open. */
+  const syncRail = (): void => {
+    partsButton.setAttribute('aria-pressed', String(!layout.primaryCollapsed && !partsSection.hidden));
+    componentsButton.setAttribute('aria-pressed', String(!layout.primaryCollapsed && !componentsSection.hidden));
+    casesButton.setAttribute('aria-pressed', String(!layout.panelCollapsed && !viewCases.hidden));
+    programButton.setAttribute('aria-pressed', String(!layout.panelCollapsed && !viewProgram.hidden));
+  };
+
+  const applyLayout = (): void => {
+    workspace.style.setProperty('--primary-w', layout.primaryCollapsed ? '0px' : `${layout.primaryW}px`);
+    workspace.style.setProperty('--p-split-w', layout.primaryCollapsed ? '0px' : '4px');
+    workspace.style.setProperty('--secondary-w', layout.secondaryCollapsed ? '0px' : `${layout.secondaryW}px`);
+    workspace.style.setProperty('--s-split-w', layout.secondaryCollapsed ? '0px' : '4px');
+    workspace.style.setProperty('--panel-h', `${layout.panelH}px`);
+    workspace.style.setProperty('--h-split-h', layout.panelCollapsed ? '0px' : '4px');
+    workspace.classList.toggle('primary-collapsed', layout.primaryCollapsed);
+    workspace.classList.toggle('secondary-collapsed', layout.secondaryCollapsed);
+    workspace.classList.toggle('panel-collapsed', layout.panelCollapsed);
+    bottom.classList.toggle('collapsed', layout.panelCollapsed);
+    collapse.textContent = layout.panelCollapsed ? '⌃' : '⌄';
+    collapse.setAttribute('aria-label', layout.panelCollapsed ? '展开下方面板' : '收起下方面板');
+    syncRail();
+  };
+
+  const setLayout = (patch: Partial<Layout>): void => {
+    layout = { ...layout, ...patch };
+    applyLayout();
+    saveLayout(layout);
+  };
+
+  const showPanel = (name: string, expand = true): void => {
+    if (expand && layout.panelCollapsed) {
+      layout = { ...layout, panelCollapsed: false };
+      saveLayout(layout);
+    }
     for (const el of panelViews) el.hidden = el.dataset.view !== name;
     for (const el of panelTabs) el.setAttribute('aria-pressed', String(el.dataset.view === name));
+    applyLayout();
   };
-  const showSidebar = (name: string): void => {
+
+  const showSidebar = (name: string, expand = true): void => {
+    if (expand && layout.primaryCollapsed) {
+      layout = { ...layout, primaryCollapsed: false };
+      saveLayout(layout);
+    }
     for (const el of [partsSection, componentsSection]) el.hidden = el.dataset.view !== name;
     for (const el of [partsTab, componentsTab]) el.setAttribute('aria-pressed', String(el.dataset.view === name));
+    applyLayout();
   };
 
   casesTab.addEventListener('click', () => showPanel('cases'));
@@ -310,20 +367,76 @@ if (app) {
   debugTab.addEventListener('click', () => showPanel('debug'));
   partsTab.addEventListener('click', () => showSidebar('parts'));
   componentsTab.addEventListener('click', () => showSidebar('components'));
-  partsButton.addEventListener('click', () => showSidebar('parts'));
-  componentsButton.addEventListener('click', () => showSidebar('components'));
+  // Clicking the rail button of the view that is already showing folds the
+  // sidebar away -- the shortcut a code editor trains into you.
+  partsButton.addEventListener('click', () => {
+    if (!layout.primaryCollapsed && !partsSection.hidden) setLayout({ primaryCollapsed: true });
+    else showSidebar('parts');
+  });
+  componentsButton.addEventListener('click', () => {
+    if (!layout.primaryCollapsed && !componentsSection.hidden) setLayout({ primaryCollapsed: true });
+    else showSidebar('components');
+  });
   casesButton.addEventListener('click', () => showPanel('cases'));
   programButton.addEventListener('click', () => {
     if (!programTab.hidden) showPanel('program');
   });
   settingsButton.addEventListener('click', () => agentPanel?.openSettings());
-  collapse.addEventListener('click', () => {
-    const collapsed = bottom.classList.toggle('collapsed');
-    collapse.textContent = collapsed ? '⌃' : '⌄';
-    collapse.setAttribute('aria-label', collapsed ? '展开下方面板' : '收起下方面板');
+  collapseSidebar.addEventListener('click', () => setLayout({ primaryCollapsed: true }));
+  collapse.addEventListener('click', () => setLayout({ panelCollapsed: !layout.panelCollapsed }));
+
+  // The drag handles: the grid's 4px tracks ARE the edges, so the element and
+  // the gap it sits in are the same thing.
+  const addSplitter = (classes: string, options: SplitterOptions): void => {
+    const el = document.createElement('div');
+    el.className = `splitter ${classes}`;
+    workspace.append(el);
+    mountSplitter(el, options);
+  };
+  /** How wide a sidebar may become before the board gets too narrow to work in. */
+  const maxSidebar = (): number => Math.max(LAYOUT_LIMITS.primaryW.min, globalThis.innerWidth - 48 - 8 - 360);
+  addSplitter('p-split', {
+    axis: 'x',
+    sign: 1,
+    value: () => layout.primaryW,
+    min: () => LAYOUT_LIMITS.primaryW.min,
+    max: () => Math.min(LAYOUT_LIMITS.primaryW.max, maxSidebar()),
+    onChange: (value) => {
+      layout = { ...layout, primaryW: value };
+      applyLayout();
+    },
+    onCommit: () => saveLayout(layout),
   });
-  showPanel('cases');
-  showSidebar('parts');
+  addSplitter('s-split', {
+    axis: 'x',
+    sign: -1,
+    value: () => layout.secondaryW,
+    min: () => LAYOUT_LIMITS.secondaryW.min,
+    max: () => Math.min(LAYOUT_LIMITS.secondaryW.max, maxSidebar()),
+    onChange: (value) => {
+      layout = { ...layout, secondaryW: value };
+      applyLayout();
+    },
+    onCommit: () => saveLayout(layout),
+  });
+  addSplitter('h-split', {
+    axis: 'y',
+    sign: -1,
+    value: () => layout.panelH,
+    min: () => LAYOUT_LIMITS.panelH.min,
+    max: () => Math.min(LAYOUT_LIMITS.panelH.max, Math.max(LAYOUT_LIMITS.panelH.min, globalThis.innerHeight * 0.55)),
+    onChange: (value) => {
+      layout = { ...layout, panelH: value };
+      applyLayout();
+    },
+    onCommit: () => saveLayout(layout),
+  });
+
+  // The first view is laid out WITHOUT expanding: a saved layout may have
+  // collapsed either dock, and booting is not a click that opens them.
+  showPanel('cases', false);
+  showSidebar('parts', false);
+  applyLayout();
 
   workspace.append(activity, primary, editor, secondary, bottom);
   app.append(workspace);
@@ -1760,12 +1873,15 @@ if (app) {
         agentPanel?.render();
       },
       // The secondary sidebar is a dock, not a floating card: opening the panel
-      // claims its column, closing it gives the column back to the board.
-      onVisibility: (open) => {
-        workspace.classList.toggle('secondary-collapsed', !open);
-      },
+      // claims its column, closing it gives the column back to the board -- and
+      // the choice is remembered with the other dock measurements.
+      onVisibility: (open) => setLayout({ secondaryCollapsed: !open }),
     },
   );
+  // A saved layout may have the assistant's dock open. The panel itself starts
+  // hidden (nothing opens on a first run), so open it now rather than leaving an
+  // empty column waiting for a rail click.
+  if (!layout.secondaryCollapsed) agentPanel.open();
 
   /**
    * A click on a level input flips what it drives.

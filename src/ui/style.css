@@ -94,6 +94,28 @@ html, body {
 }
 #app { display: flex; flex-direction: column; height: 100vh; }
 
+/* SCROLLBARS ARE PART OF THE INSTRUMENT. Chromium and WebKit draw them from
+   these pseudo-elements: a 10px track on the slab, a square thumb in the
+   hairline colour, magenta under the pointer. Firefox cannot use them, so it
+   gets the standard properties instead -- and those are fenced behind a
+   Firefox-only feature, because since Chrome 121 a specified `scrollbar-color`
+   or `scrollbar-width` makes Chrome IGNORE `::-webkit-scrollbar` (the standard
+   property wins; see
+   https://frontendmasters.com/blog/heads-up-on-custom-scrollbars-chrome-is-supporting-the-standard-now-which-overrides-the-old-pseudo-elements/).
+   The fence is what lets both worlds have the better half: Chromium keeps the
+   drawn bar, Firefox keeps a thin themed one. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--slab); }
+::-webkit-scrollbar-thumb { background: var(--hair-lit); border: 2px solid var(--slab); }
+::-webkit-scrollbar-thumb:hover { background: var(--hot); }
+::-webkit-scrollbar-corner { background: var(--slab); }
+@supports (-moz-appearance: none) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--hair-lit) var(--slab);
+  }
+}
+
 /* Keyboard focus is always visible and always magenta -- the operator's colour,
    so "the thing that will respond to me" reads the same way whether it is hovered
    or tabbed to. */
@@ -253,14 +275,31 @@ button { font-family: inherit; }
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: 48px var(--primary-w) minmax(0, 1fr) var(--secondary-w);
-  grid-template-rows: minmax(0, 1fr) auto;
+  /* Six columns and three rows, every measurement a variable `main.ts` writes:
+     the 4px tracks between the docks ARE the splitters, and collapsing a dock
+     sets its own width (and its handle's) to zero. */
+  grid-template-columns:
+    48px var(--primary-w, 252px) var(--p-split-w, 4px)
+    minmax(0, 1fr) var(--s-split-w, 4px) var(--secondary-w, 348px);
+  grid-template-rows: minmax(0, 1fr) var(--h-split-h, 4px) auto;
   grid-template-areas:
-    "activity primary editor secondary"
-    "activity primary panel secondary";
+    "activity primary p-split editor s-split secondary"
+    "activity primary p-split h-split s-split secondary"
+    "activity primary p-split panel   s-split secondary";
 }
-.workspace.secondary-collapsed { grid-template-columns: 48px var(--primary-w) minmax(0, 1fr) 0; }
-.workspace.secondary-collapsed .sidebar-secondary { display: none; }
+.workspace.primary-collapsed .sidebar-primary,
+.workspace.primary-collapsed .p-split { display: none; }
+.workspace.secondary-collapsed .sidebar-secondary,
+.workspace.secondary-collapsed .s-split { display: none; }
+.workspace.panel-collapsed .h-split { display: none; }
+/* The drag handles. Invisible until the pointer is on them, then a magenta
+   hairline -- the same rule as every other control. */
+.splitter { background: transparent; touch-action: none; }
+.splitter-x { cursor: col-resize; }
+.splitter-y { cursor: row-resize; }
+.splitter:hover,
+.splitter.dragging { background: var(--hot); }
+.splitter:focus-visible { outline: 2px solid var(--hot); outline-offset: 0; }
 .activity {
   grid-area: activity;
   display: flex;
@@ -311,6 +350,18 @@ button { font-family: inherit; }
 }
 .sidebar-tab[aria-pressed='true'] { color: var(--neon); border-bottom-color: var(--neon); }
 .sidebar-tab:hover { color: var(--text); }
+/* The chevron that folds the sidebar away, beside its two view tabs. */
+.sidebar-collapse {
+  flex: 0 0 auto;
+  width: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sidebar-collapse:hover { color: var(--hot); }
 .sidebar-section { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .sidebar-section[hidden] { display: none; }
 .editor { grid-area: editor; min-width: 0; min-height: 0; display: flex; flex-direction: column; }

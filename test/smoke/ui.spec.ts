@@ -1213,6 +1213,60 @@ test('the workbench docks its panels, and the agent claims its own column', asyn
   await page.screenshot({ path: 'test-results/smoke-workbench.png' });
 });
 
+/**
+ * THE DOCKS ARE THE PLAYER'S: they fold away, they resize, and the choice
+ * survives a reload. The handles are the grid's own 4px tracks, so this drives
+ * the pointer the way a player does and measures the box that moved.
+ */
+test('the docks fold, resize, and remember', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '开始' }).click();
+
+  const sidebar = page.locator('.sidebar-primary');
+  const before = (await sidebar.boundingBox())!;
+
+  // Drag its edge 60px right.
+  const handle = (await page.locator('.p-split').boundingBox())!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + 40);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2 + 60, handle.y + 40, { steps: 8 });
+  await page.mouse.up();
+  const widened = (await sidebar.boundingBox())!;
+  expect(widened.width).toBeGreaterThan(before.width + 40);
+
+  // The rail button of the showing view folds the sidebar away; pressing it
+  // again brings the same width back.
+  const rail = page.locator('.activity');
+  await rail.getByRole('button', { name: '元件' }).click();
+  await expect(sidebar).toBeHidden();
+  await rail.getByRole('button', { name: '元件' }).click();
+  await expect(sidebar).toBeVisible();
+  expect((await sidebar.boundingBox())!.width).toBeCloseTo(widened.width, 0);
+
+  // The bottom panel folds down to its tab strip.
+  const panel = page.locator('.bottom-panel');
+  const expanded = (await panel.boundingBox())!;
+  await page.locator('.panel-toggle').click();
+  await expect(page.locator('.panel-views')).toBeHidden();
+  expect((await panel.boundingBox())!.height).toBeLessThan(expanded.height);
+
+  // The layout is a preference: a reload brings the same shapes back.
+  await page.reload();
+  await page.getByRole('button', { name: '开始' }).click();
+  expect((await page.locator('.sidebar-primary').boundingBox())!.width).toBeCloseTo(widened.width, 0);
+  await expect(page.locator('.panel-views')).toBeHidden();
+
+  // The assistant's dock is part of the same preference: open it, reload, and it
+  // comes back open -- with its card, not just an empty column.
+  await page.locator('.agent-toggle').click();
+  await expect(page.locator('.sidebar-secondary')).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: '开始' }).click();
+  await expect(page.locator('.sidebar-secondary')).toBeVisible();
+  await expect(page.locator('.agent-card:not(.agent-setup)')).toBeVisible();
+  await page.screenshot({ path: 'test-results/smoke-docks-resized.png' });
+});
+
 /** One frame of an OpenAI-compatible streamed completion. */
 function agentChunk(delta: unknown, finish?: string): string {
   const choice = finish === undefined ? { index: 0, delta } : { index: 0, delta, finish_reason: finish };

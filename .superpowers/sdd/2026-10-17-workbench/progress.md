@@ -38,6 +38,18 @@
 
 ## 已知限制（报告给用户）
 
-- 侧栏宽度、下方面板高度是固定值，没有拖拽分隔条；折叠只能通过面板标签 / 活动栏 / 收起箭头。
+- 侧栏宽度、下方面板高度是固定值，没有拖拽分隔条；折叠只能通过面板标签 / 活动栏 / 收起箭头。（已由同日「追加」一节解决）
 - 真模型端到端（`agent-live.spec.ts`）仍需要 `DEEPSEEK_API_KEY`，本机没有 key，未跑。
 - 地图打开时侧栏、下方面板仍在原位（VSCode 的行为），下方面板显示的是上一个关卡的用例。
+
+## 追加（2026-10-17 下午）：可收起 / 可拖拽 / 自绘滚动条
+
+用户要求：左侧栏与下方面板可收起；三个侧栏可调宽（下方面板可调高）；探究滚动条能否自绘。上面第一条限制随之解决。
+
+- **收起**：活动栏按钮再点一次收起（VSCode 习惯），主侧栏标签行右侧另有 `«`；下方面板沿用 `⌃/⌄`；辅助侧栏沿用 `✕` 与活动栏。三个收起状态都进布局存档。
+- **拖拽**：新增 `src/ui/splitter.ts`；工作台网格里两条 4px 竖轨和一条 4px 横轨就是把手。主侧栏向右变宽、辅助侧栏向左变宽、下方面板向上变高（一个 `sign` 参数）。把手是 `role=separator` 的焦点元素，方向键 12px / Shift 48px。
+- **持久化**：新键 `tc.layout.v1`（`src/persist/layout.ts`）：宽/高/三个收起状态；读入逐字段回退并夹在 180–420 / 260–620 / 140–600。启动即应用；首帧的 `showPanel/showSidebar` 带 `expand=false`，所以「上次收起」不会被开机流程重新展开。Agent 停靠若上次是开着的，启动时会自动打开卡片（否则只剩一列空白）。
+- **滚动条**：CSS 自绘。Chromium/WebKit 走 `::-webkit-scrollbar*`（10px、`--slab` 轨道、`--hair-lit` 方块拇指、悬停 `--hot`）；Firefox 走 `scrollbar-width: thin` + `scrollbar-color`。**关键发现**：Chrome 121 起设置标准属性会让 Chrome 忽略 `::-webkit-scrollbar`（[frontendmasters 的说明](https://frontendmasters.com/blog/heads-up-on-custom-scrollbars-chrome-is-supporting-the-standard-now-which-overrides-the-old-pseudo-elements/)），所以标准属性用 `@supports (-moz-appearance: none)` 围栏为 Firefox 专用，两边各得其所。
+- **顺带修了一处空转的规矩**：`test/conventions.test.ts` 的样式断言原来用 `?raw` glob 读 CSS，而 Vitest 把 CSS 导入替换为空模块，影子/圆角两条规则一直在空字符串上通过。改成 `readFileSync`（沿用仓库既有的 `@ts-expect-error` 约定）后首次名副其实，并新增「滚动条必须自绘」的断言。
+- 测试：`test/persist/layout.test.ts`（7）、`test/ui/splitter.test.ts`（5）、smoke `the docks fold, resize, and remember`（拖宽 60px、活动栏收起/展开、下方面板收起、刷新后宽度/收起状态/Agent 停靠仍在）。
+- 门禁：`build` exit 0（289.24 kB / gzip 99.03 kB）、`test` 62 文件 / **1655 通过**、`smoke` **29 通过 + 2 跳过（35.3 s）**。视觉核对：`test-results/look-resized.png`、`look-map-scroll.png`。

@@ -13,6 +13,12 @@
  * a linter makes too: a rule written here has to be re-stated if the shape of
  * the code changes, so every assertion below names the decision it protects.
  */
+// tsconfig lists only `vitest/globals` in `types`, so Node's ambient types are
+// deliberately not in this program. The import is real at runtime (vitest runs
+// this file in Node) and the stylesheet assertion below is what proves it; the
+// suppression is one line rather than a project-wide `@types/node` dependency.
+// @ts-expect-error -- no Node ambient types in this project's tsconfig
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import packageText from '../package.json?raw';
 import { LEVELS, LEVEL_ORDER } from '../src/levels/index';
@@ -258,15 +264,13 @@ describe('the dependency policy', () => {
 // ---------------------------------------------------------------------------
 
 describe('the stylesheet', () => {
+  // READ FROM DISK, NOT THROUGH A CSS IMPORT: Vitest answers a CSS import with an
+  // empty module (its CSS pipeline is off by default), so a `?raw` / `?inline`
+  // import would hand these assertions an empty string and every rule below would
+  // pass vacuously. The file is still read as text, which is what the rules are
+  // about.
   const css = withoutComments(
-    only(
-      import.meta.glob('../src/ui/style.css', {
-        query: '?raw',
-        import: 'default',
-        eager: true,
-      }) as Record<string, string>,
-      'stylesheet',
-    ),
+    readFileSync(new URL('../src/ui/style.css', import.meta.url), 'utf8'),
   );
 
   it('has no shadow anywhere, as README promises', () => {
@@ -282,6 +286,13 @@ describe('the stylesheet', () => {
       offenders.push(selector.trim().replace(/\s+/g, ' '));
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('draws its own scrollbars instead of leaving them to the platform', () => {
+    // The workbench styles every scroller; a native bar reappearing in one panel
+    // reads as another application pasted into this one.
+    expect(css).toContain('::-webkit-scrollbar-thumb');
+    expect(css).toMatch(/scrollbar-color:\s*var\(--hair-lit\)/);
   });
 });
 

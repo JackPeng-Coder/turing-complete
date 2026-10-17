@@ -89,7 +89,10 @@ It is a **workbench**, laid out the way a code editor is: an activity rail on th
 tray beside it (with the component library a tab away and the clock/IO readout pinned below), the
 board as the document in the middle, the assistant in a collapsible sidebar on the right, the level's
 cases and the programming bench in a tabbed panel under the board, and the measured cost along the
-bottom in a status bar. Every panel is docked in flow, so a tool never covers a wire being drawn.
+bottom in a status bar. Every panel is docked in flow, so a tool never covers a wire being drawn. The
+three docks fold away and drag wider or taller, and the workbench remembers the sizes and which of
+them were left folded (`tc.layout.v1`); scrollbars are drawn by the stylesheet rather than left to
+the platform.
 
 Two colour axes, kept apart on purpose:
 
