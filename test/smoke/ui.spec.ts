@@ -1243,6 +1243,19 @@ test('the docks fold, resize, and remember', async ({ page }) => {
   await expect(sidebar).toBeVisible();
   expect((await sidebar.boundingBox())!.width).toBeCloseTo(widened.width, 0);
 
+  // The bottom panel's top edge is a handle too: drag it up and the view area
+  // grows. This is the one that used to be untestable -- the handle had no
+  // `grid-area` and was auto-placed off-screen at x:1400, width 0.
+  const views = page.locator('.panel-views');
+  const panelBefore = (await views.boundingBox())!;
+  const edge = (await page.locator('.h-split').boundingBox())!;
+  expect(edge.height).toBeLessThan(8);
+  await page.mouse.move(edge.x + 300, edge.y + edge.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + 300, edge.y + edge.height / 2 - 60, { steps: 8 });
+  await page.mouse.up();
+  expect((await views.boundingBox())!.height).toBeGreaterThan(panelBefore.height + 40);
+
   // The bottom panel folds down to its tab strip.
   const panel = page.locator('.bottom-panel');
   const expanded = (await panel.boundingBox())!;

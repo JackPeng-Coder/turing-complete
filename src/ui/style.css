@@ -293,7 +293,12 @@ button { font-family: inherit; }
 .workspace.secondary-collapsed .s-split { display: none; }
 .workspace.panel-collapsed .h-split { display: none; }
 /* The drag handles. Invisible until the pointer is on them, then a magenta
-   hairline -- the same rule as every other control. */
+   hairline -- the same rule as every other control. Each one is placed into the
+   grid area its column/row was named for; without these three rules the handles
+   are auto-placed into implicit tracks and the bottom one lands off-screen. */
+.p-split { grid-area: p-split; }
+.s-split { grid-area: s-split; }
+.h-split { grid-area: h-split; }
 .splitter { background: transparent; touch-action: none; }
 .splitter-x { cursor: col-resize; }
 .splitter-y { cursor: row-resize; }

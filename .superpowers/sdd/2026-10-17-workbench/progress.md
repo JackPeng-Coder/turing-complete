@@ -53,3 +53,9 @@
 - **顺带修了一处空转的规矩**：`test/conventions.test.ts` 的样式断言原来用 `?raw` glob 读 CSS，而 Vitest 把 CSS 导入替换为空模块，影子/圆角两条规则一直在空字符串上通过。改成 `readFileSync`（沿用仓库既有的 `@ts-expect-error` 约定）后首次名副其实，并新增「滚动条必须自绘」的断言。
 - 测试：`test/persist/layout.test.ts`（7）、`test/ui/splitter.test.ts`（5）、smoke `the docks fold, resize, and remember`（拖宽 60px、活动栏收起/展开、下方面板收起、刷新后宽度/收起状态/Agent 停靠仍在）。
 - 门禁：`build` exit 0（289.24 kB / gzip 99.03 kB）、`test` 62 文件 / **1655 通过**、`smoke` **29 通过 + 2 跳过（35.3 s）**。视觉核对：`test-results/look-resized.png`、`look-map-scroll.png`。
+
+### 修正（同日，用户反馈「下方面板还是不能调高」）
+
+- **根因**：第一版只写了 `grid-template-areas` 里的 `p-split/s-split/h-split`，忘了给三个把手写 `grid-area`。它们被自动排布到隐式轨道：`h-split` 的实际盒子是 `x:1400, y:49.5, width:0, height:493.5`——在屏幕外，所以下方面板没有可拖的边；`p-split`/`s-split` 也不在各自的 4px 轨道上（之前 smoke 拖 p-split 能"生效"只是因为拖到的是把手本身，改的是变量，与位置无关）。
+- **修复**：补 `.p-split/.s-split/.h-split { grid-area: … }`。修复后实测：`p-split` x=300、w=4；`h-split` y=543、h=4；横拖 80px 后 `--panel-h` 300→380，刷新保留；`s-split` 在 Agent 打开后 x=1048、w=4。
+- **测试护栏**：smoke 的 dock 用例增加横拖断言（把手高度 < 8px、拖动后面板高度 +40px 以上）——该断言在修复前会失败。
