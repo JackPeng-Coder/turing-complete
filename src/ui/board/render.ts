@@ -120,10 +120,17 @@ export function gateLookOf(def: ComponentDef): GateLook {
     // The two packers are the only parts whose shape is their FUNCTION rather
     // than their family: a funnel, narrow where the word is and wide where the
     // bits are. One word in and a bit per output out (`split`), or the same
-    // picture reversed (`make`).
+    // picture reversed (`make`). The 16/32-bit variants the sandbox registers are
+    // the same part at another width, so they are the same silhouette -- and like
+    // every width-suffixed id they share the base marking, because the width is
+    // what the pins say.
     case 'splitter':
+    case 'splitter16':
+    case 'splitter32':
       return { shape: 'split', bubble: false };
     case 'maker':
+    case 'maker16':
+    case 'maker32':
       return { shape: 'make', bubble: false };
     default:
       return { shape: 'box', bubble: false };

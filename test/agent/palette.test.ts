@@ -133,6 +133,24 @@ describe('a withheld answer is withheld from the assistant', () => {
     expect(placed.body.result.id).toBe('OUT_1');
   });
 
+  it('offers the sandbox the wide packers its connectors can reach', async () => {
+    // A sandbox connector's width is the player's, up to 32 bits, and the 8-bit
+    // packers truncate anything wider -- so the sandbox palette carries the
+    // 16/32-bit pair (`PACKER_DEFS`). The agent's catalogue is the tray's, which
+    // is the user-visible half of the fix; the defs themselves are
+    // `test/core/defs-wide.test.ts`.
+    const palette = offeredDefsFor(emptyProgress(), LEVELS, SANDBOX_LEVEL, false, registry);
+    expect(palette).toEqual(
+      expect.arrayContaining(['splitter16', 'maker16', 'splitter32', 'maker32']),
+    );
+
+    const fixture = makeTestHost({ parts: palette.map(partInfo) });
+    expect(await listed(fixture)).toEqual(expect.arrayContaining(['splitter16', 'maker16']));
+    const placed = await call(fixture, 'place_part', { defId: 'splitter16', x: 0, y: 0 });
+    expect(placed.ok).toBe(true);
+    expect(fixture.graph.instances.map((inst) => inst.def)).toEqual(['splitter16']);
+  });
+
   it('names the connectors in the readable step line once the board is a sandbox', async () => {
     // The line the player reads is the tool's `note`, and on a sandbox it must not
     // hide the two parts that make a circuit observable.

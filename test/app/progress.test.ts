@@ -282,6 +282,12 @@ describe('offeredDefsFor', () => {
     expect(offered).toContain('add8');
     expect(offered).toContain('level_input');
     expect(offered).toContain('level_output');
+    // The packers above the registered eight are ordinary base defs too: a
+    // sandbox connector can be 16 or 32 bits wide, and without these its word
+    // could not be split (the 8-bit pair truncates the top half).
+    expect(offered).toEqual(
+      expect.arrayContaining(['splitter16', 'maker16', 'splitter32', 'maker32']),
+    );
     // Still a sandbox, not a secret level: nothing else hidden rides along.
     const hidden = registry.all().filter((def) => def.hidden === true).map((def) => def.id);
     expect(hidden.sort()).toEqual(['level_input', 'level_output']);

@@ -73,6 +73,14 @@ const MARKING: Readonly<Record<string, string>> = {
   div8: 'DIV',
   splitter: 'SPLIT',
   maker: 'MAKE',
+  // The sandbox packers at 16 and 32 bits. One marking per operation, the same as
+  // `and` / `and8`: the width is carried by the pins (and, in the tray, by the
+  // name), not by the legend -- a splitter's first output is one bit, so its
+  // corner badge cannot be the word it splits.
+  splitter16: 'SPLIT',
+  maker16: 'MAKE',
+  splitter32: 'SPLIT',
+  maker32: 'MAKE',
   switch: 'SW',
   switch8: 'SW',
   mux8: 'MUX',

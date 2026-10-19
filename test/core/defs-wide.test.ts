@@ -4,6 +4,9 @@ import {
   DECODER_DEF_IDS,
   DEFAULT_WIDE_WIDTH,
   MAX_WIDE_WIDTH,
+  PACKER_DEFS,
+  PACKER_DEF_IDS,
+  PACKER_WIDTHS,
   WIDE_DEF_IDS,
   WIDE_STORAGE_DEFS,
   WIDE_STORAGE_DEF_IDS,
@@ -139,7 +142,7 @@ const STORAGE_IDS = STORAGE_CONTRACT.map((row) => row.id);
 
 /**
  * Every id the wide module registers, read from the module's own exported id
- * tuples -- the same three `defs/index.ts` builds `DEF_IDS` from -- instead of
+ * tuples -- the same four `defs/index.ts` builds `DEF_IDS` from -- instead of
  * being typed out here.
  *
  * THIS REPLACES A HAND-MAINTAINED LIST THAT A GENERATED FAMILY BROKE. The
@@ -162,7 +165,12 @@ const STORAGE_IDS = STORAGE_CONTRACT.map((row) => row.id);
  * to catch. Here a mis-filed part is still missing from `byCategory('wide')`
  * while remaining in this set, so the assertion fails.
  */
-const WIDE_MODULE_IDS = [...WIDE_DEF_IDS, ...WIDE_STORAGE_DEF_IDS, ...DECODER_DEF_IDS] as const;
+const WIDE_MODULE_IDS = [
+  ...WIDE_DEF_IDS,
+  ...PACKER_DEF_IDS,
+  ...WIDE_STORAGE_DEF_IDS,
+  ...DECODER_DEF_IDS,
+] as const;
 
 /**
  * `WIDE_MODULE_IDS` minus `const8`, the module's ONE deliberate exception: it is
@@ -1015,6 +1023,96 @@ describe('splitter and maker', () => {
   });
 });
 
+/**
+ * THE HALF OF A WORD THAT HAD NO PIN. A sandbox connector's width is the
+ * player's (`main.ts`'s `PIN_WIDTHS` cycles 1, 8, 16, 32, 2, 3, 4, 6), and the
+ * registered packers are eight bits wide: a sixteen-bit pin wired into `splitter`
+ * is truncated to `min(16, 8)` bits by `compile`, so the top byte has nowhere to
+ * come out and nothing could make it. These are the pair at the two widths the
+ * chip reaches above eight, and the assertions here are the top bits that were
+ * unreachable before -- while 8 and below stay on the registered part, where a
+ * narrow driver arrives zero-extended and truncates back correctly.
+ */
+describe('the 16- and 32-bit packers a sandbox connector can reach', () => {
+  it('registers exactly the widths above eight the connector chip offers', () => {
+    expect(PACKER_WIDTHS).toEqual([16, 32]);
+    expect(PACKER_DEF_IDS).toEqual(['splitter16', 'maker16', 'splitter32', 'maker32']);
+    expect(PACKER_DEFS.map((def) => def.id)).toEqual([...PACKER_DEF_IDS]);
+    // They are ordinary base defs: `DEF_IDS` is what makes the id spellable by
+    // level data and by the palette, and the registry is what the board draws.
+    for (const id of PACKER_DEF_IDS) expect([...DEF_IDS], id).toContain(id);
+    for (const def of PACKER_DEFS) expect(registry.get(def.id).id).toBe(def.id);
+  });
+
+  it('is one word in, one bit per pin out, at its own width', () => {
+    expect(registry.get('splitter16').inputs).toEqual([{ id: 'in', width: 16 }]);
+    expect(registry.get('splitter16').outputs).toHaveLength(16);
+    expect(registry.get('splitter16').outputs.every((pin) => pin.width === 1)).toBe(true);
+    expect(registry.get('maker16').inputs).toHaveLength(16);
+    expect(registry.get('maker16').outputs).toEqual([{ id: 'out', width: 16 }]);
+    expect(registry.get('splitter32').outputs).toHaveLength(32);
+    expect(registry.get('maker32').inputs).toHaveLength(32);
+    expect(registry.get('maker32').outputs).toEqual([{ id: 'out', width: 32 }]);
+    // Pin ids count from the low bit, the same `b0..b{w-1}` the 8-bit pair uses,
+    // so a circuit addresses both widths the same way.
+    expect(registry.get('splitter32').outputs[31]!.id).toBe('b31');
+    expect(registry.get('maker32').inputs[31]!.id).toBe('b31');
+  });
+
+  it('splits sixteen bits with the top bit in place, and packs them back', () => {
+    // Bit 15 is the bit the 8-bit part cannot see at all.
+    const high = outputsOf('splitter16', [0x8001]);
+    expect(high).toHaveLength(16);
+    expect(high[0]).toBe(1);
+    expect(high[15]).toBe(1);
+    expect(high.slice(1, 15)).toEqual(Array.from({ length: 14 }, () => 0));
+    expect(outputsOf('maker16', high)).toEqual([0x8001]);
+    for (const value of [0, 1, 0x00ff, 0x0100, 0xabcd, 0x8000, 0xffff]) {
+      const bits = outputsOf('splitter16', [value]);
+      expect(outputsOf('maker16', bits)[0], `maker16(splitter16(${value}))`).toBe(value);
+    }
+  });
+
+  it('splits and packs thirty-two bits, sign bit included', () => {
+    const bits = outputsOf('splitter32', [0xdead_beef]);
+    expect(bits).toHaveLength(32);
+    expect(bits[0]).toBe(1);
+    expect(bits[31]).toBe(1);
+    expect(outputsOf('maker32', bits)).toEqual([0xdead_beef]);
+    expect(outputsOf('splitter32', [0xffff_ffff])).toEqual(Array.from({ length: 32 }, () => 1));
+  });
+
+  it('is wiring on both metrics, like the pair it widens', () => {
+    for (const id of PACKER_DEF_IDS) {
+      const def = registry.get(id);
+      expect(def.cost, id).toBe(0);
+      expect(def.gateCost, id).toBe(0);
+      expect(def.category, id).toBe('wide');
+      expect(def.sequential, id).toBe(false);
+      expect(def.stateBytes, id).toBe(0);
+      expect(def.clockEdge, id).toBeUndefined();
+      expect(def.hidden, id).toBeUndefined();
+    }
+  });
+
+  it('names each part with its width, so the tray says which one it is', () => {
+    // The palette shows `name.zh`; two entries both reading 位拆分器 would be a
+    // tray a player cannot choose from.
+    expect(PACKER_DEFS.map((def) => def.name.zh)).toEqual([
+      '16 位拆分器',
+      '16 位合并器',
+      '32 位拆分器',
+      '32 位合并器',
+    ]);
+    expect(PACKER_DEFS.map((def) => def.name.en)).toEqual([
+      '16-Bit Splitter',
+      '16-Bit Maker',
+      '32-Bit Splitter',
+      '32-Bit Maker',
+    ]);
+  });
+});
+
 describe('the width generator', () => {
   it('defaults to eight bits', () => {
     expect(DEFAULT_WIDE_WIDTH).toBe(8);
@@ -1258,6 +1356,26 @@ describe('wide defs through the kernel', () => {
     ]);
     const { sim: s, write, read } = sim(g);
     for (let x = 0; x < 256; x += 1) {
+      write('x', x);
+      s.settle();
+      expect(read('OUT'), `x=${x}`).toBe(x);
+    }
+  });
+
+  it('carries a sixteen-bit word through splitter16 -> maker16 at the pin level', () => {
+    // THE SANDBOX CASE THE 8-BIT PAIR COULD NOT SERVE: a 16-bit level pin is
+    // truncated to eight bits by the 8-bit splitter, so this round trip is the
+    // part that has to exist for a 16-bit connector to be usable at all. The same
+    // kernel path as the byte test above, one carrier width up.
+    const bits = Array.from({ length: 16 }, (_, b) => `split.b${b}`);
+    const g = build([
+      { kind: 'input', name: 'x', width: 16 },
+      { kind: 'part', def: 'splitter16', id: 'split', from: ['x'] },
+      { kind: 'part', def: 'maker16', id: 'pack', from: bits },
+      { kind: 'output', name: 'OUT', width: 16, from: 'pack.out' },
+    ]);
+    const { sim: s, write, read } = sim(g);
+    for (const x of [0, 1, 0x00ff, 0x0100, 0x8000, 0xabcd, 0xffff]) {
       write('x', x);
       s.settle();
       expect(read('OUT'), `x=${x}`).toBe(x);

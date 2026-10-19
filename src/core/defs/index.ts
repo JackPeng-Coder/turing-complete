@@ -4,6 +4,8 @@ import {
   DECODER_DEFS,
   DECODER_DEF_IDS,
   FULL_ADDER,
+  PACKER_DEFS,
+  PACKER_DEF_IDS,
   WIDE_DEF_IDS,
   WIDE_STORAGE_DEFS,
   WIDE_STORAGE_DEF_IDS,
@@ -197,8 +199,8 @@ const POST_PHASE0_DEF_IDS = ['full_adder'] as const;
 
 /**
  * Every def id the game ships: phase 0's one-bit parts, the one-bit gate added
- * since, then the wide family -- the operators, the storage parts, and the
- * decoders -- and last the CPU family chapter 3 rewards.
+ * since, then the wide family -- the operators, the 16/32-bit packers, the
+ * storage parts, and the decoders -- and last the CPU family chapter 3 rewards.
  *
  * The wide ids are not repeated here -- `wide.ts` owns them next to the defs
  * they name, and `test/core/defs-wide.test.ts` pins that each list agrees with
@@ -210,6 +212,7 @@ export const DEF_IDS = [
   ...PHASE0_DEF_IDS,
   ...POST_PHASE0_DEF_IDS,
   ...WIDE_DEF_IDS,
+  ...PACKER_DEF_IDS,
   ...WIDE_STORAGE_DEF_IDS,
   ...DECODER_DEF_IDS,
   ...CPU_DEF_IDS,
@@ -330,6 +333,18 @@ export const BASE_DEFS: readonly ComponentDef[] = [
   // per-bit cells against these 1-bit gates, so the two tables cannot drift
   // into two different bases.
   ...createWideDefs(),
+
+  // THE PACKER PAIR AT 16 AND 32 BITS, registered beside the 8-bit pair they
+  // widen. The sandbox's connector chip lets a player take a pin to 16 or 32
+  // bits, and the 8-bit `splitter` cannot recover a wider value's top bits --
+  // `compile` would copy eight of them and leave the rest reading zero -- so a
+  // 16-bit sandbox circuit had no way to see its own input split. `wide.ts`'s
+  // `PACKER_DEFS` states the scope (16/32 is exactly what the chip reaches above
+  // eight; 64 would need the byte-array carrier, which is phase 6a's work) and
+  // why these are their own ids rather than an instance width. They are ordinary
+  // base defs, so the sandbox palette offers them and a level still has to list
+  // them -- which none does.
+  ...PACKER_DEFS,
 
   // The 8-bit storage family (task 4): a byte mux, a byte delay, a register, a
   // counter and a 256-byte RAM. Registered from a literal list rather than a

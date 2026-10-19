@@ -1249,6 +1249,79 @@ test('the sandbox is driven and read through the connectors a player places', as
 });
 
 /**
+ * THE WIDTH A SANDBOX CONNECTOR CAN REACH, ALL THE WAY THROUGH THE PACKERS.
+ *
+ * A connector's chip takes it to 16 bits, but the only packers were eight bits
+ * wide: a 16-bit pin wired into `splitter` is truncated to `min(16, 8)` bits by
+ * `compile`, so the word could be driven and read as one number while nothing
+ * could look at its top half -- the reported "没有对应的位拆分器和位合并器".
+ * The palette now offers the 16/32-bit pair (`PACKER_DEFS`, pinned in
+ * `test/core/defs-wide.test.ts`); this walks the user-visible half end to end:
+ * place, wire, drive a word bit by bit, and read the same word back on the
+ * board's own output row.
+ *
+ * The pin rows are geometry: a 16-pin packer is 384 tall, so its pins sit 24
+ * apart from -180 to +180 around the row it was dropped on (`geometry.ts`), and
+ * all four parts are dropped on the same row so the sixteen wires are horizontal.
+ */
+test('a sixteen-bit sandbox connector is split and packed by the wide packers', async ({ page }) => {
+  // A 16-pin packer is 384 world pixels tall, and this suite's default 800-pixel
+  // viewport leaves the editor about 340 -- so its top and bottom pins would be
+  // outside the canvas, and a pin that is off screen cannot be wired. The window is
+  // taller for this test only; nothing about the layout under test changes.
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await open(page, '/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await page.getByRole('button', { name: '自由建造' }).click();
+  await expect(page.locator('.shell-bar')).toContainText('沙盒');
+
+  // The pair is in the sandbox tray, next to the 8-bit part it widens.
+  const tray = page.locator('.palette');
+  await expect(tray.getByRole('button', { name: '16 位拆分器', exact: true })).toBeEnabled();
+  await expect(tray.getByRole('button', { name: '16 位合并器', exact: true })).toBeEnabled();
+  await expect(tray.getByRole('button', { name: '32 位拆分器', exact: true })).toBeEnabled();
+
+  const { cx, cy } = await boardCentre(page);
+  await place(page, '关卡输入', cx - 400, cy);
+  await place(page, '16 位拆分器', cx - 200, cy);
+  await place(page, '16 位合并器', cx, cy);
+  await place(page, '关卡输出', cx + 160, cy);
+
+  // 1 -> 8 -> 16 on each connector's chip.
+  const inputRow = page.locator('.io-pin').first();
+  const outputRow = page.locator('.io-pin').nth(1);
+  for (const row of [inputRow, outputRow]) {
+    await row.locator('.io-width').click();
+    await row.locator('.io-width').click();
+    await expect(row.locator('.io-width')).toHaveText('16 位');
+  }
+
+  // The word: connector -> splitter, one bit per row -> maker, maker -> connector.
+  // The sixteen rows are 24 world pixels apart around the row the packers were
+  // dropped on (`geometry.ts`), and every part was dropped on that same row.
+  await dragWire(page, cx - 400 + 72, cy, cx - 200, cy);
+  for (let bit = 0; bit < 16; bit += 1) {
+    const y = cy + (bit - 7.5) * 24;
+    await dragWire(page, cx - 200 + 72, y, cx, y);
+  }
+  await dragWire(page, cx + 72, cy, cx + 160, cy);
+
+  // Drive 0xabcd one bit at a time -- the cells are most significant first, so
+  // bit position `p` is cell `15 - p` -- and read the same number back out. The
+  // two packers are transparent, which is exactly what makes a 16-bit sandbox
+  // circuit observable.
+  const cells = inputRow.locator('.bit');
+  await expect(cells).toHaveCount(16);
+  for (const position of [0, 2, 3, 6, 7, 8, 9, 11, 13, 15]) {
+    await cells.nth(15 - position).click();
+  }
+  await expect(inputRow.locator('.io-value')).toHaveText('43981');
+  await expect(outputRow.locator('.io-value')).toHaveText('43981');
+  await page.screenshot({ path: 'test-results/smoke-sandbox-16bit.png' });
+});
+
+/**
  * THE AGENT ASKS IN ITS PANEL, AND NEVER LOCKS THE GAME.
  *
  * There is no first-run card any more: a browser with no `tc.agent.v1` opens on

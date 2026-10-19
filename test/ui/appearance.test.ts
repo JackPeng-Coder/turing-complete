@@ -109,9 +109,14 @@ describe('gate silhouettes', () => {
 
   it('draws the two packers as funnels, opposite ways round', () => {
     // The only parts whose silhouette is their function: one word in and a bit
-    // per output out, or the same picture reversed.
-    expect(gateLookOf(registry.get('splitter')).shape).toBe('split');
-    expect(gateLookOf(registry.get('maker')).shape).toBe('make');
+    // per output out, or the same picture reversed. The sandbox's 16/32-bit pair
+    // is the same part at another width, so it is the same funnel.
+    for (const id of ['splitter', 'splitter16', 'splitter32']) {
+      expect(gateLookOf(registry.get(id)).shape, id).toBe('split');
+    }
+    for (const id of ['maker', 'maker16', 'maker32']) {
+      expect(gateLookOf(registry.get(id)).shape, id).toBe('make');
+    }
   });
 });
 
@@ -134,6 +139,12 @@ describe('the width a part reports', () => {
     expect(widthOf('maker')).toBe(8);
     expect(widthOf('equal8')).toBe(8);
     expect(widthOf('and8')).toBe(8);
+    // The sandbox pair reports the width of the word it splits / packs, which is
+    // the input side for the splitter and the output side for the maker.
+    expect(widthOf('splitter16')).toBe(16);
+    expect(widthOf('maker16')).toBe(16);
+    expect(widthOf('splitter32')).toBe(32);
+    expect(widthOf('maker32')).toBe(32);
   });
 
   it('leaves a one-bit part one bit wide, whatever its shape', () => {
@@ -239,5 +250,12 @@ describe('part markings', () => {
     expect(code('and8')).toBe(code('and'));
     expect(code('xor8')).toBe(code('xor'));
     expect(code('add8')).not.toBe(code('full_adder'));
+    // The sandbox packers are the same rule: SPLIT / MAKE at every width, told
+    // apart by their pins (a splitter's corner badge reads its bit output, so the
+    // tray's name is what says which size it is -- see `markings.ts`).
+    expect(code('splitter16')).toBe(code('splitter'));
+    expect(code('splitter32')).toBe(code('splitter'));
+    expect(code('maker16')).toBe(code('maker'));
+    expect(code('maker32')).toBe(code('maker'));
   });
 });

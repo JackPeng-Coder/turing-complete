@@ -48,12 +48,16 @@ import { maskOf, type PortValue } from '../signal';
  * uses `b0..b3` of the registered splitter and leaves the rest unwired (an
  * unwired pin reads 0).
  *
- * RECORDED LIMITATION (not solved here): **the project has no way to
- * instantiate `splitter` / `maker` at a non-8 pin count.** The registered
+ * RECORDED LIMITATION (still not solved here): **there is no way to instantiate
+ * `splitter` / `maker` at an arbitrary non-8 pin count.** The registered
  * instances are 8-wide, `params.width` cannot re-count pins, and per-instance
  * counts would need a def-level hook in `net.ts` (e.g. `def.expand(params)`) --
- * a file this task does not own. So a 4-bit level works against the 8-pin part
- * by using `b0..b3`, and this is a documented workaround rather than a feature.
+ * a file this task does not own. A 4-bit level works against the 8-pin part by
+ * using `b0..b3` (a narrow driver arrives zero-extended), and that is a
+ * documented workaround rather than a feature. The one exception is the sandbox
+ * pair `PACKER_DEFS` below: the widths a sandbox connector can take ABOVE eight
+ * (16 and 32) are registered as their own defs, because above eight the 8-bit
+ * part cannot recover the top bits.
  *
  * COST: TWO METRICS, TWO FIELDS. `cost` and `gateCost` are deliberately
  * different numbers here, because the spec expands a wide part differently for
@@ -686,11 +690,19 @@ function constDef(w: number): ComponentDef {
 /**
  * `splitter`: one `w`-bit input, `w` one-bit outputs `b0..b{w-1}`, least
  * significant bit first. Pure wiring, so it costs no gate and no delay.
+ *
+ * `id` and `name` are parameters because the widths above eight are registered as
+ * their own ids (`PACKER_DEFS` below); the registered 8-bit pair keeps the bare
+ * `splitter` / `maker` ids the level data spells.
  */
-function splitterDef(w: number): ComponentDef {
+function splitterDef(
+  w: number,
+  id: string = 'splitter',
+  name: { zh: string; en: string } = { zh: '位拆分器', en: 'Splitter' },
+): ComponentDef {
   return combinational(
-    'splitter',
-    { zh: '位拆分器', en: 'Splitter' },
+    id,
+    name,
     'wide',
     [{ id: 'in', width: w }],
     Array.from({ length: w }, (_, b) => ({ id: `b${b}`, width: 1 })),
@@ -704,10 +716,14 @@ function splitterDef(w: number): ComponentDef {
 }
 
 /** `maker`: `w` one-bit inputs `b0..b{w-1}` in, one `w`-bit value out. Wiring too. */
-function makerDef(w: number): ComponentDef {
+function makerDef(
+  w: number,
+  id: string = 'maker',
+  name: { zh: string; en: string } = { zh: '位合并器', en: 'Maker' },
+): ComponentDef {
   return combinational(
-    'maker',
-    { zh: '位合并器', en: 'Maker' },
+    id,
+    name,
     'wide',
     Array.from({ length: w }, (_, b) => ({ id: `b${b}`, width: 1 })),
     wideOut(w),
@@ -721,6 +737,48 @@ function makerDef(w: number): ComponentDef {
     },
   );
 }
+
+/**
+ * The packer pair at the widths a SANDBOX CONNECTOR can take above eight.
+ *
+ * WHY THESE EXIST, IN ONE SENTENCE: a sandbox connector's width is the player's
+ * (`main.ts`'s `PIN_WIDTHS` cycles 1, 8, 16, 32, 2, 3, 4, 6), and the only
+ * registered packers were eight bits wide, so a sixteen-bit pin could be wired
+ * into `splitter` -- `compile` copies `min(from, to)` bits and leaves the rest
+ * reading zero -- with its top half silently dropped and no way to see it. That is
+ * the reported defect: "没有对应的位拆分器和位合并器来处理 16 位输入输出元件".
+ *
+ * WHY ONLY 16 AND 32. A width of eight or less needs no variant: a narrower
+ * driver into the 8-bit splitter arrives zero-extended, so `b0..b{w-1}` are the
+ * value and the high pins read 0, and a narrower sink truncates a packed word back
+ * to its own width -- `maker`'s output feeding a 4-bit connector delivers the low
+ * four bits, which is the value. Above eight the 8-bit part cannot recover the top
+ * bits at all, so the two widths the connector chip reaches (`PIN_WIDTHS`) get a
+ * part of their own. 64 is not one of them, and would not be free even if it
+ * were: a pin that wide is carried by a `Uint8Array`, not the `number` that
+ * `splitOp` / `makeOp` read (`MAX_WIDE_WIDTH` is this module's ceiling) -- that is
+ * phase 6a's width work, not a palette fix.
+ *
+ * NAMING. The registered pair keeps the bare ids (`WIDE_DEF_IDS`'s note records
+ * that level data spells them with no suffix); these carry a width suffix in the
+ * same style as `and8` / `decoder2` / `switch8`, so `splitter16` is a 16-bit
+ * splitter by its own name. They are NOT generated through `createWideDefs`: that
+ * builds the whole family at one width and its packers would collide with the
+ * registered bare ids, so this is the pair alone.
+ *
+ * COST is the same as the pair's: pure wiring, free on both metrics.
+ */
+export const PACKER_WIDTHS = [16, 32] as const;
+
+/** Every id `PACKER_DEFS` registers, in order, for `DEF_IDS` to spread. */
+export const PACKER_DEF_IDS = ['splitter16', 'maker16', 'splitter32', 'maker32'] as const;
+
+export const PACKER_DEFS: readonly ComponentDef[] = [
+  splitterDef(16, 'splitter16', { zh: '16 位拆分器', en: '16-Bit Splitter' }),
+  makerDef(16, 'maker16', { zh: '16 位合并器', en: '16-Bit Maker' }),
+  splitterDef(32, 'splitter32', { zh: '32 位拆分器', en: '32-Bit Splitter' }),
+  makerDef(32, 'maker32', { zh: '32 位合并器', en: '32-Bit Maker' }),
+];
 
 /**
  * Ids `createWideDefs(8)` produces, in order, as a literal tuple so `DEF_IDS`

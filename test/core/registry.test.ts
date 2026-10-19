@@ -7,6 +7,7 @@ import {
   DECODER_DEF_IDS,
   DECODER_MAX_WIDTH,
   DECODER_WIDTHS,
+  PACKER_DEF_IDS,
   WIDE_DEF_IDS,
   WIDE_STORAGE_DEF_IDS,
   createDecoderDef,
@@ -169,8 +170,14 @@ describe('base defs', () => {
     // `regfile6`, `pc8` and `ram_prog` are free on both metrics. The set is
     // still built from the families' registration tuples, so a def in none of
     // them that states a count or a delay fails below.
+    //
+    // The 16/32-bit sandbox packers state their zero explicitly like the 8-bit
+    // pair they widen (`PACKER_DEF_IDS`, one more registration tuple), so they
+    // belong to this set too: a free part that states a count is exactly what the
+    // fallback is not for.
     const statedCounts = new Set<string>([
       ...WIDE_DEF_IDS,
+      ...PACKER_DEF_IDS,
       ...WIDE_STORAGE_DEF_IDS,
       ...DECODER_DEF_IDS,
       ...CPU_DEF_IDS,
@@ -330,8 +337,12 @@ describe('base defs: extra coverage', () => {
     // 1-bit member; it is excluded with the rest so that this loop keeps meaning
     // "every def in neither of the two described families", not "every def whose
     // author remembered this test".
+    // The 16/32-bit sandbox packers are the third exclusion, declared the same
+    // way: their pin widths are the whole reason they exist, and
+    // `defs-wide.test.ts` pins both widths against the pair they widen.
     const wideAndCpu = new Set<string>([
       ...WIDE_DEF_IDS,
+      ...PACKER_DEF_IDS,
       ...WIDE_STORAGE_DEF_IDS,
       ...DECODER_DEF_IDS,
       ...CPU_DEF_IDS,
