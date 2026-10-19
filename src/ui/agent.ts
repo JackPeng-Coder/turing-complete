@@ -169,6 +169,21 @@ function button(label: string, className: string): HTMLButtonElement {
   return element;
 }
 
+/**
+ * How many characters of a streaming step the live window keeps in the DOM.
+ *
+ * A reasoning model can write tens of thousands of characters into one step, and
+ * the live box only ever shows the last six lines of it. Re-filling that box with
+ * the WHOLE stream on every token made each delta copy the text, lay it out and
+ * scroll it -- work that grows with the thought and a panel that stutters the
+ * longer the model thinks. The tail is bounded instead: a few thousand characters
+ * overfill six lines by an order of magnitude, so `scrollTop = scrollHeight` still
+ * lands on the newest line while one delta costs the same at token 10 and at
+ * token 10,000. The full text is still accumulated on the entry, which is what the
+ * folded block renders from once the step ends.
+ */
+const LIVE_TAIL_CHARS = 4096;
+
 export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptions): AgentPanel {
   const run = options.run ?? runAgent;
   const entries: Entry[] = [];
@@ -183,6 +198,17 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
    * scrolled to the bottom.
    */
   let liveBody: HTMLElement | null = null;
+  /**
+   * The last `LIVE_TAIL_CHARS` characters of the stream, and which field the tail
+   * currently ends with.
+   *
+   * The box shows six lines; keeping only a bounded tail means the work of one
+   * delta does not grow with how long the model has been thinking. The full text
+   * still accumulates on the entry -- the tail is a window onto it, not a second
+   * copy of the record.
+   */
+  let liveTail = '';
+  let liveField: 'thought' | 'text' | null = null;
   let controller: AbortController | null = null;
   let busy = false;
   let status = '';
@@ -386,7 +412,13 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
       });
     }
     wrap.append(head, bodyEl);
-    if (live) liveBody = bodyEl;
+    if (live) {
+      liveBody = bodyEl;
+      liveTail = text.length <= LIVE_TAIL_CHARS ? text : text.slice(-LIVE_TAIL_CHARS);
+      // The stream is `thought` then `text` (`streamOf`), so whichever part it
+      // ends with is the field the next delta continues.
+      liveField = entry.text !== '' ? 'text' : entry.thought !== '' ? 'thought' : null;
+    }
     return wrap;
   }
 
@@ -449,6 +481,8 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
 
     log.textContent = '';
     liveBody = null;
+    liveTail = '';
+    liveField = null;
     for (const entry of entries) {
       if (entry.kind === 'user') {
         const line = document.createElement('article');
@@ -539,10 +573,11 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   /**
    * Extends the step being written, without rebuilding the log.
    *
-   * The box is re-filled rather than appended to because reasoning and answer are
-   * two fields of one window: whichever arrives second has to appear under the
-   * first, and recomputing a few kilobytes of text is cheaper than tracking which
-   * end of the stream the cursor is on.
+   * A delta is an append to the tail the box already holds, not a re-render of the
+   * step: the box is a six-line window, so the part that scrolled out of it is
+   * gone from the DOM on purpose (`LIVE_TAIL_CHARS`) and the whole text lives on
+   * the entry. Reasoning and answer are two fields of one window, and a field
+   * switch starts a new line exactly as `streamOf` joins them in the folded body.
    */
   const appendStream = (text: string, field: 'thought' | 'text'): void => {
     if (current === null) {
@@ -552,11 +587,15 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     }
     current[field] += text;
     current.live = true;
-    if (liveBody === null) render();
-    else {
-      liveBody.textContent = streamOf(current);
-      liveBody.scrollTop = liveBody.scrollHeight;
+    if (liveBody === null) {
+      render();
+      return;
     }
+    const newLine = liveField !== null && liveField !== field && liveTail !== '';
+    liveField = field;
+    liveTail = (liveTail + (newLine ? `\n${text}` : text)).slice(-LIVE_TAIL_CHARS);
+    liveBody.textContent = liveTail;
+    liveBody.scrollTop = liveBody.scrollHeight;
     log.scrollTop = log.scrollHeight;
   };
 

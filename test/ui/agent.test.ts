@@ -426,6 +426,65 @@ describe('a conversation', () => {
     expect(stage.querySelector('.agent-text')!.textContent).toBe('再决定放什么。');
   });
 
+  it('keeps a long thought in a bounded live window without re-filling the paragraph', async () => {
+    // A REASONING MODEL WRITES FOR MINUTES, and the live box shows six lines of it.
+    // The reported stutter: the longer the thought, the slower the panel, because
+    // every token re-filled the paragraph with the whole stream -- the work per
+    // delta grew with the text. The window is bounded now, so the box holds only a
+    // tail and a delta costs the same at the end of a long thought as at the start.
+    let finish: () => void = () => {};
+    let push: (text: string) => void = () => {};
+    const scripted = (options: RunOptions): Promise<RunResult> =>
+      new Promise<RunResult>((resolve) => {
+        finish = () => resolve(DONE([...options.messages]));
+        options.onEvent?.({ kind: 'step', index: 0 });
+        push = (text) => options.onEvent?.({ kind: 'thinking', text });
+      });
+    const { stage } = mount(CONFIG, scripted);
+    stage.querySelector<HTMLButtonElement>('.agent-toggle')!.click();
+    stage.querySelector<HTMLTextAreaElement>('.agent-input')!.value = '想很久';
+    clickButton(stage, '发送');
+    await tick();
+
+    const chunk = (index: number): string => `第 ${index} 段思考；`;
+    let full = '';
+    for (let index = 0; index < 900; index += 1) {
+      full += chunk(index);
+      push(chunk(index));
+    }
+    await tick();
+    const liveBody = stage.querySelector<HTMLElement>('.agent-think-live .agent-think-body')!;
+    // More than the window's worth has been written, so the paragraph is clipped
+    // to the tail ... and it ends on the newest character, which is what the box
+    // must be scrolled to.
+    expect(full.length).toBeGreaterThan(4096);
+    expect(liveBody.textContent!.length).toBe(4096);
+    expect(full.endsWith(liveBody.textContent!)).toBe(true);
+    expect(stage.querySelector('.agent-think-head')!.textContent).toBe('思考中…');
+
+    // THE NODE IS EXTENDED, NOT REBUILT: a second burst reaches the same box, so a
+    // token does not throw the paragraph away and build a new one.
+    for (let index = 900; index < 1000; index += 1) {
+      full += chunk(index);
+      push(chunk(index));
+    }
+    await tick();
+    expect(stage.querySelector('.agent-think-live .agent-think-body')).toBe(liveBody);
+    expect(liveBody.textContent!.length).toBe(4096);
+    expect(full.endsWith(liveBody.textContent!)).toBe(true);
+
+    // THE RECORD IS THE WHOLE THOUGHT, even though the live DOM is not: the folded
+    // block renders from the entry, so opening it later shows everything that was
+    // written, not the window's last four thousand characters.
+    finish();
+    await tick();
+    expect(stage.querySelector('.agent-think-live')).toBeNull();
+    const folded = stage.querySelector<HTMLElement>('.agent-think-body')!;
+    expect(folded.hidden).toBe(true);
+    expect(folded.textContent).toBe(full);
+    expect(stage.querySelector('.agent-think-head')!.textContent).toBe('▸ 思考 · 1 行');
+  });
+
   it('opens a folded block when its header is clicked', async () => {
     const scripted = (options: RunOptions): Promise<RunResult> => {
       options.onEvent?.({ kind: 'step', index: 0 });
