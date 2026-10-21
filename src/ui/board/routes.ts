@@ -30,6 +30,25 @@
  * and the router cannot afford to look everywhere it would have to look to count
  * them (see the lane index below).
  *
+ * ONE SIGNAL, ONE LINE -- THE EXPERIMENT OF 2026-10-21. On a board built from
+ * hundreds of gates, the reported defect was not one wrong wire but a picture:
+ * long wires wandered across the board through gate bodies, and fan-out trunks
+ * from the same pin were scattered into dozens of parallel lines. Two changes
+ * address it, and both are stated in the weights below:
+ *
+ *   * A run of a net counts ONCE against a new route, not once per wire: a fan-out
+ *     trunk is one drawn line, and pricing it as fifty lines pushed the next wire
+ *     through a gate rather than beside it (`LaneIndex` merges per net as it
+ *     adds).
+ *   * A run of the SAME net costs nothing to follow and counts as nothing to
+ *     cross, because two wires out of one pin are one signal. That is what turns
+ *     a fan-out into a trunk instead of a fan.
+ *
+ * The measured effect on a synthetic 900-gate board is in the phase record
+ * (`.superpowers/sdd/2026-10-21-routing/`): routes through part bodies went from
+ * hundreds of wires to none, and different-net wires drawn on top of each other
+ * almost disappeared.
+ *
  * IT IS THE SAME POLYLINE THE HIT TEST USES. `view.ts` calls this, `render.ts`
  * calls this, and the memo is keyed on the graph, so the wire you click is the
  * wire you can see even after it has been routed around a gate.
@@ -57,10 +76,29 @@ export const WIRE_CLEARANCE = 16;
 export const ROUTE_COST = {
   /** One more corner, worth this much detour. */
   bend: 26,
-  /** Per pixel of a run that crosses a part body. */
+  /**
+   * Per pixel of a run that crosses a part body.
+   *
+   * Four hundred is deliberately high: on a dense board a route that cuts through
+   * one gate saves at most a couple of hundred pixels, so any lane that is merely
+   * crowded is still cheaper than a hole in the schematic.
+   */
   part: 400,
-  /** Per pixel of a run that lies within `WIRE_CLEARANCE` of a parallel wire. */
-  parallel: 120,
+  /**
+   * Per pixel of a run that lies within `WIRE_CLEARANCE` of a parallel run of a
+   * DIFFERENT net.
+   *
+   * A run of the SAME net is free: wires out of one pin are one signal, and a
+   * fan-out is many wires that should run together -- two of them lying on top of
+   * each other is correct drawing rather than a short (`costOf`).
+   *
+   * TWENTY-FOUR, DOWN FROM A HUNDRED AND TWENTY. The old price made a crowded lane
+   * cost more than cutting through a gate body, so on a board where every useful
+   * lane is crowded the router chose the hole. With nets counted once
+   * (`LaneIndex`) the price can be low enough to make "run beside it" the answer
+   * without letting two nets sit close enough to read as one thick wire.
+   */
+  parallel: 24,
   /**
    * How far outside a body edge a lane candidate is offered, and how far the
    * body is grown before a run counts as crossing it.
@@ -76,13 +114,19 @@ export const ROUTE_COST = {
 /**
  * How many lanes one direction may offer before scoring.
  *
- * Sixteen, because the lanes that matter are often NOT the ones nearest the
+ * Fourteen, because the lanes that matter are often NOT the ones nearest the
  * midpoint: a wire that has to get past a part standing in its corridor needs
  * the lane just outside that part, and that lane can be a hundred pixels from
  * the middle. Cap this too low and the router never sees the way around and
  * settles for ploughing through -- which is the defect this module exists to fix.
+ *
+ * The cap is also the router's performance knob: candidates are scored against
+ * every nearby part, so the cost is linear in this number, and it shows up
+ * directly in how a part drag feels on the biggest boards (see the budget test).
+ * Fourteen was the knee on the reported board: sixteen bought almost nothing and
+ * ten lost lanes the router needed.
  */
-const MAX_LANES = 16;
+const MAX_LANES = 14;
 
 /** How far outside the pins' own box a part can still matter to a route. */
 const NEARBY = 128 + WIRE_STUB;
@@ -128,6 +172,22 @@ function lanes(values: readonly number[], centre: number): number[] {
  * that turns on a vertical lane (`x`), and one that turns on a horizontal lane
  * (`y`). The plain L-shapes fall out of both for free -- a lane drawn at the far
  * stub's own coordinate collapses one of the two bends.
+ *
+ * TRACKS, NOT LANES. A gap between two bodies is 2 x `lane` wide on a compact
+ * board, which is exactly one `WIRE_CLEARANCE`, so each part edge offers TWO
+ * candidates a clearance apart: the lane just outside the body and the track
+ * beside it. Without the second, two nets whose natural lanes coincide have no
+ * legal side-by-side position and the cheaper answer is one drawn on top of the
+ * other -- which reads as a short.
+ *
+ * The vertical family has two more shapes for the same reason: its vertical
+ * column used to be the source stub's own x, a single line every wire from that
+ * pin column wanted. One variant moves the trunk beside it
+ * (`start.x + WIRE_CLEARANCE`), which keeps two stacked input connectors apart;
+ * the other moves the DESCENT, the last vertical into the target pin, one track
+ * left (`end.x - WIRE_CLEARANCE`), which keeps two wires that arrive at the same
+ * gate column from sharing the last run into their pins. Each costs a couple of
+ * pixels of length and nothing else.
  */
 export function candidateRoutes(from: Point, to: Point, parts: readonly Rect[]): Point[][] {
   const start = { x: from.x + WIRE_STUB, y: from.y };
@@ -135,11 +195,18 @@ export function candidateRoutes(from: Point, to: Point, parts: readonly Rect[]):
   const midX = (start.x + end.x) / 2;
   const midY = (start.y + end.y) / 2;
   const lane = ROUTE_COST.lane;
+  // Two tracks per gap, one WIRE_CLEARANCE apart: a candidate that has one other
+  // net on the near track can move to the far one and still be a separate line
+  // rather than a thicker one (`near` counts nets, not wires, so the two tracks
+  // are what spatial separation comes from).
+  const track = lane + WIRE_CLEARANCE;
 
   const xs = lanes(
     [
       start.x,
+      start.x + WIRE_CLEARANCE,
       end.x,
+      end.x - WIRE_CLEARANCE,
       midX,
       (start.x * 3 + end.x) / 4,
       (start.x + end.x * 3) / 4,
@@ -147,14 +214,18 @@ export function candidateRoutes(from: Point, to: Point, parts: readonly Rect[]):
       Math.min(start.x, end.x) - WIRE_STUB,
       ...parts
         .filter((r) => spans(start.y, end.y, r.y, r.y + r.h))
-        .flatMap((r) => [r.x - lane, r.x + r.w + lane]),
+        .flatMap((r) => [r.x - lane, r.x + r.w + lane, r.x - track, r.x + r.w + track]),
     ],
     midX,
   );
   const ys = lanes(
     [
       start.y,
+      start.y + WIRE_CLEARANCE,
+      start.y - WIRE_CLEARANCE,
       end.y,
+      end.y + WIRE_CLEARANCE,
+      end.y - WIRE_CLEARANCE,
       midY,
       (start.y * 3 + end.y) / 4,
       (start.y + end.y * 3) / 4,
@@ -162,14 +233,36 @@ export function candidateRoutes(from: Point, to: Point, parts: readonly Rect[]):
       Math.min(start.y, end.y) - WIRE_STUB,
       ...parts
         .filter((r) => spans(start.x, end.x, r.x, r.x + r.w))
-        .flatMap((r) => [r.y - lane, r.y + r.h + lane]),
+        .flatMap((r) => [r.y - lane, r.y + r.h + lane, r.y - track, r.y + r.h + track]),
     ],
     midY,
   );
 
   return [
     ...xs.map((x) => path(from, to, [start, { x, y: start.y }, { x, y: end.y }, end])),
-    ...ys.map((y) => path(from, to, [start, { x: start.x, y }, { x: end.x, y }, end])),
+    // The vertical family's two columns are tracks too, not fixed lines: two
+    // nets whose sources share a pin column (a row of connectors, a gate row) both
+    // want the vertical just right of that column, and without a track beside it
+    // the second wire is drawn exactly on top of the first -- one visible line
+    // carrying two signals. The horizontal room is unchanged; only the vertical
+    // column moves, so the cost is two extra pixels of length and nothing else.
+    ...ys.flatMap((y) => [
+      path(from, to, [start, { x: start.x, y }, { x: end.x, y }, end]),
+      path(from, to, [
+        start,
+        { x: start.x + WIRE_CLEARANCE, y: start.y },
+        { x: start.x + WIRE_CLEARANCE, y },
+        { x: end.x, y },
+        end,
+      ]),
+      path(from, to, [
+        start,
+        { x: start.x, y },
+        { x: end.x - WIRE_CLEARANCE, y },
+        { x: end.x - WIRE_CLEARANCE, y: end.y },
+        end,
+      ]),
+    ]),
   ];
 }
 
@@ -205,6 +298,8 @@ interface Placed {
   readonly lo: number;
   readonly hi: number;
   readonly horizontal: boolean;
+  /** The output pin this run carries, so fan-out wires can share a trunk. */
+  readonly net: string;
 }
 
 /**
@@ -213,34 +308,74 @@ interface Placed {
  * A candidate segment can only conflict with a parallel run whose perpendicular
  * coordinate is within `WIRE_CLEARANCE`, so bucketing by that coordinate -- one
  * grid step per bucket, three buckets either way -- turns a whole-board scan into
- * a handful of lookups. It has to be local: the late-game boards carry hundreds
+ * a handful of lookups. It has to be local: the late-game boards carry thousands
  * of segments, and this runs once per wire per edit.
+ *
+ * ONE ENTRY PER NET PER BUCKET, merged as it is added -- not one per wire. A
+ * fan-out trunk is hundreds of wires on the same lane and the same net, drawn as
+ * ONE line; storing them wire by wire makes every later candidate scan the whole
+ * trunk and would price a lane as hundreds of lines deep, which is the defect
+ * this tap exists to fix. Merging on the way in also keeps the index small, which
+ * is what lets the scoring afford more candidate lanes.
  */
 export class LaneIndex {
-  private readonly buckets = new Map<string, Placed[]>();
+  private readonly buckets = new Map<string, Map<string, Run>>();
 
   add(segments: readonly Placed[]): void {
     for (const segment of segments) {
       const key = bucketKey(segment.horizontal, bucketOf(segment.coord));
-      const list = this.buckets.get(key);
-      if (list) list.push(segment);
-      else this.buckets.set(key, [segment]);
+      let byNet = this.buckets.get(key);
+      if (byNet === undefined) {
+        byNet = new Map();
+        this.buckets.set(key, byNet);
+      }
+      const merged = byNet.get(segment.net);
+      if (merged === undefined) {
+        byNet.set(segment.net, { coord: segment.coord, lo: segment.lo, hi: segment.hi });
+      } else {
+        merged.lo = Math.min(merged.lo, segment.lo);
+        merged.hi = Math.max(merged.hi, segment.hi);
+      }
     }
   }
 
-  /** The parallel runs close enough to merge with a segment on this lane. */
+  /**
+   * The parallel runs close enough to merge with a segment on this lane.
+   *
+   * One reading per net and span: `costOf` asks "how many distinct lines would
+   * this run sit beside", which is what the player sees.
+   */
   near(horizontal: boolean, coord: number, lo: number, hi: number): Placed[] {
     const bucket = bucketOf(coord);
-    const found: Placed[] = [];
+    let byNet: Map<string, Run> | null = null;
     for (let offset = -3; offset <= 3; offset += 1) {
-      for (const segment of this.buckets.get(bucketKey(horizontal, bucket + offset)) ?? []) {
-        if (Math.abs(segment.coord - coord) >= WIRE_CLEARANCE) continue;
-        if (Math.min(hi, segment.hi) - Math.max(lo, segment.lo) <= 0) continue;
-        found.push(segment);
+      const runs = this.buckets.get(bucketKey(horizontal, bucket + offset));
+      if (runs === undefined) continue;
+      for (const [net, run] of runs) {
+        if (Math.abs(run.coord - coord) >= WIRE_CLEARANCE) continue;
+        if (Math.min(hi, run.hi) - Math.max(lo, run.lo) <= 0) continue;
+        if (byNet === null) byNet = new Map();
+        const merged = byNet.get(net);
+        if (merged === undefined) byNet.set(net, { ...run });
+        else {
+          merged.lo = Math.min(merged.lo, run.lo);
+          merged.hi = Math.max(merged.hi, run.hi);
+        }
       }
+    }
+    if (byNet === null) return [];
+    const found: Placed[] = [];
+    for (const [net, run] of byNet) {
+      found.push({ horizontal, coord: run.coord, lo: run.lo, hi: run.hi, net });
     }
     return found;
   }
+}
+
+interface Run {
+  coord: number;
+  lo: number;
+  hi: number;
 }
 
 function bucketOf(coord: number): number {
@@ -251,7 +386,7 @@ function bucketKey(horizontal: boolean, bucket: number): string {
   return `${horizontal ? 'h' : 'v'}${bucket}`;
 }
 
-function segmentsOf(points: readonly Point[]): Placed[] {
+function segmentsOf(points: readonly Point[], net: string): Placed[] {
   const out: Placed[] = [];
   for (let i = 1; i < points.length; i += 1) {
     const a = points[i - 1]!;
@@ -263,14 +398,34 @@ function segmentsOf(points: readonly Point[]): Placed[] {
       coord: horizontal ? a.y : a.x,
       lo: Math.min(horizontal ? a.x : a.y, horizontal ? b.x : b.y),
       hi: Math.max(horizontal ? a.x : a.y, horizontal ? b.x : b.y),
+      net,
     });
   }
   return out;
 }
 
+/** True corners: direction changes, not raw point count (a collinear point is not a bend). */
+function cornersOf(points: readonly Point[]): number {
+  let corners = 0;
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const c = points[i + 1]!;
+    const abHorizontal = a.y === b.y;
+    const bcHorizontal = b.y === c.y;
+    if (abHorizontal !== bcHorizontal) corners += 1;
+  }
+  return corners;
+}
+
 /** What a candidate costs: its length, its corners, and everything it hits. */
-function costOf(points: readonly Point[], parts: readonly Rect[], lanes: LaneIndex): number {
-  let cost = ROUTE_COST.bend * Math.max(0, points.length - 2);
+function costOf(
+  points: readonly Point[],
+  parts: readonly Rect[],
+  lanes: LaneIndex,
+  net: string,
+): number {
+  let cost = ROUTE_COST.bend * cornersOf(points);
   for (let i = 1; i < points.length; i += 1) {
     const a = points[i - 1]!;
     const b = points[i]!;
@@ -291,6 +446,10 @@ function costOf(points: readonly Point[], parts: readonly Rect[], lanes: LaneInd
     }
 
     for (const p of lanes.near(horizontal, coord, lo, hi)) {
+      // ONE SIGNAL, ONE LINE. A fan-out wire beside a run of its own net is
+      // drawing the signal it already is -- one line, correctly -- so it costs
+      // nothing. Any other net at that distance is the two-thick-wires defect.
+      if (p.net === net) continue;
       cost += ROUTE_COST.parallel * (Math.min(hi, p.hi) - Math.max(lo, p.lo));
     }
   }
@@ -303,11 +462,12 @@ export function chooseRoute(
   to: Point,
   parts: readonly Rect[],
   lanes: LaneIndex,
+  net: string,
 ): Point[] {
   let best: Point[] | null = null;
   let bestCost = Number.POSITIVE_INFINITY;
   for (const points of candidateRoutes(from, to, parts)) {
-    const cost = costOf(points, parts, lanes);
+    const cost = costOf(points, parts, lanes, net);
     if (cost >= bestCost) continue;
     best = points;
     bestCost = cost;
@@ -368,11 +528,22 @@ function compute(graph: Graph, registry: Registry): RoutePlan {
         r.y - NEARBY <= Math.max(a.y, b.y) &&
         r.y + r.h + NEARBY >= Math.min(a.y, b.y),
     );
-    const points = chooseRoute(a, b, nearby, lanes);
+    const points = chooseRoute(a, b, nearby, lanes, netOf(wire));
     plan.set(wire.id, points);
-    lanes.add(segmentsOf(points));
+    lanes.add(segmentsOf(points, netOf(wire)));
   }
   return plan;
+}
+
+/**
+ * The net a wire carries: the output pin it comes from.
+ *
+ * Two wires out of one pin are the SAME SIGNAL, so they are allowed -- and
+ * encouraged -- to share a trunk (`ROUTE_COST.reuse`). Any other pair of wires is
+ * two signals, and has to stay apart.
+ */
+function netOf(wire: Graph['wires'][number]): string {
+  return `${wire.from.inst}.${wire.from.port}`;
 }
 
 /**
