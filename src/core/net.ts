@@ -78,6 +78,21 @@ export interface Netlist {
   /** Slot of the output pin `"<instId>.<pinId>"`. */
   outputBase(key: string): number;
   /**
+   * Slot base of the input pin's OWN storage: the indices `drive` is keyed from.
+   *
+   * `inputBase` answers a caller reading a RANGE and may hand back a
+   * materialised read region instead of the pin's own slots (a driver narrower
+   * than the pin is the case that needs one). A consumer that walks the netlist
+   * bit by bit needs the pin's own base instead, so that
+   * `drive[inputSlot(key) + bit]` names the single slot that bit reads: `drive`
+   * is built over the pin slots alone and a read region is allocated after it,
+   * so indexing `drive` with a region base reads past the array.
+   *
+   * This is the Arduino exporter's accessor. Every range reader keeps using
+   * `inputBase`; the two differ only for the narrow-driver case described above.
+   */
+  inputSlot(key: string): number;
+  /**
    * Width of the input pin `"<instId>.<pinId>"`, in bits, as compiled.
    *
    * This is the width the pin's slots were allocated at and the width its read
@@ -649,6 +664,7 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     refs,
     inputBase: (key) => baseOf(readBases, 'input', key),
     outputBase: (key) => baseOf(outputBases, 'output', key),
+    inputSlot: (key) => baseOf(inputBases, 'input', key),
     inputWidth: (key) => widthOf(inputWidths, 'input', key),
     outputWidth: (key) => widthOf(outputWidths, 'output', key),
     pathsOf: (instanceId) => pathsOfRoot.get(instanceId) ?? [],

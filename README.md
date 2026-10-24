@@ -62,6 +62,13 @@ towards a working CPU.
   one part: the wires crossing its edge become its pins, and it joins the palette so the next circuit
   can use it. 编辑内部 opens it again on the same board. Cost is measured through the expansion, so
   wrapping a circuit never makes it cheaper.
+- **A sandbox circuit can be written to an Arduino.** The 开发板 tab builds a table-driven sketch
+  from the sandbox board — the first version knows the one-bit gates, the full adder, the delay
+  line, the one-bit memory and the two connectors — costs it against Uno, Nano or Mega budgets,
+  and either downloads a self-contained `.ino` or flashes it through `tools/arduino-bridge.mjs`, a
+  loopback daemon that runs `arduino-cli` (a browser cannot). Once flashed, the board is driven and
+  read over Web Serial with the sketch's own line protocol; the banner's hash says whether the
+  board is running the circuit on screen.
 - **A built-in agent you can talk to.** Fill in an API address, a key and a model once — the request
   goes straight from the browser to that endpoint, so the app still ships **no runtime dependency and
   no server** — then describe what you want in Chinese and watch it happen. The agent calls one
@@ -231,6 +238,41 @@ While it is on, the top bar carries an amber `DEV` light — a mode that unlocks
 impossible to forget — and clicking that light leaves the mode and cleans the URL, so a refresh does not
 bring it back.
 
+### Writing a sandbox circuit to a board
+
+The 开发板 tab in the bottom panel is only there in the sandbox. It needs three things outside the
+browser:
+
+1. **`arduino-cli` on `PATH`** (1.x), with the AVR core installed once:
+   `arduino-cli core install arduino:avr`. Set `TC_ARDUINO_CLI` to point at a binary that is not on
+   `PATH`.
+2. **The local bridge**, run from the repository root while you want to flash:
+   `node tools/arduino-bridge.mjs` (default `http://127.0.0.1:8765`). It binds loopback only, refuses
+   origins other than the game's own tabs, and requires the `X-TC-Arduino: 1` header on every request.
+   Set `TC_ARDUINO_TOKEN` to require a shared secret as well; type the same value into the panel's
+   令牌 field. The bridge can program a microcontroller, so do not expose it.
+3. **A Chromium browser** for Web Serial (Chrome or Edge, over `localhost` or `https`). Firefox and
+   Safari cannot open a serial port.
+
+Then, on the sandbox screen: place at least one 关卡输入 or 关卡输出, open 开发板, and press 构建映像.
+The card reports what the circuit compiles to (nodes, slots, states, tables) and what it is estimated
+to cost in RAM and flash, against the board chosen in the 本地桥 card; a circuit that will not fit is
+refused by name rather than failing on the board. 下载 .ino writes the sketch to disk — put it in a
+folder of the same name and the Arduino IDE opens it — and 检查连接 / 编译 / 烧录 take the same sketch
+through the bridge. The compiler's own size report and log are shown beside the estimate.
+
+After a flash, press 连接串口 (the panel closes the port again with 断开; `arduino-cli` cannot upload
+while it is open). The banner's hash is compared with the image the panel built, so "the board is
+running the circuit on screen" is a check rather than a guess. 单步 T applies one clock edge, 复位 R
+clears the storage and the inputs, 读取 S prints the current frame, each input connector has a value
+field and 同步面板输入 copies the in-page input values onto the board, and the command line accepts
+the documented protocol lines (`I <index> <value>`, `T`, `R`, `S`, `C <hz>`, `B`) directly.
+
+The supported set is deliberately narrow: a wide part, a decoder or a CPU part is refused with the
+instance named, and `src/flash/build.ts` is where the set is stated. The sketch is a table-driven
+interpreter rather than one statement per gate, which is what lets a board of several hundred gates
+fit an Uno at all; the price is settling speed, paid only while the circuit runs.
+
 ## Project layout
 
 ```
@@ -239,6 +281,8 @@ src/
   asm/      the assembler and its ISA: field ranges, addressing modes, operands, program images
   levels/   LevelSpec types, the campaign table, checks, grader, content/ (chapters 1–4), the
             sandbox spec, and the custom-component library and wrap
+  flash/    the Arduino exporter: component tables, the program image, the sketch emitter, the
+            serial line protocol and the local bridge's client
   app/      application state, command/undo stack, progress, and the shared viewport types
   agent/    the built-in assistant: the tool list it may call, the operations behind them, the
             OpenAI-compatible streaming client, its settings, and the run loop
@@ -252,12 +296,13 @@ tools/      the SDD PowerShell helpers that build a phase workspace and its brie
 docs/       the design spec, the phase plans, and the per-chapter level provenance
 ```
 
-Dependencies run one way: `core` ← `asm` ← `levels` ← `app` ← `ui`, with `persist` reading `app` to
-build an empty save and `agent` reading `app` to drive it the way a player does — the chrome imports
-`agent`, never the other way, and `agent/` may not import `ui/` at all. Nothing imports upwards, and
-`test/conventions.test.ts` fails the build if anything starts to — that file is this project's linter,
-because no linter is pinned (see `AGENTS.md` for why, along with the four rules that shape everything
-else).
+Dependencies run one way: `core` ← `asm` ← `levels` ← `flash`, and `app` sits beside `flash` (it
+does not import it: the exporter reads a circuit, not the application). `persist` reads `app` to
+build an empty save and `agent` reads `app` to drive it the way a player does — the chrome imports
+`agent` and `flash`, never the other way, and `agent/` may not import `ui/` at all. Nothing imports
+upwards, and `test/conventions.test.ts` fails the build if anything starts to — that file is this
+project's linter, because no linter is pinned (see `AGENTS.md` for why, along with the four rules
+that shape everything else).
 
 ## Contributing / scope
 

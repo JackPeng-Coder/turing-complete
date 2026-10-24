@@ -1322,6 +1322,117 @@ test('a sixteen-bit sandbox connector is split and packed by the wide packers', 
 });
 
 /**
+ * THE SANDBOX CAN BE WRITTEN TO AN ARDUINO.
+ *
+ * The three halves of the feature, end to end: the panel builds the circuit's
+ * image and costs it; the local bridge (mocked here, because a CI image has no
+ * `arduino-cli` and no board) compiles the same sketch the download button would
+ * hand over; and the board is driven through Web Serial (mocked, because a
+ * headless browser has no USB port either). What is real is everything above the
+ * transport: `buildImage`, `emitSketch`, `FlashClient`, the panel and the
+ * protocol.
+ */
+test('the sandbox circuit is costed, compiled through the bridge, and driven over serial', async ({ page }) => {
+  const origin = 'http://127.0.0.1:4173';
+  const cors = {
+    'access-control-allow-origin': origin,
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-headers': 'Content-Type, X-TC-Arduino, X-TC-Token',
+  };
+  await page.route('http://127.0.0.1:8765/**', async (route) => {
+    const request = route.request();
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({ status: 204, headers: { ...cors } });
+      return;
+    }
+    const send = (body: unknown) =>
+      route.fulfill({
+        status: 200,
+        headers: { ...cors, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    if (request.url().endsWith('/health')) {
+      return send({
+        ok: true,
+        cli: 'arduino-cli  Version: 1.3.1',
+        core: true,
+        ports: [{ address: 'COM3', label: 'Arduino Uno' }],
+      });
+    }
+    return send({
+      ok: true,
+      code: 0,
+      log: 'Sketch uses 924 bytes (2%) of program storage space.',
+      flashBytes: 924,
+      ramBytes: 9,
+    });
+  });
+  // A board on a desk, for a browser with no COM port: the banner deliberately
+  // carries hash 0, so the panel's "another circuit" branch is what is asserted.
+  await page.addInitScript(() => {
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    let push = (_text: string): void => undefined;
+    const port = {
+      readable: new ReadableStream<Uint8Array>({
+        start(controller) {
+          push = (text) => controller.enqueue(encoder.encode(text));
+        },
+      }),
+      writable: new WritableStream<Uint8Array>({
+        write(chunk) {
+          const line = decoder.decode(chunk).trim();
+          if (line === 'B') push('#TC1 0 3 1 1 1\n');
+          else if (line === 'T') push('F 4 1 1\n');
+        },
+      }),
+      open: async () => undefined,
+      close: async () => undefined,
+    };
+    const serial = { requestPort: async () => port };
+    try {
+      Object.defineProperty(globalThis.navigator, 'serial', { configurable: true, value: serial });
+    } catch {
+      Object.defineProperty(Object.getPrototypeOf(globalThis.navigator), 'serial', {
+        configurable: true,
+        get: () => serial,
+      });
+    }
+  });
+
+  await open(page, '/');
+  await page.getByRole('button', { name: '开始' }).click();
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await page.getByRole('button', { name: '自由建造' }).click();
+
+  const { cx, cy } = await boardCentre(page);
+  await place(page, '关卡输入', cx - 160, cy);
+  await place(page, '关卡输出', cx + 160, cy);
+  await dragWire(page, cx - 160 + 72, cy, cx + 160, cy);
+
+  // The tab only exists in the sandbox, and opening it builds a fresh report.
+  await page.getByRole('button', { name: '开发板' }).click();
+  await expect(page.locator('.flash-summary')).toContainText('节点');
+  await expect(page.locator('.flash-limits')).toContainText('Arduino Uno');
+  await expect(page.locator('.flash-limits')).toContainText('30000');
+
+  // The bridge: health fills the port picker, compile prints sizes and log.
+  await page.getByRole('button', { name: '检查连接' }).click();
+  await expect(page.locator('.flash-bridge-status')).toContainText('已安装');
+  await expect(page.locator('.flash-fields select').nth(1)).toContainText('COM3');
+  await page.getByRole('button', { name: '编译' }).click();
+  await expect(page.locator('.flash-bridge-log')).toContainText('Sketch uses 924 bytes');
+
+  // The board: the banner is read, the hash is compared, a tick's frame is shown.
+  await page.getByRole('button', { name: '连接串口' }).click();
+  await expect(page.locator('.flash-banner')).toContainText('另一块电路');
+  await page.getByRole('button', { name: '单步 T' }).click();
+  await expect(page.locator('.flash-frame')).toContainText('第 4 拍');
+  await expect(page.locator('.flash-frame')).toContainText('OUT_1=1');
+  await page.screenshot({ path: 'test-results/smoke-arduino.png' });
+});
+
+/**
  * THE AGENT ASKS IN ITS PANEL, AND NEVER LOCKS THE GAME.
  *
  * There is no first-run card any more: a browser with no `tc.agent.v1` opens on

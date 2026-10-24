@@ -96,9 +96,9 @@ function withoutComments(source: string): string {
 // The layer rule
 // ---------------------------------------------------------------------------
 
-type Layer = 'core' | 'asm' | 'levels' | 'persist' | 'app' | 'agent' | 'ui';
+type Layer = 'core' | 'asm' | 'levels' | 'flash' | 'persist' | 'app' | 'agent' | 'ui';
 
-const LAYERS: readonly string[] = ['core', 'asm', 'levels', 'persist', 'app', 'agent', 'ui'];
+const LAYERS: readonly string[] = ['core', 'asm', 'levels', 'flash', 'persist', 'app', 'agent', 'ui'];
 
 function isLayer(name: string | undefined): name is Layer {
   return name !== undefined && LAYERS.includes(name);
@@ -113,21 +113,23 @@ function isLayer(name: string | undefined): name is Layer {
  * because `ui/` reads `core/` and `levels/` directly rather than going through
  * `app/`. What is enforced is the part that matters: nothing imports upwards.
  *
- * The order is `core <- asm <- levels <- app <- ui`, with `persist` beside
- * `app` (it reads `app/progress` to build an empty save) and `agent` beside it
- * too. `agent/` drives the application the way a player does, through an
- * interface the composition root implements (`agent/host.ts`), so it reads
- * `app/` and below and never the chrome -- `ui/agent.ts` is the only file that
- * imports the other way, exactly as `ui/` imports everything else.
+ * The order is `core <- asm <- levels <- flash`, with `app` beside `flash`, `persist` beside `app`
+ * (it reads `app/progress` to build an empty save) and `agent` beside it too. `flash/` turns a
+ * sandbox circuit into an Arduino sketch and talks to the local bridge; it reads `levels/` and
+ * below and is read only by the chrome (and by `main.ts`, the composition root). `agent/` drives
+ * the application the way a player does, through an interface the composition root implements
+ * (`agent/host.ts`), so it reads `app/` and below and never the chrome -- `ui/agent.ts` is the only
+ * file that imports the other way, exactly as `ui/` imports everything else.
  */
 const MAY_IMPORT: Readonly<Record<Layer, readonly Layer[]>> = {
   core: ['core'],
   asm: ['core', 'asm'],
   levels: ['core', 'asm', 'levels'],
+  flash: ['core', 'asm', 'levels', 'flash'],
   persist: ['core', 'asm', 'levels', 'app', 'persist'],
-  app: ['core', 'asm', 'levels', 'persist', 'app'],
-  agent: ['core', 'asm', 'levels', 'persist', 'app', 'agent'],
-  ui: ['core', 'asm', 'levels', 'persist', 'app', 'agent', 'ui'],
+  app: ['core', 'asm', 'levels', 'flash', 'persist', 'app'],
+  agent: ['core', 'asm', 'levels', 'flash', 'persist', 'app', 'agent'],
+  ui: ['core', 'asm', 'levels', 'flash', 'persist', 'app', 'agent', 'ui'],
 };
 
 /** `src/core/defs/wide.ts` -> `core`; `src/main.ts` -> null (the root composes). */

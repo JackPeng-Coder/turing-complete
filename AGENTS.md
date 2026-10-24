@@ -16,11 +16,12 @@ published inside a supply-chain cutoff window (see the waiver in
 `pnpm-workspace.yaml`, and add an entry only if a clean
 `pnpm install --frozen-lockfile` demands it).
 
-**2. Dependencies flow one way.** `core` <- `asm` <- `levels` <- `app` <- `ui`,
-with `persist` reading `app` to build an empty save and `agent` reading `app` to
+**2. Dependencies flow one way.** `core` <- `asm` <- `levels` <- `flash`, with
+`app` beside `flash` (the exporter reads a circuit, not the application), and
+`persist` reading `app` to build an empty save and `agent` reading `app` to
 drive it the way a player does, through the `agent/host.ts` interface the
-composition root implements; the chrome imports `agent`, never the other way,
-and `agent/` may not import `ui/`. Nothing imports upwards, runtime or type.
+composition root implements; the chrome imports `agent` and `flash`, never the
+other way, and `agent/` may not import `ui/`. Nothing imports upwards, runtime or type.
 `src/app/viewport.ts` exists only to keep that true: the camera
 and point types are declared in `app/` because `AppState` holds them, and the
 board reads them downwards.
@@ -78,12 +79,14 @@ over its own answer therefore fails the gate rather than being found by a player
 src/core/     simulator: signals, registry and definitions, graph/netlist, settle and tick
 src/asm/      the assembler and its ISA: field ranges, modes, operands, program images
 src/levels/   LevelSpec types, checks, grader, and content/ (chapters 1-4 so far)
+src/flash/    the Arduino exporter: component tables, the program image, the sketch, the line protocol
 src/app/      state, command/undo stack, progress, shared viewport types
 src/agent/    the built-in assistant: tool list, operations, streaming client, run loop
 src/ui/       the chrome, and ui/board/ -- camera, hit testing, routing, painting
 src/persist/  localStorage save and load
 test/         Vitest tests, the convention assertions, and the Playwright smoke spec
-tools/        the SDD PowerShell helpers, the session-transcript readers, the visual check
+tools/        the SDD PowerShell helpers, the session-transcript readers, the visual check,
+              and `arduino-bridge.mjs` (the local compile-and-upload daemon)
 docs/         the design spec, the phase plans, level provenance
 ```
 

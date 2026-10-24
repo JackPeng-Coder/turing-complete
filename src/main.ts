@@ -39,6 +39,7 @@ import { levelExpectsProgram, playerProgramFormat, testCases, type TestPlan } fr
 import { createProgramRun, type ProgramRun } from './levels/run';
 import { mountIde } from './ui/ide';
 import { mountDebug } from './ui/debug';
+import { mountFlashPanel, type FlashPanel } from './ui/flashPanel';
 import type { LevelSpec } from './levels/spec';
 
 const registry = createRegistry(BASE_DEFS);
@@ -290,14 +291,19 @@ if (app) {
   const casesTab = panelTab('用例', 'cases');
   const programTab = panelTab('程序', 'program');
   const debugTab = panelTab('调试', 'debug');
+  // The Arduino panel is a sandbox tool: a level's pins are the puzzle, and
+  // `buildImage` refuses a level board for the same reason. Hidden until the
+  // sandbox is open, exactly as the bench tabs are hidden outside a program level.
+  const boardTab = panelTab('开发板', 'board');
   programTab.hidden = true;
   debugTab.hidden = true;
+  boardTab.hidden = true;
   const collapse = document.createElement('button');
   collapse.type = 'button';
   collapse.className = 'panel-toggle';
   collapse.textContent = '⌄';
   collapse.setAttribute('aria-label', '收起下方面板');
-  bottomTabs.append(casesTab, programTab, debugTab, collapse);
+  bottomTabs.append(casesTab, programTab, debugTab, boardTab, collapse);
 
   const bottomViews = document.createElement('div');
   bottomViews.className = 'panel-views';
@@ -312,10 +318,11 @@ if (app) {
   const viewCases = panelView('cases');
   const viewProgram = panelView('program');
   const viewDebug = panelView('debug');
+  const viewBoard = panelView('board');
   bottom.append(bottomTabs, bottomViews);
 
-  const panelTabs = [casesTab, programTab, debugTab];
-  const panelViews = [viewCases, viewProgram, viewDebug];
+  const panelTabs = [casesTab, programTab, debugTab, boardTab];
+  const panelViews = [viewCases, viewProgram, viewDebug, viewBoard];
 
   // ---------------------------------------------------------------- layout --
   // The docks' measurements live in `tc.layout.v1`: a player who widened the
@@ -339,6 +346,15 @@ if (app) {
    */
   let onLayoutResize: () => void = () => {};
 
+  /**
+   * The Arduino panel, once it is mounted.
+   *
+   * The layout code is what knows whether its tab is showing, but the panel is
+   * mounted far below that code; a mutable handle is the seam (the same shape
+   * `onLayoutResize` uses for the board).
+   */
+  let flashPanel: FlashPanel | null = null;
+
   /** The rail's icons show which view is showing, and whether its dock is open. */
   const syncRail = (): void => {
     partsButton.setAttribute('aria-pressed', String(!layout.primaryCollapsed && !partsSection.hidden));
@@ -361,6 +377,9 @@ if (app) {
     collapse.textContent = layout.panelCollapsed ? '⌃' : '⌄';
     collapse.setAttribute('aria-label', layout.panelCollapsed ? '展开下方面板' : '收起下方面板');
     syncRail();
+    // A hidden panel does no work: the board panel only reacts to the store and
+    // only redraws while its tab is the showing one.
+    flashPanel?.setVisible(!layout.panelCollapsed && !viewBoard.hidden);
     onLayoutResize();
   };
 
@@ -378,6 +397,9 @@ if (app) {
     for (const el of panelViews) el.hidden = el.dataset.view !== name;
     for (const el of panelTabs) el.setAttribute('aria-pressed', String(el.dataset.view === name));
     applyLayout();
+    // Opening the tab builds a report for the circuit as it is now, rather than
+    // showing numbers from before the last edit. A hidden panel never builds.
+    if (name === 'board') flashPanel?.reveal();
   };
 
   const showSidebar = (name: string, expand = true): void => {
@@ -393,6 +415,7 @@ if (app) {
   casesTab.addEventListener('click', () => showPanel('cases'));
   programTab.addEventListener('click', () => showPanel('program'));
   debugTab.addEventListener('click', () => showPanel('debug'));
+  boardTab.addEventListener('click', () => showPanel('board'));
   partsTab.addEventListener('click', () => showSidebar('parts'));
   componentsTab.addEventListener('click', () => showSidebar('components'));
   // Clicking the rail button of the view that is already showing folds the
@@ -1168,6 +1191,11 @@ if (app) {
     programTab.hidden = !wants;
     debugTab.hidden = !wants;
     programButton.hidden = !wants;
+    // The board panel belongs to the sandbox and nowhere else: a level's pins are
+    // its puzzle, and `buildImage` refuses a level board on its own account too.
+    const sandbox = isSandbox(store.get().level);
+    boardTab.hidden = !sandbox;
+    if (!sandbox && !viewBoard.hidden) showPanel('cases');
     if (!wants) {
       if (viewProgram.hidden === false || viewDebug.hidden === false) showPanel('cases');
       return;
@@ -1565,6 +1593,10 @@ if (app) {
   // assistant in the secondary sidebar.
   mountPalette(partsSection, store, onPickPart);
   const blueprintPanel = mountBlueprintPanel(componentsSection, store, blueprintOptions);
+  // The Arduino panel is a sandbox tool; its tab is hidden everywhere else by
+  // `mountBench`. It reads the circuit and the level from the store rather than
+  // from this closure's copies, and the vector is read lazily for "sync inputs".
+  flashPanel = mountFlashPanel(viewBoard, store, { vector: () => vector });
   const truth = mountTruthTable(viewCases, store, {
     live: levelOutputs,
     active: () => activeCase,

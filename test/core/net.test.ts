@@ -87,6 +87,44 @@ describe('compile', () => {
   );
 });
 
+describe('inputSlot', () => {
+  it('is the slot `drive` is keyed from, so a wired bit names its driver', () => {
+    const g = emptyGraph();
+    const driver = addInstance(g, 'nand', 0, 0);
+    const sink = addInstance(g, 'not', 80, 0);
+    connect(g, { inst: driver.id, port: 'out' }, { inst: sink.id, port: 'a' });
+    const net = compile(g, registry);
+    const base = net.inputSlot(`${sink.id}.a`);
+    expect(net.drive[base]).toBe(net.outputBase(`${driver.id}.out`));
+    // A one-bit pin is always one contiguous run, so the range reader agrees.
+    expect(net.inputBase(`${sink.id}.a`)).toBe(net.drive[base]!);
+  });
+
+  it('stays the pin own slot for an unwired bit, which reads zero', () => {
+    const { graph, nand } = nandFixture();
+    const net = compile(graph, registry);
+    const base = net.inputSlot(`${nand}.a`);
+    expect(net.drive[base]).toBe(base);
+  });
+
+  it('differs from inputBase when a narrow driver forces a read region', () => {
+    // The accessor exists for exactly this case: the 8-bit connector's read
+    // region is materialised because its driver is one bit wide, and a
+    // `drive[inputBase(...)]` walk would index past the drive array. The pin's
+    // own slots still hold the driver's bit and seven untouched zero slots.
+    const g = emptyGraph();
+    const driver = addInstance(g, 'nand', 0, 0);
+    const out = addInstance(g, 'level_output', 80, 0, 'OUT');
+    out.params.width = 8;
+    connect(g, { inst: driver.id, port: 'out' }, { inst: out.id, port: 'in' });
+    const net = compile(g, registry);
+    const slot = net.inputSlot(`${out.id}.in`);
+    expect(net.drive[slot]).toBe(net.outputBase(`${driver.id}.out`));
+    expect(net.drive[slot + 1]).toBe(slot + 1);
+    expect(net.inputBase(`${out.id}.in`)).not.toBe(slot);
+  });
+});
+
 describe('Simulation', () => {
   it('evaluates a NAND for every input combination', () => {
     const g = emptyGraph();

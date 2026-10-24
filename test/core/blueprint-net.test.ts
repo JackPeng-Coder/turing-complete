@@ -117,6 +117,14 @@ describe('custom components in the kernel', () => {
     expect(sim.net.pathsOf('nope')).toEqual([]);
   });
 
+  it('aliases a component input pin to the body slot it binds', () => {
+    // The Arduino exporter walks `drive` from `inputSlot`, so an alias has to be
+    // the body pin's own base rather than one it happens to read like.
+    const { sim } = twoInstances();
+    expect(sim.net.inputSlot('i1.set')).toBe(sim.net.inputSlot('i1/i1.set'));
+    expect(sim.net.outputBase('i1.out')).toBe(sim.net.outputBase('i1/OUT.mirror'));
+  });
+
   it('drives a component input through to the body pin it binds', () => {
     const component = latchComponent('bp1');
     const registry = withComponents([component]);

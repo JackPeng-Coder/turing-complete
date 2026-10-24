@@ -1478,6 +1478,82 @@ button { font-family: inherit; }
 .agent-setup-hint span { flex: 1 1 auto; }
 .agent-setup-hint button { flex: 0 0 auto; white-space: nowrap; }
 
+/* ---------------------------------------------------------- 开发板 panel --
+   The Arduino panel is three cards in the bottom panel: the image, the local
+   bridge and the board. It is wider than the cases table, so it uses a
+   three-column grid and falls back to one column when the dock is narrow. */
+.flash-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(280px, 1fr));
+  gap: 8px;
+  padding: 8px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .flash-panel { grid-template-columns: 1fr; }
+}
+.flash-card { background: var(--slab); }
+.flash-body { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 10px; }
+.flash-summary { font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.5; }
+.flash-limits { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; line-height: 1.5; }
+.flash-note { font-size: 11px; line-height: 1.45; color: var(--text-muted); }
+.flash-note[hidden] { display: none; }
+.flash-note[data-tone='good'] { color: var(--neon); }
+.flash-note[data-tone='bad'] { color: var(--off); }
+.flash-note[data-tone='warn'] { color: var(--amber); }
+.flash-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.flash-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.flash-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 10px; color: var(--text-muted); }
+.flash-field-label { letter-spacing: 0.1em; }
+.flash-field small { font-size: 10px; line-height: 1.4; }
+.flash-input {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--hair);
+  background: var(--slab-lit);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+}
+.flash-input:disabled { color: var(--text-muted); opacity: 0.55; }
+.flash-button {
+  padding: 4px 8px;
+  border: 1px solid var(--hair);
+  background: var(--slab-lit);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.flash-button:hover:not(:disabled) { border-color: var(--hot); color: var(--hot); }
+.flash-button:disabled { color: #3b4d5e; border-color: var(--hair); cursor: not-allowed; }
+.flash-primary { border-color: var(--hot-dim); color: var(--hot); }
+.flash-log {
+  margin: 0;
+  max-height: 92px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--hair);
+  background: var(--void);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.flash-log[hidden] { display: none; }
+.flash-inputs, .flash-outputs { display: flex; flex-direction: column; gap: 3px; }
+.flash-pin-row { display: flex; align-items: center; gap: 6px; }
+.flash-pin-name { flex: 0 0 4.4em; font-size: 11px; color: var(--text-muted); letter-spacing: 0.06em; }
+.flash-pin-value { flex: 0 0 5.5em; width: 5.5em; }
+.flash-readout { min-width: 2ch; text-align: right; font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
+.flash-empty { font-size: 10.5px; color: var(--text-muted); }
+.flash-command-row { display: flex; gap: 6px; }
+.flash-command-row .flash-input { flex: 1 1 auto; }
+
 /* Accessibility floor: nothing moves that does not have to. */
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
