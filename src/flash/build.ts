@@ -7,6 +7,10 @@ import type { LevelSpec } from '../levels/spec';
 import { DEFAULT_BOARD, boardProfile, type BoardId } from './boards';
 import { ExtractionError, MAX_STATES, extractCombination, extractStorage } from './extract';
 import {
+  EDGE_BYTES,
+  NODE_BYTES,
+  OUTPUT_BYTES,
+  SOURCE_BYTES,
   hashText,
   imageSignature,
   refusal,
@@ -76,9 +80,7 @@ const MAX_SERIAL_BITS = 32;
  */
 const RAM_RESERVE = 400;
 
-/** Estimated bytes per node descriptor, per edge descriptor, and the runtime. */
-const NODE_BYTES = 14;
-const EDGE_BYTES = 10;
+/** The runtime template's share of the sketch: Serial, the line reader, the loops. */
 const FLASH_RUNTIME = 8_192;
 
 /**
@@ -333,10 +335,20 @@ export function buildImage(
 
   const slotBytes = Math.ceil(slots / 8);
   const buffered = ordered.mode === 'dag' ? slotBytes : slotBytes * 2;
-  const ramBytes = buffered + stateCount + RAM_RESERVE;
+  // The firmware holds the connector values in `TC_IN` outside the settle
+  // buffers (`uint32_t` each), and a state byte plus its pending byte per
+  // storage element; all three are SRAM the estimate has to account for.
+  const ramBytes = buffered + stateCount * 2 + inputs.length * 4 + RAM_RESERVE;
   const tableBytes = tables.reduce((sum, table) => sum + table.length, 0);
+  // Every PROGMEM array the sketch emits is counted, not just the descriptors:
+  // the source table and the per-output base/width tables are flash too.
   const flashBytes =
-    ordered.nodes.length * NODE_BYTES + edges.length * EDGE_BYTES + tableBytes + FLASH_RUNTIME;
+    ordered.nodes.length * NODE_BYTES +
+    edges.length * EDGE_BYTES +
+    sources.length * SOURCE_BYTES +
+    outputs.length * OUTPUT_BYTES +
+    tableBytes +
+    FLASH_RUNTIME;
 
   const limits = boardProfile(board);
   if (ramBytes > limits.maxRam || flashBytes > limits.maxFlash) {

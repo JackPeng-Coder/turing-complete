@@ -106,6 +106,28 @@ export interface ImageReport {
   readonly mode: ImageMode;
 }
 
+/**
+ * Bytes each firmware PROGMEM entry takes, written down once.
+ *
+ * `build.ts` estimates the sketch's flash with these numbers and `emit.ts`
+ * asserts them against `sizeof` in the generated sketch, so a descriptor that
+ * grows makes `arduino-cli` (or the host test) fail rather than silently
+ * invalidating the estimate the panel showed the player. The structs are
+ * `__attribute__((packed))` because AVR aligns `uint16_t` to one byte and a PC
+ * compiler aligns it to two: without packing the same sketch would cost
+ * different bytes on the two sides of the host test.
+ *
+ * `TcNode` is 14 bytes after its state index was widened to `uint16_t`: the byte
+ * it used to occupy was padding, so a circuit with more storage than one byte
+ * can index costs no extra flash per node. `TcEdge` grew by one.
+ */
+export const NODE_BYTES = 14;
+export const EDGE_BYTES = 11;
+/** `TcSrc`: a slot (`uint16_t`), a connector index (`uint16_t`) and a bit. */
+export const SOURCE_BYTES = 5;
+/** `TC_OUT_BASE`'s `uint16_t` plus `TC_OUT_WIDTH`'s `uint8_t`, per output. */
+export const OUTPUT_BYTES = 3;
+
 /** Everything the firmware and its host side need to agree about. */
 export interface ProgramImage {
   readonly level: string;

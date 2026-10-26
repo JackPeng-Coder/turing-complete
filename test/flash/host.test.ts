@@ -147,6 +147,31 @@ function latch(): Built {
   return builtOf(place.graph);
 }
 
+/** Two hundred and fifty-seven one-bit inputs: more connectors than a byte names. */
+function connectorWall(): Built {
+  const place = board(
+    Array.from({ length: 257 }, () => 1),
+    [1],
+  );
+  connect(place.graph, { inst: 'IN_257', port: 'out' }, { inst: 'OUT_1', port: 'in' });
+  return builtOf(place.graph);
+}
+
+/** Three hundred one-bit memories: more storage elements than a byte indexes. */
+function memoryWall(): Built {
+  const place = board(
+    [1],
+    Array.from({ length: 300 }, () => 1),
+  );
+  for (let index = 0; index < 300; index += 1) {
+    const memory = addInstance(place.graph, 'mem1', 160, 80 + index);
+    connect(place.graph, { inst: 'IN_1', port: 'out' }, { inst: memory.id, port: 'set' });
+    connect(place.graph, { inst: 'IN_1', port: 'out' }, { inst: memory.id, port: 'value' });
+    connect(place.graph, { inst: memory.id, port: 'out' }, { inst: `OUT_${index + 1}`, port: 'in' });
+  }
+  return builtOf(place.graph);
+}
+
 /** The frames `Simulation` would show for the same command sequence. */
 function referenceFrames(built: Built, commands: readonly string[]): Frame[] {
   const net = compile(built.graph, registry);
@@ -212,7 +237,7 @@ function runFirmware(image: ProgramImage, commands: readonly string[]): ReturnTy
     if (compiled.status !== 0) {
       throw new Error(`g++ failed:\n${compiled.stdout ?? ''}\n${compiled.stderr ?? ''}`);
     }
-    const ran = spawnSync(exe, [commandsFile], { encoding: 'utf8' });
+    const ran = spawnSync(exe, [commandsFile], { encoding: 'utf8', timeout: 20_000 });
     if (ran.status !== 0) {
       throw new Error(`harness failed:\n${ran.stdout ?? ''}\n${ran.stderr ?? ''}`);
     }
@@ -312,5 +337,20 @@ describe.skipIf(!compiler)('generated firmware on the host', () => {
     const lines = runFirmware(built.image, []);
     const banner = lines.find((line) => line?.kind === 'banner');
     expect(banner).toMatchObject({ kind: 'banner', hash: built.image.hash });
+  });
+
+  /**
+   * Both of these were latent width bugs: the firmware read a connector's
+   * descriptor index, a source-table cursor and a storage-element index out of
+   * one byte each, so 257 connectors wrote the wrong slot and 300 memories
+   * aliased their state. The comparator is the kernel, so a truncation cannot
+   * pass as "close enough".
+   */
+  it('addresses more than 255 input connectors', () => {
+    checkCase('connector-wall', connectorWall(), ['I 256 1', 'S', 'I 0 1', 'S', 'I 256 0', 'R', 'S']);
+  });
+
+  it('addresses more than 255 storage elements', () => {
+    checkCase('memory-wall', memoryWall(), ['I 0 1', 'T', 'S', 'I 0 0', 'T', 'S', 'R', 'S']);
   });
 });

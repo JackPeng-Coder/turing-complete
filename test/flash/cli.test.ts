@@ -11,17 +11,21 @@ import { addInstance, connect, emptyGraph } from '../../src/core/graph';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { SANDBOX_LEVEL } from '../../src/levels/sandbox';
+import { boardProfile, type BoardId } from '../../src/flash/boards';
 import { buildImage } from '../../src/flash/build';
 import { emitSketch } from '../../src/flash/emit';
-import { isImage } from '../../src/flash/image';
+import { isImage, type ProgramImage } from '../../src/flash/image';
 
 /**
  * The emitted sketch through the REAL Arduino toolchain.
  *
  * The host test proves the firmware's behaviour; this one proves the other half:
  * that `arduino-cli` for an Uno accepts the text at all (the host shim is not an
- * AVR compiler and would not catch a PROGMEM or `Print` overload mistake) and
- * that a board the size of the one that prompted the feature fits the chip.
+ * AVR compiler and would not catch a PROGMEM or `Print` overload mistake, nor
+ * the `static_assert`s that pin the descriptor sizes the cost estimate uses) and
+ * that a board the size of the one that prompted the feature fits the chip. The
+ * Mega case is the same text for the other board the panel offers: one image, two
+ * chips, and a real size report against each one's budget.
  *
  * The benchmark is 896 gates, matching the sandbox board in the request: a
  * fan-in tree (`i` reads `i/2` and `i/3`) so the kernel settles it in ~10 sweeps
@@ -59,51 +63,95 @@ function benchmark() {
   return graph;
 }
 
-describe.skipIf(!hasCli)('the sketch through arduino-cli', () => {
-  it('compiles a 896-gate board for an Uno inside its flash and RAM', () => {
-    const result = buildImage(benchmark(), registry, SANDBOX_LEVEL);
-    if (!isImage(result)) {
-      throw new Error(`refused: ${result.refusal.code} ${result.refusal.en}`);
-    }
-    const { image } = result;
-    expect(image.report.instances).toBe(898);
-    expect(image.mode).toBe('dag');
+interface Built {
+  readonly status: number | null;
+  readonly log: string;
+  readonly flashBytes: number | null;
+  readonly ramBytes: number | null;
+}
 
-    const root = mkdtempSync(join(tmpdir(), 'tc-arduino-cli-'));
-    try {
-      const sketchDir = join(root, name);
-      mkdirSync(sketchDir);
-      writeFileSync(join(sketchDir, `${name}.ino`), emitSketch(image, { name }), 'utf8');
-      const built = spawnSync(
-        'arduino-cli',
-        [
-          'compile',
-          '--fqbn',
-          'arduino:avr:uno',
-          '--build-path',
-          join(root, 'build'),
-          '--warnings',
-          'none',
-          sketchDir,
-        ],
-        { encoding: 'utf8' },
-      );
-      const log = `${built.stdout ?? ''}\n${built.stderr ?? ''}`;
-      expect(built.status, log).toBe(0);
-      const flash = /Sketch uses (\d+) bytes/.exec(log);
-      const ram = /Global variables use (\d+) bytes/.exec(log);
-      expect(flash, log).not.toBeNull();
-      expect(ram, log).not.toBeNull();
-      const flashBytes = Number(flash![1]);
-      const ramBytes = Number(ram![1]);
-      expect(flashBytes, log).toBeLessThanOrEqual(32_256);
-      expect(ramBytes, log).toBeLessThanOrEqual(2_048);
+/** Write the sketch into a fresh folder and run the real compiler for `fqbn`. */
+function compileFor(image: ProgramImage, fqbn: BoardId): Built {
+  const root = mkdtempSync(join(tmpdir(), 'tc-arduino-cli-'));
+  try {
+    const sketchDir = join(root, name);
+    mkdirSync(sketchDir);
+    writeFileSync(join(sketchDir, `${name}.ino`), emitSketch(image, { name }), 'utf8');
+    const built = spawnSync(
+      'arduino-cli',
+      [
+        'compile',
+        '--fqbn',
+        fqbn,
+        '--build-path',
+        join(root, 'build'),
+        '--warnings',
+        'none',
+        sketchDir,
+      ],
+      { encoding: 'utf8' },
+    );
+    const log = `${built.stdout ?? ''}\n${built.stderr ?? ''}`;
+    const flash = /Sketch uses (\d+) bytes/.exec(log);
+    const ram = /Global variables use (\d+) bytes/.exec(log);
+    return {
+      status: built.status,
+      log,
+      flashBytes: flash === null ? null : Number(flash[1]),
+      ramBytes: ram === null ? null : Number(ram[1]),
+    };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function benchImage() {
+  const result = buildImage(benchmark(), registry, SANDBOX_LEVEL);
+  if (!isImage(result)) {
+    throw new Error(`refused: ${result.refusal.code} ${result.refusal.en}`);
+  }
+  const { image } = result;
+  expect(image.report.instances).toBe(898);
+  expect(image.mode).toBe('dag');
+  return image;
+}
+
+// A real AVR compile is seconds, not milliseconds: the first one on a cold cache
+// (or behind a scanner) has been seen at 5.5 s here, and the default 5 s timeout
+// turned "the compiler works" into a red gate on a machine that has arduino-cli.
+// The budget is the bridge's own compile ceiling.
+describe.skipIf(!hasCli)('the sketch through arduino-cli', () => {
+  it(
+    'compiles a 896-gate board for an Uno inside its flash and RAM',
+    () => {
+      const image = benchImage();
+      const built = compileFor(image, 'arduino:avr:uno');
+      expect(built.status, built.log).toBe(0);
+      expect(built.flashBytes, built.log).not.toBeNull();
+      expect(built.ramBytes, built.log).not.toBeNull();
+      const limits = boardProfile('arduino:avr:uno');
+      expect(built.flashBytes!, built.log).toBeLessThanOrEqual(limits.chipFlash);
+      expect(built.ramBytes!, built.log).toBeLessThanOrEqual(limits.chipRam);
       // A sanity floor as well as a ceiling: a sketch that compiled to almost
       // nothing would mean the image, not the board, was empty.
-      expect(flashBytes).toBeGreaterThan(5_000);
-      expect(ramBytes).toBeGreaterThan(200);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+      expect(built.flashBytes!).toBeGreaterThan(5_000);
+      expect(built.ramBytes!).toBeGreaterThan(200);
+    },
+    120_000,
+  );
+
+  it(
+    'compiles the same sketch for the Mega the panel offers',
+    () => {
+      const built = compileFor(benchImage(), 'arduino:avr:mega');
+      expect(built.status, built.log).toBe(0);
+      const limits = boardProfile('arduino:avr:mega');
+      // The image is board-independent; the budget is not. The same circuit that
+      // uses half an Uno's flash is a rounding error on a Mega, and its compile
+      // is what proves the panel's second board is a real fallback.
+      expect(built.flashBytes!, built.log).toBeLessThanOrEqual(limits.chipFlash);
+      expect(built.ramBytes!, built.log).toBeLessThanOrEqual(limits.chipRam);
+    },
+    120_000,
+  );
 });
