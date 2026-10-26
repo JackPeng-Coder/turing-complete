@@ -116,13 +116,21 @@ export function sketchNameFor(level: string): string {
 export function planSketch(
   image: ProgramImage,
   board: BoardId,
-  options: { readonly port?: string; readonly name?: string } = {},
+  options: {
+    readonly port?: string;
+    readonly name?: string;
+    /** `arduino-cli --board-options`, for a variant of the same FQBN (old Nano bootloader). */
+    readonly boardOptions?: string;
+  } = {},
 ): SketchPlan {
   const name = options.name ?? sketchNameFor(image.level);
-  const request: SketchRequest =
-    options.port === undefined
-      ? { name, sketch: emitSketch(image, { name }), fqbn: board }
-      : { name, sketch: emitSketch(image, { name }), fqbn: board, port: options.port };
+  const request: SketchRequest = {
+    name,
+    sketch: emitSketch(image, { name }),
+    fqbn: board,
+    ...(options.port === undefined ? {} : { port: options.port }),
+    ...(options.boardOptions === undefined ? {} : { boardOptions: options.boardOptions }),
+  };
   return { request, fileName: `${name}.ino` };
 }
 

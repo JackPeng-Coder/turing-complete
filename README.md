@@ -247,7 +247,8 @@ browser:
    `arduino-cli core install arduino:avr`. Set `TC_ARDUINO_CLI` to point at a binary that is not on
    `PATH`.
 2. **The local bridge**, run from the repository root while you want to flash:
-   `node tools/arduino-bridge.mjs` (default `http://127.0.0.1:8765`). It binds loopback only, refuses
+   `node tools/arduino-bridge.mjs` (`pnpm arduino` runs the same file; default `http://127.0.0.1:8765`).
+   It binds loopback only, refuses
    origins other than the game's own tabs, and requires the `X-TC-Arduino: 1` header on every request.
    Set `TC_ARDUINO_TOKEN` to require a shared secret as well; type the same value into the panel's
    令牌 field. The bridge can program a microcontroller, so do not expose it.
@@ -257,14 +258,16 @@ browser:
 Then, on the sandbox screen: place at least one 关卡输入 or 关卡输出, open 开发板, and press 构建映像.
 The card reports what the circuit compiles to (nodes, slots, states, tables) and what it is estimated
 to cost in RAM and flash, against the board chosen in the 本地桥 card; a circuit that will not fit is
-refused by name rather than failing on the board. 下载 .ino writes the sketch to disk — put it in a
+refused by name rather than failing on the board. The picker lists Uno, Nano and Mega, plus the
+Nano's old bootloader as its own row (same chip, compiled with `--board-options cpu=atmega328old`).
+下载 .ino writes the sketch to disk — put it in a
 folder of the same name and the Arduino IDE opens it — and 检查连接 / 编译 / 烧录 take the same sketch
 through the bridge. The compiler's own size report and log are shown beside the estimate.
 
-After a flash, press 连接串口 (the panel closes the port again with 断开; `arduino-cli` cannot upload
-while it is open). The banner's hash is compared with the image the panel built, so "the board is
-running the circuit on screen" is a check rather than a guess. 单步 T applies one clock edge, 复位 R
-clears the storage and the inputs, 读取 S prints the current frame, each input connector has a value
+An upload closes the port first — `arduino-cli` cannot open one Web Serial is holding — so after a
+flash press 连接串口 again. The banner's hash is compared with the image the panel built, so "the board
+is running the circuit on screen" is a check rather than a guess. 单步 T applies one clock edge, 复位
+R clears the storage and the inputs, 读取 S prints the current frame, each input connector has a value
 field and 同步面板输入 copies the in-page input values onto the board, and the command line accepts
 the documented protocol lines (`I <index> <value>`, `T`, `R`, `S`, `C <hz>`, `B`) directly.
 

@@ -210,5 +210,12 @@ describe('planSketch', () => {
     const plan = planSketch(image(), 'arduino:avr:uno');
     expect(plan.request.port).toBeUndefined();
     expect('port' in plan.request).toBe(false);
+    expect('boardOptions' in plan.request).toBe(false);
+  });
+
+  it('carries the board options a bootloader variant needs', () => {
+    const plan = planSketch(image(), 'arduino:avr:nano', { boardOptions: 'cpu=atmega328old' });
+    expect(plan.request.fqbn).toBe('arduino:avr:nano');
+    expect(plan.request.boardOptions).toBe('cpu=atmega328old');
   });
 });

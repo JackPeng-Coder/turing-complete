@@ -15,7 +15,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke": "playwright test"
+    "smoke": "playwright test",
+    "arduino": "node tools/arduino-bridge.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

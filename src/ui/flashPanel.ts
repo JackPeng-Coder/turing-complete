@@ -1,5 +1,11 @@
 import type { AppState, Store } from '../app/store';
-import { boardProfile, BOARDS, DEFAULT_BOARD, type BoardId } from '../flash/boards';
+import {
+  BOARD_CHOICES,
+  DEFAULT_BOARD_CHOICE,
+  boardChoice,
+  boardProfile,
+  type BoardId,
+} from '../flash/boards';
 import {
   DEFAULT_BRIDGE_URL,
   FlashClient,
@@ -63,7 +69,8 @@ const PREFS_KEY = 'tc.flash.v1';
 
 interface Prefs {
   readonly url?: string;
-  readonly board?: BoardId;
+  /** A `BOARD_CHOICES` row id, which is why the Nano's old bootloader is one. */
+  readonly board?: string;
 }
 
 function loadPrefs(): Prefs {
@@ -75,8 +82,8 @@ function loadPrefs(): Prefs {
     const record = parsed as Record<string, unknown>;
     const url = typeof record.url === 'string' && record.url.trim() !== '' ? record.url : undefined;
     const board =
-      typeof record.board === 'string' && BOARDS.some((entry) => entry.id === record.board)
-        ? (record.board as BoardId)
+      typeof record.board === 'string' && BOARD_CHOICES.some((entry) => entry.id === record.board)
+        ? record.board
         : undefined;
     return {
       ...(url === undefined ? {} : { url }),
@@ -175,12 +182,12 @@ export function mountFlashPanel(
   tokenInput.placeholder = '令牌（桥未设置时可留空）';
   tokenInput.autocomplete = 'off';
   const boardSelect = element('select', 'flash-input');
-  for (const board of BOARDS) {
-    const option = element('option', undefined, board.name);
-    option.value = board.id;
+  for (const choice of BOARD_CHOICES) {
+    const option = element('option', undefined, choice.name);
+    option.value = choice.id;
     boardSelect.append(option);
   }
-  boardSelect.value = prefs.board ?? DEFAULT_BOARD;
+  boardSelect.value = prefs.board ?? DEFAULT_BOARD_CHOICE;
   const portSelect = element('select', 'flash-input');
   portSelect.disabled = true;
   const bridgeFields = element('div', 'flash-fields');
@@ -254,9 +261,21 @@ export function mountFlashPanel(
   // ------------------------------------------------------------- the image --
 
   function boardId(): BoardId {
-    const chosen = boardSelect.value;
-    const found = BOARDS.find((entry) => entry.id === chosen);
-    return found?.id ?? DEFAULT_BOARD;
+    return boardChoice(boardSelect.value).board;
+  }
+
+  /** The picker's row, for the budget line and the bridge request. */
+  function selectedBoard() {
+    return boardChoice(boardSelect.value);
+  }
+
+  /** The plan both the download and the bridge request are built from. */
+  function planFor(image: ProgramImage, port?: string) {
+    const choice = selectedBoard();
+    return planSketch(image, choice.board, {
+      ...(port === undefined ? {} : { port }),
+      ...(choice.boardOptions === undefined ? {} : { boardOptions: choice.boardOptions }),
+    });
   }
 
   function signatureOf(level: AppState['level'], graph: AppState['graph']): string {
@@ -307,7 +326,7 @@ export function mountFlashPanel(
       render();
       return;
     }
-    const plan = planSketch(image, boardId());
+    const plan = planFor(image);
     if (options.onDownload !== undefined) {
       options.onDownload(plan.fileName, plan.request.sketch);
       message = { text: `已生成 ${plan.fileName}（${plan.request.sketch.length} 字符）。`, tone: 'good' };
@@ -384,11 +403,15 @@ export function mountFlashPanel(
       render();
       return;
     }
+    // `arduino-cli` cannot open a port Web Serial is holding, so an upload owns
+    // the port: close it through the same teardown path 「断开」 uses, then let
+    // the player reconnect after the flash.
+    if (upload) await disconnectSerial();
     busy = upload ? '正在烧录…这一步会调用 arduino-cli，可能需要半分钟。' : '正在编译…';
     build = null;
     render();
     const client = makeClient();
-    const plan = planSketch(image, boardId());
+    const plan = planFor(image);
     const result = upload
       ? await client.flash({ ...plan.request, port })
       : await client.compile(plan.request);
@@ -397,7 +420,7 @@ export function mountFlashPanel(
     message = result.ok
       ? {
           text: upload
-            ? `烧录完成：${result.flashBytes ?? '—'} B flash、${result.ramBytes ?? '—'} B RAM。断开串口后点「连接串口」查看板子。`
+            ? `烧录完成：${result.flashBytes ?? '—'} B flash、${result.ramBytes ?? '—'} B RAM。点「连接串口」读板子的横幅。`
             : `编译通过：${result.flashBytes ?? '—'} B flash、${result.ramBytes ?? '—'} B RAM。`,
           tone: 'good',
         }
@@ -562,6 +585,11 @@ export function mountFlashPanel(
       }
     }
 
+    // The fields are built once per image, so their enabled state is refreshed
+    // on every render instead: a port connected after the build must make them
+    // typeable, and an upload (which closes the port) must grey them again.
+    for (const field of inputFields.values()) field.disabled = serial === null;
+
     outputsBox.replaceChildren();
     if (built === null) {
       outputsBox.append(element('div', 'flash-empty', '构建映像后这里列出输出连接器。'));
@@ -614,6 +642,7 @@ export function mountFlashPanel(
     if (!visible) return;
     const image = built?.image ?? null;
     const profile = boardProfile(boardId());
+    const choice = selectedBoard();
     const stale = staleNow();
 
     buildButton.disabled = busy !== null;
@@ -628,11 +657,11 @@ export function mountFlashPanel(
 
     if (image === null) {
       summary.textContent = isSandbox(store.get().level) ? '尚未构建映像。' : '开发板只在沙盒里可用。';
-      limits.textContent = `${profile.name} · 预算：RAM ${profile.maxRam} B · flash ${profile.maxFlash} B`;
+      limits.textContent = `${choice.name} · 预算：RAM ${profile.maxRam} B · flash ${profile.maxFlash} B`;
     } else {
       const report = image.report;
       summary.textContent = `${report.instances} 元件 · ${report.expanded} 展开 · ${report.nodes} 节点 · ${report.slots} 槽位 · ${report.stateCount} 状态 · ${report.tables} 表`;
-      limits.textContent = `${profile.name} · RAM ≈ ${report.ramBytes} B / ${profile.maxRam} B · flash ≈ ${report.flashBytes} B / ${profile.maxFlash} B · ${report.mode === 'dag' ? '顺序求值' : '迭代收敛'}`;
+      limits.textContent = `${choice.name} · RAM ≈ ${report.ramBytes} B / ${profile.maxRam} B · flash ≈ ${report.flashBytes} B / ${profile.maxFlash} B · ${report.mode === 'dag' ? '顺序求值' : '迭代收敛'}`;
     }
     staleNote.hidden = !stale;
     staleNote.textContent = stale ? '电路已改动：重新构建后才会把新的电路写进板子。' : '';
@@ -682,12 +711,14 @@ export function mountFlashPanel(
   }
 
   // ------------------------------------------------------------------ boot --
-  savePrefs({ url: urlInput.value, board: boardId() });
+  // The remembered board is the picker's row, not the FQBN: two rows share the
+  // Nano's chip and only one of them carries the old bootloader's options.
+  savePrefs({ url: urlInput.value, board: boardSelect.value });
   urlInput.addEventListener('change', () => {
-    savePrefs({ url: urlInput.value, board: boardId() });
+    savePrefs({ url: urlInput.value, board: boardSelect.value });
   });
   boardSelect.addEventListener('change', () => {
-    savePrefs({ url: urlInput.value, board: boardId() });
+    savePrefs({ url: urlInput.value, board: boardSelect.value });
     // The budget belongs to the board: a refusal for an Uno may be a fit for a
     // Mega, so the stale test has to see the new board, not the old build.
     if (visible) render();

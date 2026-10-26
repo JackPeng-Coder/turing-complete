@@ -252,6 +252,72 @@ describe('the 开发板 panel', () => {
     expect((JSON.parse(posted!.body ?? '{}') as Record<string, unknown>).port).toBe('COM3');
   });
 
+  it('asks for the old bootloader options when that board row is chosen', async () => {
+    const { store } = sandboxStore();
+    const fake = bridgeFetch((url) =>
+      url.endsWith('/flash')
+        ? { ok: true, code: 0, log: 'avrdude done.', flashBytes: 924, ramBytes: 9 }
+        : {
+            ok: true,
+            cli: 'arduino-cli',
+            core: true,
+            ports: [{ address: 'COM9', label: 'Arduino Nano' }],
+          },
+    );
+    const { root, panel } = mount(store, { fetch: fake.fetch });
+    // The Nano's old bootloader shares the chip with the plain Nano; the row is
+    // what makes the bridge add `--board-options cpu=atmega328old`.
+    const board = root.querySelectorAll<HTMLSelectElement>('.flash-fields select')[0]!;
+    board.value = 'arduino:avr:nano:old';
+    board.dispatchEvent(new Event('change'));
+    buttonByText(root, '检查连接').click();
+    await until(
+      () => root.querySelectorAll('.flash-fields select')[1]!.querySelectorAll('option').length > 1,
+      'the port list',
+    );
+    panel.render();
+    expect(text(root, '.flash-limits')).toContain('旧 bootloader');
+    buttonByText(root, '烧录').click();
+    await until(() => text(root, '.flash-bridge-log').includes('烧录成功'), 'the flash answer');
+    const posted = fake.calls.find((call) => call.url.endsWith('/flash'));
+    expect(posted).toBeDefined();
+    const body = JSON.parse(posted!.body ?? '{}') as Record<string, unknown>;
+    expect(body.fqbn).toBe('arduino:avr:nano');
+    expect(body.boardOptions).toBe('cpu=atmega328old');
+    expect(body.port).toBe('COM9');
+  });
+
+  it('closes the port before uploading and leaves it closed for the linker', async () => {
+    const { store } = sandboxStore();
+    const serial = fakeSerial();
+    const bridge = bridgeFetch((url) =>
+      url.endsWith('/flash')
+        ? { ok: true, code: 0, log: 'avrdude done.', flashBytes: 924, ramBytes: 9 }
+        : {
+            ok: true,
+            cli: 'arduino-cli',
+            core: true,
+            ports: [{ address: 'COM3', label: 'Arduino Uno' }],
+          },
+    );
+    const { root, panel } = mount(store, { fetch: bridge.fetch, serialSource: serial.serialSource });
+    buttonByText(root, '检查连接').click();
+    await until(
+      () => root.querySelectorAll('.flash-fields select')[1]!.querySelectorAll('option').length > 1,
+      'the port list',
+    );
+    buttonByText(root, '连接串口').click();
+    await until(() => !buttonByText(root, '断开').disabled, 'the serial connection');
+    expect(serial.closes()).toBe(0);
+    panel.render();
+    buttonByText(root, '烧录').click();
+    await until(() => text(root, '.flash-bridge-log').includes('烧录成功'), 'the flash answer');
+    // `arduino-cli` cannot open a port Web Serial holds: the upload closes it.
+    expect(serial.closes()).toBe(1);
+    expect(buttonByText(root, '断开').disabled).toBe(true);
+    expect(buttonByText(root, '连接串口').disabled).toBe(false);
+  });
+
   it('hands the sketch to the downloader under a folder-matching name', () => {
     const { store } = sandboxStore();
     const downloads: Array<{ name: string; text: string }> = [];
@@ -272,6 +338,8 @@ describe('the 开发板 panel', () => {
     buttonByText(root, '连接串口').click();
     await until(() => !buttonByText(root, '断开').disabled, 'the serial connection');
     expect(fake.written()).toContain('B\n');
+    // A field built before the port existed becomes typeable with it.
+    expect((root.querySelector('.flash-pin-row input') as HTMLInputElement).disabled).toBe(false);
     fake.push(`#TC1 ${image.hash.toString(16)} ${image.report.nodes} 1 1 1\n`);
     await until(() => text(root, '.flash-banner').includes('一致'), 'the banner');
     expect(text(root, '.flash-banner')).toContain('与屏幕上的电路一致');
