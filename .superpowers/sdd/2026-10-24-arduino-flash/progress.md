@@ -69,4 +69,62 @@
 | # | SHA | 内容 |
 |---|---|---|
 | 1 | `372723f` | `feat(panel): write a sandbox circuit to an Arduino board`——撤回的那批文件 + 本轮的门禁修复、板子预算、桥客户端、串口、面板、接线、测试与文档 |
-| 2 | （本条所在提交） | 本记录 + `.superpowers/sdd/.gitignore` 的解除忽略 |
+| 2 | `b2264b7` | 本记录 + `.superpowers/sdd/.gitignore` 的解除忽略 |
+
+## 2026-10-26 复核（在一台装有 Arduino 工具链的机器上）
+
+上一轮在一台**没有** `arduino-cli`、没有 `arduino:avr` 核心、没有板子的机器上收尾：`cli.test.ts`
+与 `bridge.test.ts` 的真实 CLI 用例在那里按设计跳过，所以“编译能过、桥能调 CLI”从未真正执行过。
+这一轮在同一份提交上重跑——本机有 `arduino-cli 1.5.0` 与 `arduino:avr 1.8.7`——被跳过的部分第一次
+真的运行，暴露出几个上一轮看不见的缺陷；用户要求“继续做完未完成的工作（我已在其他电脑上推进，
+请重新审查）”，所以这里连同整条链路一起复核。
+
+### 复核发现的缺陷
+
+| # | 缺陷 | 后果 | 修法 |
+|---|---|---|---|
+| 1 | `cli.test.ts` 的真实编译用例沿用默认 5 s 超时 | 在**有** CLI 的机器上门禁是红的（本机冷缓存首次 5.5 s） | 两条用例各给 120 s 预算，与桥的编译上限一致 |
+| 2 | 固件用 `uint8_t` 数输入连接器、源表游标、输出列，`TcNode.state`/`TcEdge.state`/`TcSrc.ext` 也是单字节 | >255 个连接器或源位时 `for (uint8_t k < TC_COUNT)` 回绕成死循环；>255 个存储元件时状态索引混叠 | 循环计数改 `uint16_t`，三个索引字段改 `uint16_t`；结构体 `__attribute__((packed))`（AVR 与 PC 的 `uint16_t` 对齐不同），尺寸由生成的 `static_assert` 钉住 |
+| 3 | 成本估计只算节点/边/表/运行时，漏了 `TC_SRC`、`TC_OUT_*`、`TC_IN`、`TC_PENDING` | 估计偏低，可能放过超出 SRAM 的电路 | flash 计入源表与输出表，RAM 计入 `TC_IN` 与每状态两字节；字节常数收进 `flash/image.ts` 一处 |
+| 4 | 上传前不关闭 Web Serial 占用的串口 | 连过串口再点烧录，avrdude 打不开端口 | 烧录前走「断开」同一条清理路径关串口，成功提示改为“点「连接串口」读横幅” |
+| 5 | 输入值输入框只在构建映像时设置禁用状态 | 连接串口后输入框仍是灰的 | 每次 render 刷新禁用状态 |
+| 6 | 面板没有 `boardOptions`（桥本就支持） | Nano 旧 bootloader 只能手工烧 | `boards.ts` 增加 `BOARD_CHOICES`，旧 bootloader 是独立一行；`planSketch` 带 `boardOptions`，面板记住的是行而不是 FQBN |
+
+### 新增测试
+
+- `test/flash/host.test.ts` +2：257 个单比特输入连接器（>255 个连接器与源位）和 300 个 `mem1`
+  （>255 个存储元件），逐帧与内核对比；后者在旧固件上状态会混叠。harness 的 `spawnSync` 加了
+  20 s 超时，假使回归成死循环，结果是失败而不是挂住。
+- `test/flash/cli.test.ts` 拆成 Uno 与 Mega 两条：同一份映像各用真实 `arduino-cli` 编译一次，尺寸
+  对照 `boards.ts` 的芯片上限；`static_assert` 让描述符尺寸与估计常数对不上时*编译*失败。
+- `test/flash/client.test.ts` +1：`planSketch` 的 `boardOptions` 与“没有就不发”。
+- `test/ui/flash-panel.test.ts` +2：旧 bootloader 行真的把 `cpu=atmega328old` 发给桥；烧录前关串口、
+  烧录后按钮状态；另在既有串口用例里断言连接后输入框可输入。
+
+### 证据（本机，全部真实执行）
+
+- `pnpm build` exit 0（98 模块，338.57 kB / gzip 116.70 kB）。
+- `pnpm test` **77 文件 / 1848 通过**（`cli.test.ts` 与 `bridge.test.ts` 的真实 CLI 用例**不再跳过**）。
+- `pnpm smoke` **35 通过 + 2 跳过**（47.2 s）——与上一轮相同的两条既有跳过。
+- 真实 `arduino-cli 1.5.0` + `arduino:avr 1.8.7`，896 门基准（`instances 898 / nodes 912 / slots 2744`）：
+  - 估计：RAM 747 B、flash 21,007 B（运行时常量特意留了 8 KiB，估计偏保守）；
+  - Uno 实测 **16,864 B flash / 607 B RAM**（52% / 30%）；
+  - Mega 实测 **17,144 B flash / 607 B RAM**；
+  - 两份 `Sketch uses` / `Global variables use` 都在芯片上限内。
+- 真实 `node tools/arduino-bridge.mjs --port 8877`：
+  - `/health` → `{ok:true, cli:"1.5.0", core:true}`，列出 5 个 `COM*`；缺 `X-TC-Arduino` → 403；
+  - `/compile` → `ok:true`，blink 1,480 B flash / 194 B RAM 并带回日志；
+  - `/flash` 到不存在的 `COM250`：编译成功、avrdude 报 `cannot open port`，`ok:false` 且保留完整日志
+    ——除“插着板子”之外的每一步都真的跑过了；
+  - Nano + `--board-options cpu=atmega328old` 同样先编译成功、再在端口上失败；
+  - `boardOptions: "cpu=$(rm)"` → 400：注入被拒。
+
+### 还没做的
+
+- **没有真实硬件**：本机没有板子。串口协议在浏览器侧由 Playwright 的假串口覆盖，固件行为由
+  `host.test.ts` 用 g++ 编译同一份 sketch 与内核逐帧对比；`avrdude` 只走到“打不开端口”为止。
+- Mega 是编译验证，不是实物验证。
+- 桥仍需玩家自己起（浏览器不能起进程），面板只负责告诉玩家命令。
+- 页面输入/时钟没有自动镜像到板子（`driveTo` 即写串口）：第一版把串口交给面板手动驱动；
+  这是可加的下一步，不是缺陷。
+
