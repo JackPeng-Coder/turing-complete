@@ -27,6 +27,45 @@
 #define pgm_read_word(address) (*(const uint16_t *)(address))
 #define memcpy_P memcpy
 
+/** The Arduino pin vocabulary a generated sketch is allowed to use. */
+#define LOW 0x0
+#define HIGH 0x1
+#define INPUT 0x0
+#define OUTPUT 0x1
+#define INPUT_PULLUP 0x2
+
+/**
+ * The pin state a real board would have, as far as a host test needs it.
+ *
+ * A downloaded pin is driven by the sketch (`digitalWrite` records what it did,
+ * so the test can assert the mapping). An input pin reads what the harness drives
+ * (`tcShimSetRead`); with nothing driving it and `INPUT_PULLUP` set it reads HIGH,
+ * exactly like the board, which is what makes a mapped-but-unwired input
+ * deterministic in a test.
+ */
+inline uint8_t tcShimPinMode[70];
+inline uint8_t tcShimPinWritten[70];
+inline uint8_t tcShimPinRead[70];
+inline uint8_t tcShimPinDriven[70];
+
+inline void pinMode(uint8_t pin, uint8_t mode) {
+  if (pin < 70) tcShimPinMode[pin] = mode;
+}
+inline void digitalWrite(uint8_t pin, uint8_t value) {
+  if (pin < 70) tcShimPinWritten[pin] = value == HIGH ? 1 : 0;
+}
+inline int digitalRead(uint8_t pin) {
+  if (pin >= 70) return LOW;
+  if (tcShimPinDriven[pin]) return tcShimPinRead[pin] ? HIGH : LOW;
+  return tcShimPinMode[pin] == INPUT_PULLUP ? HIGH : LOW;
+}
+/** The harness's side: what an external wire holds this input pin at. */
+inline void tcShimSetRead(uint8_t pin, uint8_t value) {
+  if (pin >= 70) return;
+  tcShimPinDriven[pin] = 1;
+  tcShimPinRead[pin] = value ? 1 : 0;
+}
+
 inline unsigned long millis(void) {
   return 0UL;
 }

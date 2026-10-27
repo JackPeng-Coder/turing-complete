@@ -172,6 +172,18 @@ function memoryWall(): Built {
   return builtOf(place.graph);
 }
 
+/** A pass-through whose connectors are on physical pins: 2 in, 13 out. */
+function pinnedPassThrough(): Built {
+  const place = board([1], [1]);
+  connect(place.graph, { inst: 'IN_1', port: 'out' }, { inst: 'OUT_1', port: 'in' });
+  const result = buildImage(place.graph, registry, SANDBOX_LEVEL, 'arduino:avr:uno', {
+    IN_1: '2',
+    OUT_1: '13',
+  });
+  if (!isImage(result)) throw new Error(`refused: ${result.refusal.code} ${result.refusal.en}`);
+  return { graph: place.graph, image: result.image };
+}
+
 /** The frames `Simulation` would show for the same command sequence. */
 function referenceFrames(built: Built, commands: readonly string[]): Frame[] {
   const net = compile(built.graph, registry);
@@ -330,6 +342,31 @@ describe.skipIf(!compiler)('generated firmware on the host', () => {
       'S',
       'R',
     ]);
+  });
+
+  /**
+   * The pin half of the exporter, on the host: the mapped input reads the level
+   * an outside wire holds (the harness's `=` lines), the mapped output is driven
+   * with `digitalWrite`, and every pin change re-settles and prints a frame.
+   */
+  it('reads a mapped input pin and drives a mapped output pin', () => {
+    const built = pinnedPassThrough();
+    expect(built.image.pinInputs).toEqual([{ ext: 0, pin: 2 }]);
+    expect(built.image.pinOutputs).toEqual([{ base: expect.any(Number), pin: 13 }]);
+    const lines = runFirmware(built.image, ['= 2 0', 'S', '= 2 1', 'S']);
+    const pins: string[] = [];
+    for (const line of lines) {
+      if (line !== null && line.kind === 'other' && line.text.startsWith('PIN ')) {
+        pins.push(line.text);
+      }
+    }
+    const frames = lines.filter((line): line is BoardFrame => line?.kind === 'frame');
+    // The input starts pulled up (unwired reads HIGH), so the pass-through drives
+    // pin 13 HIGH in setup; pin 2 low then high moves the output with it.
+    expect(frames.map((frame) => frame.outputs[0])).toEqual([1, 0, 0, 1, 1]);
+    expect(frames.every((frame) => frame.tick === 0 && frame.stable)).toBe(true);
+    expect(pins).toContain('PIN 13 1');
+    expect(pins).toContain('PIN 13 0');
   });
 
   it('reports the image hash in the banner', () => {

@@ -8,6 +8,7 @@ import { blueprintDef } from '../../src/levels/blueprints';
 import { buildImage } from '../../src/flash/build';
 import { emitSketch } from '../../src/flash/emit';
 import { isImage, type ProgramImage } from '../../src/flash/image';
+import type { PinMap } from '../../src/flash/pins';
 
 const registry = createRegistry(BASE_DEFS);
 
@@ -29,8 +30,8 @@ function board(): { graph: Graph; input(id: string, width: number): string; outp
   };
 }
 
-function build(graph: Graph, custom = registry): ProgramImage {
-  const result = buildImage(graph, custom, SANDBOX_LEVEL);
+function build(graph: Graph, custom = registry, pins: PinMap = {}): ProgramImage {
+  const result = buildImage(graph, custom, SANDBOX_LEVEL, 'arduino:avr:uno', pins);
   if (!isImage(result)) throw new Error(`refused: ${result.refusal.code} ${result.refusal.en}`);
   return result.image;
 }
@@ -283,6 +284,63 @@ describe('buildImage', () => {
     // `IN_1`, `OUT_1` and the component's NAND: the component itself is a name,
     // not a leaf.
     expect(image.report.expanded).toBe(3);
+  });
+
+  it('puts a connector on a board pin, and the pin is part of the image', () => {
+    const place = board();
+    const input = place.input('IN_1', 1);
+    const output = place.output('OUT_1', 1);
+    connect(place.graph, { inst: input, port: 'out' }, { inst: output, port: 'in' });
+    const plain = build(place.graph);
+    const pinned = build(place.graph, registry, { IN_1: '2', OUT_1: '13' });
+    expect(pinned.pinInputs).toEqual([{ ext: 0, pin: 2 }]);
+    expect(pinned.pinOutputs).toHaveLength(1);
+    expect(pinned.pinOutputs[0]!.pin).toBe(13);
+    // The mapping changes what the firmware does, so it changes the banner hash.
+    expect(pinned.hash).not.toBe(plain.hash);
+    // The compiled-in pin tables cost their descriptor bytes exactly: 2 for the
+    // input pin, 3 for the output pin, and one RAM byte for the poll snapshot.
+    expect(pinned.report.flashBytes - plain.report.flashBytes).toBe(5);
+    expect(pinned.report.ramBytes - plain.report.ramBytes).toBe(1);
+    const sketch = emitSketch(pinned);
+    expect(sketch).toContain('static const TcPinIn TC_PIN_IN[1] PROGMEM');
+    expect(sketch).toContain('static const TcPinOut TC_PIN_OUT[1] PROGMEM');
+    expect(sketch).toContain('{2,0}');
+    expect(sketch).toMatch(/\{13,\d+\}/);
+    expect(sketch).toContain('INPUT_PULLUP');
+  });
+
+  it('ignores a remembered pin for a connector the circuit no longer has', () => {
+    const place = board();
+    const input = place.input('IN_1', 1);
+    const output = place.output('OUT_1', 1);
+    connect(place.graph, { inst: input, port: 'out' }, { inst: output, port: 'in' });
+    const plain = build(place.graph);
+    const stale = build(place.graph, registry, { GONE: '13' });
+    expect(stale.hash).toBe(plain.hash);
+  });
+
+  it('refuses pin assignments that cannot work', () => {
+    const place = board();
+    const input = place.input('IN_1', 1);
+    const output = place.output('OUT_1', 1);
+    place.input('IN_2', 8);
+    connect(place.graph, { inst: input, port: 'out' }, { inst: output, port: 'in' });
+    const refusalOf = (pins: PinMap) => {
+      const result = buildImage(place.graph, registry, SANDBOX_LEVEL, 'arduino:avr:uno', pins);
+      if (isImage(result)) throw new Error('expected a refusal');
+      return result.refusal;
+    };
+    const shared = refusalOf({ IN_1: '13', OUT_1: '13' });
+    expect(shared.code).toBe('pins');
+    expect(shared.en).toContain('both');
+    // The connector that arrived second is the one the refusal names; the first
+    // stays the holder of the pin.
+    expect(shared.instances).toEqual(['OUT_1']);
+    expect(refusalOf({ OUT_1: '22' }).code).toBe('pins');
+    const wide = refusalOf({ IN_2: '3' });
+    expect(wide.code).toBe('pins');
+    expect(wide.zh).toContain('IN_2');
   });
 
   it('is deterministic: one circuit, one hash, one sketch', () => {

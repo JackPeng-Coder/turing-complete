@@ -6,10 +6,14 @@ import { boardPins, isSandbox } from '../levels/sandbox';
 import type { LevelSpec } from '../levels/spec';
 import { DEFAULT_BOARD, boardProfile, type BoardId } from './boards';
 import { ExtractionError, MAX_STATES, extractCombination, extractStorage } from './extract';
+import { pinValue, validatePinMap, type PinConnector, type PinIssue, type PinMap } from './pins';
 import {
   EDGE_BYTES,
   NODE_BYTES,
   OUTPUT_BYTES,
+  PIN_IN_BYTES,
+  PIN_OUT_BYTES,
+  PIN_RAM_BYTES,
   SOURCE_BYTES,
   hashText,
   imageSignature,
@@ -19,6 +23,8 @@ import {
   type ImageEdge,
   type ImageMode,
   type ImageNode,
+  type ImagePinIn,
+  type ImagePinOut,
   type ImageRefusal,
   type ImageSource,
 } from './image';
@@ -91,15 +97,27 @@ const FLASH_RUNTIME = 8_192;
  * The default is the Uno the first version was built and measured around.
  *
  * The order of refusals is the order a player can act on them: wrong screen,
- * doesn't compile, no connectors, unsupported parts, never settles, doesn't fit.
- * A circuit with two defects reports the first one, which is the one to fix
- * first anyway.
+ * doesn't compile, no connectors, unsupported parts, a pin assignment that cannot
+ * work, never settles, doesn't fit. A circuit with two defects reports the first
+ * one, which is the one to fix first anyway.
+ *
+ * `board` decides the budget the estimate is checked against, and -- once a
+ * connector is mapped to an analogue pin -- the pin NUMBER the sketch writes,
+ * because A0 is 14 on a 328P and 54 on a Mega. Without a mapping the image is the
+ * same bytes on every AVR; with one, the number is in the image and its hash.
+ *
+ * `pinMap` is what the panel's 引脚 card chose: a connector id to a board pin.
+ * It is validated here as well as in the panel (a stale save or another caller
+ * must not produce firmware that shares a pin or uses one the board lacks), and
+ * it is part of the image's hash because it changes what the firmware does --
+ * see `pins.ts` for the rules.
  */
 export function buildImage(
   graph: Graph,
   registry: Registry,
   level: LevelSpec,
   board: BoardId = DEFAULT_BOARD,
+  pinMap: PinMap = {},
 ): BuildResult {
   if (!isSandbox(level)) {
     return refusal(
@@ -168,6 +186,34 @@ export function buildImage(
       );
     }
     outputs.push({ id: pin.id, index, width, base });
+  }
+
+  // The pin card's assignments. Errors are refusals so a stale save, a second
+  // caller or a future import path cannot produce firmware that fights itself
+  // for a pin; the panel removes the same collisions before they can occur.
+  const pinConnectors: PinConnector[] = [
+    ...inputs.map((pin) => ({ id: pin.id, width: pin.width })),
+    ...outputs.map((pin) => ({ id: pin.id, width: pin.width })),
+  ];
+  const pinIssues = validatePinMap(board, pinConnectors, pinMap);
+  if (pinIssues.length > 0) {
+    return refusal(
+      'pins',
+      `引脚分配不可用：${pinIssues.slice(0, 6).map(pinIssueZh).join('；')}。只有 1 位连接器能接一个引脚；宽连接器请继续走串口。`,
+      `These pin assignments cannot be used: ${pinIssues.slice(0, 6).map(pinIssueEn).join('; ')}. Only one-bit connectors take a pin; wider connectors stay on the serial line.`,
+      [...new Set(pinIssues.map((issue) => issue.connector))],
+    );
+  }
+
+  const pinInputs: ImagePinIn[] = [];
+  for (const pin of inputs) {
+    const assigned = pinMap[pin.id];
+    if (assigned !== undefined) pinInputs.push({ ext: pin.index, pin: pinValue(board, assigned) });
+  }
+  const pinOutputs: ImagePinOut[] = [];
+  for (const pin of outputs) {
+    const assigned = pinMap[pin.id];
+    if (assigned !== undefined) pinOutputs.push({ base: pin.base, pin: pinValue(board, assigned) });
   }
 
   const paths = net.instanceIds();
@@ -336,17 +382,21 @@ export function buildImage(
   const slotBytes = Math.ceil(slots / 8);
   const buffered = ordered.mode === 'dag' ? slotBytes : slotBytes * 2;
   // The firmware holds the connector values in `TC_IN` outside the settle
-  // buffers (`uint32_t` each), and a state byte plus its pending byte per
-  // storage element; all three are SRAM the estimate has to account for.
-  const ramBytes = buffered + stateCount * 2 + inputs.length * 4 + RAM_RESERVE;
+  // buffers (`uint32_t` each), a state byte plus its pending byte per storage
+  // element, and one previous-level byte per input pin it polls.
+  const ramBytes =
+    buffered + stateCount * 2 + inputs.length * 4 + pinInputs.length * PIN_RAM_BYTES + RAM_RESERVE;
   const tableBytes = tables.reduce((sum, table) => sum + table.length, 0);
   // Every PROGMEM array the sketch emits is counted, not just the descriptors:
-  // the source table and the per-output base/width tables are flash too.
+  // the source table, the per-output base/width tables and the pin tables are
+  // flash too.
   const flashBytes =
     ordered.nodes.length * NODE_BYTES +
     edges.length * EDGE_BYTES +
     sources.length * SOURCE_BYTES +
     outputs.length * OUTPUT_BYTES +
+    pinInputs.length * PIN_IN_BYTES +
+    pinOutputs.length * PIN_OUT_BYTES +
     tableBytes +
     FLASH_RUNTIME;
 
@@ -380,6 +430,8 @@ export function buildImage(
     tables,
     inputs,
     outputs,
+    pinInputs,
+    pinOutputs,
   } as const;
   const report = {
     level: level.id,
@@ -398,6 +450,34 @@ export function buildImage(
   } as const;
 
   return { image: { ...built, hash: hashText(imageSignature(built)), stateCount, report } };
+}
+
+/**
+ * One pin problem as the panel's sentence, in the app's two languages.
+ *
+ * Kept next to `buildImage` rather than in `pins.ts` because the wording belongs
+ * to the refusal the player reads, not to the validator.
+ */
+function pinIssueZh(issue: PinIssue): string {
+  switch (issue.code) {
+    case 'wide-connector':
+      return `${issue.connector} 不是 1 位连接器`;
+    case 'unsupported-pin':
+      return `${issue.connector} → ${issue.pin ?? '?'}（这块板没有这个引脚）`;
+    case 'duplicate-pin':
+      return `${issue.pin ?? '?'} 同时接给了 ${issue.other ?? '?'} 和 ${issue.connector}`;
+  }
+}
+
+function pinIssueEn(issue: PinIssue): string {
+  switch (issue.code) {
+    case 'wide-connector':
+      return `${issue.connector} is not a one-bit connector`;
+    case 'unsupported-pin':
+      return `${issue.connector} → ${issue.pin ?? '?'} (this board has no such pin)`;
+    case 'duplicate-pin':
+      return `${issue.pin ?? '?'} is assigned to both ${issue.other ?? '?'} and ${issue.connector}`;
+  }
 }
 
 /**

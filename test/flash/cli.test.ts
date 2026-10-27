@@ -116,6 +116,22 @@ function benchImage() {
   return image;
 }
 
+/** A one-bit pass-through with both connectors on pins: IN_1 → D2, OUT_1 → D13. */
+function pinnedImage() {
+  const graph = emptyGraph('sandbox');
+  const input = addInstance(graph, 'level_input', 0, 0, 'IN_1');
+  input.params.width = 1;
+  const output = addInstance(graph, 'level_output', 0, 240, 'OUT_1');
+  output.params.width = 1;
+  connect(graph, { inst: input.id, port: 'out' }, { inst: output.id, port: 'in' });
+  const result = buildImage(graph, registry, SANDBOX_LEVEL, 'arduino:avr:uno', {
+    IN_1: '2',
+    OUT_1: '13',
+  });
+  if (!isImage(result)) throw new Error(`refused: ${result.refusal.code} ${result.refusal.en}`);
+  return result.image;
+}
+
 // A real AVR compile is seconds, not milliseconds: the first one on a cold cache
 // (or behind a scanner) has been seen at 5.5 s here, and the default 5 s timeout
 // turned "the compiler works" into a red gate on a machine that has arduino-cli.
@@ -151,6 +167,26 @@ describe.skipIf(!hasCli)('the sketch through arduino-cli', () => {
       // is what proves the panel's second board is a real fallback.
       expect(built.flashBytes!, built.log).toBeLessThanOrEqual(limits.chipFlash);
       expect(built.ramBytes!, built.log).toBeLessThanOrEqual(limits.chipRam);
+    },
+    120_000,
+  );
+
+  it(
+    'compiles a sketch that reads an input pin and drives an output pin',
+    () => {
+      const image = pinnedImage();
+      const sketch = emitSketch(image, { name });
+      // The pin tables are real C++ with `static_assert`s on their sizes; only the
+      // AVR compiler can prove `digitalRead`/`digitalWrite`/`INPUT_PULLUP` land.
+      expect(sketch).toContain('digitalRead');
+      expect(sketch).toContain('digitalWrite');
+      expect(sketch).toContain('INPUT_PULLUP');
+      const built = compileFor(image, 'arduino:avr:uno');
+      expect(built.status, built.log).toBe(0);
+      expect(built.flashBytes, built.log).not.toBeNull();
+      expect(built.ramBytes!, built.log).toBeLessThanOrEqual(
+        boardProfile('arduino:avr:uno').chipRam,
+      );
     },
     120_000,
   );

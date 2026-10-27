@@ -127,6 +127,31 @@ export const EDGE_BYTES = 11;
 export const SOURCE_BYTES = 5;
 /** `TC_OUT_BASE`'s `uint16_t` plus `TC_OUT_WIDTH`'s `uint8_t`, per output. */
 export const OUTPUT_BYTES = 3;
+/** `TcPinIn`: a board pin and the input connector it drives, one byte each. */
+export const PIN_IN_BYTES = 2;
+/** `TcPinOut`: a board pin and the output slot it publishes, `uint16_t` base. */
+export const PIN_OUT_BYTES = 3;
+/** `TC_PIN_LAST`, the one byte per input pin that detects a hardware change. */
+export const PIN_RAM_BYTES = 1;
+
+/**
+ * One input connector read from a physical pin (`ext` is the connector index).
+ *
+ * `pin` is the Arduino pin NUMBER the sketch writes (`digitalRead(2)`), which is
+ * why the image is not completely board-independent once a connector is mapped:
+ * `A0` is 14 on a 328P and 54 on a Mega. That is also why the number, not the
+ * name, is in the hash. `pins.ts` owns the name-to-number rule.
+ */
+export interface ImagePinIn {
+  readonly ext: number;
+  readonly pin: number;
+}
+
+/** One output connector written to a physical pin (`base` is its slot base). */
+export interface ImagePinOut {
+  readonly base: number;
+  readonly pin: number;
+}
 
 /** Everything the firmware and its host side need to agree about. */
 export interface ProgramImage {
@@ -143,6 +168,9 @@ export interface ProgramImage {
   readonly stateCount: number;
   readonly inputs: readonly ConnectorPin[];
   readonly outputs: readonly ConnectorPin[];
+  /** Connectors given a physical pin; empty when the board only talks serial. */
+  readonly pinInputs: readonly ImagePinIn[];
+  readonly pinOutputs: readonly ImagePinOut[];
   readonly report: ImageReport;
 }
 
@@ -152,6 +180,7 @@ export type RefusalCode =
   | 'no-connectors'
   | 'unsupported'
   | 'unstable'
+  | 'pins'
   | 'too-big';
 
 /** Why a circuit cannot become firmware, in the app's two languages. */
@@ -205,11 +234,17 @@ export function imageSignature(image: {
   readonly tables: readonly Uint8Array[];
   readonly inputs: readonly ConnectorPin[];
   readonly outputs: readonly ConnectorPin[];
+  readonly pinInputs: readonly ImagePinIn[];
+  readonly pinOutputs: readonly ImagePinOut[];
 }): string {
   const parts: string[] = [image.level, image.mode, String(image.slots)];
   for (const input of image.inputs) parts.push(`i:${input.id}:${input.index}:${input.width}:${input.base}`);
   for (const output of image.outputs)
     parts.push(`o:${output.id}:${output.index}:${output.width}:${output.base}`);
+  // A pin changes what the firmware does, so it changes the hash: the banner
+  // still answers "is the board running what is on screen" once pins are mapped.
+  for (const pin of image.pinInputs) parts.push(`pi:${pin.ext}:${pin.pin}`);
+  for (const pin of image.pinOutputs) parts.push(`po:${pin.base}:${pin.pin}`);
   for (const source of image.sources) parts.push(`s:${source.out}:${source.ext}:${source.bit}`);
   for (const node of image.nodes) {
     parts.push(`n:${node.kind}:${node.out}:${node.inputs.join('/')}:${node.table}:${node.state}`);
