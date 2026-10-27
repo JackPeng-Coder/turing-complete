@@ -128,3 +128,56 @@
 - 页面输入/时钟没有自动镜像到板子（`driveTo` 即写串口）：第一版把串口交给面板手动驱动；
   这是可加的下一步，不是缺陷。
 
+## 2026-10-27 第一次真实硬件验证（CH340 / ATmega328P / COM3）
+
+用户插上板子后报「识别不到」。排查结论与处置如下；这一轮也把整条链路第一次跑到了真实板子上。
+
+### 「识别不到」的三个原因（都不是固件缺陷）
+
+1. **本地桥没起**：8765 无监听，面板点「检查连接」只会说「连不上本地桥」，串口下拉是
+   「未发现串口（点「检查连接」）」——看起来就像板子没被识别。起
+   `node tools/arduino-bridge.mjs` 后同一面板立刻列出 5 个串口（4 个蓝牙 + COM3）。
+2. **CH340 克隆板没有板名**：`arduino-cli board list` 把 COM3 认成 "Serial Port (USB)"，但
+   Board Name = Unknown——CH340 不携带 Arduino 的 USB 标识，自动识别不到型号是正常的，需要玩家在
+   「开发板」下拉里手动选 Uno/Nano。**不是端口没认到**：Windows 的 USB-SERIAL CH340 (COM3) 状态
+   OK，驱动 wch.cn 3.9.2024.9，`arduino-cli 1.5.0` 也看得到它。
+3. **端口被游戏自己的标签页占着**：`handle64 -a Serial2` 显示 `\Device\Serial2` 在 msedge.exe
+   (pid 6244) 手里——上午那次「连接串口」的 Web Serial 一直开着，于是 PowerShell 以任何波特率打开
+   COM3 都报「访问被拒绝」，烧录也会在 avrdude 处失败。Edge 释放后立刻 `OPEN_OK`。
+
+### 三处让原因更容易看出来的改动
+
+| 改动 | 文件 | 说明 |
+|---|---|---|
+| 未识别 USB 串口按 `vid:pid` 命名 | `tools/arduino-bridge.mjs` | `parsePorts` 在 CLI 报不出板名时用 `properties.vid/pid` 生成标签（CH340→`WCH CH340 (1a86:7523)`，未知厂商→`USB serial (1234:0001)`）；蓝牙口仍是自己的地址。面板下拉从此能分辨“哪一个是板子”。+1 测试。 |
+| 失败时先说是端口被占用还是 bootloader 没应答 | `src/ui/flashPanel.ts` | `failureText` 匹配 avrdude 的 `cannot open port`/`Access is denied`/`not in sync`/`stk500` 等，给出「先断开、关掉占用程序」或「确认型号、Nano 旧 bootloader 换一行」的句子，而不是只留一段日志。+1 测试。 |
+| 选串口后「烧录」立刻可用 | `src/ui/flashPanel.ts` | 用真实浏览器驱动面板时发现：串口下拉没有 `change` 监听，选完 COM3 后「烧录」仍是灰的（单测里手工调 `render()` 把这个缺陷藏住了）。现在选择会重绘；测试改成 `dispatchEvent(new Event('change'))`。 |
+
+### 真实硬件证据（这轮新增，全部实测）
+
+- 板型：`avrdude -c arduino -p m328p -P COM3 -b 115200 -U signature:r:-:h` →
+  **`0x1e,0x95,0x0f`**，即 ATmega328P、115200 的 bootloader（Uno 或新 bootloader 的 Nano 克隆）。
+- 烧录（桥的 HTTP 接口 + 仓库 exporter）：1 位输入 → NAND（两输入并接，即 NOT）→ 输出的最小电路
+  （image hash `0xB1E40214`，2 节点 / 6 槽 / 报告 8,232 B flash / 405 B RAM），经 `POST /flash`
+  （fqbn `arduino:avr:uno`、port COM3）真实编译并上传：**`ok:true`，Sketch uses 4,052 bytes (12%) /
+  Global variables use 265 bytes (12%)**——这是本功能第一次在实物上完成一键编译 + 烧录。
+- 串口协议（同一块板，115200）：
+  - `B` → `#TC1 B1E40214 2 1 1 1`，横幅 hash 与映像 hash 一致；
+  - `S` → `F 0 1 1`（NOT(0)=1）；`I 0 1` → `F 0 1 0`（NOT(1)=0）；`I 0 0` → `F 0 1 1`；
+  - `T` → `F 1 1 1`，tick 前进、输出正确。
+- **从游戏面板本身烧录**（Playwright 驱动真实页面，dev server + 真桥 + 真板子）：在沙盒画
+  「关卡输入 → 关卡输出」的直通电路 → 开发板 → 检查连接（下拉显示 `COM3 · WCH CH340 (1a86:7523)`）
+  → 选 COM3 → 烧录 → 面板显示「烧录完成：3992 B flash、265 B RAM」（`Sketch uses 3992 bytes (12%)`）。
+  串口读回：`B` → `#TC1 1A718278 1 1 1 1`；`S` → `F 0 1 0`，`I 0 1` → `F 0 1 1`，
+  `I 0 0` → `F 0 1 0`，`T` → `F 1 1 0`——直通逻辑与 tick 全部正确。
+
+  即：导出器、面板、桥、`arduino-cli`/avrdude、固件、线协议第一次在真实硬件上串成一条可用的链。
+
+### 仍然没做的
+
+- 玩家自己的电路仍要玩家在自己的会话里点一次「烧录」（自动化已经走过同一条面板路径，见上）。
+- Mega 仍是编译验证。
+- 页面输入/时钟自动镜像到板子仍未做（第一版手动驱动）。
+- 板子现在跑的是面板烧进去的直通固件（hash 1A718278，与玩家的电路不会一致，面板会如实说
+  “板子跑的是另一块电路”）；点一次「烧录」即可换成屏幕上的电路。
+
