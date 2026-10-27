@@ -33,6 +33,9 @@ import {
 import type { AppState, Store } from '../../app/store';
 import { instanceRect, placementAt, pinPosition, worldToScreen, type Camera, type Point } from './view';
 import { instanceHeight } from './geometry';
+// The ghost previews the id and width the DROP will give the connector, so it
+// asks the same function the drop uses rather than a second copy of the rule.
+import { levelIoPlacement } from './interact';
 import { CORNER_RADIUS, cornerRadii, longestSegment, routeWire } from './routing';
 import { planRoutes } from './routes';
 import { partCodeOf } from './markings';
@@ -388,6 +391,60 @@ function boxRadiusOf(def: ComponentDef, h: number, zoom: number): number {
 }
 
 /**
+ * The silhouette a part is drawn in, decided once for both the board and the
+ * hand.
+ *
+ * THE GHOST AND THE PLACED PART USED TO HAVE DIFFERENT BODIES, and the level
+ * connector is where it showed: the ghost passed `PART_RADIUS` to `traceBody`
+ * while a placed part asked `boxRadiusOf`, so `关卡输出` previewed as a rounded
+ * rectangle and landed as a circle. The level input had the mirror-image bug on
+ * its other axis: the ghost keyed the arrow off the DEF id, the board off the
+ * INSTANCE id prefix, so a spare `level_input` (allocated `i1` once the level's
+ * pins were taken) was previewed as an arrow and drawn as a box.
+ *
+ * One function, two callers: a preview cannot disagree with the result about
+ * geometry again. The arrow is the level input's own symbol; a level output is a
+ * body with a full-height radius, i.e. a circle at the part's size.
+ */
+export type PartSilhouette =
+  | { readonly kind: 'level-arrow' }
+  | { readonly kind: 'body'; readonly look: GateLook; readonly radius: number };
+
+export function silhouetteOf(def: ComponentDef, h: number, zoom: number): PartSilhouette {
+  if (def.category === 'level' && def.id === 'level_input') return { kind: 'level-arrow' };
+  return { kind: 'body', look: gateLookOf(def), radius: boxRadiusOf(def, h, zoom) };
+}
+
+/** Traces a silhouette at a rectangle; the single drawing path for both states. */
+export function traceSilhouette(
+  ctx: CanvasRenderingContext2D,
+  silhouette: PartSilhouette,
+  p: Point,
+  w: number,
+  h: number,
+  zoom: number,
+): void {
+  if (silhouette.kind === 'level-arrow') {
+    traceLevelArrow(ctx, p, w, h, zoom);
+    return;
+  }
+  traceBody(ctx, silhouette.look, p.x, p.y, w, h, zoom, silhouette.radius);
+}
+
+/**
+ * The width a part declares, before an instance overrides it.
+ *
+ * What a ghost previews: the drop will put the def's own width on an ordinary
+ * part, and a level connector's width comes from the pin instead (see
+ * `drawGhost`).
+ */
+export function declaredWidthOf(def: ComponentDef): number {
+  let width = 1;
+  for (const pin of [...def.inputs, ...def.outputs]) width = Math.max(width, pin.width);
+  return width;
+}
+
+/**
  * The paper: a flat slate blue with a soft diagonal weave over it.
  *
  * The weave is a pattern rather than a run of `stroke()` calls because the
@@ -693,7 +750,12 @@ function outlinedText(
  * and cannot drift from it.
  */
 function levelPinName(inst: Instance): string {
-  const name = inst.id.replace(/^IN_/, '').replace(/^OUT_?/, '');
+  return pinNameOf(inst.id);
+}
+
+/** The name a level connector's badge shows, from the id that binds it. */
+function pinNameOf(id: string): string {
+  const name = id.replace(/^IN_/, '').replace(/^OUT_?/, '');
   return name.length > 0 ? name : 'out';
 }
 
@@ -975,8 +1037,10 @@ function drawInstance(
   const w = rect.w * camera.zoom;
   const h = rect.h * camera.zoom;
   const isSelected = selected.includes(inst.id);
-  const isLevelInput = def.category === 'level' && inst.id.startsWith('IN_');
-  const box = boxRadiusOf(def, h, camera.zoom);
+  // The same silhouette the ghost draws: by def, never by instance id (a spare
+  // level_input would otherwise be previewed as an arrow and land as a box).
+  const silhouette = silhouetteOf(def, h, camera.zoom);
+  const arrowInput = silhouette.kind === 'level-arrow';
   const gate = gateLookOf(def);
   const { colour, glow } = partAppearance(def, inst, view, driven);
 
@@ -985,8 +1049,7 @@ function drawInstance(
   // used to be the exception -- two flat fills and nothing else -- which is why
   // it looked like a sticker next to the gates it feeds.
   const trace = (): void => {
-    if (isLevelInput) traceLevelArrow(ctx, p, w, h, camera.zoom);
-    else traceBody(ctx, gate, p.x, p.y, w, h, camera.zoom, box);
+    traceSilhouette(ctx, silhouette, p, w, h, camera.zoom);
   };
 
   // A lit part is haloed by a wide translucent stroke of its own body path, the
@@ -1014,7 +1077,7 @@ function drawInstance(
   ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
   ctx.fillRect(p.x, p.y, w, h * 0.45);
   ctx.restore();
-  if (!isLevelInput) paintMarks(ctx, gate, p.x, p.y, w, h, camera.zoom);
+  if (!arrowInput) paintMarks(ctx, gate, p.x, p.y, w, h, camera.zoom);
 
   const outputWidth = def.outputs[0] ? effectiveWidth(inst, def.outputs[0]) : 1;
   const value = def.outputs[0] ? outputValue(view, inst.id, def.outputs[0].id) : undefined;
@@ -1038,7 +1101,7 @@ function drawInstance(
         String(value),
         // The arrow's mass is behind its apex, so its number sits further left
         // than a disc's: centred, the last digit of `255` runs off the slope.
-        p.x + w * (isLevelInput ? 0.42 : 0.5),
+        p.x + w * (arrowInput ? 0.42 : 0.5),
         p.y + h / 2,
         Math.max(12, 20 * camera.zoom),
         camera.zoom,
@@ -1113,11 +1176,14 @@ function drawInstance(
  * It is drawn at the position the drop WOULD take (`placementAt`, the same
  * function the drop itself uses), so the preview is not an approximation of the
  * result: what you see under the cursor is where the part lands, on the grid,
- * with the same silhouette and the same marking it will have. A ghost drawn at
- * the raw pointer would be a preview of a placement that never happens.
+ * with the same silhouette it will have (one `traceSilhouette` call for both
+ * states, so the ghost and the placed part cannot disagree about the body), the
+ * marking an ordinary part will carry, and the width and pin-name badges it will
+ * carry -- those are identity, not a reading: a preview of an 8-bit part has to
+ * look 8-bit before it is dropped.
  *
- * No values, no badges, no pins: this is a part that does not exist yet, and
- * anything on it that reported a signal would be reporting one from nowhere.
+ * No values and no pins: this is a part that does not exist yet, and anything on
+ * it that reported a signal would be reporting one from nowhere.
  */
 function drawGhost(
   ctx: CanvasRenderingContext2D,
@@ -1131,27 +1197,46 @@ function drawGhost(
   const corner = worldToScreen(camera, placementAt(at, def));
   const w = INSTANCE_WIDTH * camera.zoom;
   const h = instanceHeight(def) * camera.zoom;
-  const gate = gateLookOf(def);
+  const silhouette = silhouetteOf(def, h, camera.zoom);
+  const placement = levelIoPlacement(state.level, state.graph, defId);
 
   ctx.save();
   ctx.globalAlpha = 0.45;
-  const isLevelInput = def.category === 'level' && defId === 'level_input';
-  if (isLevelInput) traceLevelArrow(ctx, corner, w, h, camera.zoom);
-  else traceBody(ctx, gate, corner.x, corner.y, w, h, camera.zoom, PART_RADIUS * camera.zoom);
+  traceSilhouette(ctx, silhouette, corner, w, h, camera.zoom);
   ctx.fillStyle = THEME.idleBody;
   ctx.fill();
   ctx.strokeStyle = THEME.armed;
   ctx.lineWidth = Math.max(1, 1.5 * camera.zoom);
   ctx.stroke();
-  outlinedText(
-    ctx,
-    partCodeOf(def),
-    corner.x + w * LABEL_CENTRE[gate.shape],
-    corner.y + h / 2,
-    Math.max(10, Math.min(16, 15 * camera.zoom)),
-    camera.zoom,
-    w * (gate.shape === 'triangle' ? 0.46 : gate.shape === 'box' ? 0.84 : 0.66),
-  );
+  if (def.category === 'level') {
+    // A level connector carries its value in the body and its pin name in the
+    // corner; there is no value before it exists, so the ghost is the shape plus
+    // the name it would be given.
+    if (placement !== undefined) {
+      drawNameBadge(
+        ctx,
+        corner.x + (placement.id.startsWith('IN_') ? 22 : 20) * camera.zoom,
+        corner.y + 3 * camera.zoom,
+        pinNameOf(placement.id),
+        camera.zoom,
+      );
+    }
+  } else {
+    const look = silhouette.kind === 'body' ? silhouette.look : gateLookOf(def);
+    outlinedText(
+      ctx,
+      partCodeOf(def),
+      corner.x + w * LABEL_CENTRE[look.shape],
+      corner.y + h / 2,
+      Math.max(10, Math.min(16, 15 * camera.zoom)),
+      camera.zoom,
+      w * (look.shape === 'triangle' ? 0.46 : look.shape === 'box' ? 0.84 : 0.66),
+    );
+  }
+  const width = placement?.width ?? declaredWidthOf(def);
+  if (width > 1) {
+    drawWidthBadge(ctx, corner.x + w - 8 * camera.zoom, corner.y + 3 * camera.zoom, width, camera.zoom);
+  }
   ctx.restore();
 }
 

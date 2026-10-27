@@ -265,6 +265,30 @@ describe('the dependency policy', () => {
 // The drawing rules
 // ---------------------------------------------------------------------------
 
+describe("the board's silhouettes", () => {
+  /**
+   * ONE PATH, TWO CALLERS. The palette's ghost and a placed part are painted by
+   * different functions, and they drifted: the ghost passed the small box radius
+   * to `traceBody` so 关卡输出 previewed as a rounded rectangle while the placed
+   * part was a circle, and the two keyed the level input's arrow off different
+   * things (def id vs instance id), so a spare connector was previewed as an
+   * arrow and drawn as a box.
+   *
+   * The fix is structural: both callers now go through `traceSilhouette`, and
+   * this rule fails if a second call site of either body tracer appears. It reads
+   * the source as text because that is what the invariant is about -- the tool
+   * that catches the next drift has to see the code, not the picture.
+   */
+  it('traces every part body through the one silhouette function', () => {
+    const render = withoutComments(SOURCES['src/ui/board/render.ts'] ?? '');
+    expect(render, 'src/ui/board/render.ts is missing from the source glob').not.toBe('');
+    // Definition plus its single call, each: a third occurrence is a second path.
+    expect([...render.matchAll(/\btraceBody\(/g)]).toHaveLength(2);
+    expect([...render.matchAll(/\btraceLevelArrow\(/g)]).toHaveLength(2);
+    expect(render).toContain('export function traceSilhouette');
+  });
+});
+
 describe('the stylesheet', () => {
   // READ FROM DISK, NOT THROUGH A CSS IMPORT: Vitest answers a CSS import with an
   // empty module (its CSS pipeline is off by default), so a `?raw` / `?inline`

@@ -1,12 +1,38 @@
 import { describe, expect, it } from 'vitest';
-import { THEME, bodyColourOf, glowColourOf, partStateOf } from '../../src/ui/theme';
-import { gateLookOf, partWidthOf, traceLevelArrow } from '../../src/ui/board/render';
+import { PART_RADIUS, THEME, bodyColourOf, glowColourOf, partStateOf } from '../../src/ui/theme';
+import {
+  declaredWidthOf,
+  gateLookOf,
+  partWidthOf,
+  silhouetteOf,
+  traceLevelArrow,
+  traceSilhouette,
+} from '../../src/ui/board/render';
 import { partCodeOf } from '../../src/ui/board/markings';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import type { Instance } from '../../src/core/graph';
 
 const registry = createRegistry(BASE_DEFS);
+
+/**
+ * A canvas context that records every call instead of drawing.
+ *
+ * Structure is what a test can hold on to: a screenshot notices a seam, and then
+ * nothing remembers it. Used here for the silhouette paths.
+ */
+function recorder(): { ctx: CanvasRenderingContext2D; calls: string[] } {
+  const calls: string[] = [];
+  const ctx = new Proxy(
+    {},
+    {
+      get: (_target, key) =>
+        (...args: unknown[]) =>
+          calls.push(`${String(key)}(${args.join(',')})`),
+    },
+  ) as unknown as CanvasRenderingContext2D;
+  return { ctx, calls };
+}
 
 /**
  * The board's colour rule, on its own.
@@ -174,20 +200,6 @@ describe('the width a part reports', () => {
  * one subpath, rounded on the left only, apex on the output pin.
  */
 describe('the level input arrow', () => {
-  /** A canvas context that records every call instead of drawing. */
-  function recorder(): { ctx: CanvasRenderingContext2D; calls: string[] } {
-    const calls: string[] = [];
-    const ctx = new Proxy(
-      {},
-      {
-        get: (_target, key) =>
-          (...args: unknown[]) =>
-            calls.push(`${String(key)}(${args.join(',')})`),
-      },
-    ) as unknown as CanvasRenderingContext2D;
-    return { ctx, calls };
-  }
-
   const trace = (): string[] => {
     const { ctx, calls } = recorder();
     traceLevelArrow(ctx, { x: 0, y: 0 }, 72, 72, 1);
@@ -214,6 +226,66 @@ describe('the level input arrow', () => {
     expect(arcs).toHaveLength(2);
     // Both corners are on the back edge, at x = 0.
     for (const arc of arcs) expect(arc.startsWith('arcTo(0,')).toBe(true);
+  });
+});
+
+/**
+ * ONE SILHOUETTE FOR THE HAND AND THE BOARD.
+ *
+ * The palette's ghost and a placed part are painted by two code paths, and they
+ * drifted: `关卡输出` previewed as a rounded rectangle and landed as a circle
+ * (the ghost passed `PART_RADIUS`, the board asked `boxRadiusOf`), and a spare
+ * `level_input` -- allocated `i1` once a level's own pins were taken -- was
+ * previewed as an arrow and drawn as a box, because the ghost keyed on the DEF id
+ * and the board on the INSTANCE id. Both are geometry, and geometry is testable
+ * without a canvas: `silhouetteOf` is the single decision both paths make.
+ */
+describe('the silhouette a part is previewed and placed in', () => {
+  const silhouette = (id: string) => silhouetteOf(registry.get(id), 72, 1);
+
+  it('gives a level output the full-height body the board draws', () => {
+    const look = silhouette('level_output');
+    expect(look).toEqual({ kind: 'body', look: { shape: 'box', bubble: false }, radius: 36 });
+    // Not the 6px corner every ordinary box gets: at the part's size a full
+    // height radius IS the circle the connector lands as.
+    expect((look as { radius: number }).radius).not.toBe(PART_RADIUS);
+  });
+
+  it('keeps the level input an arrow whatever instance id it will get', () => {
+    // The decision is on the DEF, so a spare connector that will be allocated
+    // `i1` is previewed exactly as it will be drawn.
+    expect(silhouette('level_input')).toEqual({ kind: 'level-arrow' });
+    expect(silhouetteOf(registry.get('level_input'), 40, 2)).toEqual({ kind: 'level-arrow' });
+  });
+
+  it('leaves an ordinary part a rounded rectangle', () => {
+    const look = silhouette('nand');
+    expect(look.kind).toBe('body');
+    expect((look as { radius: number }).radius).toBe(PART_RADIUS);
+  });
+
+  it('draws the same path for both states through one function', () => {
+    const { ctx, calls } = recorder();
+    traceSilhouette(ctx, silhouette('level_output'), { x: 0, y: 0 }, 72, 72, 1);
+    // The circle: `roundRect` with a 36px radius, not the 6px box corner.
+    expect(calls).toContain('roundRect(0,0,72,72,36)');
+    const { ctx: gateCtx, calls: gateCalls } = recorder();
+    traceSilhouette(gateCtx, silhouette('mem1'), { x: 0, y: 0 }, 72, 72, 1);
+    expect(gateCalls.filter((call) => call.startsWith('roundRect('))).toEqual([
+      'roundRect(0,0,72,72,6)',
+    ]);
+    const { ctx: arrowCtx, calls: arrowCalls } = recorder();
+    traceSilhouette(arrowCtx, silhouette('level_input'), { x: 0, y: 0 }, 72, 72, 1);
+    expect(arrowCalls.filter((call) => call.startsWith('roundRect('))).toEqual([]);
+    expect(arrowCalls).toContain('lineTo(72,36)');
+  });
+
+  it('previews the width the part will carry', () => {
+    // The ghost draws the width badge from this: an 8-bit part previewed as 1-bit
+    // is the same class of mismatch as the wrong body.
+    expect(declaredWidthOf(registry.get('and8'))).toBe(8);
+    expect(declaredWidthOf(registry.get('splitter32'))).toBe(32);
+    expect(declaredWidthOf(registry.get('level_output'))).toBe(1);
   });
 });
 
