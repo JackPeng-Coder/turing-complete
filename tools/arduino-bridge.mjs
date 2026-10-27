@@ -146,6 +146,45 @@ export function parseHexPath(log) {
 }
 
 /**
+ * Human names for the USB-to-serial chips a clone carries.
+ *
+ * `arduino-cli` cannot name a board whose USB descriptor is not Arduino's, so an
+ * unidentified port comes back with no `matching_boards` and a label that is
+ * just its address. That is normal for a CH340 clone, but it left "COM3" in the
+ * picker indistinguishable from a Bluetooth socket, which is why the `vid:pid`
+ * such a board does report becomes the label when the table knows its vendor.
+ */
+const USB_VENDORS = new Map([
+  ['1a86', 'WCH CH340'],
+  ['0403', 'FTDI'],
+  ['10c4', 'Silicon Labs CP210x'],
+  ['2341', 'Arduino'],
+  ['2a03', 'Arduino'],
+  ['1b4f', 'SparkFun'],
+  ['239a', 'Adafruit'],
+]);
+
+/** `vid:pid`-based label for a port whose board arduino-cli could not name. */
+function usbLabel(port) {
+  const properties = port.properties;
+  if (
+    properties === null ||
+    typeof properties !== 'object' ||
+    Array.isArray(properties)
+  ) {
+    return null;
+  }
+  const vid = typeof properties.vid === 'string' ? properties.vid.trim().toLowerCase() : '';
+  const pid = typeof properties.pid === 'string' ? properties.pid.trim().toLowerCase() : '';
+  if (!/^0x[0-9a-f]{4}$/.test(vid)) return null;
+  const vendor = USB_VENDORS.get(vid.slice(2));
+  const id = /^0x[0-9a-f]{4}$/.test(pid)
+    ? `${vid.slice(2)}:${pid.slice(2)}`
+    : vid.slice(2);
+  return vendor === undefined ? `USB serial (${id})` : `${vendor} (${id})`;
+}
+
+/**
  * The ports a flash may be pointed at.
  *
  * `arduino-cli board list --format json` reports more than serial ports (the
@@ -154,6 +193,10 @@ export function parseHexPath(log) {
  * `matching_boards`. So the filter is the *address shape*, not the board: every
  * port whose address looks like `COM<n>` or `/dev/tty*` is kept, identified or
  * not. A USB device that has not enumerated yet cannot appear here at all.
+ *
+ * The label is what the picker shows: the board name when the CLI identified
+ * one, otherwise the USB chip when the port reports a `vid` (a CH340 clone
+ * cannot report anything better), otherwise the CLI's own label or the address.
  */
 export function parsePorts(payload) {
   const detected =
@@ -179,12 +222,15 @@ export function parsePorts(payload) {
         typeof candidate.name === 'string' &&
         candidate.name.trim() !== '',
     );
+    const boardName =
+      board !== undefined && typeof board.name === 'string' ? board.name.trim() : '';
     const label =
-      board !== undefined && typeof board.name === 'string'
-        ? board.name.trim()
-        : typeof port.label === 'string' && port.label.trim() !== ''
-          ? port.label.trim()
-          : address;
+      boardName !== ''
+        ? boardName
+        : (usbLabel(port) ??
+          (typeof port.label === 'string' && port.label.trim() !== ''
+            ? port.label.trim()
+            : address));
     seen.add(address);
     ports.push({ address, label });
   }

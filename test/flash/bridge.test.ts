@@ -911,6 +911,48 @@ describe('parsing what the CLI says', () => {
     ]);
   });
 
+  it('names an unidentified USB-serial adapter by the vid:pid it reports', () => {
+    // A CH340 clone carries no Arduino USB descriptor, so `board list` cannot
+    // name the board; without this the picker showed "COM3 · COM3", which was
+    // indistinguishable from a Bluetooth socket on the same machine.
+    const ports = parsePorts({
+      detected_ports: [
+        {
+          port: {
+            address: 'COM3',
+            label: 'COM3',
+            protocol: 'serial',
+            protocol_label: 'Serial Port (USB)',
+            properties: { vid: '0x1A86', pid: '0x7523' },
+          },
+        },
+        { port: { address: 'COM9', label: 'COM9', protocol: 'serial', properties: {} } },
+        {
+          port: {
+            address: 'COM5',
+            label: 'COM5',
+            protocol: 'serial',
+            properties: { vid: '0x1234', pid: '0x0001' },
+          },
+        },
+        {
+          port: {
+            address: 'COM6',
+            label: 'COM6',
+            protocol: 'serial',
+            properties: { vid: 'not-a-vid' },
+          },
+        },
+      ],
+    });
+    expect(ports).toEqual([
+      { address: 'COM3', label: 'WCH CH340 (1a86:7523)' },
+      { address: 'COM9', label: 'COM9' },
+      { address: 'COM5', label: 'USB serial (1234:0001)' },
+      { address: 'COM6', label: 'COM6' },
+    ]);
+  });
+
   it('recognises the installed core in the two shapes the CLI has used', () => {
     expect(coreInstalled({ platforms: [{ id: 'arduino:avr', installed_version: '1.8.7' }] })).toBe(
       true,
