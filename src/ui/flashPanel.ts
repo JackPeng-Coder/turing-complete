@@ -16,21 +16,27 @@ import {
 } from '../flash/client';
 import { buildImage } from '../flash/build';
 import { isImage, type ImageRefusal, type ProgramImage } from '../flash/image';
+import { boardPinChoices } from '../flash/pins';
 import { parseBoardLine, type BoardBanner, type BoardFrame } from '../flash/protocol';
-import { isSandbox } from '../levels/sandbox';
+import { isSandbox, sandboxPins } from '../levels/sandbox';
 import { circuitSignature } from '../persist/sandbox';
 import { SerialLink, serialApi, type SerialPortLike } from './serial';
 
 /**
  * 开发板: the panel that writes a sandbox circuit to a real Arduino.
  *
- * THREE CARDS, in the order a player uses them. 映像 is what the circuit compiles
- * to on the board and what it will cost; 本地桥 is the local daemon that runs
+ * FOUR CARDS, in the order a player uses them. 映像 is what the circuit compiles
+ * to on the board and what it will cost; 引脚 maps a one-bit connector onto a
+ * physical board pin (`pins.ts` holds the rules) so the circuit can drive an LED
+ * or read a button, not only the serial line; 本地桥 is the local daemon that runs
  * `arduino-cli` (the browser cannot); 串口 is the board itself, driven by the
  * line protocol in `flash/protocol.ts`. The panel does not own any circuit: it
  * reads the store, builds an image only when asked or when the tab is opened, and
  * caches that image by the circuit's signature so dragging a wire does not
- * rebuild 900 gates every frame.
+ * rebuild 900 gates every frame. The pin assignment is remembered with the
+ * bridge and board in `tc.flash.v1`, not in the circuit: it belongs to the board
+ * the circuit is flashed to, and it changes only the firmware's I/O, not its
+ * price.
  *
  * IT IS A SANDBOX VIEW. A level's pins are the puzzle's contract and the exporter
  * refuses a level board; the composition root hides the tab outside the sandbox,
@@ -71,6 +77,8 @@ interface Prefs {
   readonly url?: string;
   /** A `BOARD_CHOICES` row id, which is why the Nano's old bootloader is one. */
   readonly board?: string;
+  /** Connector id -> board pin, the 引脚 card's assignments. */
+  readonly pins?: Readonly<Record<string, string>>;
 }
 
 function loadPrefs(): Prefs {
@@ -85,9 +93,16 @@ function loadPrefs(): Prefs {
       typeof record.board === 'string' && BOARD_CHOICES.some((entry) => entry.id === record.board)
         ? record.board
         : undefined;
+    const pins: Record<string, string> = {};
+    if (record.pins !== null && typeof record.pins === 'object' && !Array.isArray(record.pins)) {
+      for (const [id, value] of Object.entries(record.pins as Record<string, unknown>)) {
+        if (typeof value === 'string' && value.trim() !== '') pins[id] = value.trim();
+      }
+    }
     return {
       ...(url === undefined ? {} : { url }),
       ...(board === undefined ? {} : { board }),
+      ...(Object.keys(pins).length === 0 ? {} : { pins }),
     };
   } catch {
     // A corrupt or unavailable save is "no prefs", never a failed boot.
@@ -190,6 +205,14 @@ export function mountFlashPanel(
   imageButtons.append(buildButton, downloadButton);
   imageCard.body.append(summary, limits, staleNote, refusalNote, messageNote, imageButtons);
 
+  // ------------------------------------------------------------------- pins --
+  const pinCard = card('引脚');
+  const pinHint = note('flash-note flash-pin-hint');
+  pinHint.textContent =
+    '1 位连接器可以接板子引脚：输出用 digitalWrite，输入用内部上拉读取（按钮接 GND，未接线读 1）。「不接」的连接器只走串口。D0/D1 是串口线，不在列表里。';
+  const pinList = element('div', 'flash-pin-list');
+  pinCard.body.append(pinHint, pinList);
+
   // ----------------------------------------------------------------- bridge --
   const bridgeCard = card('本地桥');
   const urlInput = element('input', 'flash-input');
@@ -256,7 +279,7 @@ export function mountFlashPanel(
   const serialLog = element('pre', 'flash-log flash-serial-log');
   serialCard.body.append(serialButtons, bannerLine, frameLine, serialNote, inputsBox, outputsBox, serialActions, serialCommandRow, serialLog);
 
-  wrap.append(imageCard.section, bridgeCard.section, serialCard.section);
+  wrap.append(imageCard.section, pinCard.section, bridgeCard.section, serialCard.section);
 
   // ------------------------------------------------------------------ state --
   let built: { readonly image: ProgramImage; readonly signature: string } | null = null;
@@ -274,6 +297,8 @@ export function mountFlashPanel(
   let lastInputsFor: ProgramImage | null = null;
   let inputFields = new Map<string, HTMLInputElement>();
   let serialLines: string[] = [];
+  /** Connector id -> board pin; mutated by the 引脚 card, persisted in prefs. */
+  const pinMap: Record<string, string> = { ...(prefs.pins ?? {}) };
   const unsubscribe = store.subscribe(() => {
     if (visible) render();
   });
@@ -298,14 +323,27 @@ export function mountFlashPanel(
     });
   }
 
+  /** The assignments in a stable spelling, for the image's cache key. */
+  function pinSignature(): string {
+    return Object.keys(pinMap)
+      .sort()
+      .map((id) => `${id}=${pinMap[id] ?? ''}`)
+      .join(',');
+  }
+
   function signatureOf(level: AppState['level'], graph: AppState['graph']): string {
-    return `${level.id}@${circuitSignature(graph)}@${boardId()}`;
+    return `${level.id}@${circuitSignature(graph)}@${boardId()}@${pinSignature()}`;
+  }
+
+  /** Remember everything the panel owns in one save; the fields call it. */
+  function rememberPrefs(): void {
+    savePrefs({ url: urlInput.value, board: boardSelect.value, pins: pinMap });
   }
 
   /**
-   * The built image, built on first use and rebuilt when the circuit or the
-   * board changed. A refusal is kept as a refusal: the panel shows why rather
-   * than leaving the last good image on screen.
+   * The built image, built on first use and rebuilt when the circuit, the board
+   * or a pin assignment changed. A refusal is kept as a refusal: the panel shows
+   * why rather than leaving the last good image on screen.
    */
   function ensureImage(): ProgramImage | null {
     const state = store.get();
@@ -315,9 +353,10 @@ export function mountFlashPanel(
       message = { text: '写入开发板只在沙盒里可用：关卡板上的引脚是题目的契约。', tone: 'warn' };
       return null;
     }
+    prunePins();
     const signature = signatureOf(state.level, state.graph);
     if (built !== null && built.signature === signature) return built.image;
-    const result = buildImage(state.graph, state.registry, state.level, boardId());
+    const result = buildImage(state.graph, state.registry, state.level, boardId(), pinMap);
     if (isImage(result)) {
       built = { image: result.image, signature };
       refusal = null;
@@ -326,6 +365,97 @@ export function mountFlashPanel(
       refusal = result.refusal;
     }
     return built?.image ?? null;
+  }
+
+  // -------------------------------------------------------------- the pins --
+
+  interface ConnectorRow {
+    readonly id: string;
+    readonly width: number;
+    readonly direction: '输入' | '输出';
+  }
+
+  /** The connectors the circuit has now, in the order the cards list them. */
+  function connectorRows(): readonly ConnectorRow[] {
+    const state = store.get();
+    if (!isSandbox(state.level)) return [];
+    const pins = sandboxPins(state.graph, state.registry);
+    return [
+      ...pins.inputs.map((pin) => ({ id: pin.id, width: pin.width, direction: '输入' as const })),
+      ...pins.outputs.map((pin) => ({ id: pin.id, width: pin.width, direction: '输出' as const })),
+    ];
+  }
+
+  /**
+   * Drop assignments that cannot be used any more: a deleted connector, a
+   * connector that became wide, a pin that board does not have (after a board
+   * switch) and a second connector on a pin already taken. The image builder
+   * refuses the same states, but pruning here is what keeps the pickers usable
+   * instead of leaving the player to repair a crossing that the UI created.
+   */
+  function prunePins(): void {
+    const allowed = new Set(boardPinChoices(boardId()));
+    const held = new Set<string>();
+    const kept: Record<string, string> = {};
+    for (const row of connectorRows()) {
+      const pin = pinMap[row.id];
+      if (pin === undefined) continue;
+      if (row.width !== 1 || !allowed.has(pin) || held.has(pin)) continue;
+      held.add(pin);
+      kept[row.id] = pin;
+    }
+    const before = Object.keys(pinMap).length;
+    const after = Object.keys(kept).length;
+    if (before === after && Object.keys(kept).every((id) => pinMap[id] === kept[id])) return;
+    for (const id of Object.keys(pinMap)) delete pinMap[id];
+    Object.assign(pinMap, kept);
+    rememberPrefs();
+  }
+
+  /** Rebuild the connector rows and their pin pickers. */
+  function renderPins(): void {
+    prunePins();
+    const rows = connectorRows();
+    pinList.replaceChildren();
+    if (rows.length === 0) {
+      pinList.append(element('div', 'flash-empty', '沙盒里还没有连接器：放一个「关卡输入」或「关卡输出」再选引脚。'));
+      return;
+    }
+    const choices = boardPinChoices(boardId());
+    const holder = new Map<string, string>();
+    for (const row of rows) {
+      const pin = pinMap[row.id];
+      if (pin !== undefined) holder.set(pin, row.id);
+    }
+    for (const row of rows) {
+      const line = element('div', 'flash-pin-row');
+      line.append(element('span', 'flash-pin-name', `${row.direction} ${row.id}`));
+      if (row.width !== 1) {
+        line.append(element('span', 'flash-empty', `${row.width} 位：只走串口`));
+        pinList.append(line);
+        continue;
+      }
+      const select = element('select', 'flash-input');
+      const none = element('option', undefined, '不接');
+      none.value = '';
+      select.append(none);
+      for (const pin of choices) {
+        const option = element('option', undefined, `引脚 ${pin}`);
+        option.value = pin;
+        const takenBy = holder.get(pin);
+        option.disabled = takenBy !== undefined && takenBy !== row.id;
+        select.append(option);
+      }
+      select.value = pinMap[row.id] ?? '';
+      select.addEventListener('change', () => {
+        if (select.value === '') delete pinMap[row.id];
+        else pinMap[row.id] = select.value;
+        rememberPrefs();
+        if (visible) render();
+      });
+      line.append(select);
+      pinList.append(line);
+    }
   }
 
   function buildNow(): void {
@@ -660,10 +790,13 @@ export function mountFlashPanel(
 
   function render(): void {
     if (!visible) return;
+    renderPins();
     const image = built?.image ?? null;
     const profile = boardProfile(boardId());
     const choice = selectedBoard();
     const stale = staleNow();
+    const pinCount =
+      image === null ? 0 : image.pinInputs.length + image.pinOutputs.length;
 
     buildButton.disabled = busy !== null;
     downloadButton.disabled = image === null;
@@ -680,7 +813,7 @@ export function mountFlashPanel(
       limits.textContent = `${choice.name} · 预算：RAM ${profile.maxRam} B · flash ${profile.maxFlash} B`;
     } else {
       const report = image.report;
-      summary.textContent = `${report.instances} 元件 · ${report.expanded} 展开 · ${report.nodes} 节点 · ${report.slots} 槽位 · ${report.stateCount} 状态 · ${report.tables} 表`;
+      summary.textContent = `${report.instances} 元件 · ${report.expanded} 展开 · ${report.nodes} 节点 · ${report.slots} 槽位 · ${report.stateCount} 状态 · ${report.tables} 表${pinCount === 0 ? '' : ` · ${pinCount} 个引脚`}`;
       limits.textContent = `${choice.name} · RAM ≈ ${report.ramBytes} B / ${profile.maxRam} B · flash ≈ ${report.flashBytes} B / ${profile.maxFlash} B · ${report.mode === 'dag' ? '顺序求值' : '迭代收敛'}`;
     }
     staleNote.hidden = !stale;
@@ -732,15 +865,17 @@ export function mountFlashPanel(
 
   // ------------------------------------------------------------------ boot --
   // The remembered board is the picker's row, not the FQBN: two rows share the
-  // Nano's chip and only one of them carries the old bootloader's options.
-  savePrefs({ url: urlInput.value, board: boardSelect.value });
+  // Nano's chip and only one of them carries the old bootloader's options. The
+  // pin assignments ride along in the same record.
+  rememberPrefs();
   urlInput.addEventListener('change', () => {
-    savePrefs({ url: urlInput.value, board: boardSelect.value });
+    rememberPrefs();
   });
   boardSelect.addEventListener('change', () => {
-    savePrefs({ url: urlInput.value, board: boardSelect.value });
-    // The budget belongs to the board: a refusal for an Uno may be a fit for a
-    // Mega, so the stale test has to see the new board, not the old build.
+    rememberPrefs();
+    // The pin list belongs to the board too: a Mega pin is not an Uno pin, so a
+    // switch prunes the assignments that the new board cannot make (render does
+    // it through the pin card) before the next build.
     if (visible) render();
   });
   // 烧录 is enabled by the port picker, and nothing in the store changes when a

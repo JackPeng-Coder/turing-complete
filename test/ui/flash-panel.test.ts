@@ -21,18 +21,9 @@ async function until(check: () => boolean, what: string): Promise<void> {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/** A sandbox board with a NAND driven by one input and read by one output. */
-function sandboxStore(): { store: Store<AppState>; graph: Graph } {
-  const graph = emptyGraph('sandbox');
-  const input = addInstance(graph, 'level_input', 0, 0, 'IN_1');
-  input.params.width = 1;
-  const output = addInstance(graph, 'level_output', 400, 0, 'OUT_1');
-  output.params.width = 1;
-  const gate = addInstance(graph, 'nand', 200, 0);
-  connect(graph, { inst: input.id, port: 'out' }, { inst: gate.id, port: 'a' });
-  connect(graph, { inst: input.id, port: 'out' }, { inst: gate.id, port: 'b' });
-  connect(graph, { inst: gate.id, port: 'out' }, { inst: output.id, port: 'in' });
-  const store = createStore<AppState>({
+/** The store a mounted panel reads, from a circuit the caller built. */
+function storeOf(graph: Graph): Store<AppState> {
+  return createStore<AppState>({
     level: SANDBOX_LEVEL,
     graph,
     registry,
@@ -49,7 +40,31 @@ function sandboxStore(): { store: Store<AppState>; graph: Graph } {
     lastGrade: null,
     status: null,
   });
-  return { store, graph };
+}
+
+/** A sandbox board with a NAND driven by one input and read by one output. */
+function sandboxStore(): { store: Store<AppState>; graph: Graph } {
+  const graph = emptyGraph('sandbox');
+  const input = addInstance(graph, 'level_input', 0, 0, 'IN_1');
+  input.params.width = 1;
+  const output = addInstance(graph, 'level_output', 400, 0, 'OUT_1');
+  output.params.width = 1;
+  const gate = addInstance(graph, 'nand', 200, 0);
+  connect(graph, { inst: input.id, port: 'out' }, { inst: gate.id, port: 'a' });
+  connect(graph, { inst: input.id, port: 'out' }, { inst: gate.id, port: 'b' });
+  connect(graph, { inst: gate.id, port: 'out' }, { inst: output.id, port: 'in' });
+  return { store: storeOf(graph), graph };
+}
+
+/** A direct input-to-output circuit with the widths a pin test needs. */
+function passStore(width: number): { store: Store<AppState>; graph: Graph } {
+  const graph = emptyGraph('sandbox');
+  const input = addInstance(graph, 'level_input', 0, 0, 'IN_1');
+  input.params.width = width;
+  const output = addInstance(graph, 'level_output', 400, 0, 'OUT_1');
+  output.params.width = width;
+  connect(graph, { inst: input.id, port: 'out' }, { inst: output.id, port: 'in' });
+  return { store: storeOf(graph), graph };
 }
 
 function imageOf(graph: Graph): ProgramImage {
@@ -63,10 +78,24 @@ function mount(
   store: Store<AppState>,
   options: FlashPanelOptions = {},
 ): { root: HTMLElement; panel: FlashPanel } {
+  // Every test starts with no remembered board, pins or bridge address; a test
+  // that cares about what survives a remount mounts the panel directly.
+  globalThis.localStorage?.clear();
   const root = document.createElement('div');
   const panel = mountFlashPanel(root, store, options);
   panel.reveal();
   return { root, panel };
+}
+
+/** The 引脚 card's pickers, inputs first and then outputs. */
+function pinSelects(root: HTMLElement): HTMLSelectElement[] {
+  return [...root.querySelectorAll<HTMLSelectElement>('.flash-pin-list select')];
+}
+
+function optionByValue(select: HTMLSelectElement, value: string): HTMLOptionElement {
+  const found = [...select.options].find((option) => option.value === value);
+  if (found === undefined) throw new Error(`no option ${value}`);
+  return found;
 }
 
 function buttonByText(root: HTMLElement, text: string): HTMLButtonElement {
@@ -403,5 +432,61 @@ describe('the 开发板 panel', () => {
     const { root } = mount(store, { serialSource: {} });
     buttonByText(root, '连接串口').click();
     await until(() => text(root, '.flash-serial-note').includes('Web Serial'), 'the no-serial note');
+  });
+
+  it('maps connectors onto board pins and downloads a sketch that carries them', () => {
+    const { store } = sandboxStore();
+    const downloads: Array<{ name: string; text: string }> = [];
+    const { root } = mount(store, {
+      onDownload: (name, text) => downloads.push({ name, text }),
+    });
+    // The card lists inputs first and then outputs; both are one bit here.
+    expect(pinSelects(root)).toHaveLength(2);
+    const input = pinSelects(root)[0]!;
+    input.value = '2';
+    input.dispatchEvent(new Event('change'));
+    expect(part(root, '.flash-stale').hidden).toBe(false);
+    // The pin just taken is no longer offered to the other row -- the panel
+    // prevents the duplicate the builder would otherwise refuse.
+    const output = pinSelects(root)[1]!;
+    expect(optionByValue(output, '2').disabled).toBe(true);
+    output.value = '13';
+    output.dispatchEvent(new Event('change'));
+    buttonByText(root, '构建映像').click();
+    expect(text(root, '.flash-summary')).toContain('2 个引脚');
+    buttonByText(root, '下载 .ino').click();
+    expect(downloads).toHaveLength(1);
+    const sketch = downloads[0]!.text;
+    expect(sketch).toContain('static const TcPinIn TC_PIN_IN[1] PROGMEM');
+    expect(sketch).toContain('static const TcPinOut TC_PIN_OUT[1] PROGMEM');
+    expect(sketch).toContain('{2,0}');
+    expect(sketch).toMatch(/\{13,\d+\}/);
+    expect(sketch).toContain('INPUT_PULLUP');
+    expect(sketch).toContain('digitalWrite');
+  });
+
+  it('shows a wide connector as serial-only instead of offering it a pin', () => {
+    const { store } = passStore(8);
+    const { root } = mount(store);
+    expect(pinSelects(root)).toHaveLength(0);
+    expect(root.querySelector('.flash-pin-list')?.textContent).toContain('8 位：只走串口');
+  });
+
+  it('remembers pin assignments across a remount', () => {
+    globalThis.localStorage?.clear();
+    const { store } = sandboxStore();
+    const first = document.createElement('div');
+    const panel = mountFlashPanel(first, store);
+    panel.reveal();
+    const select = pinSelects(first)[1]!;
+    select.value = '13';
+    select.dispatchEvent(new Event('change'));
+    panel.destroy();
+
+    const second = document.createElement('div');
+    const again = mountFlashPanel(second, store);
+    again.reveal();
+    expect(pinSelects(second)[1]!.value).toBe('13');
+    again.destroy();
   });
 });

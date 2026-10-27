@@ -1339,12 +1339,16 @@ test('the sandbox circuit is costed, compiled through the bridge, and driven ove
     'access-control-allow-methods': 'GET, POST, OPTIONS',
     'access-control-allow-headers': 'Content-Type, X-TC-Arduino, X-TC-Token',
   };
+  /** The JSON bodies the panel posted, so the sketch itself can be asserted. */
+  const bodies: string[] = [];
   await page.route('http://127.0.0.1:8765/**', async (route) => {
     const request = route.request();
     if (request.method() === 'OPTIONS') {
       await route.fulfill({ status: 204, headers: { ...cors } });
       return;
     }
+    const posted = request.postData();
+    if (posted !== null && posted !== '') bodies.push(posted);
     const send = (body: unknown) =>
       route.fulfill({
         status: 200,
@@ -1420,8 +1424,21 @@ test('the sandbox circuit is costed, compiled through the bridge, and driven ove
   await page.getByRole('button', { name: '检查连接' }).click();
   await expect(page.locator('.flash-bridge-status')).toContainText('已安装');
   await expect(page.locator('.flash-fields select').nth(1)).toContainText('COM3');
+
+  // The 引脚 card: both connectors are one bit, so both take a pin. The compile
+  // request must carry the pin tables, which is the panel having rebuilt the
+  // image with the mapping rather than only remembering it.
+  await expect(page.locator('.flash-pin-list select')).toHaveCount(2);
+  await page.locator('.flash-pin-list select').nth(0).selectOption('2');
+  await page.locator('.flash-pin-list select').nth(1).selectOption('13');
   await page.getByRole('button', { name: '编译' }).click();
   await expect(page.locator('.flash-bridge-log')).toContainText('Sketch uses 924 bytes');
+  await expect(page.locator('.flash-summary')).toContainText('2 个引脚');
+  const sketch = (JSON.parse(bodies.at(-1) ?? '{}') as { sketch?: string }).sketch ?? '';
+  expect(sketch).toContain('TC_PIN_IN');
+  expect(sketch).toContain('TC_PIN_OUT');
+  expect(sketch).toContain('INPUT_PULLUP');
+  expect(sketch).toContain('digitalWrite');
 
   // The board: the banner is read, the hash is compared, a tick's frame is shown.
   await page.getByRole('button', { name: '连接串口' }).click();

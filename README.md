@@ -66,9 +66,10 @@ towards a working CPU.
   from the sandbox board — the first version knows the one-bit gates, the full adder, the delay
   line, the one-bit memory and the two connectors — costs it against Uno, Nano or Mega budgets,
   and either downloads a self-contained `.ino` or flashes it through `tools/arduino-bridge.mjs`, a
-  loopback daemon that runs `arduino-cli` (a browser cannot). Once flashed, the board is driven and
-  read over Web Serial with the sketch's own line protocol; the banner's hash says whether the
-  board is running the circuit on screen.
+  loopback daemon that runs `arduino-cli` (a browser cannot). A one-bit connector can also be put on
+  a physical pin: an output drives it with `digitalWrite`, an input is read with the internal pull-up.
+  Once flashed, the board is driven and read over Web Serial with the sketch's own line protocol; the
+  banner's hash says whether the board is running the circuit on screen.
 - **A built-in agent you can talk to.** Fill in an API address, a key and a model once — the request
   goes straight from the browser to that endpoint, so the app still ships **no runtime dependency and
   no server** — then describe what you want in Chinese and watch it happen. The agent calls one
@@ -271,6 +272,16 @@ R clears the storage and the inputs, 读取 S prints the current frame, each inp
 field and 同步面板输入 copies the in-page input values onto the board, and the command line accepts
 the documented protocol lines (`I <index> <value>`, `T`, `R`, `S`, `C <hz>`, `B`) directly.
 
+The 引脚 card puts a one-bit connector on a physical pin. An output is driven with `digitalWrite` after
+every settle, so D13's LED or a relay on D7 follows the circuit; an input is read with `digitalRead`
+every loop with the internal pull-up on, so a button wired to GND works (and an unwired input reads 1).
+One pin can belong to one connector — the pickers disable a pin another row already holds, and
+`buildImage` refuses the same collision from a stale save. D0/D1 are not offered (they are the USB
+serial line) and neither are the 328P's analogue-only A6/A7; the Mega adds D22–D53 and A6–A15. A wide
+connector stays on the serial line: one pin per connector is the first version's contract. Assignments
+are remembered with the board in the browser, are compiled into the sketch (and therefore into the
+banner hash), so "what is flashed" and "what is on screen" still agree.
+
 The supported set is deliberately narrow: a wide part, a decoder or a CPU part is refused with the
 instance named, and `src/flash/build.ts` is where the set is stated. The sketch is a table-driven
 interpreter rather than one statement per gate, which is what lets a board of several hundred gates
@@ -284,8 +295,8 @@ src/
   asm/      the assembler and its ISA: field ranges, addressing modes, operands, program images
   levels/   LevelSpec types, the campaign table, checks, grader, content/ (chapters 1–4), the
             sandbox spec, and the custom-component library and wrap
-  flash/    the Arduino exporter: component tables, the program image, the sketch emitter, the
-            serial line protocol and the local bridge's client
+  flash/    the Arduino exporter: component tables, the program image, the pin map, the sketch
+            emitter, the serial line protocol and the local bridge's client
   app/      application state, command/undo stack, progress, and the shared viewport types
   agent/    the built-in assistant: the tool list it may call, the operations behind them, the
             OpenAI-compatible streaming client, its settings, and the run loop
