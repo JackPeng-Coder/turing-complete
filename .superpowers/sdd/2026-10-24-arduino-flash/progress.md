@@ -214,7 +214,7 @@
   下载的 `.ino` 带引脚表；宽连接器显示“只走串口”；映射跨重挂载被记住。
 - `test/smoke/ui.spec.ts`：沙盒 → 开发板 → 检查连接 → 给两个连接器选引脚 → 编译；断言发出去的
   request sketch 含 `TC_PIN_IN`/`TC_PIN_OUT`/`INPUT_PULLUP`，面板摘要显示“2 个引脚”。
-- 门禁：`pnpm build` exit 0；`pnpm test` **78 文件 / 1858 通过**；`pnpm smoke` **35 通过 + 2 跳过**。
+- 门禁：`pnpm build` exit 0；`pnpm test` **78 文件 / 1865 通过**；`pnpm smoke` **35 通过 + 2 跳过**。
 - **真实板子**（CH340 / ATmega328P，COM3）：从游戏面板（Playwright 驱动预览页 + 真桥 + 真板）
   画 关卡输入 → 关卡输出，引脚选 IN_1→2、OUT_1→13，烧录：**4,776 B flash / 266 B RAM**，
   摘要“2 个引脚”；串口读回 `#TC1 A9461310 1 1 1 1`、`S` → `F 0 1 1`（D2 上拉 = 1 → D13 = 1，
@@ -228,4 +228,39 @@
 - 输出只有高/低；PWM、开漏、模拟量没有做。
 - 引脚映射没有做电气保护提示（5 V 逻辑、别把输出对地短路之类只写在 README 的常识里）。
 - Mega 的引脚号只做过编译验证，实物仍是 Uno 类板。
+
+## 2026-10-27 预览与放置的形状不一致（渲染缺陷）
+
+用户报「放下的输出元件和手上拿的输入元件样式不一样」。根因不是输入/输出两种元件本身的符号差异
+（关卡输入是箭头、关卡输出是圆，这是两种元件各自的符号），而是**同一个元件在“手上”与“放下后”
+被画成两个形状**；顺着查还有两处同类的预览/实物漂移：
+
+| # | 缺陷 | 根因 | 后果 |
+|---|---|---|---|
+| 1 | 手持 关卡输出 是圆角方框，放下是圆 | `drawGhost` 给 `traceBody` 传 `PART_RADIUS`；已放置实例问 `boxRadiusOf`，而 level 类半径 = h/2 | 预览与结果不同形 |
+| 2 | 备用 level_input（本关引脚放完后拿到的 `i1`）预览是箭头、放下是方框 | ghost 按 def id 判断箭头，board 按 instance id 前缀判断 | 同一个 def 两种轮廓 |
+| 3 | 手持 8 位元件看不出位宽；手持连接器看不到它将得到的引脚名 | ghost 原先“无徽章” | 8 位与 1 位预览一样；连接器放下后才出现名字 |
+
+修法：
+
+- `render.ts` 新增 `silhouetteOf` / `traceSilhouette`：板与 ghost 共用同一条绘制路径，轮廓只由 def
+  （和高度）决定；备用 level_input 也按 def 画箭头。
+- ghost 用 `levelIoPlacement`（和真正 drop 同一个函数）预演将拿到的 id 与位宽，画名字徽章与位宽
+  徽章；普通元件仍画标记。值仍然不画（尚未存在的东西没有读数）。
+- `declaredWidthOf` 把“def 的位宽”写在一处。
+- `conventions.test.ts` 加结构规则：`traceBody(` / `traceLevelArrow(` 各只允许出现 2 次
+  （定义 + `traceSilhouette` 里的唯一调用）；出现第三个调用点即失败。
+
+证据：
+
+- `test/ui/appearance.test.ts` +5：输出圆的半径是 36 而非 6、输入恒为箭头、普通元件是 6；
+  `traceSilhouette` 实际画出 `roundRect(…,36)` / `roundRect(…,6)` / 箭头 apex；`declaredWidthOf`
+  的 8/32/1。
+- `test/conventions.test.ts` +1：单一路径规则。
+- 门禁：`pnpm build` exit 0；`pnpm test` **78 文件 / 1871 通过**；`pnpm smoke` **35 通过 + 2 跳过**。
+- 真浏览器截图（Playwright 对 dev server）：手持 关卡输出 是圆 + 名字徽章（下一号 2），放下后同形；
+  手持 8 位与门 显示 `AND` + `8` 徽章，放下后同形；输入/输出各自的符号不变。
+
+没做的：ghost 仍不画引脚与数值（尚未存在的元件没有信号，这是刻意的）；输入箭头 vs 输出圆是两种
+元件的符号，不是不一致。
 
