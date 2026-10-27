@@ -148,6 +148,26 @@ function toneOf(node: HTMLElement, tone: 'info' | 'good' | 'bad' | 'warn'): void
   node.dataset.tone = tone;
 }
 
+/**
+ * The sentence a failed compile or upload ends on.
+ *
+ * The two failures a player is most likely to meet have nothing to do with the
+ * circuit: the serial port is still held open (by this card before an upload, or
+ * by another serial tool), or an ATmega-class board does not answer because the
+ * wrong bootloader was picked. Naming which one it is saves reading an avrdude
+ * log, which is otherwise the only place the difference shows.
+ */
+function failureText(result: BridgeBuild): string {
+  const log = `${result.log}\n${result.error ?? ''}`;
+  if (/cannot open (?:the )?port|access is denied|permission denied|拒绝访问|被占用/i.test(log)) {
+    return '串口被占用或不允许访问：先在「串口」卡点「断开」，并关掉其他占用它的程序（Arduino IDE、串口监视器、别的标签页）再烧录。';
+  }
+  if (/programmer is not responding|not in sync|stk500|wrong microcontroller|invalid device signature/i.test(log)) {
+    return '板子的 bootloader 没有应答：确认「开发板」选的是板子上的型号；Nano 克隆板若是旧 bootloader，改选「Arduino Nano（旧 bootloader）」。';
+  }
+  return result.error ?? 'arduino-cli 没有通过：日志见下方。';
+}
+
 export function mountFlashPanel(
   root: HTMLElement,
   store: Store<AppState>,
@@ -424,7 +444,7 @@ export function mountFlashPanel(
             : `编译通过：${result.flashBytes ?? '—'} B flash、${result.ramBytes ?? '—'} B RAM。`,
           tone: 'good',
         }
-      : { text: result.error ?? 'arduino-cli 没有通过：日志见下方。', tone: 'bad' };
+      : { text: failureText(result), tone: 'bad' };
     render();
   }
 
@@ -721,6 +741,13 @@ export function mountFlashPanel(
     savePrefs({ url: urlInput.value, board: boardSelect.value });
     // The budget belongs to the board: a refusal for an Uno may be a fit for a
     // Mega, so the stale test has to see the new board, not the old build.
+    if (visible) render();
+  });
+  // 烧录 is enabled by the port picker, and nothing in the store changes when a
+  // port is chosen: without this the button stayed grey after selecting COM3
+  // (found by driving the real board from a browser, not by the unit tests,
+  // which called render() by hand until this listener made that unnecessary).
+  portSelect.addEventListener('change', () => {
     if (visible) render();
   });
   commandInput.addEventListener('keydown', (event) => {

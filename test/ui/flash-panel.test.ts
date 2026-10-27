@@ -183,7 +183,7 @@ describe('the 开发板 panel', () => {
         { address: 'COM4', label: 'Arduino Nano' },
       ],
     }));
-    const { root, panel } = mount(store, { fetch: fake.fetch });
+    const { root } = mount(store, { fetch: fake.fetch });
     buttonByText(root, '检查连接').click();
     await until(() => text(root, '.flash-bridge-status').includes('已安装'), 'the health answer');
     expect(text(root, '.flash-bridge-status')).toContain('arduino-cli');
@@ -196,8 +196,11 @@ describe('the 开发板 panel', () => {
     ]);
     // Two ports means no automatic choice: 烧录 stays off until a player picks one.
     expect(buttonByText(root, '烧录').disabled).toBe(true);
+    // The browser fires `change` on a picker choice; the button has to follow it
+    // without any store update, which is why this dispatches rather than calling
+    // panel.render() (that call is what once hid the missing listener).
     selects[1]!.value = 'COM3';
-    panel.render();
+    selects[1]!.dispatchEvent(new Event('change'));
     expect(buttonByText(root, '烧录').disabled).toBe(false);
   });
 
@@ -250,6 +253,37 @@ describe('the 开发板 panel', () => {
     const posted = fake.calls.find((call) => call.url.endsWith('/flash'));
     expect(posted).toBeDefined();
     expect((JSON.parse(posted!.body ?? '{}') as Record<string, unknown>).port).toBe('COM3');
+  });
+
+  it('names a held serial port instead of leaving only the avrdude log', async () => {
+    const { store } = sandboxStore();
+    const fake = bridgeFetch((url) =>
+      url.endsWith('/flash')
+        ? {
+            ok: false,
+            code: 1,
+            log: 'avrdude: ser_open(): cannot open port COM3: Access is denied.\nError during Upload: uploading error: exit status 1',
+            flashBytes: 924,
+            ramBytes: 9,
+          }
+        : {
+            ok: true,
+            cli: 'arduino-cli',
+            core: true,
+            ports: [{ address: 'COM3', label: 'WCH CH340 (1a86:7523)' }],
+          },
+    );
+    const { root, panel } = mount(store, { fetch: fake.fetch });
+    buttonByText(root, '检查连接').click();
+    await until(
+      () => root.querySelectorAll('.flash-fields select')[1]!.querySelectorAll('option').length > 1,
+      'the port list',
+    );
+    panel.render();
+    buttonByText(root, '烧录').click();
+    await until(() => text(root, '.flash-message').includes('占用'), 'the busy-port sentence');
+    expect(text(root, '.flash-message')).toContain('断开');
+    expect(text(root, '.flash-bridge-log')).toContain('Access is denied');
   });
 
   it('asks for the old bootloader options when that board row is chosen', async () => {
