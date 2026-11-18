@@ -1,94 +1,79 @@
+// 第 4 章第 2 批：全局第 53-56 关，本章收尾的四关，也是本章头一次不全是同一形状的关卡。
+// 依赖下层 `boards/overture`（第 3 章机器的共享构造器）与 `spec`/`tables` 的关卡类型；
+// 本文件只被 `content/ch4/index.ts` 拼接。第 54、56 关使用 `custom` 检查器（lock、maze），
+// 由内容路径上的副作用 import 登记。关键不变量：编程关每关两段步进、两个向量；
+// 闭环关的谜题数据（秘密字节、迷宫网格）只住在关卡 `params` 里。
+
 import { overtureBoard } from '../../boards/overture';
 import type { LevelSpec, ProgramStep } from '../../spec';
-// `LevelIo` -- the pin shape -- is `tables.ts`'s; `checks.ts` exports an
-// unrelated runtime interface of the same name (the bound simulation).
+// 这里的 `LevelIo` 是"引脚形状"，来自 `tables.ts`；`checks.ts` 也导出了一个同名但无关的
+// 运行时接口（绑定后的仿真环境），两者不要混用。
 import type { LevelIo } from '../../tables';
 
 /**
- * Chapter 4, levels 53-56: the chapter's closing four, and the first levels in
- * it that are not all one shape.
+ * 第 4 章第 53-56 关：本章收尾的四关，也是本章头一次不全是同一形状的关卡。
  *
- * TWO KINDS OF LEVEL, ONE CHANNEL. Levels 53 and 55 are the straight-line shape
- * batch 1 established: `overtureBoard({ inputId })` as the board, the player's
- * program read by a `program` check (`from: 'player'`, no `source`), and a step
- * list that names the ticks the answer must and must not be on `out`. Levels 54
- * and 56 close the loop: the board is the same machine with `halt: false`, and
- * the check is `custom` -- the puzzle's data (a secret byte, a maze grid) lives
- * in the level, and a registered checker (`lock`, `maze`) resets the board,
- * loads the player's program itself, drives the level's pins and decides its own
- * verdict and tick count. Copying that driving logic into level data would be
- * hiding an engine in the level layer, which ruling 4 forbids.
+ * 两种关卡、一个通道。第 53、55 关是批次 1 建立的直线形状：
+ * `overtureBoard({ inputId })` 当画板，`program` 检查读玩家的程序（`from: 'player'`，无 `source`），
+ * 步进列表点名答案必须与不得出现在 `out` 上的节拍。第 54、56 关闭环：
+ * 画板是同一台机器但 `halt: false`，检查是 `custom`——谜题数据（秘密字节、迷宫网格）
+ * 住在关卡里，由注册的检查器（`lock`、`maze`）重置画板、自己装载玩家程序、驱动关卡引脚，
+ * 并决定自己的判定与节拍数。把那段驱动逻辑复制进关卡数据，等于把引擎藏进关卡层，
+ * 而裁决 4 禁止这样做。
  *
- * WHY THE CLOSED-LOOP LEVELS ARE `halt: false`, AND WHY THAT IS A FACT RATHER
- * THAN A TUNING. `out` on this machine is combinational: it publishes the byte a
- * `move|sX|out` instruction copies while that instruction is being decoded, and
- * the halt line freezes the program counter on that instruction so the byte
- * stays put. That is exactly what levels 53 and 55 want -- the answer must
- * remain on `out` for the walk's later assertions -- and exactly what 54 and 56
- * cannot have: a searching or walking program writes `out` inside its loop, so
- * on the halting board it would stop at its first guess or its first move.
- * Measured: the code lock's reference locks at PC 2 with `try` at 0 forever.
+ * 闭环关为什么是 `halt: false`，以及为什么这是事实而不是调参。这台机器的 `out` 是组合的：
+ * 它在 `move|sX|out` 指令被译码期间发布该指令复制的字节，而停机线把程序计数器冻在该指令上，
+ * 字节于是留在那里。这正是第 53、55 关想要的——答案必须留在 `out` 上供步进后面的断言读取——
+ * 也恰恰是 54、56 关不能有的：搜索或走迷宫的程序在循环内部写 `out`，
+ * 在会停机的画板上它会在第一次猜测或第一步就停住。实测：密码锁的参考程序在 PC 2 处锁定，
+ * `try` 永远停在 0。
  *
- * THE PROGRAM IS THE PLAYER'S (ruling 2). `runChecks(graph, registry, spec,
- * player?)` reads the buffer its fourth argument carries -- for `from: 'player'`
- * directly, and for a `custom` check through the checker, which is handed the
- * same buffer. The level data therefore carries NO `source` anywhere: the
- * reference programs belong to `test/fixtures/ch4-references.ts`, and a level
- * that shipped one would let an empty buffer be graded against text the player
- * never wrote.
+ * 程序是玩家的（裁决 2）。`runChecks(graph, registry, spec, player?)` 读取它第四个参数携带的缓冲区——
+ * `from: 'player'` 时直接读，`custom` 检查时通过检查器（同一个缓冲区交给它）。
+ * 因此关卡数据任何地方都不带 `source`：参考程序属于 `test/fixtures/ch4-references.ts`，
+ * 自带参考文本的关卡会让空缓冲区被拿去和玩家从未写过的文本比对。
  *
- * THE PROGRAM LEVELS EACH CARRY TWO WALKS, ON TWO VECTORS (ruling R9). One
- * `program` check is one execution of the player's text, so one walk pins one
- * (input, answer) pair -- and a program that ignores its input can hard-code
- * exactly that pair and publish it on the reveal tick. Two walks whose vectors
- * and answers differ close that hole, because `runChecks` builds a fresh
- * Simulation per check and a constant cannot answer both. Both levels here are
- * deliberately the two ends of that argument: level 53's second vector is 1,
- * whose answer is small enough to hold as an immediate from tick 12, so a
- * constant program CAN reproduce that walk -- and the sibling walk's 55 at tick
- * 129 is what rejects it; level 55's answers (2 and 3) are both one-instruction
- * constants, and its walks disagree on the same tick 4.
+ * 编程关每关带两段步进、两个向量（裁决 R9）。一个 `program` 检查是玩家文本的一次执行，
+ * 所以一段步进只钉住一个（输入，答案）对——忽略输入的程序可以把那一对硬编码，
+ * 在揭晓节拍发布它。两段向量与答案都不同的步进堵住这个洞，因为 `runChecks`
+ * 为每个检查新建一份 Simulation，常数不可能同时答对两段。这里两关刻意处在那套论证的两端：
+ * 第 53 关第二个向量是 1，它的答案小到可以在节拍 12 用一条立即数保持，
+ * 所以常数程序"能"复现那段步进——拒绝它的是另一段步进在第 129 拍给出的 55；
+ * 第 55 关的两个答案（2 与 3）都是单指令常数，而两段步进在同一个节拍 4 上意见不同。
  *
- * EVERY STEP REPEATS ITS INPUTS, and that is `driveSteps`' contract rather than
- * a style rule: it writes EVERY input pin at every step and defaults the pins a
- * step omits to 0, so a step without `inputs` would clear the byte the program
- * is supposed to read. `test/levels/ch4-batch2.test.ts` holds every step to it.
+ * 每一步都重复写输入，这是 `driveSteps` 的契约而不是风格规则：它在每一步写"每一根"输入引脚，
+ * 并把步骤省略的引脚默认为 0，所以没有 `inputs` 的步骤会清掉程序本该读取的字节。
+ * `test/levels/ch4-batch2.test.ts` 让每一步都接受这条规则。
  *
- * CHAPTER 4 HANDS OUT NO NEW PARTS (spec §3.3), so every level's `rewards` is
- * absent and the palette is the exact part list the shipped board is built from
- * -- not "everything earned". `test/levels/ch4-batch2.test.ts` holds the list to
- * the board in BOTH directions.
+ * 第 4 章不发放新元件（设计规格 §3.3），所以每关的 `rewards` 都缺席，
+ * 而托盘是随游戏发布的画板"由哪些元件构成"的精确清单——不是"已挣到的一切"。
+ * `test/levels/ch4-batch2.test.ts` 让这份清单与画板双向对上。
  */
 
 /**
- * Every part the shipped board is made of: `overtureBoard({ inputId })`'s parts,
- * connectors included, and nothing else.
+ * 随游戏发布的画板由哪些元件构成：`overtureBoard({ inputId })` 的全部元件，含连接器，别无其他。
  *
- * Read against `boards/overture.ts`'s `placedParts`: the level's own pins, the
- * fetch stage (rails, program RAM, counter, decoder), the mode and field glue
- * (splitters, the four mode gates and the one-hot decoders), the register file
- * with its ALU and write path (muxes and switches), and the jump glue plus the
- * halt line. `halt: false` ties a wire low rather than adding a part, which is
- * why the closed-loop levels state the same list and the same gate count.
+ * 对照 `boards/overture.ts` 的 `placedParts` 阅读：关卡自己的引脚、取指级
+ * （常量轨、程序 RAM、计数器、译码器）、模式与字段胶水（拆分器、四个模式门与独热译码器）、
+ * 寄存器堆及其 ALU 与写路径（多路选择器与开关），以及跳转胶水与停机线。
+ * `halt: false` 是把一根导线接低，而不是增加元件，所以闭环关声明同样的清单、同样的门数。
  *
- * A COPY OF BATCH 1'S LIST, deliberately: this file's levels are pure data and
- * exporting the constant from `batch1.ts` would make one batch's module graph
- * depend on another's for a reviewable list that is the board's own. The batch
- * test holds each copy to the board, so a board change breaks both.
+ * 这是批次 1 那份清单的副本，而且是刻意的：本文件的关卡都是纯数据，
+ * 从 `batch1.ts` 导出那个常量会让一个批次的模块图依赖另一个批次，
+ * 只为了一份可评审的、本就属于画板的清单。批次测试把每份副本都钉在画板上，
+ * 所以画板一改，两份都会失败。
  */
 const BOARD_PARTS = [
-  // The level's own pins: two inputs (the clock the driver ticks on, and the
-  // data pin this level reads) and the answer.
+  // 关卡自己的引脚：两个输入（驱动器走节拍用的时钟，以及本关读取的数据引脚）与答案。
   'level_input',
   'level_output',
-  // Fetch and the constant rails.
+  // 取指与常量轨。
   'const_on',
   'const_off',
   'ram_prog',
   'pc8',
   'instr_decoder',
-  // Mode and fields: splitters, the mode gates, the one-hot decoders, and the
-  // REG1/REG2/REG3 constants the read addresses are made from.
+  // 模式与字段：拆分器、模式门、独热译码器，以及拼读地址用的 REG1/REG2/REG3 常量。
   'splitter',
   'not',
   'nor',
@@ -96,13 +81,12 @@ const BOARD_PARTS = [
   'nand',
   'decoder3',
   'maker',
-  // The register file, the ALU and the write path (source, calc/loadi selects,
-  // and the write-address rules).
+  // 寄存器堆、ALU 与写路径（源选择、calc/loadi 选择、写地址规则）。
   'mux8',
   'switch8',
   'regfile6',
   'alu8',
-  // The jump glue and the halt line that holds the answer on `out`.
+  // 跳转胶水，以及把答案留在 `out` 上的停机线。
   'equal8',
   'or3',
   'or',
@@ -110,14 +94,11 @@ const BOARD_PARTS = [
 ] as const;
 
 /**
- * THE TWO 8-BIT CONNECTORS, and the reason the closed-loop levels declare the
- * same shape as the straight ones even though their checkers need fewer bits on
- * paper (`match` is one bit of answer, `move` a two-bit code, `sensors` three
- * bits of wall). The level's io is what `bindLevelIo` compares against the
- * COMPILED pin, and the chapter's board carries 8-bit connectors; a level that
- * declared 3-bit `sensors` would fail at bind time with `missing-io` and the
- * checker would never run. The checkers validate these names and widths
- * themselves (`ioIssue`), so the names here are their contract.
+ * 两个 8 位连接器，以及闭环关为什么明明在纸面上用不了这么多位
+ * （`match` 只是一位答案、`move` 是两位码、`sensors` 是三位墙）却仍声明成直线关的形状。
+ * 关卡的 io 是 `bindLevelIo` 拿来与"编译后的引脚"比较的东西，而本章的画板带的是 8 位连接器；
+ * 一个把 `sensors` 声明成 3 位的关卡会在绑定时以 `missing-io` 失败，检查器根本不会跑。
+ * 检查器自己会校验这些名字与宽度（`ioIssue`），所以这里的名字就是它们的契约。
  */
 const IO_N: LevelIo = {
   inputs: [{ id: 'n', width: 8 }],
@@ -140,21 +121,17 @@ const IO_SENSORS: LevelIo = {
 };
 
 /**
- * Level 53's walks: the countdown sum driven at n = 10 for 55, and at n = 1 for
- * 1 -- two vectors, two checks (ruling R9).
+ * 第 53 关的步进：倒数求和，n = 10 时求 55，n = 1 时求 1——两个向量、两个检查（裁决 R9）。
  *
- * THE TICKS ARE THE PROGRAM'S OWN SHAPE, not a measurement to be adjusted. The
- * loop is instructions 1..13 and its exit pass is 1..11 (the `jz` at 11 is taken
- * once the counter reaches 0), so n passes put the `move|s4|out` at address 14
- * on tick 13n - 1: 129 for n = 10 and 12 for n = 1. Each walk asserts 0 one tick
- * earlier -- the machine is still working -- the answer on the reveal tick, and
- * the answer six ticks later, where the halt has to have frozen the counter.
+ * 节拍来自程序自身的形状，不是可调的测量值。循环是第 1..13 条指令，退出那一趟是 1..11
+ * （计数器到 0 后第 11 条的 `jz` 成立），所以 n 趟之后位于地址 14 的 `move|s4|out`
+ * 出现在节拍 13n - 1：n = 10 是 129，n = 1 是 12。每段步进在早一拍断言 0——机器还在工作——
+ * 在揭晓节拍断言答案，六拍之后再断言答案，那里停机必须已经冻住计数器。
  *
- * WHY 10 AND 1. 10 is the vector `reference-programs.md` measured this program
- * against. 1 is the other end: its answer (1) is a bare immediate, so an
- * input-ignoring program can hold it from tick 12 with `loadi|1` and eleven
- * filler moves -- the exact spoof ruling R9 exists for, and the batch test
- * builds it and shows that the 10-walk's 55 at tick 129 rejects it.
+ * 为什么是 10 和 1。10 是 `reference-programs.md` 测量本程序时用的向量。
+ * 1 是另一端：它的答案（1）是裸立即数，所以忽略输入的程序可以用 `loadi|1`
+ * 加十一条填充移动，从节拍 12 起保持它——这正是裁决 R9 要防的冒充，
+ * 批次测试把它搭出来，并证明 10 那段步进在第 129 拍的 55 会拒绝它。
  */
 const STEPS_53_AT_10: readonly ProgramStep[] = [
   { tick: 0, inputs: { n: 10 }, expect: { out: 0 } },
@@ -171,20 +148,16 @@ const STEPS_53_AT_1: readonly ProgramStep[] = [
 ];
 
 /**
- * Level 55's walks: `in & 3` driven at 42 for 2 and at 255 for 3 -- the mask's
- * two vectors, and two answers that disagree on the same tick.
+ * 第 55 关的步进：`in & 3`，驱动 42 求 2、驱动 255 求 3——掩码的两个向量，
+ * 两个答案在同一个节拍上意见不同。
  *
- * TICK 4 IS WHERE THE ANSWER APPEARS, and the number is the program's shape:
- * `out` publishes while the counter looks at `move|s3|out`, the fifth
- * instruction (index 4), so the byte is there after four edges. Tick 3 demands 0
- * one edge earlier and tick 10 demands the byte again -- the halt has to have
- * frozen the counter, or it would have fallen back to 0.
+ * 节拍 4 是答案出现的地方，这个数字来自程序的形状：`out` 在计数器看向 `move|s3|out`
+ * 时发布，那是第五条指令（下标 4），所以四个沿之后字节就在那里。节拍 3 在早一个沿要求 0，
+ * 节拍 10 再次要求该字节——停机必须已经冻住计数器，否则它会回落到 0。
  *
- * WHY 255 IS THE SECOND VECTOR. It is the all-ones byte, so the mask's answer is
- * 3 -- the complement of the first walk's 2 -- and both are single-instruction
- * constants (`loadi|2`, `loadi|3`), which is what makes this pair the sharpest
- * form of the R9 argument: either walk alone is spoofable by one immediate, and
- * only together do they refuse it.
+ * 为什么第二个向量是 255。它是全 1 字节，所以掩码的答案是 3——第一段步进的 2 的补数——
+ * 而两者都是单指令常数（`loadi|2`、`loadi|3`），这正是这对向量构成本形式最锋利的 R9 论证的原因：
+ * 单看任一段步进都能被一条立即数冒充，只有合起来才能拒绝它。
  */
 const STEPS_55_AT_42: readonly ProgramStep[] = [
   { tick: 0, inputs: { in: 42 }, expect: { out: 0 } },
@@ -201,55 +174,42 @@ const STEPS_55_AT_255: readonly ProgramStep[] = [
 ];
 
 /**
- * The code lock's budget, in exchanges -- one exchange being one read of `try`,
- * one answer on `match`, one settle and one edge.
+ * 密码锁的预算，单位是"交换"——一次交换 = 读一次 `try`、在 `match` 上回答一次、
+ * 结算一次、走一个节拍。
  *
- * 1024 IS HEADROOM, NOT A ROUND NUMBER. The reference walks the candidates up
- * from 0 and publishes each one inside a fourteen-instruction loop, so the read
- * that finds the secret 42 is tick 590 (measured, and re-measured by the batch
- * test); 1024 leaves over four hundred ticks -- some thirty more candidates --
- * for a program that counts less cleverly. It also bounds the cost of a player's
- * wrong program on every board edit, which is what the checker's own default
- * (4096) is about.
+ * 1024 是余量，不是凑整的数字。参考程序从 0 开始逐个试候选值，在一条十四指令的循环里发布每一个，
+ * 所以读到秘密值 42 的那次读取发生在节拍 590（实测，且由批次测试重新测量）；
+ * 1024 留给不怎么会计数的程序四百多拍——大约多试三十个候选值。
+ * 它同时也给"玩家写错的程序在每次改板时的代价"封了顶，这正是检查器自己的默认值（4096）所关心的事。
  */
 const LOCK_BUDGET = 1024;
 
 /**
- * The maze's budget, in the checker's own units -- one read of `move`, one
- * applied move, one published sensor byte and one edge.
+ * 迷宫的预算，单位是检查器自己的单位——读一次 `move`、应用一步、发布一个传感器字节、走一个节拍。
  *
- * The reference needs 168 of them: ten moves along the wall follower's route,
- * each one costing a full pass of its 17-instruction loop except the last, whose
- * `out` is reached fourteen instructions in. So 1024 is roughly six times the
- * reference and still a cheap ceiling for a program that walks in circles. A
- * budget is the only thing that ends such a program, so it is level data rather
- * than a checker default: the puzzle is "arrive", and how long the robot may try
- * is part of the puzzle.
+ * 参考程序需要 168 个单位：沿"沿墙走"路线走十步，除最后一步外每一步都花掉其
+ * 17 指令循环的一整趟，而最后一步的 `out` 在那一趟的第 14 条指令到达。
+ * 所以 1024 大约是参考的六倍，对一个绕圈走的程序来说仍是便宜的封顶。
+ * 预算也是终止这类程序的唯一手段，所以它是关卡数据而不是检查器默认值：
+ * 谜题是"走到终点"，而机器人可以试多久是谜题的一部分。
  */
 const MAZE_BUDGET = 1024;
 
 /**
- * THE MAZE ITSELF: single-cell-wide, fully enclosed, and solvable by the
- * reference rule.
+ * 迷宫本身：单格宽、完全封闭、且能被参考规则解出。
  *
- * HOW IT WAS CHOSEN. `custom-maze.test.ts` solves one grid with the RIGHT-hand
- * follower ("right open then turn right, ..."); flipping that grid top to bottom
- * turns a right-hand maze into a left-hand one -- a reflection swaps left for
- * right and clockwise for anticlockwise while leaving east and west alone -- so
- * this is that grid's mirror image and the reference program's LEFT-hand rule
- * ("left open then turn left, else ahead open then forward, else turn right")
- * walks the mirror of the same route: five cells east along the top corridor, a
- * right turn at the wall, then four south onto `G`.
+ * 它是怎么选出来的。`custom-maze.test.ts` 先用"右手法则"（"右边通就右转……"）解一个网格；
+ * 把那个网格上下翻转，就把右手迷宫变成左手迷宫——镜像会交换左右与顺时针/逆时针，
+ * 而东与西不受影响——所以本网格是那个网格的镜像，
+ * 而参考程序的左手规则（"左边通就左转，否则前方通就前进，否则右转"）走的是同一条路线的镜像：
+ * 沿上方走廊向东五格，在墙处右转，再向南四格到达 `G`。
  *
- * WHY "ALWAYS FORWARD" CANNOT SOLVE IT. The top corridor runs east and then
- * stops at a wall two cells before the goal's column, so a program that only
- * publishes `move = 1` drives into that wall and the checker reports the
- * collision. That is ruling 3(c)'s counterexample, and the batch test drives it
- * through a real CPU.
+ * 为什么"永远前进"解不了它。上方走廊先向东、然后在离目标列还差两格处被墙挡住，
+ * 所以一个只发布 `move = 1` 的程序会撞上那面墙，检查器报告碰撞。
+ * 这就是裁决 3(c) 的反例，批次测试会通过真实 CPU 驱动它。
  *
- * THE PATTERN IS ALSO IN THE LEVEL'S BRIEF, in both languages, and the batch
- * test holds the two to this same literal (ruling 3(d)): a grid edited here
- * without editing the story -- or the other way round -- is a red test.
+ * 这张图也写进关卡 brief 的两种语言里，批次测试把三者钉在同一个字面量上（裁决 3(d)）：
+ * 只改这里的网格、不改故事——或者反过来——都是红测试。
  */
 const MAZE_GRID: readonly string[] = [
   '########',
@@ -263,22 +223,17 @@ const MAZE_GRID: readonly string[] = [
 
 export const CH4_BATCH2: readonly LevelSpec[] = [
   /**
-   * ch4-53-conditional-jumps -- Conditional Jumps / 条件跳转
+   * ch4-53-conditional-jumps —— 条件跳转 / Conditional Jumps
    *
-   * SOURCED: the name in both languages, its position (the fourth level of
-   * chapter 4, global 53) and its one-line concept from the phase plan's
-   * chapter-4 table, which transcribes the 2.x dossier's chapter-4 table (the
-   * brief for this task, `task-8-brief.md`); the concept is the conditional jump
-   * -- `jz`/`jnz` are what turn the machine's straight line into a loop.
+   * SOURCED：双语名字、位置（第 4 章第四关，全局第 53 关）与一句话概念，
+   * 来自阶段计划的第 4 章表格，它转录了 2.x 档案的第 4 章表格（本任务的 brief，
+   * `task-8-brief.md`）；概念就是条件跳转——`jz`/`jnz` 把机器的直线变成循环。
    *
-   * AUTHORED (this replica's design): the `n:8 -> out:8` pin shape; the
-   * semantics `out = n + (n-1) + ... + 1, mod 256`; the board (the chapter-3
-   * machine, `overtureBoard({ inputId: 'n' })` with the default halt); the
-   * `program` checks that read the PLAYER's buffer as assembly
-   * (`from: 'player'`); the two walks and their vectors 10 and 1, with the ticks
-   * the reference program's own shape fixes (ruling R9 -- see the walk note);
-   * the palette (the board's own parts) and the absent reward; and the measured
-   * three-star target.
+   * AUTHORED（本复刻的设计）：`n:8 -> out:8` 引脚形状；语义
+   * `out = n + (n-1) + ... + 1, mod 256`；画板（第 3 章机器，`overtureBoard({ inputId: 'n' })`，
+   * 默认停机）；读"玩家"缓冲区、按汇编解析的 `program` 检查（`from: 'player'`）；
+   * 两段步进及其向量 10 与 1，节拍由参考程序自身形状固定（裁决 R9——见步进注释）；
+   * 托盘（画板自己的元件）与缺席的奖励；以及实测的三星目标。
    */
   {
     id: 'ch4-53-conditional-jumps',
@@ -295,9 +250,8 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
     },
     allowedComponents: [...BOARD_PARTS],
     io: IO_N,
-    // The player's program text, read as assembly, on two walks with two
-    // different vectors (ruling R9). No `source`: the reference lives in the
-    // fixture (ruling 2).
+    // 玩家写的程序文本，按汇编解析，两段步进、两个不同向量（裁决 R9）。
+    // 没有 `source`：参考程序在 fixture 里（裁决 2）。
     checks: [
       {
         kind: 'program',
@@ -313,40 +267,31 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
       },
     ],
     board: overtureBoard({ inputId: 'n' }),
-    // Measured: 675 gates and 6 deep (the shipped board -- see the module note),
-    // and the tick is the walks' last assertion, merged as `Math.max`: the long
-    // walk runs to 135, the short one to 18.
+    // 实测：675 门、6 级深（随游戏发布的画板——见模块说明），
+    // 节拍取两段步进的最后一条断言并按 `Math.max` 合并：长的那段跑到 135，短的到 18。
     threeStar: { gate: 675, delay: 6, tick: 135 },
   },
 
   /**
-   * ch4-54-code-breaker -- Code Breaker / 道破心机
+   * ch4-54-code-breaker —— 道破心机 / Code Breaker
    *
-   * SOURCED: the name in both languages, its position (the fifth level of
-   * chapter 4, global 54) and its one-line concept -- a closed-loop guessing
-   * game -- from the phase plan's chapter-4 table (the brief for this task),
-   * which transcribes the 2.x dossier's chapter-4 table. The 1.x compendium's
-   * ancestor of this level is the "code lock" family, which is where the
-   * checker's name comes from.
+   * SOURCED：双语名字、位置（第 4 章第五关，全局第 54 关）与一句话概念——
+   * 闭环猜谜游戏——来自阶段计划的第 4 章表格（本任务的 brief），
+   * 它转录了 2.x 档案的第 4 章表格。本关在 1.x 攻略里的前身属于 "code lock" 家族，
+   * 检查器的名字就来自那里。
    *
-   * AUTHORED (this replica's design): the `match:8 -> try:8` pin shape; the
-   * secret (42, and the level's own choice of a non-zero byte -- see the note
-   * below); the budget (1024, measured against the reference's 590); the
-   * `custom: lock` check with its params; the board (`overtureBoard({ inputId:
-   * 'match', halt: false })`, which this level cannot do without -- see the
-   * module note); the palette and the absent reward; and the measured three-star
-   * target.
+   * AUTHORED（本复刻的设计）：`match:8 -> try:8` 引脚形状；秘密值（42，关卡自己选的非零字节——
+   * 见下面的注释）；预算（1024，对着参考程序的 590 实测）；带 params 的 `custom: lock` 检查；
+   * 画板（`overtureBoard({ inputId: 'match', halt: false })`，本关离不开它——见模块说明）；
+   * 托盘与缺席的奖励；以及实测的三星目标。
    *
-   * THE BRIEF MUST NOT CLAIM THE CPU REACTS TO `match`, and it does not: `out` is
-   * combinational and published only while the instruction that writes it is
-   * decoded, while `match` is sampled by a DIFFERENT instruction -- on that tick
-   * `out` has already fallen back to 0, so the byte a program reads on `match` is
-   * always 0 and the reference program's "found, stop" branch is never taken. The
-   * level is still solvable, because its criterion is "the secret byte went out
-   * within the budget", but a hint that promised a reaction to `match` would
-   * teach a program that cannot work. And the secret is not 0, because a board
-   * that has not moved yet publishes 0 on the checker's first read -- honest, but
-   * no puzzle at all.
+   * brief 不能宣称 CPU 会对 `match` 作出反应，而它确实没有这样宣称：`out` 是组合的，
+   * 只在写它的指令被译码时发布，而 `match` 由"另一条"指令采样——那一拍 `out` 已经回落到 0，
+   * 所以程序在 `match` 上读到的字节永远是 0，参考程序的"找到了，停"分支永远不会被走到。
+   * 关卡仍然可解，因为它的判据是"秘密字节在预算内被发布出去"，
+   * 但一个承诺"会对 `match` 作出反应"的提示会教出一个不可能工作的程序。
+   * 秘密值也不是 0，因为尚未移动过的画板在检查器第一次读取时发布 0——
+   * 诚实，但完全不成其为谜题。
    */
   {
     id: 'ch4-54-code-breaker',
@@ -363,37 +308,28 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
     },
     allowedComponents: [...BOARD_PARTS],
     io: IO_MATCH,
-    // The puzzle's data lives here, not in the checker (ruling 4): the secret
-    // byte, and a budget four hundred ticks above the reference's measured 590.
+    // 谜题数据住在这里，不在检查器里（裁决 4）：秘密字节，以及比参考程序实测 590 拍多四百拍的预算。
     checks: [{ kind: 'custom', id: 'lock', params: { secret: 42, budget: LOCK_BUDGET } }],
     board: overtureBoard({ inputId: 'match', halt: false }),
-    // Measured: 675 gates and 6 deep (`halt` is a 0-cost part, so the closed-loop
-    // board weighs the same as the straight one), and 590 ticks -- the read at
-    // which the reference publishes 42, re-measured through `runChecks` by the
-    // batch test.
+    // 实测：675 门、6 级深（`halt` 是零成本元件，所以闭环画板与直线画板一样重），
+    // 590 拍——参考程序发布 42 的那次读取，由批次测试通过 `runChecks` 重新测量。
     threeStar: { gate: 675, delay: 6, tick: 590 },
   },
 
   /**
-   * ch4-55-mod-4 -- Mod 4 / 高速掩码
+   * ch4-55-mod-4 —— 高速掩码 / Mod 4
    *
-   * SOURCED: the name in both languages, its position (the sixth level of
-   * chapter 4, global 55) and its one-line concept -- bit masking -- from the
-   * phase plan's chapter-4 table (the brief for this task), which transcribes
-   * the 2.x dossier's chapter-4 table. The Chinese name 高速掩码 is the "fast
-   * mask" the level teaches: one `and` instead of a division or a countdown.
+   * SOURCED：双语名字、位置（第 4 章第六关，全局第 55 关）与一句话概念——
+   * 位掩码——来自阶段计划的第 4 章表格（本任务的 brief），它转录了 2.x 档案的第 4 章表格。
+   * 中文名"高速掩码"就是本关所教的"快掩码"：一个 `and` 取代一次除法或一次倒数。
    *
-   * AUTHORED (this replica's design): the `in:8 -> out:8` pin shape; the
-   * semantics `out = in & 3`; the board (`overtureBoard({ inputId: 'in' })`);
-   * the `program` checks reading the PLAYER's assembly; the two walks, on 42
-   * (for 2) and 255 (for 3) -- the two vectors ruling R9 demands, and the pair
-   * whose answers are both single-instruction constants; the palette and the
-   * absent reward; and the measured three-star target.
+   * AUTHORED（本复刻的设计）：`in:8 -> out:8` 引脚形状；语义 `out = in & 3`；
+   * 画板（`overtureBoard({ inputId: 'in' })`）；读"玩家"汇编的 `program` 检查；
+   * 两段步进，42（求 2）与 255（求 3）——裁决 R9 要求的两个向量，
+   * 也是答案都属于单指令常数的那一对；托盘与缺席的奖励；以及实测的三星目标。
    *
-   * THE PROGRAM IS LEVEL 51'S FIVE INSTRUCTIONS with `and` where `add` was,
-   * which is the level's own claim rather than a coincidence: the assembler does
-   * not compute anything new, and the operation is the only thing that changed.
-   * The batch test pins both spellings against one ISA table.
+   * 程序就是第 51 关那五条指令，只是把 `add` 换成 `and`，这是关卡自己的主张而不是巧合：
+   * 汇编器不计算任何新东西，变的只有运算。批次测试把两种拼写钉在同一张 ISA 表上。
    */
   {
     id: 'ch4-55-mod-4',
@@ -425,36 +361,28 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
       },
     ],
     board: overtureBoard({ inputId: 'in' }),
-    // Measured: the same board as every other chapter-4 level, so 675 gates and
-    // 6 deep; the tick is the walks' last assertion (both share the shape, so
-    // `Math.max` is 10).
+    // 实测：与第 4 章其它关卡同一块画板，所以 675 门、6 级深；节拍取两段步进的最后一条断言
+    // （形状相同，所以 `Math.max` 是 10）。
     threeStar: { gate: 675, delay: 6, tick: 10 },
   },
 
   /**
-   * ch4-56-the-maze -- The Maze / 路在脚下
+   * ch4-56-the-maze —— 路在脚下 / The Maze
    *
-   * SOURCED: the name in both languages, its position (the seventh level of
-   * chapter 4, global 56, the chapter's last) and its one-line concept -- steer a
-   * robot through a grid from three wall sensors -- from the phase plan's
-   * chapter-4 table (the brief for this task), which transcribes the 2.x
-   * dossier's chapter-4 table. The reference algorithm is sourced with it: keep
-   * one hand on the wall, which is the "left open, turn left; else ahead open,
-   * forward; else turn right" rule the fixture's program implements.
+   * SOURCED：双语名字、位置（第 4 章第七关，全局第 56 关，本章最后一关）与一句话概念——
+   * 用三个墙面传感器把机器人开过网格——来自阶段计划的第 4 章表格（本任务的 brief），
+   * 它转录了 2.x 档案的第 4 章表格。参考算法也一并来自资料：把手一直放在墙上，
+   * 也就是 fixture 程序实现的"左边通就左转；否则前方通就前进；否则右转"规则。
    *
-   * AUTHORED (this replica's design): the `sensors:8 -> move:8` pin shape and
-   * the sensor/move encoding the checker and the brief share (bit0 ahead, bit1
-   * left, bit2 right, wall = 1; move 0 stay, 1 forward, 2 left, 3 right); the
-   * maze grid itself, its start facing east and its budget of 1024; the
-   * `custom: maze` check with its params; the board (`overtureBoard({ inputId:
-   * 'sensors', halt: false })`, without which the walker freezes on its first
-   * move); the palette and the absent reward; and the measured three-star target.
+   * AUTHORED（本复刻的设计）：`sensors:8 -> move:8` 引脚形状，
+   * 以及检查器与 brief 共享的传感器/动作编码（bit0 前方、bit1 左、bit2 右，墙 = 1；
+   * move 0 原地、1 前进、2 左转、3 右转）；迷宫网格本身、它朝东的起点与 1024 的预算；
+   * 带 params 的 `custom: maze` 检查；画板（`overtureBoard({ inputId: 'sensors', halt: false })`，
+   * 没有它，行走者会在第一步就冻住）；托盘与缺席的奖励；以及实测的三星目标。
    *
-   * THE MAZE IS DESIGNED, NOT BORROWED, and ruling 3 fixes what it has to be: one
-   * cell wide, enclosed, solvable by the reference rule within the budget, and
-   * NOT solvable by the trivial "always forward" program -- which the batch test
-   * drives through a real CPU and asserts it fails. The pattern is in `params`
-   * and in both briefs, and the batch test holds all three to one literal.
+   * 迷宫是设计出来的，不是借来的，而裁决 3 固定了它必须满足什么：单格宽、封闭、
+   * 参考规则能在预算内解出，而"永远前进"这种平凡程序"解不出"——批次测试会通过真实 CPU
+   * 驱动它并断言失败。图案写在 `params` 与两份 brief 里，批次测试把三者钉在同一个字面量上。
    */
   {
     id: 'ch4-56-the-maze',
@@ -471,18 +399,15 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
     },
     allowedComponents: [...BOARD_PARTS],
     io: IO_SENSORS,
-    // The grid and the budget are the puzzle (ruling 4); `facing` is left absent
-    // because the checker's documented default is east, which is the direction
-    // the reference program's first decision assumes.
+    // 网格与预算是谜题（裁决 4）；`facing` 故意不写，因为检查器文档规定的默认值是朝东，
+    // 也正是参考程序第一次判断所假设的方向。
     checks: [
       { kind: 'custom', id: 'maze', params: { grid: MAZE_GRID, budget: MAZE_BUDGET } },
     ],
     board: overtureBoard({ inputId: 'sensors', halt: false }),
-    // Measured: 675 gates and 6 deep (the same machine, `halt` tied low), and
-    // 168 ticks -- the exchange whose edge put the robot on `G` on its tenth
-    // move, re-measured through `runChecks` by the batch test. The route costs
-    // nine full passes of the follower's 17-instruction loop and the tenth
-    // move's own `out` fourteen instructions into its pass.
+    // 实测：675 门、6 级深（同一台机器，`halt` 接低），168 拍——那一次交换的沿在第十步
+    // 把机器人放到 `G` 上，由批次测试通过 `runChecks` 重新测量。
+    // 路线花掉沿墙者 17 指令循环的九整趟，第十步的 `out` 出现在它那一趟的第 14 条指令。
     threeStar: { gate: 675, delay: 6, tick: 168 },
   },
 ];

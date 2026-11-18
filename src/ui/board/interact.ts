@@ -1,11 +1,10 @@
 /**
- * Board input: pointer and keyboard editing.
+ * 画板输入：鼠标与键盘编辑。
  *
- * Every mutation goes through the `CommandStack` so the whole editing session is
- * undoable, and every mutation is followed by `options.onChange()` so the app
- * can re-render and re-grade. The module keeps only the *transient* pointer
- * bookkeeping (which pin a drag started from, which part is being moved); the
- * pixels themselves are drawn from the store.
+ * 所有修改都经过 `CommandStack`，让整个编辑过程可撤销；
+ * 每次修改之后都会调用 `options.onChange()`，好让应用层重绘并重新判定。
+ * 本模块只保存“临时的”指针状态（这次拖拽从哪个引脚开始、正在移动哪个元件），
+ * 画面本身始终从 store 里绘制。
  */
 import {
   addInstance,
@@ -23,59 +22,60 @@ import { INSTANCE_HEIGHT } from '../theme';
 import { placementAt, instanceRect } from './geometry';
 import { hitTest, screenToWorld, snap, type Point } from './view';
 
+/** 画板输入层的回调选项：由应用层实现，画板只在正确的时机调用。 */
 export interface BoardInputOptions {
-  /** Called after any model mutation so the UI can re-render and re-grade. */
+  /** 任何模型修改之后调用，让界面可以重绘并重新判定。 */
   onChange(): void;
   /**
-   * A CLICK -- not a drag -- on a part, reported by instance id.
+   * 对某个元件的一次“点击”（不是拖拽），按实例 id 上报。
    *
-   * What a click means belongs to the caller: the board does not know which
-   * parts are switches. It is how a level's input is flipped without going to
-   * the readout panel, which is the difference between driving a circuit and
-   * filling in a form.
+   * 点击意味着什么由调用方决定：画板不知道哪些元件是开关。
+   * 这是玩家不打开读数面板也能翻转关卡输入的方式——
+   * 区别就落在“直接拨动电路”与“填一张表单”之间。
    */
   onPick?(instId: string): void;
   /**
-   * Where the pointer is, in world units, or `null` when it has left the board.
+   * 指针所在的世界坐标；指针离开画板时为 `null`。
    *
-   * Reported only while a part is armed, because that is the only thing on this
-   * board that follows the pointer: an unarmed hover has nothing to say, and a
-   * repaint per mouse move for nothing is a repaint per mouse move.
+   * 只在元件托盘里“手持”着一个元件时才上报：画板上只有它会跟着指针走。
+   * 没有手持元件时，悬停没有信息可报；为了没有信息的东西每次移动都重绘一次，就是白费。
    */
   onHover?(at: Point | null): void;
 }
 
-/** The instance id a freshly placed level-IO part takes, and the pin's width. */
+/** 新放下的关卡 IO 元件应采用的实例 id，以及该引脚的位宽。 */
 export interface LevelIoPlacement {
-  /** `IN_<pinId>`, `OUT` or `OUT_<pinId>`, in pin order. */
+  /** 按引脚顺序依次取 `IN_<pinId>`、`OUT` 或 `OUT_<pinId>`。 */
   readonly id: string;
-  /** Width the level declares for that pin, in bits. */
+  /** 关卡为该引脚声明的位宽（单位：位）。 */
   readonly width: number;
 }
 
 /**
- * The level-IO binding a freshly placed part must carry, or `undefined`.
+ * 新放下的元件必须携带的关卡 IO 绑定；没有可分配的绑定时返回 `undefined`。
  *
- * `levels/checks.ts` binds a circuit to its level by instance id: `IN_<pin>` for
- * a level input, `OUT` for a single-output level and `OUT_<pin>` for a
- * multi-output one. A part dropped from the palette would otherwise be named by
- * the graph's own allocator (`i1`, `i2`, …), never bind, and make every level
- * unpassable -- so placement hands out the conventional ids in pin order and
- * falls back to the allocator only once the level's pins are all placed (a spare
- * `level_input` is a legal, if redundant, part).
+ * `levels/checks.ts` 按实例 id 把电路与关卡绑定：关卡输入用 `IN_<pin>`，
+ * 单输出关卡用 `OUT`，多输出关卡用 `OUT_<pin>`。
+ * 从元件托盘拖出来的元件本来会被电路图自己的分配器命名成（`i1`、`i2`、…），
+ * 永远绑不上关卡，从而让每一关都无法通过——所以放置时按引脚顺序发放这些约定俗成的 id；
+ * 只有当关卡的引脚全部放完时，才退回分配器（多放一个 `level_input` 虽然冗余，但仍是合法元件）。
  *
- * The width comes back with the id because it is part of the same binding, and
- * only this function knows which pin the id refers to: `level_input` and
- * `level_output` declare 1-bit pins, so an 8-bit level pin exists only if the
- * instance placed for it says `params.width = 8`. Guessing it back from the id
- * string would be a second, unenforced source of truth.
+ * 位宽和 id 一起返回，因为它们是同一个绑定的一部分，而只有本函数知道 id 指向哪个引脚：
+ * `level_input` 和 `level_output` 声明的引脚都是 1 位，所以 8 位关卡引脚只有在
+ * 为它放下的实例写着 `params.width = 8` 时才存在。
+ * 若试图从 id 字符串反推位宽，就会多出第二个没有被强制的真相来源。
  *
- * A SANDBOX HAS NO PINS TO COUNT, and its connectors are its pins. The next free
- * `IN_<n>` / `OUT_<n>` is handed out instead, at the def's one bit: the id
- * matches the `IN_`/`OUT` prefix the board paints a connector's value under, and
- * `sandboxPins` reads the instances back as the board's pin list. Without this a
- * sandbox connector was placed as `i1`, bound to nothing, and the sidebar said
- * "尚未放置输入元件" over a board that had a connector on it.
+ * 沙盒没有关卡引脚可数，它的连接器就是它的引脚：于是改为发放下一个空闲的
+ * `IN_<n>` / `OUT_<n>`，位宽取元件定义自带的 1 位。
+ * 这个 id 与画板给连接器印数值时使用的 `IN_`/`OUT` 前缀一致，
+ * `sandboxPins` 也正把这些实例读回成画板的引脚清单。
+ * 没有这段逻辑时，沙盒连接器会被命名成 `i1`、绑不到任何东西，
+ * 侧边栏就会在明明放着连接器的画板上显示“尚未放置输入元件”。
+ *
+ * @param level 当前关卡（沙盒走单独分支）
+ * @param graph 当前电路图，用于判断哪些 id 已被占用
+ * @param defId 即将放下的元件定义 id
+ * @returns 绑定信息（id 与位宽）；返回 undefined 表示交给分配器命名
  */
 export function levelIoPlacement(
   level: LevelSpec,
@@ -86,9 +86,8 @@ export function levelIoPlacement(
   if (isSandbox(level)) {
     const prefix = defId === 'level_input' ? 'IN_' : defId === 'level_output' ? 'OUT_' : null;
     if (prefix === null) return undefined;
-    // One bit: the def's own width. A sandbox connector is not bound to a level
-    // pin, so there is no declared width to carry. `taken` is finite, so the
-    // search terminates on the first free number.
+    // 位宽 1：用元件定义自带的宽度。沙盒连接器不绑定任何关卡引脚，
+    // 因此没有“声明位宽”可携带。`taken` 是有限集合，搜索一定会在第一个空闲编号处结束。
     for (let n = 1; ; n += 1) {
       const id = `${prefix}${n}`;
       if (!taken.has(id)) return { id, width: 1 };
@@ -116,12 +115,11 @@ export function levelIoPlacement(
 }
 
 /**
- * Deletes everything selected as one undoable step, wires included.
+ * 把选中的东西作为一个可撤销步骤全部删除，导线一并处理。
  *
- * Its own export rather than only a branch of the key handler: the toolbar's bin
- * button is the same operation, and two copies of the wire-collection rule would
- * be two chances to leave a dangling wire behind. Returns whether anything was
- * deleted, so a caller can tell "nothing selected" from "done".
+ * 它是独立导出，而不只是按键处理里的一个分支：工具栏的垃圾桶按钮做的是同一件事，
+ * 两份“收集相关导线”的规则就是两次留下悬空导线的机会。
+ * 返回是否真的删掉了东西，让调用方能区分“没有选中任何东西”和“已经删完”。
  */
 export function deleteSelection(
   store: Store<AppState>,
@@ -136,11 +134,10 @@ export function deleteSelection(
 }
 
 /**
- * Takes parts off the board, and every wire that touched one, as ONE step.
+ * 把元件从画板上取下，并带走所有碰到它的导线，作为“一个”步骤。
  *
- * The undo has to bring the wires back too: a part and the wires that reached it
- * are a single thing the player drew, and an undo that restored a bare part
- * would leave the circuit it was cut out of still cut.
+ * 撤销时必须把导线也恢复：一个元件和接到它上面的导线，是玩家画下的同一件东西；
+ * 如果撤销只还原光秃秃的元件，它曾被剪自的那个电路仍然是断的。
  */
 function deleteParts(
   store: Store<AppState>,
@@ -168,15 +165,25 @@ function deleteParts(
 }
 
 /**
- * How far the pointer may wander and still count as a click, in screen pixels.
+ * 指针最多可以移动多少屏幕像素，仍然算“点击”。
  *
- * Four, because a hand is not a mouse trap: with an exact comparison a one-pixel
- * twitch during a click turned it into a pan, and the click that should have
- * cleared the selection cleared nothing. Every interface has a number like this;
- * this is where the board keeps its own.
+ * 取 4：人的手不是捕鼠夹。若用严格相等判断，点击时手抖一个像素就会变成平移，
+ * 本来该清空选区的点击反而什么都没清。每个界面都有这么个数字，这里就是画板自己的。
  */
 const CLICK_SLOP = 4;
 
+/**
+ * 给画板挂上指针、滚轮与键盘监听。
+ *
+ * 这是画板编辑的唯一入口：它把“用户动作”翻译成对 store 的读取和命令栈的压入，
+ * 自身不持有任何模型状态——只有下面几个闭包变量记录拖拽的中间过程。
+ *
+ * @param canvas 画板画布；指针、滚轮、右键菜单事件都绑在它上面
+ * @param store 应用状态；相机、选区、拖拽状态都从这里读写
+ * @param stack 撤销栈；每次结构性修改都作为一个命令压入
+ * @param options 回调：模型变化、点击元件、指针悬停
+ * @returns 卸载函数，移除全部监听器（调用方销毁画板时执行）
+ */
 export function attachBoardInput(  canvas: HTMLCanvasElement,
   store: Store<AppState>,
   stack: CommandStack,
@@ -185,12 +192,10 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
   let pendingFrom: WireEnd | null = null;
   let panning: Point | null = null;
   /**
-   * A press on bare board that has not become a pan yet.
+   * 在空白纸面上按下、但还没有升级成平移的那次按压。
    *
-   * The gesture is only a pan once the pointer has moved past `CLICK_SLOP`, and
-   * until then nothing has happened at all: a release here is a CLICK on bare
-   * board, which clears the selection -- the gesture that used to be lost the
-   * moment panning moved onto empty space.
+   * 只有指针移动超过 `CLICK_SLOP`，这个手势才算平移；在那之前什么都还没发生：
+   * 此时松手就是一次“点空白”，会清空选区——这正是过去把平移挪到空白处后丢掉的那个手势。
    */
   let panFrom: Point | null = null;
   let moving: {
@@ -214,10 +219,10 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
   const armedDef = (): string => store.get().armed ?? '';
 
   const place = (world: Point, defId: string): void => {
-    // The cursor lands on the part's pin row (its vertical centre) at its left
-    // edge, so a part dropped at (px, py) has its output pin at (px + 72, py):
-    // the row the player then drags along to wire it up. `placementAt` states
-    // that rule once, because the ghost on the pointer is drawn from it too.
+    // 鼠标落在元件左边缘、引脚所在的那一行（垂直中心）：
+    // 于是在 (px, py) 放下的元件，其输出引脚在 (px + 72, py)，
+    // 正是玩家随后沿着一路拖出去接线的位置。
+    // 这条规则由 `placementAt` 只写一次，指针上的手持预览也按它绘制。
     const reg = store.get().registry;
     const { x, y } = reg.has(defId)
       ? placementAt(world, reg.get(defId))
@@ -229,11 +234,10 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
         label: `add ${defId}`,
         do: (g) => {
           const inst = addInstance(g, defId, x, y, placement?.id);
-          // The binding is the id AND the width: `compile` sizes a pin from
-          // `params.width ?? def.pin.width`, and `bindLevelIo` refuses a pin
-          // compiled at a width the level does not declare. A dropped 8-bit
-          // level input that carried only the id would therefore be one bit
-          // wide and make the level's own board ungradable.
+          // 绑定 = id + 位宽：`compile` 按 `params.width ?? def.pin.width` 决定引脚宽度，
+          // 而 `bindLevelIo` 会拒绝宽度与关卡声明不符的引脚。
+          // 因此一个只带 id、不带位宽的 8 位关卡输入会被编译成 1 位，
+          // 让这一关自己的画板无法判定。
           if (placement) inst.params.width = placement.width;
           created = inst.id;
         },
@@ -244,10 +248,9 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
       store.get().graph,
     );
     options.onChange();
-    // The part is on the board now, so the ghost would be drawn straight over
-    // it -- the thing you just placed sitting under a translucent copy of
-    // itself until you moved the mouse. It comes back with the next move, which
-    // is also when it has somewhere new to be.
+    // 元件已经放上画板，再画手持预览就会正好盖住它——
+    // 刚放下的东西压在自己半透明的副本下面，直到鼠标移动。
+    // 下一次移动时预览会回来，那时它才有新的位置可去。
     options.onHover?.(null);
   };
 
@@ -258,18 +261,16 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
     const hit = hitTest(state.graph, state.registry, world);
 
     if (event.button === 1) {
-      // The middle button is unambiguous, so it pans at once and never means a
-      // click on bare board.
+      // 中键没有歧义，所以按下就立刻平移，永远不算“点空白”。
       panning = localPoint(event);
       panFrom = null;
       return;
     }
     if (event.button !== 0) return;
 
-    // CTRL DRAGS A SELECTION BAND, wherever it starts: on bare board, on a part,
-    // on a wire. Ctrl is the modifier for "this drag is about selecting", so it
-    // cannot also mean "move this part" -- and a band that starts on top of a
-    // part is exactly how you select that part and its neighbours together.
+    // Ctrl 拖拽是框选，从哪儿开始都行：空白处、元件上、导线上。
+    // Ctrl 表示“这次拖拽只关乎选择”，所以它不能再同时表示“移动这个元件”——
+    // 而从元件上开始拉框，正是把该元件和邻居一起选中的自然操作。
     if (event.ctrlKey || event.metaKey) {
       options.onHover?.(null);
       store.set({ dragging: { kind: 'marquee', x0: world.x, y0: world.y, x1: world.x, y1: world.y } });
@@ -278,8 +279,7 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
 
     if (hit?.kind === 'pin' && !hit.isInput) {
       pendingFrom = { inst: hit.inst, port: hit.port };
-      // Published so the board can draw the wire following the pointer, and
-      // light up the pin it is coming from.
+      // 写进 store，好让画板画出跟着指针走的导线，并点亮它出发的那个引脚。
       store.set({
         dragging: { kind: 'wire', fromInst: hit.inst, fromPort: hit.port, to: null },
       });
@@ -287,7 +287,7 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
     }
 
     if (hit?.kind === 'pin' && hit.isInput) {
-      // Clicking a driven input unplugs it; the player then drags the new wire in.
+      // 点击已经接线的输入引脚会把它拔掉；玩家随后再从别处拖一根新线进来。
       const existing = state.graph.wires.find((w) => w.to.inst === hit.inst && w.to.port === hit.port);
       if (existing) {
         stack.push(
@@ -336,22 +336,20 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
       return;
     }
 
-    // EMPTY SPACE PANS. The board is larger than the window on every level past
-    // the first, and dragging the paper is what a hand tries first; the middle
-    // button still works for anyone who reaches for it out of habit.
+    // 空白处平移。除第一关外，画板都比窗口大，而“拖动纸张”是手最先尝试的动作；
+    // 习惯用中键的人仍然可以用中键。
     //
-    // An armed palette part still takes the click, because stamping is a mode
-    // the player turned on deliberately and it has to be exitable by clicking.
+    // 手持元件时这次点击仍然交给“放置”，因为盖章是玩家主动打开的模式，
+    // 而点击放下正是它该有的退出方式之一。
     const defId = armedDef();
     if (defId) place(world, defId);
     else panFrom = localPoint(event);
   };
 
   const onPointerMove = (event: PointerEvent): void => {
-    // The ghost only exists while a part is in hand and NOTHING is being dragged:
-    // during a band or a wire the pointer is drawing something else, and a
-    // translucent part riding along on top of it is in the way of the thing the
-    // player is actually doing.
+    // 只有在“手里拿着元件”且“没有在拖任何东西”时才有手持预览：
+    // 拉框或拉线时，指针正在画别的东西，
+    // 这时再让一个半透明元件跟着走，只会挡住玩家真正在做的操作。
     if (options.onHover && armedDef() && store.get().dragging === null) {
       options.onHover(worldPoint(event));
     }
@@ -365,10 +363,9 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
       return;
     }
 
-    // A press on bare board is not a pan until it has moved far enough to be
-    // one. Promoting it here rather than at the press means a click moves the
-    // view by exactly nothing -- the earlier version panned the pixels a
-    // twitching hand had wandered and then called it a click.
+    // 在空白处按下，要等移动足够远才算平移。
+    // 在这里（移动时）才升级，而不是在按下时，意味着一次点击对视口的移动量恰好为零——
+    // 早先的版本会把抖动的那几个像素也平移掉，然后还把它当作点击。
     if (panFrom && !panning) {
       const now = localPoint(event);
       if (Math.hypot(now.x - panFrom.x, now.y - panFrom.y) <= CLICK_SLOP) return;
@@ -390,8 +387,7 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
     }
 
     if (pendingFrom) {
-      // The rubber band. One repaint per move is the point: what moved is the
-      // wire.
+      // 橡皮筋预览。每次移动重绘一次正是目的：移动的东西就是这根线。
       store.set({
         dragging: {
           kind: 'wire',
@@ -409,9 +405,8 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
       const world = worldPoint(event);
       inst.x = snap(world.x - moving.offsetX);
       inst.y = snap(world.y - moving.offsetY);
-      // An in-place edit notifies nothing by reference, and the store's
-      // notification is unconditional by design: `set({})` is the "repaint"
-      // call. It is what makes a dragged part follow the pointer.
+      // 原地修改不会因为对象引用变化而触发通知，而 store 的通知本来就是无条件的：
+      // `set({})` 就是“请重绘”的调用。正是它让被拖拽的元件跟住指针。
       store.set({});
     }
   };
@@ -419,9 +414,8 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
   const onPointerUp = (event: PointerEvent): void => {
     const band = store.get().dragging;
     if (band?.kind === 'marquee') {
-      // Everything the band touched, in one selection. A band that never moved
-      // is a point, so it selects the part under it and nothing else -- which
-      // makes Ctrl+click the way to select one part without clearing the rest.
+      // 框碰到的东西全部进入同一个选区。没有移动过的框是一个点，
+      // 于是只选中它下面的那个元件——这就是“Ctrl+点击只选一个、不清空其他”的实现方式。
       const left = Math.min(band.x0, band.x1);
       const right = Math.max(band.x0, band.x1);
       const top = Math.min(band.y0, band.y1);
@@ -446,9 +440,8 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
       const dragged = panning !== null;
       panFrom = null;
       panning = null;
-      // It never became a drag, so it was a click on bare board: clear the
-      // selection. A pan deliberately does NOT -- looking around the board is
-      // not a statement about what you had selected.
+      // 它始终没变成拖拽，所以这是一次“点空白”：清空选区。
+      // 真正的平移故意不清空——四处看看画板，并不表示你对选中的东西改变了主意。
       if (!dragged) store.set({ selected: [] });
       store.set({ dragging: null });
       return;
@@ -459,8 +452,8 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
       const { id, startX, startY } = moving;
       moving = null;
       if (current && (current.x !== startX || current.y !== startY)) {
-        // The drag already moved the part; the command only has to record how to
-        // replay and reverse that move, so both directions are absolute.
+        // 拖拽过程中元件已经被移动过了；这条命令只需记录如何重放和反向执行这次移动，
+        // 所以两个方向存的都是绝对坐标。
         const endX = current.x;
         const endY = current.y;
         stack.push(
@@ -485,9 +478,8 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
         );
         options.onChange();
       } else if (current) {
-        // It did not move, so it was a click. Positions are snapped, so a press
-        // and release inside one grid cell lands back on the part's own
-        // coordinates and needs no undo entry.
+        // 它没动，所以这是一次点击。坐标都吸附在网格上，
+        // 因此在一个网格单元内按下再松开，落点还是元件原来的坐标，不需要撤销记录。
         options.onPick?.(id);
       }
       store.set({ dragging: null });
@@ -504,8 +496,8 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
     const hit = hitTest(store.get().graph, store.get().registry, worldPoint(event));
     if (hit?.kind === 'pin' && hit.isInput) {
       const to: WireEnd = { inst: hit.inst, port: hit.port };
-      // One driver per input: an existing wire into this pin is replaced, and
-      // the replacement is a single undoable step.
+      // 每个输入只能有一个驱动源：接到这个引脚上的旧导线会被替换，
+      // 替换过程是一个单一的可撤销步骤。
       const replaced = store
         .get()
         .graph.wires.filter((w) => w.to.inst === to.inst && w.to.port === to.port);
@@ -536,7 +528,7 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
     const zoom = Math.min(4, Math.max(0.25, camera.zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1)));
     const next = { ...camera, zoom };
     const after = screenToWorld(next, localPoint(event));
-    // Keep the world point under the cursor pinned while the scale changes.
+    // 缩放时让光标下的世界点保持钉在原地。
     store.set({
       camera: { zoom, x: next.x + (after.x - before.x), y: next.y + (after.y - before.y) },
     });
@@ -549,8 +541,8 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
     if (accel && key === 'z' && !event.shiftKey) {
       event.preventDefault();
       if (stack.undo(store.get().graph)) {
-        // The recorded commands may bring back or drop whichever parts were
-        // selected, so the selection is not carried across a history step.
+        // 记录下来的命令可能恢复或移除任意被选中的元件，
+        // 所以选区不会跨越一次历史步骤保留。
         store.set({ selected: [] });
         options.onChange();
       }
@@ -572,27 +564,23 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
     }
 
     if (event.key === 'Escape' && armedDef()) {
-      // Disarm the palette part: without this, stamping stays on forever and
-      // every later click on empty space drops another copy.
+      // 放下手里拿着的元件：否则盖章模式会一直开着，之后每次点空白都会再放一个。
       store.set({ armed: null, status: null });
     }
   };
 
-  /** The pointer left the board: there is nowhere for a ghost to be. */
+  /** 指针离开了画板：手持预览没有地方可画。 */
   const onPointerLeave = (): void => options.onHover?.(null);
 
   /**
-   * RIGHT-CLICK REMOVES WHAT IS UNDER THE POINTER, and nothing else.
+   * 右键删除指针下面的东西，而且只删它。
    *
-   * It is the shortcut for the two commonest edits on a board -- undo a part
-   * dropped in the wrong place, and cut a wire that went somewhere silly -- and
-   * both are one undoable step, so a right-click that was a mistake costs one
-   * Ctrl+Z. It deliberately does NOT touch the selection: a player who has
-   * selected five parts and right-clicks a sixth means that sixth one.
+   * 它是画板上两种最常见编辑的快捷方式——撤掉放错位置的元件、剪掉走错地方的导线——
+   * 两者都是单个可撤销步骤，所以误按一次右键只花一次 Ctrl+Z。
+   * 它故意不碰选区：已经选中五个元件的人再右键第六个，意思就是“删第六个”。
    *
-   * The browser's own menu is suppressed over the whole board, hit or miss: this
-   * is a work surface, and a context menu covering the circuit is never what a
-   * right-click here was for.
+   * 整个画板范围内都会屏蔽浏览器自带的菜单，无论有没有点中东西：
+   * 这里是一张工作台，右键从来不是为了在电路上盖一个上下文菜单。
    */
   const onContextMenu = (event: MouseEvent): void => {
     event.preventDefault();
@@ -622,8 +610,8 @@ export function attachBoardInput(  canvas: HTMLCanvasElement,
 
     const id = hit.kind === 'instance' ? hit.id : hit.inst;
     if (!deleteParts(store, stack, [id])) return;
-    // A part that was selected and is now gone must not stay in the selection,
-    // or the next press of the bin button would try to delete it twice.
+    // 被选中、现在又被删掉的元件不能留在选区里，
+    // 否则下一次按垃圾桶按钮会试图删它第二次。
     store.set({ selected: store.get().selected.filter((selected) => selected !== id) });
     options.onChange();
   };

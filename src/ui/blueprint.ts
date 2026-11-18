@@ -4,38 +4,34 @@ import type { WrapPlan } from '../levels/wrap';
 import { THEME } from './theme';
 
 /**
- * The player's own components: what they have, what a wrap is about to make, and
- * the way into a component's body.
+ * 玩家自制的元件：已经有哪些、一次封装即将产生什么，以及进入元件内部的入口。
  *
- * A PANEL BECAUSE THERE IS NO ROOM ON THE BOARD. A component has no place in the
- * world -- it is not a part you can point at until it is dropped -- so the list of
- * them belongs on the chrome, like the palette and the test matrix. It floats over
- * the stage with the other panels and is rebuilt only when its subject changes.
+ * 为什么它是一个面板而不是画板上的东西：元件在世界里没有位置——在被放到画板上之前，
+ * 你没法指着某个位置说「就是这个」。所以元件列表属于界面外壳，像元件托盘和测试矩阵
+ * 一样浮在舞台上方，只在它所依赖的数据变化时重建。
  *
- * THE DRAFT IS THE POINT OF THE WRAP FLOW. Wrapping is one command (`wrap.ts`),
- * and a command cannot be half-applied while the player types a name at it -- so
- * the panel shows the derived surface first (which wires became which pins), names
- * the component, and only then commits. Nothing has moved until 确定.
+ * 草案是封装流程的核心。封装是一条命令（`wrap.ts`），而命令不能在玩家输入名字的中途
+ * 只执行一半，所以面板先展示推导出的接口面（哪几根导线变成哪几个引脚）、给元件命名，
+ * 最后才提交；在按下「确定」之前，画板上没有任何东西移动。
  *
- * A component whose surface the panel shows but the wrap could not redraw -- a
- * plumbing pin, a nested component -- is reported as a count, because silently
- * dropping a connection is the one outcome a player cannot see.
+ * 接口面上列出的部分，如果封装没能重绘（管路引脚、嵌套元件），会以计数告警报告出来：
+ * 悄悄丢掉一条连接，是玩家唯一看不见的后果。
  */
 export interface BlueprintPanelOptions {
-  /** The wrap being drafted, or `null`. */
+  /** 正在起草的封装计划；没有草案时为 `null`。 */
   draft(): WrapPlan | null;
-  /** How many board instances are selected, so the buttons can say so. */
+  /** 画板上选中的实例数，按钮据此在文字里报出数量。 */
   selection(): number;
-  /** The name the draft would be committed under, as the inputs hold it. */
+  /** 草案提交时将使用的名字，即两个输入框里此刻的值。 */
   draftName(): { zh: string; en: string };
   onDraftName(name: { zh: string; en: string }): void;
-  /** Commit the draft: the wrap happens here. */
+  /** 提交草案：封装真正在这里发生。 */
   onConfirm(): void;
   onCancel(): void;
-  /** Start a wrap of the current selection; `false` when there is nothing to wrap. */
+  /** 开始封装当前选区；只在有选中实例时调用（按钮在 0 选中时禁用）。 */
   onStartWrap(): void;
   onRename(id: string, name: { zh: string; en: string }): void;
-  /** Reports whether the component could be removed (`false` while it is in use). */
+  /** 尝试删除元件；它仍被画板实例使用时返回 `false`。 */
   onDelete(id: string): boolean;
   onEnter(id: string): void;
   onLeave(): void;
@@ -51,15 +47,14 @@ export function mountBlueprintPanel(
   root.append(panel);
 
   /**
-   * Which library row the player opened, so its actions are on screen.
+   * 玩家展开了哪一行元件，好让这一行的操作按钮出现在屏幕上。
    *
-   * IN THE PANEL rather than in the store: the selection is not a fact about the
-   * document, only about which row is expanded, and putting it in `AppState` would
-   * make every other panel re-render when it changed.
+   * 放在面板内部而不是 store 里：哪一行展开并不是关于文档的事实，只是界面状态；
+   * 放进 `AppState` 会让它一变就触发其它所有面板重渲染。
    */
   let open: string | null = null;
 
-  /** The name inputs live across renders, so typing is not interrupted by one. */
+  /** 两个名字输入框跨渲染保留，这样输入到一半不会被某次重建打断。 */
   const zh = document.createElement('input');
   const en = document.createElement('input');
 
@@ -120,8 +115,7 @@ export function mountBlueprintPanel(
       if (draft.undeclared > 0) {
         const warn = document.createElement('p');
         warn.className = 'blueprints-warn';
-        // Which connections were left behind, as a count: the player can see the
-        // board still has them, and this is the panel saying so out loud.
+        // 哪些跨边界连接被留在了外面，用数量表示：玩家看得见画板上它们还在，这句就是面板把话说出来。
         warn.textContent = `${draft.undeclared} 条跨边界的导线无法收进元件（关卡引脚或嵌套元件），已留在画板上。`;
         panel.append(warn);
       }
@@ -191,7 +185,7 @@ export function mountBlueprintPanel(
     panel.append(list);
   };
 
-  /** A titled list of pins, or nothing at all when the side has none. */
+  /** 一块带标题的引脚列表；某一侧没有引脚时给出说明，而不是一个空块。 */
   function pinList(title: string, pins: readonly string[]): HTMLElement {
     const box = document.createElement('div');
     box.className = 'blueprints-pins';

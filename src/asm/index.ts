@@ -1,14 +1,12 @@
 /**
- * The assembler kernel's public surface.
+ * 汇编器内核对外的公共出口。
  *
- * The `program` level checker (`src/levels/checks.ts`) and, in phase 3, the
- * assembly IDE are the consumers, and both import from here rather than from
- * the two files underneath, so the surface can grow without either of them
- * learning the file layout.
+ * 消费方是 `program` 关卡检查器（`src/levels/checks.ts`），以及第三阶段的汇编
+ * IDE；它们都从这里 import，而不是从下面的两个文件 import，这样以后调整文件
+ * 布局时，两边都不必知道 `src/asm/` 内部是怎么分文件的。
  *
- * Nothing in `src/asm/` touches the DOM, the clock, the network or
- * `Math.random()` (phase-2 constraint 12): the only import below the surface is
- * `src/core/fields`.
+ * `src/asm/` 里没有任何东西接触 DOM、时钟、网络或 `Math.random()`（第二阶段
+ * 约束 12）：这一层之下唯一的 import 是 `src/core/fields`。
  */
 export { assemble } from './assemble';
 export type { AssembleError, AssembleResult } from './assemble';

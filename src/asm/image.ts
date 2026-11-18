@@ -1,56 +1,47 @@
 import { stripComment } from './assemble';
 
 /**
- * Hand-written machine code -> instruction bytes.
+ * 手写机器码 -> 指令字节。
  *
- * THE FORMAT (phase-3 ruling 3). One byte per line, written as eight binary
- * digits, with whitespace free to group the digits for the eye:
+ * 格式（第三阶段裁定 3）。每行一个字节，写成八个二进制数字，空白可以为眼睛
+ * 自由分组：
  *
- *   `# ...`            a comment, to the end of the line
- *   (blank)            skipped, as is a line of nothing but whitespace
- *   `10110001`         one byte
- *   `1011 0001`        the same byte, grouped
+ *   `# ...`            注释，到行尾
+ *   （空行）           跳过，只有空白的行同样跳过
+ *   `10110001`         一个字节
+ *   `1011 0001`        同一个字节，分组书写
  *
- * WHITESPACE IS ONLY EVER A SEPARATOR, AND ONE CHARACTER OF IT. Any whitespace
- * character groups the digits -- a space, a tab, anything else in that class --
- * because a player's editor decides which one lands between two groups and this
- * parser must not care (`1011\t0001` is the byte `1011 0001` is). A RUN of two
- * or more whitespace characters between groups is refused as an EMPTY FIELD
- * instead: it leaves a group with nothing in it, and folding it away would make
- * `1011  0001` and `1011 0001` the same byte while the player who typed the
- * first one has no way to learn which spelling the machine agreed with. Leading
- * and trailing whitespace is not an empty field -- the line is trimmed first, so
- * indenting a program stays legal.
+ * 空白永远只是分隔符，而且只算一个字符。任何空白字符都能分组——空格、制表符，
+ * 以及这个字符类里的其他字符——因为两组之间落进哪个字符由玩家的编辑器决定，
+ * 解析器不该在意（`1011\t0001` 与 `1011 0001` 是同一个字节）。组与组之间若出现
+ * 连续两个或更多空白字符，则按"空字段"拒绝：那会留下一个里面什么都没有的组，
+ * 若把它折叠掉，`1011  0001` 就会与 `1011 0001` 变成同一个字节，而输入前者的
+ * 玩家永远学不到机器接受的是哪种拼写。首尾空白不算空字段——整行先 trim，所以
+ * 给程序缩进仍然合法。
  *
- * WHY THIS EXISTS BESIDE THE ASSEMBLER. Chapter 4's first level is about the
- * ENCODING -- which two bits select the mode, what the other six mean -- so the
- * program has to be written the way the machine reads it. An assembler would
- * stand between the player and the bits, which is the one thing that level
- * teaches; so the player writes bytes, and this is the reader that turns them
- * into an image. It is deliberately NOT a second assembler: there are no
- * mnemonics here and there never will be.
+ * 为什么在汇编器之外还要有它。第四章第一关讲的就是编码——哪两位选模式、其余
+ * 六位各是什么意思——所以程序必须按机器读取它的方式写。汇编器会挡在玩家和这些
+ * 位之间，而"直接面对位"恰恰是那一关要教的东西；于是玩家写字节，这里就是把
+ * 字节读成程序映像的读取器。它刻意不是第二个汇编器：这里没有助记符，将来也
+ * 不会有。
  *
- * WHAT IT DELIBERATELY DOES NOT DO. It does not know what any byte means (see
- * `isa.ts`); it does not enforce `ram_prog`'s 256-byte capacity, which is the
- * machine's property rather than the format's; and it does not reject an empty
- * program, because zero bytes with zero errors is an honest answer and "a
- * program must exist" is the level checker's `missing-program` failure, not the
- * parser's.
+ * 刻意不做的内容：它不知道任何字节的含义（见 `isa.ts`）；它不强制 `ram_prog`
+ * 的 256 字节容量（那是机器的性质，不是格式的）；它也不拒绝空程序，因为"零
+ * 字节、零错误"是诚实的回答，而"程序必须存在"是关卡检查器的 `missing-program`
+ * 失败，不是解析器的。
  *
- * ERRORS ARE DATA, NEVER EXCEPTIONS, exactly as in `assemble()`: this runs on
- * the board-edit path, and a throw here would escape `runChecks` into `grade()`
- * on every keystroke. `ImageParseError` mirrors `AssembleError` field for field
- * -- 1-based `line`, the offending `text` verbatim, a readable `reason` -- so a
- * UI that renders one renders the other.
+ * 错误是数据，不是异常，和 `assemble()` 完全一致：这段代码跑在画板编辑路径上，
+ * 这里抛出的异常会在每次按键时从 `runChecks` 逃进 `grade()`。`ImageParseError`
+ * 逐字段对应 `AssembleError`——从 1 起算的 `line`、原文 `text`、可读的
+ * `reason`——于是能渲染其中一个的 UI 也能渲染另一个。
  */
 
 /**
- * One problem with the image, at the line that caused it.
+ * 映像中的一个问题，定位在引发它的那一行。
  *
- * `line` is 1-based and counts EVERY line of the source, comments and blanks
- * included -- a UI points at the player's text, not at the lines that survived.
- * `text` is the line exactly as written, comment included, so a caller can show
- * it without re-splitting the source.
+ * `line` 从 1 开始，统计源文本的每一行（含注释与空行）——UI 要指向玩家写的
+ * 文本，而不是指向"幸存下来"的那些行。`text` 是那一行的原文（含注释），
+ * 调用方不必重新拆分源文件就能把它展示出来。
  */
 export interface ImageParseError {
   readonly line: number;
@@ -60,68 +51,56 @@ export interface ImageParseError {
 
 export interface ImageParseResult {
   /**
-   * One byte per line that parsed, in source order.
+   * 每个解析成功的行产生一个字节，按源顺序排列。
    *
-   * A line that failed contributes nothing, so with a non-empty `errors` this
-   * array is a diagnostic listing, not an image. Every caller refuses an image
-   * with errors, which is the one case where the difference can show at all.
+   * 失败的行不贡献任何字节，因此当 `errors` 非空时，这个数组是"诊断列表"而
+   * 不是映像。所有调用方都会拒绝带错误的映像，而这正是"解析出的行"与"字节"
+   * 的差别唯一可能显现的场合。
    */
   readonly bytes: readonly number[];
   readonly errors: readonly ImageParseError[];
 }
 
-/** How many digits one byte is written with. Named, because both messages state it. */
+/** 一个字节用几位二进制数字书写。单独命名，因为两条错误消息都要说出这个数。 */
 const DIGITS_PER_BYTE = 8;
 
 /**
- * Compiles `source` into an image.
+ * 把 `source` 编译成映像。
  *
- * TOTAL: every problem comes back in `errors` and nothing is thrown at the
- * caller. At most one error is reported per line -- the line is abandoned at its
- * first fault, so a line with both a typo and a wrong length is not rendered
- * twice -- and parsing CONTINUES, because a player who mistyped three lines
- * needs all three in one run rather than three runs of one.
+ * 全函数（TOTAL）：所有问题都通过 `errors` 返回，不向调用方抛异常。每行最多
+ * 报一个错误——该行在第一个错误处放弃，于是"既有笔误又长度不对"的行不会在
+ * 列表里出现两次——并且解析会继续，因为打错三行的玩家需要一次看到三处，而
+ * 不是跑三遍每次只看一处。
  *
- * A line that fails contributes NO byte. Emitting a placeholder instead would
- * shift every instruction after it by one address, and the machine would then
- * run something the player never wrote while the check reported the image had
- * loaded.
+ * 失败的行不贡献任何字节。若改成写一个占位字节，它后面每条指令的地址都会错开
+ * 一位，机器就会运行玩家从没写过的东西，而检查还报告"映像已加载"。
  */
 export function parseImage(source: string): ImageParseResult {
   const bytes: number[] = [];
   const errors: ImageParseError[] = [];
 
-  // `\r\n` is ONE break, the same rule the assembler follows: splitting on '\n'
-  // alone would leave a carriage return on every line of a Windows-authored
-  // program, and every digit check below would fail on a character the player
-  // cannot see.
+  // `\r\n` 算一个换行，与汇编器遵循同一条规则：只按 '\n' 切分会给 Windows 写出的
+  // 程序每一行留下一个回车符，下面每个数字检查都会因为玩家看不见的字符而失败。
   const lines = source.split(/\r\n|\r|\n/);
   for (let index = 0; index < lines.length; index += 1) {
     const line = index + 1;
     const text = lines[index] ?? '';
-    // The comment goes first and the trim second, so a line that is only a
-    // comment -- or only spaces -- is skipped rather than reported: annotating a
-    // program is the normal case, and an annotation that became an error would
-    // make the format unusable past a handful of bytes. Trimming also means
-    // leading and trailing spaces are not an empty field, so indenting a program
-    // stays legal.
+    // 先去掉注释再 trim，于是"只有注释"或"只有空格"的行会被跳过而不是报错：给
+    // 程序写注释是常态，一条注释变成错误会让这个格式在写了几行之后就不可用。
+    // trim 也让首尾空白不构成空字段，所以给程序缩进仍然合法。
     const body = stripComment(text).trim();
     if (body === '') continue;
 
-    // Whitespace GROUPS digits and carries no meaning of its own, so a run of
-    // two or more whitespace characters leaves a group with nothing in it. That
-    // is refused rather than folded away: accepting it would make `1011  0001`
-    // and `1011 0001` the same byte while the player who typed the first one has
-    // no way to learn which spelling the machine agreed with. The separator is
-    // ANY whitespace rather than U+0020 alone, because which character an editor
-    // inserts between two groups is not the player's decision -- and a tab
-    // refused here would be reported as a character the player cannot see.
+    // 空白用来给数字分组，本身没有含义，所以连续两个以上空白字符会留下一个空组。
+    // 这里选择拒绝而不是折叠：接受它会让 `1011  0001` 与 `1011 0001` 成为同一个
+    // 字节，而输入前者的玩家永远学不到机器接受的是哪种拼写。分隔符是"任意空白"
+    // 而不是只认 U+0020，因为两组之间插入哪个字符不是玩家能决定的——若这里拒绝
+    // 制表符，报出来的会是玩家看不见的字符。
     //
-    // The run is tested before the split, not by looking for an empty field
-    // among its results: a single separator is not an empty field, so `1011\t0001`
-    // has to come back as two fields, while a run has to be refused whichever
-    // characters it is made of. Leading and trailing whitespace never reaches
-    // here -- the line was trimmed above -- so a run can only sit between groups.
+    // 先检查连续的空白再切分，而不是在切分结果里找空字段：单个分隔符不是空字段，
+    // 所以 `1011\t0001` 必须解析成两个字段，而连续空白无论由哪些字符组成都必须
+    // 被拒绝。首尾空白到不了这里——上面已经 trim 过——所以连续空白只可能出现在
+    // 组与组之间。
     if (/\s{2,}/.test(body)) {
       errors.push({
         line,
@@ -137,8 +116,8 @@ export function parseImage(source: string): ImageParseResult {
     const digits = fields.join('');
     const foreign = [...digits].find((digit) => digit !== '0' && digit !== '1');
     if (foreign !== undefined) {
-      // Named, because this is the typo a player actually makes: `2` is the one
-      // key that reads as a digit while being outside the alphabet.
+      // 把字符名字报出来，因为这是玩家实际会犯的笔误：`2` 是唯一看起来像数字、
+      // 却不在二进制字母表里的按键。
       errors.push({
         line,
         text,

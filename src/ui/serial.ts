@@ -1,21 +1,18 @@
 /**
- * The PC's end of the board's serial line.
+ * 板子串口连线在 PC 这一端。
  *
- * THE BOARD TALKS NEWLINE-DELIMITED ASCII (see `src/flash/protocol.ts`), so this
- * file's whole job is three things: open the Web Serial port at the sketch's
- * baud rate, split the byte stream into lines, and write one line per command.
- * It knows nothing about frames or commands -- those are the panel's and
- * `protocol.ts`'s -- which is what keeps it testable with a pair of streams and
- * no browser.
+ * 板子说的是以换行分隔的 ASCII（见 `src/flash/protocol.ts`），所以本文件的全部职责只有三件事：
+ * 以草图使用的波特率打开 Web Serial 端口、把字节流切成一行一行、每条命令写一行。
+ * 它不认识帧，也不认识命令——那是面板与 `protocol.ts` 的事——正因如此，
+ * 只要给一对流就能测试它，不需要浏览器。
  *
- * THE TYPES ARE STRUCTURAL ON PURPOSE. TypeScript's DOM library has no Web
- * Serial declarations (they live in a package this project will not add), so the
- * three members actually used are declared here. A browser that has no
- * `navigator.serial` fails `serialApi()` rather than a `ReferenceError`, because
- * the panel has to render "this browser cannot do it" like any other state.
+ * 类型是结构化声明，这是有意的。TypeScript 的 DOM 库没有 Web Serial 的声明
+ * （它们在项目不打算引入的第三方包里），所以这里只声明实际用到的三个成员。
+ * 没有 `navigator.serial` 的浏览器会让 `serialApi()` 返回 `null`，而不是抛 `ReferenceError`，
+ * 因为面板需要像渲染其它状态一样渲染「这个浏览器做不了」。
  */
 
-/** The slice of `SerialPort` this file uses. */
+/** 本文件用到的 `SerialPort` 的那一小部分。 */
 export interface SerialPortLike {
   open(options: { readonly baudRate: number }): Promise<void>;
   close(): Promise<void>;
@@ -23,17 +20,17 @@ export interface SerialPortLike {
   readonly writable: WritableStream<Uint8Array> | null;
 }
 
-/** The slice of `navigator.serial` this file uses. */
+/** 本文件用到的 `navigator.serial` 的那一小部分。 */
 export interface SerialNavigatorLike {
   requestPort(options?: {
     readonly filters?: readonly { readonly usbVendorId?: number; readonly usbProductId?: number }[];
   }): Promise<SerialPortLike>;
 }
 
-/** The baud rate the emitted sketch opens (`emit.ts`'s `SKETCH_BAUD`). */
+/** 生成的草图打开的波特率（即 `emit.ts` 里的 `SKETCH_BAUD`）。 */
 export const SERIAL_BAUD = 115_200;
 
-/** The browser's Web Serial API, or `null` when the browser has none. */
+/** 浏览器的 Web Serial API；浏览器没有该能力时返回 `null`。 */
 export function serialApi(source: unknown = globalThis.navigator): SerialNavigatorLike | null {
   if (source === null || typeof source !== 'object') return null;
   const serial = (source as { serial?: unknown }).serial;
@@ -44,20 +41,20 @@ export function serialApi(source: unknown = globalThis.navigator): SerialNavigat
 }
 
 export interface SerialLinkOptions {
-  /** One complete line, without its terminator and without a trailing `\r`. */
+  /** 一整行，不含行结束符，也不含结尾的 `\r`。 */
   onLine(line: string): void;
-  /** Called exactly once when an open port finishes closing, for any reason. */
+  /** 已打开的端口无论因何关闭，关闭完成时恰好调用一次。 */
   onClose?(): void;
-  /** A read failure worth showing; the link closes afterwards. */
+  /** 值得展示的读取失败；之后连线会关闭。 */
   onError?(message: string): void;
 }
 
 /**
- * One open serial port.
+ * 一个已打开的串口。
  *
- * `open` starts a read loop that lives until `close` (or until the board is
- * unplugged). `onLine` runs from that loop, so a reader must not throw: a
- * thrown callback would take the port down for one bad line.
+ * `open` 启动一个读循环，它一直活到 `close`（或板子被拔掉）。
+ * `onLine` 是从那个循环里调用的，所以读取方绝不能抛异常：
+ * 回调抛一次，就会因为一行坏数据把整个端口带下来。
  */
 export class SerialLink {
   private readonly options: SerialLinkOptions;
@@ -72,12 +69,12 @@ export class SerialLink {
     this.options = options;
   }
 
-  /** True while a port is open and the read loop is running. */
+  /** 端口已打开且读循环正在运行时为真。 */
   get isOpen(): boolean {
     return this.port !== null;
   }
 
-  /** Open `port` at the sketch's baud rate and start reading. */
+  /** 以草图使用的波特率打开 `port`，并开始读取。 */
   async open(port: SerialPortLike): Promise<void> {
     if (this.port !== null) throw new Error('串口已经连接');
     await port.open({ baudRate: SERIAL_BAUD });
@@ -94,7 +91,7 @@ export class SerialLink {
     this.done = this.readLoop(this.reader);
   }
 
-  /** Write one command; the newline is added here so callers cannot forget it. */
+  /** 写一条命令；换行在这里补上，调用方不可能忘记。 */
   async write(line: string): Promise<void> {
     const writer = this.writer;
     if (writer === null) throw new Error('串口尚未连接');
@@ -102,11 +99,10 @@ export class SerialLink {
   }
 
   /**
-   * Stop reading and close the port.
+   * 停止读取并关闭端口。
    *
-   * Cancelling the reader resolves the pending `read`, which runs the loop's
-   * `finally`: that is the one place the port, the writer and the locks are
-   * released, so `close` and an unplugged cable take the same path.
+   * 取消 reader 会让挂起的 `read` 解决，从而执行循环的 `finally`：
+   * 端口、writer 和锁只在那一个地方释放，所以主动 `close` 与被拔线走的是同一条路。
    */
   async close(): Promise<void> {
     if (this.port === null) return;
@@ -141,8 +137,7 @@ export class SerialLink {
       try {
         this.writer?.releaseLock();
       } catch {
-        // A writer whose stream already errored still has to be let go of; the
-        // port close below is the part that matters.
+        // 流已经出错的 writer 仍然必须放掉；真正重要的是下面的关闭端口。
       }
       this.writer = null;
       if (port !== null) await port.close().catch(() => undefined);

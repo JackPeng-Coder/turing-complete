@@ -1,3 +1,19 @@
+/**
+ * 检查器：把一条条 `LevelCheck` 施加到电路上，产出失败记录与节拍数。
+ *
+ * 这是关卡系统的执行端：它先编译电路并绑定关卡引脚（`bindLevelIo`），
+ * 再按检查种类驱动电路——真值表逐行、约束逐组枚举、fuzz 用种子化随机
+ * 向量、script / program 按节拍序列，custom 交给注册过的关卡专用检查器。
+ *
+ * 依赖下层 `core/`（编译与仿真）与 `asm/`（汇编、机器码镜像），以及同层
+ * `spec.ts` 的类型；被 `grader.ts`、`run.ts`（调试器与 IDE）、`main.ts`
+ * 与测试使用。
+ *
+ * 关键不变量：判定在每次画板编辑时都会跑，所以这里从不把异常抛给调用方
+ * ——坏关卡数据、坏程序文本、甚至检查器自身崩溃，都被吸收成失败记录；
+ * 同时“什么都不检查”的空洞检查一律算失败，不能让任何电路蒙混过关。
+ */
+
 import { assemble, OVERTURE_ISA, parseImage } from '../asm/index';
 import { CircuitValidationError, UnstableCircuitError } from '../core/errors';
 import type { Graph } from '../core/graph';
@@ -21,102 +37,102 @@ import type {
   ScriptStep,
 } from './spec';
 
+/**
+ * 一张电路与关卡引脚之间的读写接口：检查器、程序运行与调试器都只通过它
+ * 驱动电路。
+ *
+ * 它刻意不直接暴露 `Simulation`，而是把“写入 -> 结算 -> 时钟 -> 读出”
+ * 这套协议摆在接口上（见下面的 `settle`）：检查器与调试器必须遵守同一套
+ * 时序，否则同一张电路会在两处得到不同的读数。
+ */
 export interface LevelIo {
   reset(): void;
   writeInput(name: string, value: number): void;
   /**
-   * Runs the circuit to a fixed point, so a value just written is the one the
-   * next edge samples.
+   * 把电路跑到不动点，于是刚写入的值就是下一个时钟沿会采样的值。
    *
-   * PART OF THE LEVEL VOCABULARY, not an escape hatch to `io.sim`. `tick` samples
-   * the signal TABLE (`Simulation.tick` reads every storage element's inputs
-   * before it applies the edge), and a value written by `writeInput` only reaches
-   * a storage element's input through a `settle` -- so a caller that writes and
-   * ticks now clocks whatever the last settle left, which is the PREVIOUS input
-   * vector. On the OVERTURE board that is not a corner case: the level's input
-   * reaches the register file through `srcData` -> `d1` -> `data`, three
-   * combinational parts, so a checker that does not settle reads the byte it
-   * wrote one tick ago. Both of the kernel's own drivers settle for exactly this
-   * reason (`driveSteps` between a step's inputs and its edge, `runRow` after
-   * `writeInput`), and a closed-loop checker has to do the same.
+   * 它是关卡词汇表的一部分，不是通往 `io.sim` 的后门。`tick` 采样的是信号
+   * 表（`Simulation.tick` 在施加沿之前先读每个存储元件的输入），而
+   * `writeInput` 写入的值只有经过一次结算才能到达某个存储元件的输入端
+   * ——所以写完就 tick 的调用方，锁存到的是上一次结算留下的值，也就是
+   * “上一组”输入向量。在 OVERTURE 板上这不是边角情况：关卡的输入要经过
+   * `srcData` -> `d1` -> `data` 三个组合元件才到寄存器堆，所以不结算的
+   * 检查器读到的是一个节拍之前写下的字节。内核自己的两个驱动器都正因此
+   * 结算（`driveSteps` 在步骤输入与该步时钟沿之间，`runRow` 在
+   * `writeInput` 之后），闭环检查器也必须照做。
    *
-   * It is on the interface rather than reached through `io.sim` so that the
-   * write -> settle -> tick protocol is visible to a scripted stub: a test can
-   * record the call and pin the order, which is what keeps the protocol from
-   * being an implementation detail of the kernel.
+   * 它被放在接口上，而不是让调用方去碰 `io.sim`，是为了让“写入 -> 结算
+   * -> 时钟”这套协议对一个脚本化的桩可见：测试可以记录这次调用并钉住
+   * 次序，而正是这一点让协议不会沦为内核的实现细节。
    */
   settle(): void;
   readOutput(name: string): number;
   tick(): void;
   readonly sim: Simulation;
   /**
-   * A level pin whose compiled width disagrees with `spec.io`, if any.
+   * 若有某个关卡引脚的编译位宽与 `spec.io` 不符，这里是它的描述。
    *
-   * Set only when such a pin is *present* in the circuit: nothing can be written
-   * to it or read from it without crossing a pin boundary, so `createSim` treats
-   * the circuit as unbound. Absent pins are not reported here -- an incomplete
-   * board still grades, with those pins reading 0 as they always have.
+   * 只在该引脚确实“存在”于电路中时才设置：没有任何值能不跨越引脚边界就
+   * 写进它或从它读出，所以 `createSim` 把这种电路当作未绑定处理。不存在的
+   * 引脚不会在这里报告——半成品画板仍然参与判定，那些引脚照旧读 0。
    */
   readonly mismatch?: string;
 }
 
 /**
- * How many random vectors a `fuzz` check runs when it does not state `rounds`.
+ * `fuzz` 检查没有写 `rounds` 时跑多少组随机向量。
  *
- * 64 is enough to catch a wrong 8-bit operator almost immediately -- a circuit
- * that disagrees on any single bit pattern disagrees on roughly half of the
- * vectors -- while keeping a board edit cheap.
+ * 64 组足以几乎立刻抓住错误的 8 位运算——任何一位模式上有分歧的电路，
+ * 大约一半的向量都会暴露——同时让每次画板编辑的开销保持很低。
  */
 export const DEFAULT_FUZZ_ROUNDS = 64;
 
 /**
- * Hard ceiling on a `fuzz` check's `rounds`.
+ * `fuzz` 检查 `rounds` 的硬上限。
  *
- * `grade()` runs on every board edit, so a level that asks for 10^9 rounds must
- * not be able to hang the editor: `rounds` is clamped here, and the levels that
- * want exhaustive coverage use `truth-table`/`constraint` instead. (A `rounds`
- * that is not a positive integer is not clamped but refused -- see `fuzzIssue`.)
+ * `grade()` 每次画板编辑都会跑，所以一个要求 10^9 轮的关卡不能把编辑器
+ * 卡死：轮数在这里夹住；想要穷举覆盖的关卡应改用 `truth-table` /
+ * `constraint`。（不是正整数的 `rounds` 不会被夹住，而是直接拒绝；
+ * 详见 `fuzzIssue` 处的校验。）
  */
 export const FUZZ_ROUNDS_CAP = 4096;
 
 /**
- * True when `value` is representable on a `width`-bit pin.
+ * `value` 是否能在一个 `width` 位的引脚上表示。
  *
- * Delegates to the kernel's own `assertWidth` instead of duplicating its bounds,
- * so "what the level layer will write" and "what the signal table accepts" can
- * never drift apart: every value this rejects is one that would have thrown.
+ * 转调内核自己的 `assertWidth` 而不是复制它的边界，于是“关卡层会写什么”
+ * 与“信号表接受什么”永远不会漂移：被这里拒绝的每个值，原本都会被它
+ * 抛错。
  */
 function fitsPort(value: number, width: number): boolean {
   try {
     assertWidth(value, width);
     return true;
   } catch {
-    // `assertWidth` throws RangeError and nothing else; a value that does not
-    // fit is data, not a bug.
+    // `assertWidth` 只会抛 RangeError，别的都不抛；放不下的值属于数据
+    // 问题，不是 bug。
     return false;
   }
 }
 
 /**
- * Binds a compiled circuit to a level's named pins.
+ * 把一张编译好的电路绑定到关卡的有名引脚上。
  *
- * Convention: a `level_input` instance whose id is `IN_<pinId>` supplies that
- * level input; a `level_output` instance whose id is `OUT` (single output) or
- * `OUT_<pinId>` (multi-output) mirrors that level output.
+ * 命名约定：id 为 `IN_<pinId>` 的 `level_input` 实例提供对应的关卡输入；
+ * id 为 `OUT`（单输出）或 `OUT_<pinId>`（多输出）的 `level_output`
+ * 实例镜像对应的关卡输出。
  *
- * Every base and width comes from the COMPILED pin (`net.outputWidth` /
- * `net.inputWidth`), which is the instance's `params.width` when it sets one and
- * the def's declared width otherwise. The def alone is never enough: both
- * `level_input` and `level_output` declare 1-bit pins, so a level's 8-bit pin
- * exists in the table only because the instance carrying it says so.
+ * 每个基址与位宽都取自“编译后的引脚”（`net.outputWidth` /
+ * `net.inputWidth`），即实例设置了 `params.width` 时取它，否则取定义
+ * 声明的位宽。只看定义永远不够：`level_input` 与 `level_output` 声明的
+ * 都是一位引脚，关卡的 8 位引脚之所以存在于表里，完全是因为承载它的
+ * 实例这么说了。
  *
- * A pin that is present but compiled at a width other than `spec.io`'s is
- * reported in `mismatch` and binds nothing. Writing it at the spec width would
- * run across the neighbouring slots and writing it at the compiled width would
- * silently drop the high bits; neither is the value the level asked for, so the
- * check fails loudly instead (`runChecks` maps this to `missing-io`). A pin whose
- * instance is absent is NOT a mismatch: it keeps its Phase-0 behaviour of
- * reading 0 and swallowing writes, so a half-built board still grades.
+ * 引脚存在、但编译位宽与 `spec.io` 不同的，会在 `mismatch` 里报告并且
+ * 不绑定。按 spec 位宽写它会越过相邻的槽位，按编译位宽写它又会悄悄丢掉
+ * 高位；两者都不是关卡要的值，所以检查只能大声失败（`runChecks` 把它
+ * 映射成 `missing-io`）。实例缺席的引脚不算 mismatch：它保持 Phase-0 的
+ * 行为，读 0、吞掉写入，于是只搭了一半的画板仍然能参与判定。
  */
 export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): LevelIo {
   const inputSlots = new Map<string, { base: number; width: number }>();
@@ -137,7 +153,7 @@ export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): Lev
       }
       inputSlots.set(pin.id, { base: net.outputBase(key), width });
     } catch {
-      /* pin not present in this circuit: it will read as 0 */
+        /* 这个引脚不在这张电路里：它将按 0 读出 */
     }
   }
 
@@ -148,15 +164,14 @@ export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): Lev
       try {
         const width = net.inputWidth(key);
         if (width !== pin.width) {
-          // Present but mis-sized: that is the disagreement to report, not a
-          // reason to go looking for another naming convention.
+          // 存在但尺寸不对：这是要报告的分歧，而不是换一种命名约定再找。
           noteMismatch(key, width, pin.width);
           break;
         }
         outputSlots.set(pin.id, { base: net.inputBase(key), width });
         break;
       } catch {
-        /* try the next candidate */
+        /* 试下一个候选命名 */
       }
     }
   }
@@ -165,14 +180,13 @@ export function bindLevelIo(sim: Simulation, net: Netlist, spec: LevelSpec): Lev
 }
 
 /**
- * Binds a SANDBOX circuit to the connectors that are on it.
+ * 把一张沙盒电路绑定到它上面放置的接插件。
  *
- * A sandbox has no `LevelSpec.io`, so there is no naming convention to read: the
- * pin id IS the instance id (`IN_1`, `OUT_1`, ...), which is what `sandboxPins`
- * reports and what the readout, the display and the assistant all key on. The
- * slots themselves come from the compiled circuit exactly as `bindLevelIo`'s do,
- * including the width check -- a connector whose compiled width disagrees with
- * the pin the board reports is a mismatch rather than a silently truncated read.
+ * 沙盒没有 `LevelSpec.io`，没有命名约定可读：引脚 id 就是实例 id
+ * （`IN_1`、`OUT_1`……），这正是 `sandboxPins` 报告、也是读数、显示与
+ * 智能体共同使用的键。槽位本身与 `bindLevelIo` 一样取自编译后的电路，
+ * 包括位宽校验——接插件的编译位宽与画板报告的引脚不符时算 mismatch，
+ * 而不是悄悄截断着读。
  */
 export function bindSandboxIo(sim: Simulation, net: Netlist, pins: BoardPins): LevelIo {
   const inputSlots = new Map<string, { base: number; width: number }>();
@@ -189,7 +203,7 @@ export function bindSandboxIo(sim: Simulation, net: Netlist, pins: BoardPins): L
       }
       inputSlots.set(pin.id, { base: net.outputBase(key), width });
     } catch {
-      /* the connector is not in the compiled circuit: it reads as 0 */
+      /* 这个接插件不在编译后的电路里：它按 0 读出 */
     }
   }
 
@@ -203,7 +217,7 @@ export function bindSandboxIo(sim: Simulation, net: Netlist, pins: BoardPins): L
       }
       outputSlots.set(pin.id, { base: net.inputBase(key), width });
     } catch {
-      /* the connector is not in the compiled circuit: it reads as 0 */
+      /* 这个接插件不在编译后的电路里：它按 0 读出 */
     }
   }
 
@@ -211,13 +225,12 @@ export function bindSandboxIo(sim: Simulation, net: Netlist, pins: BoardPins): L
 }
 
 /**
- * The `LevelIo` both binders end in: the slots, plus the read/write rules.
+ * 两个绑定函数共同的出口：槽位，加上读/写规则。
  *
- * ONE OBJECT, TWO SPELLINGS. The level binder finds its slots by the `IN_`/`OUT`
- * naming convention and the sandbox binder by instance id; everything after the
- * lookup -- the width guard on a write, the masked read, the settle and tick
- * forwarding -- has to be the same code, because a checker and a board that
- * disagreed about it would disagree about what a pin is carrying.
+ * 一个对象，两种拼法。关卡绑定按 `IN_`/`OUT` 命名约定找槽位，沙盒绑定
+ * 按实例 id 找；查找之后的一切——写入时的位宽守卫、读出的掩码、结算与
+ * 时钟的转发——必须是同一份代码，因为检查器与画板若在这一点上不一致，
+ * 就会对“引脚上到底载着什么”不一致。
  */
 function buildIo(
   sim: Simulation,
@@ -229,8 +242,8 @@ function buildIo(
     sim,
     reset: () => sim.reset(),
     settle: () => {
-      // Routed through `io` rather than left to `io.sim`, so a scripted stub can
-      // stand in for the circuit and still see the protocol (see `LevelIo`).
+      // 经过 `io` 转发而不是让调用方去碰 `io.sim`，这样脚本化的桩可以
+      // 顶替电路，同时仍能看到这套协议（见 `LevelIo`）。
       sim.settle();
     },
     tick: () => {
@@ -240,12 +253,11 @@ function buildIo(
       const slot = inputSlots.get(name);
       if (!slot) return;
       if (!fitsPort(value, slot.width)) {
-        // Authored level data is untrusted input: a row may name a value the pin
-        // cannot hold (`{ a: 2 }` or `{ a: 0.5 }` on a 1-bit pin). Reject the
-        // write -- deterministically, leaving the pin at the zero default that
-        // `reset()` established, exactly like a pin the circuit does not contain
-        // -- rather than let `Simulation.write` raise a RangeError out of
-        // `runChecks` and `grade()` on every board edit.
+        // 关卡数据是未定型的输入：某一行可能点名义上放不进该引脚的值
+        // （在 1 位引脚上写 `{ a: 2 }` 或 `{ a: 0.5 }`）。确定性地拒绝这次
+        // 写入——让引脚停在 `reset()` 建立的 0 默认值，与“电路里没有这个
+        // 引脚”完全一样——而不是让 `Simulation.write` 抛 RangeError、从
+        // `runChecks` 一路冒出，变成每次画板编辑都炸一次 `grade()`。
         return;
       }
       sim.write(slot.base, slot.width, value);
@@ -257,9 +269,8 @@ function buildIo(
     },
   };
 
-  // `exactOptionalPropertyTypes` rejects handing an explicit `undefined` to an
-  // optional property, so the field is only present when there is something to
-  // report.
+  // `exactOptionalPropertyTypes` 不接受把一个显式的 `undefined` 交给
+  // 可选属性，所以只有真的有东西要报告时，这个字段才存在。
   return mismatches.length === 0 ? io : { ...io, mismatch: mismatches.join('; ') };
 }
 
@@ -280,9 +291,11 @@ function enumerateInputs(spec: LevelSpec): Array<Record<string, number>> {
 }
 
 /**
- * Builds the full truth table of a purely combinational level by enumerating
- * every input combination and slicing `expected` into the output pins.
- * The bit layout of `expected` must match the order of `alwaysOn.outputs`.
+ * 通过枚举全部输入组合、把 `expected` 切进各输出引脚，生成纯组合关卡的
+ * 完整真值表。
+ *
+ * `expected` 的位布局必须与 `alwaysOn.io.outputs` 的顺序一致：第一个
+ * 输出引脚占最低位，依此类推。
  */
 export function generateRows(
   alwaysOn: LevelSpec,
@@ -300,19 +313,18 @@ export function generateRows(
   });
 }
 
-/** Declared width of a level output pin; an unknown pin is treated as 1 bit. */
+/** 关卡输出引脚的声明位宽；未知引脚按 1 位处理。 */
 function outputWidth(spec: LevelSpec, id: string): number {
   return spec.io.outputs.find((pin) => pin.id === id)?.width ?? 1;
 }
 
 /**
- * Expected value of `rule.output` for one input vector.
+ * 一条规则在某个输入向量下的 `rule.output` 期望值。
  *
- * `sum-equals` reduces the sum modulo the output pin's width, because the raw
- * sum is not representable there. A 1-bit `out` pin IS a half-adder sum, and
- * comparing the raw sum would make the `(1, 1)` row unsatisfiable for every
- * circuit -- including a correct XOR. Reducing modulo `2 ** width` keeps the
- * rule meaningful for a wide pin too: it compares the low `width` bits.
+ * `sum-equals` 对输出引脚位宽取模，因为原始和在那个引脚里放不下。一个
+ * 1 位的 `out` 就是半加器的和，若比较原始和，`(1, 1)` 这一行对任何电路
+ * （包括正确的异或）都不可能成立。对宽引脚同样取模 `2 ** width`，规则
+ * 依然有意义：它比较的是低 `width` 位。
  */
 function evaluateRule(
   rule: ConstraintRule,
@@ -329,29 +341,26 @@ function evaluateRule(
   return count >= rule.count ? 1 : 0;
 }
 
-// ---------------------------------------------------------------------------
-// fuzz
-// ---------------------------------------------------------------------------
+// ------------------------------ fuzz：种子化随机向量 ------------------------------
 
 /**
- * True when `value` is a whole number that fits a `width`-bit pin.
+ * `value` 是否是能放进 `width` 位引脚的整数。
  *
- * Shares `fitsPort` with `writeInput`, so "a value a fuzz function may expect"
- * and "a value the signal table accepts" cannot drift apart.
+ * 与 `writeInput` 共用 `fitsPort`，于是“fuzz 函数可以期望的值”与
+ * “信号表接受的值”不会漂移。
  */
 function fitsPin(value: unknown, width: number): value is number {
   return typeof value === 'number' && fitsPort(value, width);
 }
 
 /**
- * A safe, short description of an untrusted value, for a failure's `detail`.
+ * 对一个不可信的值做安全、简短的描述，用于失败的 `detail`。
  *
- * EXPORTED FOR THE CUSTOM CHECKERS, which validate their own `params` and owe a
- * player the same sentence the kernel writes when it validates a fuzz vector:
- * `String(value)` alone is not safe here, because an object's own `toString` is
- * as untrusted as the value it describes, and one that throws would escape the
- * checker as "the custom check threw" -- a failure that names the checker
- * instead of the level data that is actually wrong.
+ * 导出给自定义检查器使用：它们要校验自己的 `params`，并且欠玩家一句与
+ * 内核校验 fuzz 向量时同样的话。这里不能直接 `String(value)`，因为对象
+ * 自己的 `toString` 与它所描述的值一样不可信，一个会抛错的 `toString`
+ * 会逃出检查器，变成“自定义检查抛异常”——一条点名检查器、而真正错在
+ * 关卡数据的失败。
  */
 export function describeValue(value: unknown): string {
   if (value === null) return 'null';
@@ -359,8 +368,8 @@ export function describeValue(value: unknown): string {
   if (typeof value === 'string') return JSON.stringify(value);
   if (typeof value === 'function') return 'a function';
   if (typeof value === 'object' || typeof value === 'symbol') {
-    // An object's own `toString` is untrusted too: a throwing one must not
-    // escape the failure that is trying to describe it.
+    // 对象自己的 `toString` 同样不可信：会抛错的那种，不能从“正在描述它”
+    // 的失败里逃出去。
     try {
       return String(value);
     } catch {
@@ -370,12 +379,12 @@ export function describeValue(value: unknown): string {
   return String(value);
 }
 
-/** `name: message` of a thrown `Error`, or a description of anything else. */
+/** 抛出的 `Error` 的 `name: message`；其它东西则按值描述。 */
 function describeError(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : describeValue(error);
 }
 
-/** Only the numeric entries of an authored vector, for a numeric failure record. */
+/** 只保留作者给出的向量里的数值项，用于生成数值化的失败记录。 */
 function numericOnly(vector: Readonly<Record<string, unknown>>): Record<string, number> {
   const out: Record<string, number> = {};
   for (const [key, value] of Object.entries(vector)) {
@@ -384,21 +393,19 @@ function numericOnly(vector: Readonly<Record<string, unknown>>): Record<string, 
   return out;
 }
 
-/** The sentence a failure carries when an authored value cannot fit its pin. */
+/** 作者给出的值放不进引脚时，失败携带的那句话。 */
 function unfitDetail(subject: string, id: string, value: unknown, width: number): string {
   return `${subject} "${id}" is ${describeValue(value)}, which does not fit a ${width}-bit pin`;
 }
 
 /**
- * The check's deterministic PRNG: xorshift32, seeded from the check data and
- * from nothing else.
+ * 检查自己的确定性 PRNG：xorshift32，种子只来自检查数据。
  *
- * Written here rather than taken from a library (the project has no runtime
- * dependencies) and rather than `Math.random` (a level has to grade the same
- * way on every board edit, and the same seed has to produce the same vectors in
- * every run). xorshift32 has a single fixed point at 0, so an all-zero seed is
- * remapped to the golden-ratio odd constant: a `seed: 0` level would otherwise
- * drive one vector `rounds` times without ever saying so.
+ * 写在这里而不是用库（本项目没有运行时依赖），也不用 `Math.random`
+ * （关卡必须在每次画板编辑时判定得一样，同一个种子必须在每次运行中
+ * 产生同一串向量）。xorshift32 只有一个不动点 0，所以全零种子会被重
+ * 映射成黄金比例的那个奇数常量：否则 `seed: 0` 的关卡会连续 `rounds`
+ * 次驱动同一个向量，而且从不说明。
  */
 function createFuzzRandom(seed: number): () => number {
   let state = (seed >>> 0) || 0x9e37_79b9;
@@ -410,14 +417,14 @@ function createFuzzRandom(seed: number): () => number {
   };
 }
 
-/** One validated input pin binding: the drawn sample in, the value to drive out. */
+/** 一条校验过的输入引脚绑定：输入抽到的样本，输出要驱动的值。 */
 interface FuzzInputPin {
   readonly id: string;
   readonly width: number;
   readonly fn: (sample: FuzzSample) => number;
 }
 
-/** One validated output pin binding: the driven vector in, the expected value out. */
+/** 一条校验过的输出引脚绑定：输入实际驱动的向量，输出期望值。 */
 interface FuzzOutputPin {
   readonly id: string;
   readonly width: number;
@@ -425,11 +432,11 @@ interface FuzzOutputPin {
 }
 
 /**
- * A fuzz check that can be run: the resolved round count and the level's pins
- * bound to validated functions.
+ * 一份可以跑的 fuzz 检查：定下来的轮数，以及绑定到校验过的函数上的
+ * 关卡引脚。
  *
- * `inputs` / `outputs` are in the level's pin order (never `Object.keys` order),
- * which is what makes the vector sequence reproducible.
+ * `inputs` / `outputs` 按关卡的引脚顺序排列（绝不是 `Object.keys` 的
+ * 顺序），这正是向量序列可复现的原因。
  */
 interface FuzzRun {
   readonly rounds: number;
@@ -437,7 +444,7 @@ interface FuzzRun {
   readonly outputs: readonly FuzzOutputPin[];
 }
 
-/** Why a fuzz check cannot run as written, in the shape a failure record needs. */
+/** 一份 fuzz 检查为什么按现状跑不起来，形状是失败记录需要的样子。 */
 interface FuzzIssue {
   readonly reason: 'missing-vectors' | 'invalid';
   readonly expected: Readonly<Record<string, number>>;
@@ -452,19 +459,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Validates a fuzz check against the level it belongs to.
+ * 结合所属关卡校验一份 fuzz 检查。
  *
- * Vacuity is reported first, and deliberately: a check that would compare
- * nothing is the defect this kind exists next to (`rounds: 0`, no input pins, no
- * expectations -- the `missing-rows` lesson), so it is named as such even when
- * the same check is also misspelled. Everything after that is a plain authoring
- * error and comes back as `invalid`: a pin without a function, a function for a
- * pin the level does not have, a non-integer seed.
+ * 先报告“空洞”，这是刻意的：什么都不比较的检查正是这一类存在要防的
+ * 缺陷（`rounds: 0`、没有输入引脚、没有期望——`missing-rows` 的教训），
+ * 所以哪怕同一份检查同时还有拼写错误，也先按“空洞”命名。此后的一切都是
+ * 普通的编写错误，以 `invalid` 返回：某引脚没有函数、给本关没有的引脚
+ * 写了函数、种子不是整数。
  */
 function planFuzz(check: FuzzCheck, spec: LevelSpec): FuzzPlan {
   const rounds = check.rounds ?? DEFAULT_FUZZ_ROUNDS;
-  // A check that runs no rounds compares nothing -- the `missing-rows` lesson --
-  // so the round count is the first thing validated, before any pin is bound.
+  // 一轮都不跑的检查什么都不比较——`missing-rows` 的教训——所以轮数是
+  // 第一个被校验的东西，早于任何引脚绑定。
   if (!Number.isInteger(rounds) || rounds <= 0) {
     return {
       kind: 'issue',
@@ -494,8 +500,8 @@ function planFuzz(check: FuzzCheck, spec: LevelSpec): FuzzPlan {
     };
   }
 
-  // Level data is untrusted however it is typed: `inputs` and `outputs` may be
-  // absent, or hold something that is not a function at all.
+  // 关卡数据无论怎么标注类型都不可信：`inputs` 与 `outputs` 可能缺席，
+  // 也可能装着根本不是函数的东西。
   const inputs: Record<string, unknown> = isRecord(check.inputs) ? check.inputs : {};
   const outputs: Record<string, unknown> = isRecord(check.outputs) ? check.outputs : {};
   if (Object.keys(inputs).length === 0) {
@@ -585,16 +591,14 @@ function planFuzz(check: FuzzCheck, spec: LevelSpec): FuzzPlan {
 }
 
 /**
- * The vectors a validated fuzz check drives, one per round.
+ * 一份校验过的 fuzz 检查要驱动的向量，每轮一个。
  *
- * A generator so the caller can stop at the first failing round without paying
- * for the rest of the sequence -- a wrong circuit usually disagrees on round 0,
- * and the cap allows thousands of rounds.
+ * 用生成器，是为了让调用方在第一轮失败时就能停下，不必付完整串序列的
+ * 代价——错误的电路通常第 0 轮就对不上，而上限允许几千轮。
  *
- * Each pin's draw is already inside that pin's width, so the natural input
- * function (`(sample) => sample.a`) always produces a value the pin can hold.
- * A pin wider than 32 bits can only use 32 bits of the stream; nothing this
- * phase builds is wider than eight.
+ * 每个引脚抽到的值已经落在该引脚位宽内，所以最自然的输入函数
+ * （`(sample) => sample.a`）永远产出引脚放得下的值。宽于 32 位的引脚
+ * 只能用到随机流的 32 位；本阶段搭建的东西没有宽于八位的。
  */
 function* fuzzVectors(seed: number, plan: FuzzRun): Generator<FuzzVector> {
   const random = createFuzzRandom(seed);
@@ -607,19 +611,15 @@ function* fuzzVectors(seed: number, plan: FuzzRun): Generator<FuzzVector> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// custom
-// ---------------------------------------------------------------------------
+// ------------------------------ custom：按 id 查表的关卡专用检查 ------------------------------
 
 /**
- * Why one adopted failure record cannot be shown as-is, or `undefined`.
+ * 一条被采纳的失败记录为什么不能原样显示，或 `undefined`（表示没问题）。
  *
- * `spec` is what makes the pin names checkable: these three maps are rendered
- * pin by pin, so a key that is not one of the level's pins would put a stray
- * row of zeros beside the real ones, and a value that is not a finite number
- * would render as whatever the panel's string conversion makes of it. Both are
- * refused here, for the same reason `fuzz` refuses a value that does not fit its
- * pin -- a checker must not be able to ship a silently wrong row.
+ * `spec` 让引脚名可以被核对：这三张映射会逐引脚渲染，所以不是本关引脚
+ * 的键会在真实数据旁多出一行零，而不是有限数的值会渲染成面板字符串转换
+ * 的任意结果。两者都在这里被拒绝，理由与 `fuzz` 拒绝放不进引脚的值相同
+ * ——检查器不能悄悄交上来一行错的数据。
  */
 function failureIssue(item: unknown, spec: LevelSpec): string | undefined {
   if (!isRecord(item)) return `is ${describeValue(item)}, expected an object`;
@@ -653,14 +653,12 @@ function failureIssue(item: unknown, spec: LevelSpec): string | undefined {
 }
 
 /**
- * Why a custom checker's return value cannot be adopted, or `undefined` when it
- * can.
+ * 自定义检查器的返回值为什么不能被采纳，或 `undefined`（表示可以）。
  *
- * The shape is checked here rather than trusted, because the records go straight
- * into the failure panel: a checker that returns `{ failures: 'none' }` or a
- * bare `null` must fail its check with a reason, not break the board on the next
- * keystroke. Each record is checked against the level as well as for its own
- * shape -- see `failureIssue`.
+ * 形状在这里校验，而不是选择相信，因为这些记录会直接进入失败面板：
+ * 返回 `{ failures: 'none' }` 或裸 `null` 的检查器，必须让这次检查带着
+ * 原因失败，而不是在下一次按键时把画板弄挂。每条记录除了自身形状，还要
+ * 对着关卡校验——见 `failureIssue`。
  */
 function outcomeIssue(outcome: unknown, spec: LevelSpec): string | undefined {
   if (!isRecord(outcome)) {
@@ -683,27 +681,25 @@ function outcomeIssue(outcome: unknown, spec: LevelSpec): string | undefined {
 }
 
 /**
- * The player's program text for the level being graded, as the app holds it.
+ * 正在判定的这一关的玩家程序文本，按 app 里的持有方式。
  *
- * WHY A WRAPPER AND NOT A BARE `string`. It is the one seam every program-taking
- * check funnels through -- `runChecks`, the level's own `program` steps, and the
- * closed-loop checkers (`lock`, `maze`) all read the text from here -- so the
- * shape of "the player's program" can grow without a new argument threaded
- * through `grade` and each caller. It has exactly one field today: the debugger
- * arrived reading the same text through `ProgramRun`, and breakpoints are
- * deferred by ruling, so neither added one.
+ * 为什么包一层而不是裸 `string`。它是每个“读取程序”的检查都要经过的
+ * 唯一接缝——`runChecks`、关卡自己的 `program` 步骤，以及闭环检查器
+ * （`lock`、`maze`）都从这里读文本——于是“玩家的程序”这个形状可以在不
+ * 新增参数、不穿透 `grade` 和每个调用方的前提下长大。今天它恰好只有
+ * 一个字段：调试器通过 `ProgramRun` 读同一份文本，而断点按此前裁决暂缓，
+ * 所以两者都没有加字段。
  */
 export interface PlayerProgram {
   readonly text: string;
 }
 
 /**
- * Runs every check a level declares against a circuit.
+ * 对一张电路运行关卡声明的全部检查。
  *
- * `player` is the player's program text, and it is read ONLY by a `program` check
- * whose `from` is `'player'`. Every existing caller passes nothing, and every
- * level-authored check keeps reading its own `source`, so the fourth argument is
- * invisible to the shipped levels.
+ * `player` 是玩家的程序文本，只有 `from` 为 `'player'` 的 `program`
+ * 检查会读它。现有的每个调用方都不传它，而每个关卡自带的检查仍然读
+ * 自己的 `source`，所以第四个参数对已发布的关卡是不可见的。
  */
 export function runChecks(
   graph: Graph,
@@ -715,34 +711,31 @@ export function runChecks(
   let ticksUsed = 0;
 
   for (const entry of spec.checks) {
-    // Element-level guard, before anything reads `check.kind`: level data
-    // reaches the kernel untyped, and an entry that is `null` used to throw a
-    // `TypeError` out of `runChecks` -- including from the `'error' in created`
-    // push just below, which reads `kind` and sits outside the `try`.
+    // 元素级守卫，早于任何地方读 `check.kind`：关卡数据到达内核时未定型，
+    // 而一个 `null` 条目从前会从 `runChecks` 抛出 `TypeError`——包括紧跟
+    // 在下面、位于 `try` 之外、会读 `kind` 的那次 `'error' in created`
+    // 推送。
     if (!isRecord(entry) || typeof entry.kind !== 'string') {
       failures.push(unreadableCheckFailure(entry));
       continue;
     }
     const check: LevelCheck = entry;
-    // One compilation and one Simulation per check, reused for every row.
-    // Compiling per row would re-run validateGraph and reallocate the signal
-    // table hundreds of times for a single level.
+    // 每个检查只编译一次、只建一个 Simulation，所有行复用。若每行都编译，
+    // 单个关卡就会把 validateGraph 重跑、信号表重分配几百次。
     const created = createSim(graph, registry, spec);
     if ('error' in created) {
       failures.push(failure(check, {}, {}, {}, 0, created.error));
       continue;
     }
     const io = created.io;
-    // The fuzz round in flight, so the `catch` below can still name the round
-    // when the kernel (not the authored data) is what failed. `null` for every
-    // other kind of check.
+    // 正在跑的那一轮 fuzz，用于下面 `catch` 在“失败的是内核而不是作者
+    // 数据”时仍能点名轮次。其它检查始终为 `null`。
     let activeRound: number | null = null;
 
     try {
       if (check.kind === 'truth-table') {
         if (!check.rows || check.rows.length === 0) {
-          // A truth-table check with nothing to compare against would pass
-          // every circuit ever built. Refuse it loudly instead.
+          // 没有任何可比较内容的真值表检查，会让任何电路通过。大声拒绝它。
           failures.push(
             failure(
               check,
@@ -757,9 +750,9 @@ export function runChecks(
         }
         for (const row of check.rows) {
           if (Object.keys(row.outputs).length === 0) {
-            // The same hazard as an empty `rows` array, one level down: a row
-            // that declares no expected output compares nothing, so a correct
-            // circuit and a pile of NANDs would both "pass" it.
+            // 与空 `rows` 数组同样的隐患，只是低一层：声明了却不产出任何
+            // 期望输出的一行什么都不比较，于是正确电路和一堆与非门都能
+            // “通过”。
             failures.push(
               failure(check, row.inputs, { outputs: 1 }, { outputs: 0 }, 0, 'missing-rows'),
             );
@@ -805,9 +798,9 @@ export function runChecks(
           try {
             step = vectors.next();
           } catch (e) {
-            // Authored code, not kernel code: a throwing input function is a
-            // level-data defect, and it must not escape into the board-edit
-            // path (see the `RangeError` note in the `catch` below).
+            // 作者代码，不是内核代码：抛错的输入函数是关卡数据的缺陷，
+            // 不能让异常逃进画板编辑路径（见下面 `catch` 里关于
+            // `RangeError` 的说明）。
             failures.push(
               failure(
                 check,
@@ -826,9 +819,9 @@ export function runChecks(
           const raw: Readonly<Record<string, unknown>> = step.value;
           const unpinnable = plan.inputs.find((pin) => !fitsPin(raw[pin.id], pin.width));
           if (unpinnable !== undefined) {
-            // Writing it would be refused by `writeInput` and leave the pin at
-            // zero, comparing the circuit against a vector it never saw. Say
-            // which pin and which value instead.
+            // 硬写进去会被 `writeInput` 拒绝，让引脚停在零，于是电路是在
+            // 与一个它从未见过的向量比较。这里改为点明是哪个引脚、哪个
+            // 值。
             failures.push(
               failure(
                 check,
@@ -877,10 +870,9 @@ export function runChecks(
             break;
           }
           if (badExpectation !== undefined) {
-            // Never masked to the pin width: masking `a + b` on an 8-bit pin
-            // would turn the authored mistake into a comparison that silently
-            // means something else. The expectation is reported unusable, with
-            // the pin and the value, instead.
+            // 绝不按引脚位宽做掩码：把 8 位引脚上的 `a + b` 掩掉，会把
+            // 作者的笔误变成一个悄悄表达别的意思的比较。这里改为报告这个
+            // 期望“不可用”，并带上引脚与值。
             failures.push(
               failure(
                 check,
@@ -906,10 +898,9 @@ export function runChecks(
           const attempt = runRow(io, spec, inputs, 0);
           ticksUsed = Math.max(ticksUsed, attempt.ticksUsed);
           if (compare(expected, attempt.outputs)) {
-            // The first failing round is enough: no later round can change the
-            // verdict, and a wrong circuit usually disagrees on round 0 while
-            // the cap allows thousands. The record still names the round, the
-            // vector, the expectation and what the circuit actually drove.
+            // 第一轮失败就够了：后续轮次改变不了结论，而错误的电路通常
+            // 第 0 轮就对不上，上限却允许几千轮。记录里仍然点名轮次、
+            // 向量、期望，以及电路实际驱动的值。
             failures.push(
               failure(
                 check,
@@ -930,9 +921,8 @@ export function runChecks(
 
       if (check.kind === 'custom') {
         if (typeof check.id !== 'string' || check.id === '') {
-          // Ruling: the kernel takes an id and looks it up in the registry. A
-          // function carried in level data is neither serialisable nor
-          // reviewable, so it is refused -- not called.
+          // 裁决：内核接收 id 并到注册表里查。把函数带在关卡数据里既不可
+          // 序列化也不可评审，所以直接拒绝——不调用它。
           const detail =
             typeof check.id === 'function'
               ? 'custom check inlined a function in level data; name a registered id instead'
@@ -961,25 +951,21 @@ export function runChecks(
         let outcome: unknown;
         let issue: string | undefined;
         try {
-          // The check itself is handed over as well as the level, because a
-          // checker's `params` live on the check -- that is what keeps a puzzle's
-          // data (a secret byte, a maze grid) in the level file rather than in
-          // the checker's code -- and `player` is forwarded for the same reason
-          // `program` reads it: the closed-loop checkers drive a program the
-          // player wrote, not one the level ships.
+          // 除了关卡，检查本身也交过去，因为检查器的 `params` 挂在检查上
+          // ——这正是“谜题数据（某个秘密字节、迷宫网格）留在关卡文件里、
+          // 而不是检查器代码里”的原因——而 `player` 被转发也是同一个
+          // 道理：闭环检查器驱动的是玩家写的程序，不是关卡自带的。
           outcome = checker(io, spec, check, player);
-          // Read inside the same `try` as the call: an outcome whose `passed`,
-          // `failures` or `ticksUsed` accessor throws is a hostile return value,
-          // not kernel code, and the outer `catch` rethrows everything that is
-          // not a kernel error. Here it is a malformed outcome with an
-          // explanation, which is what it is.
+          // 放在与调用同一个 `try` 里读取：返回值若在访问 `passed`、
+          // `failures` 或 `ticksUsed` 时抛错，那是一个敌意的返回值，不是
+          // 内核代码，外层 `catch` 会重抛所有不是内核错误的东西。在这里它
+          // 是一条带解释的“格式错误的返回值”，本就该如此。
           issue = outcomeIssue(outcome, spec);
         } catch (e) {
-          // A registered checker is code, and code has bugs. Every throw is
-          // absorbed here -- `grade()` runs on every board edit, and Phase 0
-          // had a `RangeError` escape this loop and fire on each one. Unlike
-          // the outer `catch`, nothing is rethrown: a checker's crash is the
-          // level's failure, not the kernel's.
+          // 注册过的检查器也是代码，代码会有 bug。每次抛出都在这里被吸收
+          // ——`grade()` 每次画板编辑都会跑，Phase 0 就曾有一个
+          // `RangeError` 逃出这个循环、每次编辑都炸一次。与外层 `catch`
+          // 不同，这里什么都不重抛：检查器崩溃是关卡的失败，不是内核的。
           failures.push(
             failure(
               check,
@@ -1012,26 +998,24 @@ export function runChecks(
         }
 
         const result = outcome as CheckOutcome;
-        // The checker owns its ticks (it is the only thing that knows how far it
-        // drove the circuit); they join the run's tick metric like every other
-        // check's.
+        // 检查器自己拥有它的节拍（只有它知道自己把电路驱动了多远）；
+        // 这些节拍与其他检查一样，汇入本次运行的 TICK 指标。
         ticksUsed = Math.max(ticksUsed, result.ticksUsed);
         if (!result.passed || result.failures.length > 0) {
           if (result.failures.length > 0) {
-            // Adopted verbatim: these records are the checker's own report. A
-            // loop rather than `push(...)`, because a checker may return more
-            // records than the argument limit a spread tolerates.
+            // 原样采纳：这些记录就是检查器自己的报告。用循环而不是展开
+            // 运算符，因为检查器可能返回多到超过展开参数上限的记录。
             for (const record of result.failures) failures.push(record);
             if (result.passed) {
-              // A contradiction fails safe: the records are kept, and a second
-              // record says why the check failed despite `passed: true`.
+              // 自相矛盾时按“失败”处理更安全：记录都保留，另外补一条
+              // 记录，说明既然 `passed: true`，为什么仍算失败。
               const count = result.failures.length;
               const detail = `custom check "${check.id}" reported passed=true despite ${count} failure(s)`;
               failures.push(failure(check, {}, {}, {}, io.sim.tickCount, 'invalid', null, detail));
             }
           } else {
-            // Failing without a record leaves the player nothing to look at,
-            // so the run states one on the checker's behalf.
+            // 声称失败却不给记录，玩家就无据可查，于是本次运行替检查器
+            // 写明一句。
             failures.push(
               failure(
                 check,
@@ -1050,23 +1034,21 @@ export function runChecks(
       }
 
       if (check.kind === 'script') {
-        // script: walk the steps in tick order, driving inputs along the way
+        // script：按节拍顺序走完步骤，沿途驱动输入。
         io.reset();
         ticksUsed = Math.max(ticksUsed, driveSteps(io, spec, check, check.steps, failures));
         continue;
       }
 
       if (check.kind === 'program') {
-        // program: take the program TEXT -- the level's own `source`, or the
-        // player's buffer when the check asks for it -- compile it into an image,
-        // put the bytes into the circuit's program RAM, then drive the steps
-        // through the SAME driver `script` uses (`driveSteps`: `io.writeInput`,
-        // `io.sim.settle`, `io.tick`, `io.readOutput`, `compare`, `failure`).
-        // Only what happens before the first step differs between the two kinds.
+        // program：取程序文本——关卡自己的 `source`，检查要求时则取玩家的
+        // 缓冲区——编译成镜像，把字节放进电路的程序 RAM，然后用与 `script`
+        // 完全相同的驱动器走步骤（`driveSteps`：写入输入并结算、`io.tick`
+        // 走拍、`io.readOutput` 读输出、`compare` 比较、`failure` 记录）。
+        // 两种检查唯一的差别只在第一步之前发生的事。
         //
-        // Vacuity comes first, as it does for every kind: a check that executes
-        // nothing, or executes something and compares nothing, would pass every
-        // circuit ever built -- the `missing-rows` lesson.
+        // 和每种检查一样，先判“空洞”：什么都不执行、或执行了却什么都不
+        // 比较的检查，会让任何电路通过——`missing-rows` 的教训。
         const steps: readonly ProgramStep[] = Array.isArray(check.steps) ? check.steps : [];
         const asserting = steps.filter(stepAsserts).length;
         if (steps.length === 0) {
@@ -1100,22 +1082,18 @@ export function runChecks(
           continue;
         }
 
-        // WHICH CHANNEL THE TEXT COMES FROM. `from` defaults to `'level'`, so
-        // every check written before the option existed reads its own `source`
-        // and nothing else; `'player'` reads the fourth argument instead. The
-        // channel is chosen by `from` rather than by which text happens to be
-        // present: a level that grades the player's program must not fall back to
-        // shipping one of its own, or an empty buffer would be graded as a pass
-        // against text the player never wrote.
+        // 文本走哪条通道。`from` 默认 `'level'`，所以在有这个选项之前写的
+        // 每条检查都只读自己的 `source`；`'player'` 则改读第四个参数。
+        // 通道由 `from` 决定，而不是由“哪份文本恰好在手”决定：判定玩家
+        // 程序的关卡绝不能悄悄回退到自带程序，否则空缓冲区会被判成“对着
+        // 玩家从未写过的文本通过”。
         //
-        // A THIRD SPELLING IS REFUSED RATHER THAN DEFAULTED, and that is the same
-        // rule one step further out. Both fields select by equality, so a typo
-        // (`from: 'players'`) would otherwise fall through to the default -- and
-        // a level that ships a `source` beside a misspelled `from` would grade
-        // the level's text while the author believed they were grading the
-        // player's, which is precisely the silent fallback the paragraph above
-        // exists to prevent. Naming the value and the field is what makes the
-        // typo findable, because nothing else in the run preserves the spelling.
+        // 第三种写法会被拒绝而不是回落到默认值，这是同一条规则再往外推一步。
+        // 两个字段都是按相等判断选路，于是拼错（`from: 'players'`）会一路
+        // 落进默认分支——而一关若同时带了 `source` 和拼错的 `from`，就会去
+        // 判关卡自己的文本，作者却以为在判玩家的程序，这恰恰是上一段要防止
+        // 的静默回退。把值和字段名写进失败记录，拼写错误才有迹可循，因为
+        // 这次运行的其它地方都不会保留它。
         const source = programOption(check.from, ['level', 'player']);
         if (source.kind === 'invalid') {
           failures.push(
@@ -1149,17 +1127,17 @@ export function runChecks(
           continue;
         }
 
-        // An absent `player`, or one whose `text` is not a string, is an empty
-        // text rather than a `TypeError`: `runChecks` runs on every board edit,
-        // and the app calls it with no buffer at all while a level is still being
-        // opened. `playerProgramText` is that rule, shared with the closed-loop
-        // checkers that drive the same buffer (`lock`, `maze`).
+        // 缺省的 `player`，或 `text` 不是字符串的 `player`，都当作空文本，
+        // 而不是抛 `TypeError`：`runChecks` 每次画板编辑都会跑，而一关还在
+        // 打开的过程中，app 调用它时根本没有缓冲区。`playerProgramText`
+        // 就是这条规则，与驱动同一份缓冲区的闭环检查器（`lock`、`maze`）
+        // 共用。
         const fromPlayer = source.value === 'player';
         const text = fromPlayer ? playerProgramText(player) : check.source;
         if (typeof text !== 'string') {
-          // Level data reaches the kernel untyped, and the assembler is handed
-          // this value directly: refusing it here keeps a `TypeError` out of the
-          // board-edit path rather than out of the kernel's own `catch`.
+          // 关卡数据到达内核时未定型，而汇编器会直接拿到这个值：在这里
+          // 拒绝它，能把 `TypeError` 挡在画板编辑路径之外，而不是留给内核
+          // 自己的 `catch`。
           failures.push(
             failure(
               check,
@@ -1175,11 +1153,9 @@ export function runChecks(
           continue;
         }
         if (text.trim() === '') {
-          // Nothing to run, whichever channel it came from and whichever format
-          // it is written in -- the same lesson as an empty table. The detail
-          // names the buffer, because "the level ships no program" and "you have
-          // not typed one" are the same defect to the circuit and different
-          // problems for different people.
+          // 没有可运行的东西，无论来自哪条通道、用哪种格式书写——和空表格
+          // 是同一个教训。说明里点明是哪份缓冲区，因为对电路而言“关卡没带
+          // 程序”与“你还没写程序”是同一种缺陷，对不同的人却是不同的问题。
           failures.push(
             failure(
               check,
@@ -1195,33 +1171,27 @@ export function runChecks(
           continue;
         }
 
-        // HOW THE TEXT IS READ, and the two readers report in one shape: `format`
-        // is `'bytes'` for the hand-written machine-code format of the
-        // programming chapter, assembly otherwise. Neither parser throws, so a
-        // refusal is a failure record here rather than an exception on the
-        // board-edit path.
+        // 文本怎么读，以及两个读取器如何报同一种形状：`format` 为
+        // `'bytes'` 时是编程章节手写的机器码格式，否则是汇编。两个解析器
+        // 都不抛错，所以拒绝在这里是一条失败记录，而不是编辑路径上的异常。
         //
-        // The parse, the targets and the load are one helper (`loadProgramImage`)
-        // rather than three steps here, because a custom checker that drives a
-        // program of its own -- chapter 4's code lock is the first -- has to do
-        // exactly these three things, and a second copy of the reset-then-load
-        // ordering is a second place to get that ordering wrong. Everything it
-        // reports is the same three sentences the branch used to build inline:
-        // the reader's line-numbered refusal, "there is no `ram_prog`", and the
-        // kernel's own `RangeError` for an oversized image or a `ram` id this
-        // netlist does not have, which the `catch` below absorbs as `invalid` --
-        // neither reader enforces `ram_prog`'s capacity, so a 257-byte program
-        // still reaches the kernel and is refused there.
+        // 解析、选目标、装载三件事合成一个助手（`loadProgramImage`），而不是
+        // 在这里展开成三步，因为自己驱动程序的闭环检查器——第 4 章的密码锁
+        // 是第一个——也必须做同样这三件事；而“先复位再装载”这个次序若抄成
+        // 第二份，就多了一个会写错次序的地方。它报告的内容与原分支就地拼出来
+        // 的那三种句子相同：读取器带行号的拒绝、“没有 `ram_prog`”，以及内核
+        // 对“镜像过大”或“netlist 里没有这个 ram id”抛出的 `RangeError`
+        // ——后者会被下面的 `catch` 收成 `invalid`。两个读取器都不检查
+        // `ram_prog` 的容量，所以 257 字节的程序仍会到达内核，并在那里被
+        // 拒绝。
         const image = loadProgramImage(io, text, reader.value, source.value, check.ram);
         if (image.errors.length > 0) {
-          // A ZERO-BYTE PROGRAM IS A DIFFERENT FAILURE FROM A REFUSAL, and the
-          // helper says which one it is. An empty or comment-only text is a legal
-          // program to both readers -- nothing here parses badly -- yet it
-          // exercises no instruction at all, which is the same hazard as an empty
-          // `steps` array: that keeps the `missing-program` reason and the
-          // `bytes: 0` record the branch wrote before the helper existed. A
-          // reader's refusal is `invalid`, and a circuit with no `ram_prog` is
-          // `missing-io`; both carry the same sentence they always did.
+          // 零字节程序与“读取器拒绝”是两种不同的失败，助手会说明是哪一种。
+          // 空文本或只有注释的文本对两个读取器都是合法程序——这里没有解析
+          // 错误——但它一条指令都不执行，这与空的 `steps` 数组是同一种隐患：
+          // 保留 `missing-program` 原因和 `bytes: 0` 记录（在这个助手存在
+          // 之前，正是分支自己写这两样）。读取器的拒绝是 `invalid`，而电路
+          // 没有 `ram_prog` 是 `missing-io`；两者都带原来那句话。
           const empty = image.emptyProgram;
           failures.push(
             failure(
@@ -1242,11 +1212,11 @@ export function runChecks(
         continue;
       }
 
-      // Every kind `LevelCheck` declares is handled above; this is the guard for
-      // level data that names something else (a stale save, a typo, a check from
-      // a newer kernel). It fails loudly instead of falling through, which is
-      // exactly how a `fuzz` or `custom` check used to reach `check.steps` and
-      // throw a `TypeError` out of `runChecks` on every board edit.
+      // `LevelCheck` 声明的每种检查都在上面处理了；这里是给“关卡数据里
+      // 写了别的东西”（过期存档、拼写错误、来自更新内核的检查）留的兜底。
+      // 它大声失败，而不是顺势往下掉——这正是从前 `fuzz` 或 `custom` 检查
+      // 会一路走到 `check.steps`、并在每次画板编辑时从 `runChecks` 抛出
+      // `TypeError` 的原因。
       const unknown = check as { readonly kind?: unknown };
       failures.push(
         failure(
@@ -1275,11 +1245,10 @@ export function runChecks(
           ),
         );
       } else if (e instanceof CircuitValidationError || e instanceof RangeError) {
-        // `RangeError` is the kernel's "this value does not fit this port"
-        // signal (`assertWidth`), and level data is hand-authored: absorb it as
-        // a failed check so nothing thrown from inside a check can escape
-        // `runChecks` into the board-edit path. `'invalid'` already means "this
-        // circuit/spec cannot be evaluated as declared".
+        // `RangeError` 是内核“这个值放不进这个端口”的信号（`assertWidth`），
+        // 而关卡数据由人手编写：把它吸收成一次失败的检查，于是任何从检查
+        // 内部抛出的东西都逃不出 `runChecks`、进不了画板编辑路径。
+        // `'invalid'` 的含义本来就是“按声明无法评估这份电路或规格”。
         failures.push(
           failure(
             check,
@@ -1302,33 +1271,29 @@ export function runChecks(
 }
 
 /**
- * True when a step carries at least one expectation.
+ * 一步是否至少带了一条期望。
  *
- * `expect: {}` compares nothing, so it is not an assertion: a `program` check
- * whose every step looks like that would pass every circuit ever built, and it
- * counts here exactly like a step with no `expect` at all. Read defensively,
- * because level data reaches the kernel untyped and a `null` step must not throw.
+ * `expect: {}` 什么都不比较，所以它不算断言：一个 `program` 检查若每一步
+ * 都长这样，就会让任何电路通过，因此它在这里与“根本没有 `expect`”同等
+ * 看待。按防御式读取，因为关卡数据到达内核时是未定型的，`null` 步骤不能
+ * 让这里抛错。
  */
 function stepAsserts(step: unknown): boolean {
   return isRecord(step) && isRecord(step.expect) && Object.keys(step.expect).length > 0;
 }
 
 /**
- * One of a `program` check's two enumerated options: the value to use, or the
- * value to refuse.
+ * `program` 检查两个枚举选项之一：要用的值，或要拒绝的值。
  *
- * WHY AN UNKNOWN VALUE IS NOT A DEFAULT. `from` and `format` are each read to
- * choose between two readers, and the code that reads them is an equality test,
- * so `'players'` or `'byte'` would silently select the default -- the level's own
- * text, read as assembly -- and a level that ships a `source` would grade THAT
- * while its author believed otherwise. The misspelling is reported instead, with
- * the value and the field named, because the failure record is the only place it
- * survives.
+ * 为什么未知值不能当默认值。`from` 与 `format` 各自用来在两个读取器之间
+ * 选路，而读取它们的代码是相等判断，于是 `'players'` 或 `'byte'` 会悄悄
+ * 选中默认值——即关卡自己的文本、按汇编来读——而带了 `source` 的关卡会
+ * 去判那份文本，作者却以为在判玩家的。所以这里改为报告拼写错误，并带上
+ * 值与字段名，因为失败记录是它唯一能留下痕迹的地方。
  *
- * ABSENT IS NOT UNKNOWN: an omitted field keeps the documented default, which is
- * what every level written before the options existed relies on. Level data
- * reaches the kernel untyped, so `null` is treated as absent too rather than
- * reported as a misspelling nobody could have typed.
+ * 缺省不是未知：省略字段就沿用文档里的默认值，这是所有在选项出现之前写
+ * 的关卡所依赖的。关卡数据到达内核时未定型，所以 `null` 也按缺省处理，
+ * 而不是报成一个没人可能敲出来的拼写错误。
  */
 function programOption<T extends string>(
   value: unknown,
@@ -1344,45 +1309,38 @@ function programOption<T extends string>(
 }
 
 /**
- * The player's program text for the level being graded, or `''` when nothing has
- * been typed.
+ * 正在判定的这一关的玩家程序文本；什么都没输入时为 `''`。
  *
- * THE PLAYER CHANNEL, READ THE SAME WAY EVERYWHERE. `program`'s branch reads it
- * for `from: 'player'`, and a `custom` checker that drives a program of its own
- * reads it for the same reason: chapter 4's code lock and maze hand the player's
- * program to the CPU before they start driving it, so both must agree on what
- * "the player's program" means -- including the two cases that are not text at
- * all. An absent `player`, or one whose `text` is not a string, is an EMPTY text
- * rather than a `TypeError`, because `runChecks` runs on every board edit and the
- * app calls it with no buffer while a level is still being opened; and a level
- * that grades the player's program never falls back to a program of its own,
- * because the channel is chosen by the caller rather than by which text happens
- * to be present.
+ * 玩家通道：到处都按同一方式读取。`program` 分支在 `from: 'player'` 时
+ * 读它，自己驱动程序的 `custom` 检查器也出于同一理由读它：第 4 章的密码
+ * 锁与迷宫在开始驱动之前，要把玩家的程序交给 CPU，所以两边必须对“玩家
+ * 的程序”含义一致——包括两种“根本不是文本”的情况。缺省的 `player`、或
+ * `text` 不是字符串的 `player`，都当作空文本而不是 `TypeError`，因为
+ * `runChecks` 每次画板编辑都会跑，而一关还在打开时 app 调用它并没有
+ * 缓冲区；同时，判定玩家程序的关卡永远不会回退到自己带的程序，因为
+ * 通道由调用方选择，而不是由哪份文本恰好在手决定。
  *
- * The level's own `source` is deliberately NOT read here: that channel belongs to
- * `program`'s `from` option, and a checker that took it would grade text the
- * player never wrote.
+ * 关卡自己的 `source` 刻意不在这里读：那条通道属于 `program` 的 `from`
+ * 选项，检查器若拿了它，就会去判玩家从未写过的文本。
  */
 export function playerProgramText(player?: PlayerProgram): string {
   return typeof player?.text === 'string' ? player.text : '';
 }
 
 /**
- * True when a level hands the keyboard to the player: it grades a program the
- * player WROTE, or drives one through a closed-loop checker.
+ * 一关是否把键盘交给玩家：它判定玩家“写的”程序，或通过闭环检查器驱动
+ * 一段玩家程序。
  *
- * THIS IS THE MOUNT DECISION for the assembly editor (`ui/ide.ts`), and it is a
- * level-data question rather than a UI one, which is why it is answered here.
- * Both shapes count, and for the same reason: a `program` check with
- * `from: 'player'` reads the player's buffer directly, and a `custom` check --
- * chapter 4's code lock and maze -- is handed the same buffer and drives the CPU
- * through it. A `program` check with `from: 'level'` is NOT one of them: chapter
- * 3's machine levels grade a program the level ships, so there is nothing for the
- * player to type.
+ * 这是汇编编辑器（`ui/ide.ts`）的挂载判断，而它其实是关卡数据的问题、
+ * 不是 UI 的问题，所以答案在这里。两种形态都算，理由相同：
+ * `from: 'player'` 的 `program` 检查直接读玩家的缓冲区；`custom` 检查
+ * ——第 4 章的密码锁与迷宫——拿到同一份缓冲区并驱动 CPU 跑它。
+ * `from: 'level'` 的 `program` 检查不算：第 3 章的机器关判定的是关卡
+ * 自带的程序，玩家没有东西可输入。
  *
- * The walk is deliberately defensive, like `testCases`: level data reaches the
- * kernel untyped, and a `null` entry or a check with no readable `kind` must
- * leave the editor closed rather than throw out of the mount path.
+ * 遍历刻意写成防御式的，和 `testCases` 一样：关卡数据到达内核时未定型，
+ * `null` 条目或读不到 `kind` 的检查，应当让编辑器保持关闭，而不是在挂载
+ * 路径上抛错。
  */
 export function levelExpectsProgram(spec: LevelSpec): boolean {
   const checks: readonly LevelCheck[] = Array.isArray(spec.checks) ? spec.checks : [];
@@ -1395,16 +1353,15 @@ export function levelExpectsProgram(spec: LevelSpec): boolean {
 }
 
 /**
- * The reader this level's player programs are written for: `'asm'`, or `'bytes'`
- * for the hand-written machine-code format of the programming chapter.
+ * 这一关的玩家程序用哪种读取器：`'asm'`，或编程章节手写机器码格式的
+ * `'bytes'`。
  *
- * THE SAME CHOICE THE LEVEL'S OWN CHECK MAKES, asked once so the editor and the
- * checker cannot read one text two ways: the punchcard level's program is bytes,
- * and an editor that assumed assembly would show a byte count for a program the
- * grade then refuses. The first `program from: 'player'` check wins (a level
- * could in principle declare two readers for two buffers, and the app has one);
- * a level whose channel is a `custom` checker, or which has no player channel at
- * all, answers `'asm'`, which is what both closed-loop checkers read.
+ * 与关卡自己的检查所做的选择相同，问一次，好让编辑器与检查器不会把同一
+ * 份文本读成两种东西：打孔卡关的程序是字节，若编辑器假定是汇编，它显示
+ * 的字节数就会与随后判定的结果不符。第一个 `program from: 'player'`
+ * 检查胜出（原则上关卡可以为两份缓冲区声明两种读取器，但 app 只有一份
+ * 缓冲区）；通道是 `custom` 检查器、或根本没有玩家通道的关卡，回答
+ * `'asm'`——两个闭环检查器读的就是它。
  */
 export function playerProgramFormat(spec: LevelSpec): 'asm' | 'bytes' {
   const checks: readonly LevelCheck[] = Array.isArray(spec.checks) ? spec.checks : [];
@@ -1417,54 +1374,45 @@ export function playerProgramFormat(spec: LevelSpec): 'asm' | 'bytes' {
 }
 
 /**
- * A parsed program text: the bytes it denotes, or the sentences explaining why it
- * denotes none.
+ * 解析后的程序文本：它表示的字节，或说明它为什么不表示任何字节的句子。
  *
- * ONE SHAPE FOR BOTH READERS AND BOTH CHANNELS. Assembly and the hand-written
- * byte format refuse different things but report in the same shape -- a line, the
- * text, a reason -- so a caller records one failure the same way for either, and
- * only the wording differs. The line is the reader's own, and neither parser
- * throws: a refusal is data, not an exception.
+ * 两种读取器、两条通道共用一种形状。汇编与手写字节格式拒绝的东西不同，
+ * 但报告方式是同一形状——行号、文本、原因——于是调用方用同一种方式为
+ * 任一种记录失败，只有措辞不同。行号来自读取器自己，两个解析器都不抛错：
+ * 拒绝是数据，不是异常。
  *
- * `errors` carries the same line-numbered sentences the `program` branch turns
- * into `detail`, and `reason` says which failure they belong to: a reader's
- * refusal is `invalid`, while "there is no `ram_prog` instance to load into" is
- * `missing-io`. `emptyProgram` marks the one case that is not a refusal at all --
- * a text both readers accept as zero bytes, which the caller reports as
- * `missing-program` because it would execute nothing.
+ * `errors` 携带与 `program` 分支转成 `detail` 的同样带行号的句子；
+ * `reason` 说明它们属于哪种失败：读取器的拒绝是 `invalid`，而“没有
+ * `ram_prog` 实例可装载”是 `missing-io`。`emptyProgram` 标记的是唯一
+ * 一种并非拒绝的情况——两个读取器都接受它为零字节文本，调用方把它报成
+ * `missing-program`，因为它一条指令都不会执行。
  *
- * HOW THE ZERO-BYTE SENTENCE IS WORDED IS THE CALLER'S TO SAY, through
- * `channel`. "The player compiles to zero bytes" and "the program source
- * compiles to zero bytes" are the same defect to the circuit and different
- * problems for different people: one is a player who has typed nothing runnable,
- * the other a level that shipped nothing to run. The distinction used to be made
- * by the branch that had `from` in hand; it lives here now, because the custom
- * checkers drive the player's buffer through the same parse and owe the player
- * the same sentence.
+ * 零字节那句话怎么措辞由调用方通过 `channel` 决定。“玩家的程序编译出
+ * 零字节”和“关卡源码编译出零字节”对电路是同一种缺陷，对不同的人却是
+ * 不同的问题：一个是玩家什么都没输入可运行的东西，另一个是关卡什么都没
+ * 提供。这个区分从前由手里有 `from` 的分支来做，现在住在这里，因为
+ * 自定义检查器通过同一次解析驱动玩家的缓冲区，也欠玩家同样一句话。
  *
- * `bytes` is filled only on success; when `errors` is not empty nothing at all
- * parses. Both are returned rather than a discriminated union because the caller
- * reports the two together: an image that parsed to zero bytes is a
- * `missing-program` failure whose record says `bytes: 0`, so it needs the count
- * and the reason in one place.
+ * `bytes` 只在成功时填充；`errors` 非空时什么都没解析出来。两者一起
+ * 返回而不是做成可辨识联合，是因为调用方要一起报告它们：解析出零字节的
+ * 镜像是一次 `missing-program` 失败，其记录写着 `bytes: 0`，所以它需要
+ * 计数与原因在同一处。
  */
 export interface ProgramImage {
   readonly bytes: readonly number[];
   readonly errors: readonly string[];
-  /** Which failure reason `errors` belongs to; see the doc comment above. */
+  /** `errors` 属于哪种失败原因；见接口上方的说明。 */
   readonly reason: 'invalid' | 'missing-io';
-  /** True when the text is a legal program of zero bytes rather than a refusal. */
+  /** 文本是合法的零字节程序（而不是被拒绝）时为 true。 */
   readonly emptyProgram: boolean;
 }
 
 /**
- * The image `text` denotes in `format`, or the sentence a failure should carry.
+ * `text` 在 `format` 下表示的镜像，或失败应当携带的那句话。
  *
- * PURE AND CIRCUIT-FREE, so the IDE and the debugger can show a refusal -- and a
- * byte count -- without a board to load it into, and `loadProgramImage` can parse
- * with the same reader the panel uses. Nothing here is level data: the format is
- * the check's own `format`, and the channel only decides how a zero-byte program
- * is worded.
+ * 是纯函数、不碰电路，因此 IDE 与调试器不必有画板就能显示拒绝和字节数，
+ * 而 `loadProgramImage` 可以用与面板相同的读取器解析。这里没有关卡数据：
+ * 格式来自检查自己的 `format`，通道只决定零字节程序怎么措辞。
  */
 export function programImageOf(
   text: string,
@@ -1476,11 +1424,10 @@ export function programImageOf(
     return { bytes: [], errors: [image.detail], reason: 'invalid', emptyProgram: false };
   }
   if (image.bytes.length === 0) {
-    // An empty or comment-only text is a legal zero-byte program to both
-    // readers; loading it would exercise no instruction at all, which is the
-    // same hazard as an empty `steps` array. `emptyProgram` is what lets the
-    // caller say `missing-program` and print `bytes: 0` instead of reporting a
-    // parse refusal it never saw.
+    // 空文本或只有注释的文本，对两个读取器都是合法的零字节程序；装载它
+    // 一条指令都不会执行，这与空的 `steps` 数组是同一种隐患。
+    // `emptyProgram` 让调用方可以说 `missing-program` 并打印 `bytes: 0`，
+    // 而不是报告一次它从未见到过的解析拒绝。
     return {
       bytes: [],
       errors: [
@@ -1494,42 +1441,35 @@ export function programImageOf(
 }
 
 /**
- * Parse/assemble `text` and load it into the circuit's program RAM(s). Never
- * throws.
+ * 解析或汇编 `text`，并把它装载进电路的程序 RAM。从不抛错。
  *
- * THE THREE STEPS EVERY PROGRAM-TAKING CHECK NEEDS, in the one order that works:
- * read the text into bytes, decide which `ram_prog` instances those bytes go
- * into, and reset the circuit BEFORE loading -- `reset()` clears every storage
- * byte, so an image written before it would be gone before anything could read
- * it. `runChecks` compiled the circuit before calling this, and the reset is
- * therefore the last thing that happens to the state before the image lands.
+ * 这是每个“要跑程序”的检查都需要的三步，且只有一种次序可行：把文本
+ * 读成字节、决定这些字节进哪些 `ram_prog` 实例、并在装载之前复位电路
+ * ——`reset()` 会清掉每个存储字节，所以先写镜像再复位，镜像会在被读到
+ * 之前就消失。`runChecks` 在调用它之前已经编译好电路，因此复位是镜像
+ * 落地之前，状态上发生的最后一件事。
  *
- * THE PARSE IS `programImageOf`'s, so a refusal is worded once for the checker,
- * the IDE and the debugger. `channel` says whose text this is and is therefore
- * part of the signature rather than a caller-side rewording: the level branch
- * passes the `from` it resolved, and every checker that drives the PLAYER's
- * buffer says `'player'`.
+ * 解析用的是 `programImageOf`，所以同一句拒绝的措辞只写一次，供检查器、
+ * IDE 与调试器共用。`channel` 说明这是谁的文本，因此它是签名的一部分，
+ * 而不是调用方自己改写的说法：关卡分支传它解析出的 `from`，每个驱动
+ * “玩家”缓冲区的检查器都说 `'player'`。
  *
- * A `ram` id this netlist does not have, or an image longer than the instance's
- * state, is `Simulation.loadImage`'s own `RangeError` and is deliberately NOT
- * caught here: `runChecks` absorbs it into an `invalid` failure (the same shape
- * it would take anywhere else in the branch), and a custom checker that calls
- * this gets the same treatment from the loop around it.
+ * netlist 里没有的 `ram` id，或比该实例状态更长的镜像，会触发
+ * `Simulation.loadImage` 自己的 `RangeError`，这里刻意不接：
+ * `runChecks` 把它吸收成一条 `invalid` 失败（与该分支任何其他地方得到
+ * 的形状相同），而调用它的自定义检查器会由外层循环得到同样处理。
  *
- * THE UNNAMED `ram` CASE comes with no extra argument: the ids of every
- * `ram_prog` instance are read from the COMPILED NETLIST (`io.sim.net`), whose
- * instance ids `compile` sets from the document ids -- so "every `ram_prog` in
- * the circuit" means what it always did, and the helper needs no document of its
- * own. See `programTargets` for why an unnamed `ram` loads all of them, why a
- * `ram` that is present and is not a string is refused rather than read as
- * unnamed, and why an empty list is an error rather than a quiet no-op.
+ * 未命名的 `ram` 情况不需要额外参数：每个 `ram_prog` 实例的 id 都从
+ * “已编译的 netlist”（`io.sim.net`）读出，`compile` 用文档里的实例 id
+ * 设置这些 id——所以“电路里每一块 `ram_prog`”的含义和从前一样，助手
+ * 不需要自己拿到一份文档。为什么未命名的 `ram` 会装载全部、为什么
+ * “存在但不是字符串”的 `ram` 会被拒绝而不是当作未命名、为什么空列表
+ * 算错误而不是安静地什么都不做，见 `programTargets`。
  *
- * `spec` IS NOT AN ARGUMENT, and that is a fact about what the load needs rather
- * than a narrowing of the brief's signature: nothing between the text and the
- * image is level data. The only level-shaped thing involved is the OPTIONAL
- * `ram` the caller passes through, which is a name from the check, not from the
- * level -- so `spec` here would be an argument every caller had to look up and
- * no line could read.
+ * `spec` 不作为参数，这是“装载真正需要什么”的事实，而不是把说明里的
+ * 签名收窄：从文本到镜像之间没有任何关卡数据。唯一与关卡形状有关的东西，
+ * 是调用方透传的可选 `ram`，而它是检查里的名字、不是关卡里的——所以
+ * `spec` 会变成一个每个调用方都要先查、却没有一行能读的参数。
  */
 export function loadProgramImage(
   io: LevelIo,
@@ -1553,13 +1493,12 @@ export function loadProgramImage(
 }
 
 /**
- * The image an assembly text denotes, or the sentence a failure should carry.
+ * 一段汇编文本表示的镜像，或失败应当携带的那句话。
  *
- * ONE SHAPE FOR BOTH READERS. Assembly and the hand-written byte format refuse
- * different things but report in the same shape -- a line, the text, a reason --
- * so the branch that uses them records an `invalid` failure the same way for
- * either, and only the wording below differs. The line is the reader's own, and
- * the parser never throws: a refusal is data, not an exception.
+ * 两种读取器共用一种形状。汇编与手写字节格式拒绝的东西不同，但报告方式
+ * 是同一形状——行号、文本、原因——于是使用它们的代码为任一种记录
+ * `invalid` 失败的方式相同，只有下面这句措辞不同。行号来自读取器自己，
+ * 解析器从不抛错：拒绝是数据，不是异常。
  */
 function imageOfAssembly(text: string): { readonly bytes: readonly number[] } | { readonly detail: string } {
   const assembled = assemble(text, OVERTURE_ISA);
@@ -1570,7 +1509,7 @@ function imageOfAssembly(text: string): { readonly bytes: readonly number[] } | 
   return { bytes: assembled.bytes };
 }
 
-/** The bytes `parseImage` reads out of a hand-written machine-code text. */
+/** `parseImage` 从手写机器码文本里读出的字节。 */
 function imageOfBytes(text: string): { readonly bytes: readonly number[] } | { readonly detail: string } {
   const parsed = parseImage(text);
   const first = parsed.errors[0];
@@ -1581,43 +1520,36 @@ function imageOfBytes(text: string): { readonly bytes: readonly number[] } | { r
 }
 
 /**
- * The `ram_prog` instances a `program` check must load its image into, or the
- * sentence explaining why there is nothing to load it into.
+ * 一次 `program` 检查必须把镜像装进哪些 `ram_prog` 实例；或者解释为什么
+ * 没有地方可装。
  *
- * An absent (or empty) `ram` loads EVERY `ram_prog` instance in the circuit: a
- * level with one program RAM need not name it, and a level with several gets all
- * of them, which keeps the check independent of the order instances sit in the
- * document. A named `ram` is used verbatim -- an id the netlist does not have is
- * `Simulation.loadImage`'s `RangeError`, which `runChecks` reports as `invalid`,
- * so the check does not second-guess the name here.
+ * 缺省（或空）的 `ram` 装载电路里“每一块” `ram_prog` 实例：只有一块
+ * 程序 RAM 的关卡不必点名，有好几块的关卡则全部装载，这使检查与实例在
+ * 文档里的排列顺序无关。命名了 `ram` 就原样使用——netlist 里没有的 id
+ * 是 `Simulation.loadImage` 的 `RangeError`，由 `runChecks` 报成
+ * `invalid`，所以这里不去二次猜测这个名字。
  *
- * A `ram` THAT IS PRESENT AND IS NOT A STRING IS REFUSED, by the same rule `from`
- * and `format` follow one field over: absent is not unknown. `null` is treated as
- * absent (level data reaches the kernel untyped, and `null` is how a JSON save
- * spells a missing key), but a number, an object or a boolean would otherwise
- * fall through to "load every `ram_prog`" -- and a level that meant to select one
- * RAM while its author spelled the id wrong would quietly load all of them and
- * grade against a circuit the check never described. The sentence names the field
- * and the value, because the failure record is the only place the bad spelling
- * survives.
+ * “存在但不是字符串”的 `ram` 会被拒绝，规则与隔壁的 `from`、`format`
+ * 相同：缺省不是未知。`null` 按缺省处理（关卡数据到达内核时未定型，而
+ * `null` 是 JSON 存档里“没有这个键”的常见写法），但数字、对象或布尔值
+ * 若放过去，就会落进“装载每一块 `ram_prog`”——于是作者本想选一块 RAM、
+ * 却把 id 拼错时，会悄悄装载全部，并对着一个检查从未描述过的电路做判定。
+ * 这句话会点名字段与值，因为失败记录是错误拼写唯一能留下痕迹的地方。
  *
- * The list is read from the COMPILED NETLIST, whose `instanceIds()` and
- * `instanceDefs()` are parallel arrays in evaluation order: an id and its def in
- * one place, which is what "every `ram_prog` instance" needs. `compile` sets
- * each `CompiledInstance.key` from the document instance id, so the ids this
- * returns are the ids `Simulation.loadImage` resolves -- the same ones the
- * document would give, without the helper having to be handed a `Graph` it does
- * not otherwise read.
+ * 列表从“已编译的 netlist”读出，它的 `instanceIds()` 与
+ * `instanceDefs()` 是按求值顺序排列的平行数组：一个 id 与它的 def 在
+ * 同一处，这正是“每一块 `ram_prog` 实例”需要的形式。`compile` 用文档里
+ * 的实例 id 设置每个 `CompiledInstance.key`，所以这里返回的 id 就是
+ * `Simulation.loadImage` 会解析的 id——与文档给出的一致，而助手不必
+ * 拿到它本不读取的 `Graph`。
  *
- * Returning an empty list is not an option: a check that has nowhere to put its
- * program is a `missing-io` failure, not a check that quietly runs nothing.
+ * 返回空列表不是一个选项：无处安放程序的检查是 `missing-io` 失败，而
+ * 不是悄悄什么都不跑。
  *
- * EXPORTED FOR THE IDE AND THE DEBUGGER (the phase plan's Task 6). They load the
- * same image into the same `ram_prog` instances to show a program running on the
- * board, and "which instances hold a program" is the one rule they must not
- * answer differently from the checkers: a second copy of it would drift, and the
- * drift would be invisible from both sides -- the check would grade into the RAM
- * the debugger does not read, or the other way round.
+ * 导出给 IDE 与调试器（阶段计划的 Task 6）：它们把同一份镜像装进同样
+ * 的 `ram_prog` 实例，好在画板上展示程序运行；“哪些实例持有程序”这条
+ * 规则，它们绝不能与检查器给出不同答案：抄第二份会漂移，而且漂移在两边
+ * 都看不见——检查可能判进调试器不读的 RAM，或者反过来。
  */
 export function programTargets(
   ram: unknown,
@@ -1643,20 +1575,18 @@ export function programTargets(
 }
 
 /**
- * Drives a tick-ordered step list against an already-reset circuit, appending
- * one `mismatch` failure per step whose expectations the circuit does not meet,
- * and returns the tick high-water mark.
+ * 对一张已经复位的电路，驱动一串按节拍排序的步骤；每有一个步骤的期望
+ * 没有被满足，就追加一条 `mismatch` 失败；返回节拍的高水位。
  *
- * Shared by `script` and `program` on purpose. The two kinds differ only in what
- * happens before the first step -- a `program` check assembles its source and
- * loads the bytes into the circuit's program RAM, a `script` check does not --
- * and every step after that means the same thing to both: write the step's
- * inputs, settle, tick up to the step's tick, then compare each declared output
- * with `compare` and record a `failure` when one differs. A second driver for
- * `program` would be a second set of tick semantics to keep in agreement.
+ * 由 `script` 与 `program` 共用，这是有意的。两种检查只在第一步之前
+ * 不同——`program` 会汇编它的源码并把字节装进电路的程序 RAM，
+ * `script` 不会——此后每一步对两者含义相同：写入该步输入、结算、时钟到
+ * 该步的节拍，然后用 `compare` 比较每个声明的输出，不同就记一条
+ * `failure`。若给 `program` 另写一个驱动器，就多了一套要时刻保持一致
+ * 的节拍语义。
  *
- * The caller resets first. `settle` and `tick` never clear state, so a program
- * image loaded between the reset and this call survives every step.
+ * 调用方负责先复位。`settle` 与 `tick` 从不清理状态，所以复位与本次调用
+ * 之间装好的程序镜像能活过每一步。
  */
 function driveSteps(
   io: LevelIo,
@@ -1685,7 +1615,7 @@ function driveSteps(
   return ticksUsed;
 }
 
-/** Drives one input vector into a fresh reset of an already-compiled circuit. */
+/** 把一个输入向量驱动进已编译电路的一次新复位里，走 ticks 拍后再读输出。 */
 function runRow(
   io: LevelIo,
   spec: LevelSpec,
@@ -1701,7 +1631,7 @@ function runRow(
   return { outputs, ticksUsed: io.sim.tickCount };
 }
 
-/** True when `actual` differs from `expected` on any key that `expected` declares. */
+/** `actual` 是否在 `expected` 声明的任一键上与期望不同（未声明的键不比较）。 */
 function compare(
   expected: Readonly<Record<string, number>>,
   actual: Readonly<Record<string, number>>,
@@ -1713,13 +1643,12 @@ function compare(
 }
 
 /**
- * The failure for a `spec.checks` element that is not a check at all.
+ * 为一个“根本不是检查”的 `spec.checks` 元素生成失败记录。
  *
- * `failure()` cannot build this one: it reads `check.kind`, and the point of the
- * record is that there is no readable kind. The record's `check` field is typed
- * as the union of the kinds this kernel knows, so it states `'(none)'` here --
- * the one place where level data is known to have named nothing the kernel can
- * run.
+ * `failure()` 造不出这一条：它要读 `check.kind`，而这条记录的重点恰恰
+ * 是没有可读的 kind。记录的 `check` 字段类型是本内核认识的 kind 的联合，
+ * 所以这里写 `'(none)'`——这是唯一一处“可以确定关卡数据没写出任何内核
+ * 能运行的东西”的地方。
  */
 function unreadableCheckFailure(entry: unknown): CheckFailure {
   const detail = isRecord(entry)
@@ -1737,16 +1666,15 @@ function unreadableCheckFailure(entry: unknown): CheckFailure {
 }
 
 /**
- * Builds one failure record.
+ * 构造一条失败记录。
  *
- * `reason` is `NonNullable<...>` rather than `CheckFailure['reason']`: the field
- * is optional, so the indexed type includes `undefined`, and
- * `exactOptionalPropertyTypes` rejects assigning a possibly-`undefined` value to
- * an optional property. Every failure this module builds names a reason anyway.
+ * `reason` 用 `NonNullable<...>` 而不是 `CheckFailure['reason']`：该字段
+ * 是可选的，所以索引类型包含 `undefined`，而
+ * `exactOptionalPropertyTypes` 不允许把可能为 `undefined` 的值赋给可选
+ * 属性。何况本模块构造的每条失败都会给出原因。
  *
- * `round` and `detail` are likewise "absent when there is nothing to say": only
- * `fuzz` has rounds, and only the failures whose specifics do not fit a numeric
- * record carry a sentence.
+ * `round` 与 `detail` 同样是“没话说就不出现”：只有 `fuzz` 有轮次，
+ * 也只有细节塞不进数值记录的失败才带一句话。
  */
 function failure(
   check: LevelCheck,
@@ -1758,9 +1686,9 @@ function failure(
   round: number | null = null,
   detail: string | null = null,
 ): CheckFailure {
-  // `round` and `detail` are only attached when they exist: `exactOptional
-  // PropertyTypes` rejects handing an explicit `undefined` to an optional
-  // property, and a caller here has nothing to say with a null either.
+  // `round` 与 `detail` 只在存在时附加：`exactOptionalPropertyTypes`
+  // 不允许把显式的 `undefined` 交给可选属性，而这里的调用方即使给 `null`
+  // 也没有内容可说。
   return {
     check: check.kind,
     inputs,
@@ -1774,10 +1702,10 @@ function failure(
 }
 
 /**
- * Why a check had no evaluable circuit: the settle loop ran away (`unstable`),
- * `compile` refused the graph (`invalid`), or the graph's level I/O does not
- * match the level's declared pins (`missing-io`, see `bindLevelIo`). Each maps
- * onto the `CheckFailure` reason of the same name.
+ * 一次检查为什么没有可评估的电路：结算循环跑飞了（`unstable`）、
+ * `compile` 拒绝了这张图（`invalid`），或图的关卡 I/O 与关卡声明的
+ * 引脚不符（`missing-io`，见 `bindLevelIo`）。三者在 `CheckFailure` 里
+ * 映射为同名的失败原因。
  */
 interface AttemptFail {
   error: 'unstable' | 'invalid' | 'missing-io';
@@ -1797,9 +1725,9 @@ function createSim(
     const net = compile(graph, registry);
     const sim = new Simulation(net, registry);
     const io = bindLevelIo(sim, net, spec);
-    // The circuit's level I/O is present but sized against the level: no value
-    // can cross such a pin intact, so the circuit is unbound rather than run at
-    // whichever of the two widths happens to look right.
+    // 电路的关卡 I/O 存在、但位宽与关卡声明不符：没有任何值能完整穿过这样
+    // 的引脚，所以这份电路按“未绑定”处理，而不是按两种位宽里看起来顺眼的
+    // 那种去跑。
     if (io.mismatch !== undefined) return { error: 'missing-io' };
     return { io };
   } catch (e) {
@@ -1809,74 +1737,77 @@ function createSim(
   }
 }
 
+/**
+ * 只取本关全部检查用掉的节拍数（TICK 指标），不关心通过与否。
+ *
+ * 它是 `runChecks` 的一层薄封装，供需要显示“这张电路要跑多少拍”的
+ * 地方使用，不产生失败清单。
+ *
+ * @param graph 要测量的电路。
+ * @param registry 元件定义表。
+ * @param spec 关卡规格。
+ * @returns 各检查用例节拍数的最大值。
+ */
 export function countTicksUsed(graph: Graph, registry: Registry, spec: LevelSpec): number {
   return runChecks(graph, registry, spec).ticksUsed;
 }
 
-// ---------------------------------------------------------------------------
-// the case list the board plays
-// ---------------------------------------------------------------------------
+// ------------------------------ 画板逐条演示用的用例表 ------------------------------
 
-/** One case a level's checks drive: the vector in, what the level expects back. */
+/** 关卡检查驱动的一个用例：输入向量，以及关卡期望的输出。 */
 export interface TestCase {
   readonly inputs: Readonly<Record<string, number>>;
-  /** The outputs this case asserts; empty for a case that asserts nothing. */
+  /** 这个用例断言的输出；不断言任何输出的用例为空。 */
   readonly expected: Readonly<Record<string, number>>;
   /**
-   * Clock edges to apply after driving, before reading. Always 0 for a
-   * combinational level; a `script` step states the tick it belongs to.
+   * 驱动输入后、读输出前要施加的时钟沿数。组合逻辑关卡永远是 0；
+   * `script` 的步骤则声明自己属于哪个节拍。
    */
   readonly tick: number;
   /**
-   * True when the circuit is cleared before this case is driven.
+   * 驱动这个用例之前，是否先清空电路。
    *
-   * THE ONE THING THAT MAKES A CASE LIST PLAYABLE, and it is per case rather than
-   * per level because a level may declare checks of both shapes --
-   * `ch2-23-odd-cycles` declares two scripts, and a level with a table and a
-   * script would declare one of each. A truth table, a constraint and a fuzz
-   * check each drive one vector into a freshly reset circuit, so every one of
-   * their cases says `true`. A script's steps are one run -- step 3 reads a
-   * register step 2 clocked -- so only its first step does, and the rest carry
-   * the clock on from where the previous one left it.
+   * 这是让“用例列表”可播放的唯一要素，而且它按用例而不是按关卡存在，
+   * 因为一关可能同时声明两种形状的检查——`ch2-23-odd-cycles` 声明了两段
+   * script，而同时有真值表和 script 的关卡会各声明一条。真值表、约束与
+   * fuzz 检查各自把一条向量驱动进刚复位的电路，所以它们的用例都是 `true`。
+   * 一段 script 的步骤属于同一次运行——第 3 步读到的寄存器是第 2 步时钟
+   * 出来的——所以只有它的第一步为 `true`，其余步骤接着上一次留下的状态
+   * 继续走时钟。
    */
   readonly reset: boolean;
 }
 
-/** What a level will test, or why it cannot be laid out case by case. */
+/** 一关将要测试什么，或为什么无法拆成一条条用例。 */
 export type TestPlan =
   | { readonly kind: 'cases'; readonly cases: readonly TestCase[] }
   | { readonly kind: 'none'; readonly reason: 'program' | 'custom' | 'empty' };
 
 /**
- * The cases this level's checks drive, in the order the checker drives them.
+ * 这一关的检查会驱动的用例，顺序与检查器驱动的顺序一致。
  *
- * WHY THIS EXISTS. The bottom panel used to be a report rather than a plan: it
- * showed the failures the last grade happened to record, so a player could not
- * see what a level would test until after it had already judged them, and a
- * circuit that passed left nothing to look at. The cases are declared data -- a
- * truth table's `rows`, the inputs a `constraint` enumerates, a `fuzz` check's
- * own seeded vectors, a `script`'s steps -- so they can be laid out before the
- * circuit is built and then played one at a time.
+ * 为什么要它。底部面板从前只是一份“报告”而不是“计划”：它显示上一次
+ * 判定碰巧记下的失败，于是玩家在已经被判完之后才知道这一关会测什么，
+ * 而通过的电路则什么都看不到。用例本来就是声明好的数据——真值表的
+ * `rows`、约束枚举出的输入、fuzz 检查自己的种子化向量、script 的步骤
+ * ——所以它们可以在电路造好之前先排出来，再逐条播放。
  *
- * IT IS DERIVED FROM THE PRIMITIVES THE CHECKER ITSELF USES: `enumerateInputs`
- * and `evaluateRule` for a constraint, `planFuzz` and `fuzzVectors` for a fuzz
- * check, and the checks' own `rows` and `steps`. A list that drifted from what
- * `runChecks` drives would animate a test the level never runs, which is worse
- * than no animation at all; `test/levels/testcases.test.ts` pins the agreement
- * by driving a known-wrong circuit through the real checker and matching its
- * failure records against this list, vector by vector.
+ * 它是从检查器“自己用的原语”推导出来的：约束用 `enumerateInputs` 与
+ * `evaluateRule`，fuzz 检查用 `planFuzz` 与 `fuzzVectors`，其余用检查
+ * 自己的 `rows` 与 `steps`。一份与 `runChecks` 实际驱动内容漂移的列表，
+ * 会动画演示一个关卡从不运行的测试，那比没有动画更糟；
+ * `test/levels/testcases.test.ts` 把这份一致性钉住了：让一张已知错误的
+ * 电路走真实检查器，再把它的失败记录与这份列表逐向量比对。
  *
- * `program` AND `custom` HAVE NO LIST, and they are not an oversight. A program's
- * vectors only mean anything with the assembled image loaded into the circuit's
- * RAM, which is the check's own business; a custom check's cases live in code
- * this module cannot see. Both report a reason, and the test button still grades
- * them -- it just cannot play them.
+ * `program` 与 `custom` 没有用例列表，这不是疏忽。程序的向量只有在
+ * 汇编好的镜像装进电路 RAM 之后才有意义，而那是检查自己的事；custom
+ * 检查的用例活在本模块看不到的代码里。两者都会报告原因，测试按钮仍然
+ * 判定它们——只是无法逐条播放。
  *
- * NEVER THROWS. It is called from the panel's render path, on every board edit,
- * with level data that reaches the kernel untyped. A malformed check, an input
- * function that throws, a value the enumeration cannot express: each drops those
- * cases rather than taking the board down with it -- the rule `runChecks`
- * follows, one level up.
+ * 从不抛错。它被面板的渲染路径在每次画板编辑时调用，而关卡数据到达内核
+ * 时是未定型的。格式错误的检查、抛错的输入函数、枚举无法表达的取值：
+ * 每一种都只是丢掉那些用例，而不是把画板一起拖垮——这正是 `runChecks`
+ * 在上层遵循的规则。
  */
 export function testCases(spec: LevelSpec): TestPlan {
   const cases: TestCase[] = [];
@@ -1913,8 +1844,8 @@ export function testCases(spec: LevelSpec): TestPlan {
       if (check.kind === 'fuzz') {
         const plan = planFuzz(check, spec);
         if (plan.kind !== 'plan') continue;
-        // `fuzzVectors` yields the values the pins are DRIVEN with, which is the
-        // same record `runChecks` writes into a failure -- not the raw draw.
+        // `fuzzVectors` 给出的是写入引脚“实际驱动”的值，与 `runChecks`
+        // 写进失败记录的是同一份记录，而不是原始抽样的值。
         for (const inputs of fuzzVectors(check.seed, plan)) {
           const expected: Record<string, number> = {};
           for (const pin of plan.outputs) {
@@ -1932,10 +1863,9 @@ export function testCases(spec: LevelSpec): TestPlan {
             inputs: numericOnly(step.inputs ?? {}),
             expected: numericOnly(step.expect ?? {}),
             tick: step.tick,
-            // Only a script's FIRST step starts from a cleared circuit:
-            // `runChecks` resets once per check and then walks the steps. A
-            // level that declares two scripts (`ch2-23-odd-cycles`) resets twice,
-            // once at each script's front.
+            // 只有 script 的第一步从清空的电路开始：`runChecks` 对每个检查
+            // 复位一次，然后走完所有步骤。声明两段 script 的关卡
+            // （`ch2-23-odd-cycles`）会复位两次，每段 script 开头一次。
             reset: index === 0,
           });
         }
@@ -1944,8 +1874,8 @@ export function testCases(spec: LevelSpec): TestPlan {
       if (check.kind === 'program') blocked ??= 'program';
       else if (check.kind === 'custom') blocked ??= 'custom';
     } catch {
-      // Deliberately silent: see "NEVER THROWS" above. The checker reports the
-      // same defect properly, with a reason and a detail, when it is run.
+      // 刻意保持安静：见上面的“从不抛错”。真正运行检查器时，它会把同一种
+      // 缺陷连原因带说明一起正确报告出来。
     }
   }
 

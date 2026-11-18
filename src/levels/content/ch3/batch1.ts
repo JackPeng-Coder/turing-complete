@@ -1,44 +1,41 @@
+// 第 3 章第 1 批：全局第 39-41 关，OVERTURE 的前三步——运算引擎、寄存器堆、控制扇出。
+// 依赖下层 `spec`（关卡类型）与 `tables`（引脚形状 LevelIo）；本文件只被 `content/ch3/index.ts` 拼接。
+// 关键不变量：本文件导出的 `aluOp` 是"运算码 -> 运算结果"的唯一实现，
+// 关卡判定、参考电路与奖励元件 `alu8` 都以它为准；选择位按权重解码（op0 个位、op1 二位、op2 四位），
+// 6/7 两个空码输出 0，使关卡契约对全部 8 个输入码都有定义。
+
 import type { LevelSpec } from '../../spec';
-// `LevelIo` -- the pin shape -- is `tables.ts`'s; `checks.ts` exports an
-// unrelated runtime interface of the same name (the bound simulation).
+// 这里的 `LevelIo` 是"引脚形状"，来自 `tables.ts`；`checks.ts` 也导出了一个同名但无关的
+// 运行时接口（绑定后的仿真环境），两者不要混用。
 import type { LevelIo } from '../../tables';
 
 /**
- * Chapter 3, levels 39-41: the first three steps of OVERTURE -- the arithmetic
- * engine, the register bank underneath the registers, and the control fan-out
- * that lets one instruction drive several destinations at once.
+ * 第 3 章第 39-41 关：OVERTURE 的最初三步——算术引擎、寄存器背后的寄存器堆、
+ * 以及让一条指令同时驱动多个目的地的控制扇出。
  *
- * WHAT THE SOURCE FIXES, AND WHAT IT DOES NOT. The compendium gives each of
- * these levels exactly three things: its name (English and Chinese), its place
- * in the chapter, and one line of teaching concept. It gives no ports, no
- * widths, no pass conditions, no targets and no rewards. Everything else below
- * is this replica's design, derived from the name and that one line -- so each
- * level carries a data comment split into `SOURCED` and `AUTHORED`, exactly as
- * chapter 2's four batches do.
+ * 资料固定了什么、没固定什么。攻略资料对这三关只给三样东西：双语名字、在章节里的位置、
+ * 一句话的教学概念。它没有给端口、位宽、通过条件、目标值和奖励。
+ * 下面所有内容都是本复刻的设计，由名字和那一句话推导而来——因此每一关都带一条数据注释，
+ * 分成 `SOURCED`（来自资料）与 `AUTHORED`（本复刻设计），与第 2 章的四个批次完全一致。
  *
- * ONE LEVEL IS A REBUILD. The source's level 41 is "Component Factory" and it
- * teaches encapsulating a circuit into a reusable part. Blueprints (spec §3.4)
- * are phase 3 work, so this replica builds the same goal -- one control signal
- * driving several destinations correctly -- out of parts that exist now. That
- * level's comment records the divergence under `AUTHORED`.
+ * 其中一关是重设计。资料的 41 关叫 "Component Factory"，教的是把电路封装成可复用元件。
+ * 蓝图（设计规格 §3.4）属于第 3 阶段的工作，所以本复刻用现有元件搭出同样的目标——
+ * 一个控制信号正确地驱动多个目的地。该关的注释在 `AUTHORED` 里记录了这处分歧。
  *
- * THE INSTRUCTION ENCODING LIVES IN `src/asm/isa.ts`, not here: the levels that
- * need it (42 and up) read the ISA table, and this batch states field positions
- * only where a level's pins make them observable.
+ * 指令编码住在 `src/asm/isa.ts`，不在本文件：需要它的关卡（42 关起）读取 ISA 表，
+ * 本批次只在关卡的引脚让字段位置"可观测"的地方陈述它们。
  */
 
 const IO_ALU: LevelIo = {
   inputs: [
     { id: 'a', width: 8 },
     { id: 'b', width: 8 },
-    // The operation arrives as THREE one-bit pins rather than one three-bit
-    // pin, and that is a wiring fact rather than a taste: an instance's
-    // `params.width` covers every pin of that instance (spec §3.3, `net.ts`
-    // `effectiveWidth`), so no part can turn a three-bit value into its three
-    // bits -- a `splitter` at width 3 would publish three-bit outputs, and at
-    // width 1 it can only read bit 0. Three pins make the same selector
-    // expressible with parts the game has, and they name the encoding in the
-    // level's own interface instead of hiding it inside a packer.
+    // 运算码以三根一位引脚到来，而不是一根三位引脚，这是布线事实而不是口味：
+    // 实例的 `params.width` 覆盖该实例的所有引脚（设计规格 §3.3、`net.ts` 的
+    // `effectiveWidth`），所以没有任何元件能把一个三位值拆成它的三位——
+    // 宽度 3 的 `splitter` 会发布三位的输出，宽度 1 时它只能读第 0 位。
+    // 三根引脚让同一个选择码能用游戏现有元件表达，而且把编码写在关卡自己的接口上，
+    // 而不是藏进一个打包器里。
     { id: 'op0', width: 1 },
     { id: 'op1', width: 1 },
     { id: 'op2', width: 1 },
@@ -67,72 +64,63 @@ const IO_FANOUT: LevelIo = {
 };
 
 /**
- * The two connectors every level offers and no level rewards.
+ * 每一关都提供、但任何关卡都不作为奖励发放的两个连接器。
  *
- * Declared here rather than inline in each level's palette, which is what batches
- * 2 and 3 do: the pair is not a part the chapter teaches, and a level that lists
- * it by hand is one edit away from a level that forgets to.
+ * 在这里声明，而不是在每个关卡的元件托盘里内联（批次 2、3 是那样做的）：
+ * 这对连接器不是本章要教的元件，而一个手写清单的关卡离"忘了写"只差一次编辑。
  */
 const LEVEL_IO = ['level_input', 'level_output'] as const;
 
 /**
- * The six operations `alu8` implements, as this batch's levels and the def
- * agree on them. Kept here as a function so the level data and the test file
- * cannot disagree about what a selector code means.
+ * `alu8` 实现的六种运算，本批次的关卡与此处的定义对它们保持一致。
+ * 写成函数，是为了让关卡数据和测试文件无法对"某个选择码是什么意思"产生分歧。
  *
- * The op NUMBER is the ISA's operand field (ruling 5's `mnemonics` table in
- * `src/asm/isa.ts`), and `alu8` implements that numbering exactly:
+ * 运算编号就是 ISA 的操作数字段（`src/asm/isa.ts` 中 ruling 5 的 `mnemonics` 表），
+ * 而 `alu8` 完全按这个编号实现：
  *
- * | op | operation | note |
+ * | 编号 | 运算 | 说明 |
  * |----|---|---|
- * | 0 | add | low eight bits; no carry-out pin |
- * | 1 | subtract | `a + ~b + 1`, so 0 - 1 is 255 |
- * | 2 | AND | |
- * | 3 | OR | |
- * | 4 | NAND | |
- * | 5 | NOR | |
- * | 6 | 0 | reserved |
- * | 7 | 0 | reserved |
+ * | 0 | 加 | 只取低八位；没有进位输出引脚 |
+ * | 1 | 减 | `a + ~b + 1`，所以 0 - 1 得 255 |
+ * | 2 | 与 | |
+ * | 3 | 或 | |
+ * | 4 | 与非 | |
+ * | 5 | 或非 | |
+ * | 6 | 0 | 保留 |
+ * | 7 | 0 | 保留 |
  *
- * THE THREE LEVEL PINS CARRY THAT NUMBER WITH `op0` AS THE HIGH BIT:
- * `op = 4*op0 + 2*op1 + op2`. So `op0` is the class (0 arithmetic, 1 logic),
- * `op1` picks inside the class, and `op2` inverts the logic result. Codes 6 and 7
- * are the ones with no operation behind them, and `alu8` publishes zero for both,
- * which keeps the level's contract total: every input a player can drive has a
- * defined answer.
+ * 三根关卡引脚按权重承载这个编号：`op = op0 + 2*op1 + 4*op2`。
+ * 因此 `op0` 是个位（类别内的具体运算），`op1` 是二位（类别：0 算术、1 逻辑），
+ * `op2` 是四位（对逻辑结果取反）。注意这里早期的英文注释一边给出 `4*op0 + 2*op1 + op2`
+ * 的公式、一边又说 `op0` 是类别，两句话互相矛盾；以公式、下面的代码与 `alu8` 为准
+ * （即 `op0` 为个位，`op1` 为类别位）。
+ * 6、7 号是没有运算支撑的码，`alu8` 对两者都发布 0，
+ * 从而让关卡契约是完备的：玩家能驱动的每一个输入都有确定的答案。
  *
- * THE ORDER MATTERS AND WAS WRONG IN TWO PLACES AT ONCE. This function used to
- * read the pins as `op0` = bit 0, and the level's own `fuzz` check assembled them
- * that way too, so the two agreed with each other while both disagreed with
- * `alu8`: on the vector the grader failed at, the level expected NOR (156) where
- * the rewarded part answers sub (29). An expectation compared against a
- * generator that shares its mistake cannot catch it -- what caught it was the
- * reference circuit, which had the pins wired the ISA's way.
+ * 顺序很重要，而且曾经在两个地方同时错。旧实现用了另一套位映射（守卫写成
+ * `op2 === 1 && op0 === 0`），关卡自己的 `fuzz` 检查也按同一套读法拼接，
+ * 于是两者彼此一致、却同时与 `alu8` 不一致：
+ * 在判定器失败的那个向量上，关卡期望 NOR（156），而被奖励的元件给出减（29）。
+ * 与共享同一错误的生成器比较的期望，永远抓不到错误——抓到它的是参考电路，
+ * 那套电路把引脚按 ISA 的方式接了线。
  */
 export function aluOp(op: number, a: number, b: number): number {
   const x = a & 0xff;
   const y = b & 0xff;
-  // A SWITCH ON THE OP NUMBER, BECAUSE THE NUMBER IS THE ISA'S FIELD.
-  // Ruling 5 gives `calc` a 3-bit operation field and numbers it linearly
-  // (`mnemonics: { add: 0, sub: 1, and: 2, or: 3, nand: 4, nor: 5 }` in
-  // `src/asm/isa.ts`), and `alu8` implements exactly that numbering -- verified
-  // against the registered def over every op and operand pair. So the map is a
-  // lookup, and decoding the number into "class / select / invert" bits is not
-  // just unnecessary, it is WRONG: no assignment of those three roles to the
-  // three bits reproduces the table, which is why every field-recipe version of
-  // this function disagreed with `alu8` somewhere.
+  // 对运算编号做 switch，因为这个编号就是 ISA 的字段。ruling 5 给 `calc` 一个三位操作字段，
+  // 并把它线性编号（`src/asm/isa.ts` 里 `mnemonics: { add: 0, sub: 1, and: 2, or: 3, nand: 4, nor: 5 }`），
+  // 而 `alu8` 完全实现这套编号——已对每个运算码与操作数组合与注册定义核对过。
+  // 所以映射就是一次查表；把编号解码成"类别 / 选择 / 取反"三位不仅没有必要，而且错误：
+  // 没有任何一种把这三种角色分配给三位的方案能复现这张表，
+  // 这也是本函数每个"字段配方"版本都在某处与 `alu8` 不一致的原因。
   //
-  // HOW THE ORIGINAL WENT WRONG, because the shape recurs. It read the guard as
-  // `op2 === 1 && op0 === 0`: true for ops 4 and 5, which are NAND and NOR, and
-  // false for 6 and 7, which are the spares -- both halves inverted. So the level
-  // zeroed the NAND/NOR codes and answered NOR/AND-with-inversion for the two
-  // reserved ones, contradicting the part the level REWARDS on four of eight
-  // codes. It survived because the level's own `fuzz` check built its expectation
-  // by calling this same function: an expectation compared against a generator
-  // that shares its bug cannot fail. What caught it was the reference CIRCUIT in
-  // `test/fixtures/ch3-references.ts`, wired from gates and muxes and therefore
-  // holding no opinion -- the first time the level's contract was tested against
-  // something that was not itself.
+  // 原版是怎么错的（这种形状会重演）：它把守卫读成 `op2 === 1 && op0 === 0`：
+  // 对 4、5 号（与非、或非）为真，对 6、7 号（空码）为假——也就是把两半都取反了。
+  // 于是关卡把与非/或非清零，却给两个保留码回答或非/取反的与，
+  // 在八个码中的四个上与被关卡奖励的元件矛盾。它能存活，是因为关卡自己的 `fuzz` 检查
+  // 调用同一个函数构造期望：与共享 bug 的生成器比较的期望不会失败。
+  // 抓到它的是 `test/fixtures/ch3-references.ts` 里的参考电路——用门与多路选择器搭出来，
+  // 因而不持有任何偏见——这是关卡的契约第一次被"它自己之外"的东西检验。
   switch (op & 7) {
     case 0:
       return (x + y) & 0xff;
@@ -147,40 +135,31 @@ export function aluOp(op: number, a: number, b: number): number {
     case 5:
       return ~(x | y) & 0xff;
     default:
-      // 6 and 7: the codes with no operation behind them. "Don't care" would make
-      // them values the ALU publishes without promising anything, and the first
-      // level to assert `out` across all eight codes would be asserting a value
-      // no construction owes it; `alu8` declares the same two codes zero.
+      // 6、7 号：背后没有运算的码。若写成"随便"（don't care），它们就是 ALU 发布却不作承诺的值，
+      // 而第一个断言"八个码下 out 都对"的关卡，就会断言一个没有任何构造欠它的值；
+      // `alu8` 同样声明这两个码为零。
       return 0;
   }
 }
 
 export const CH3_BATCH1: readonly LevelSpec[] = [
   /**
-   * ch3-40-alu-1 -- Arithmetic Engine / 算数引擎
+   * ch3-40-alu-1 —— 算术引擎 / Arithmetic Engine
    *
-   * SOURCED: the name in both languages, its position (the 39th level, and the
-   * first of chapter 3), and the source's one-line concept -- build the ALU, the
-   * part that does the arithmetic and the bitwise work. The source's §6.4 also
-   * names the operator set the OVERTURE ALU answers to: `add`, `sub`, `and`,
-   * `or`, `nand`, `nor`. Those six names are the source's.
+   * SOURCED：双语名字、位置（第 39 关，也是第 3 章第一关）、资料的一句话概念——
+   * 造出 ALU，也就是做算术与位运算的元件。资料 §6.4 还给出了 OVERTURE 的 ALU 支持的运算集合：
+   * `add`、`sub`、`and`、`or`、`nand`、`nor`。这六个名字来自资料。
    *
-   * AUTHORED: everything a player can see or a test can measure. The selector
-   * (the source names six operators but no encoding), the pin shape, the choice
-   * that codes 6 and 7 publish zero, the twenty-four-round fuzz check that draws
-   * each of the six, the reward, and the measured three-star target.
+   * AUTHORED：玩家能看到、测试能测到的一切。选择器（资料只给了六个运算名，没有编码方式）、
+   * 引脚形状、6/7 号码输出零这一选择、抽到六种运算各若干次的 24 轮模糊测试、奖励、
+   * 以及实测的三星目标。
    *
-   * WHY THE SELECTOR IS THREE ONE-BIT PINS. Six operators do not fit in two
-   * bits, and the source's own instruction word spends three bits on the
-   * operator field (§6.3's `01` mode, whose low six bits carry it) -- so the
-   * selector is three bits wide here and in the `alu8` reward, whose `op` pin is
-   * three bits. What differs is only how the player receives it: a single
-   * three-bit pin cannot be split by any part in the game, because an instance's
-   * `params.width` widens every pin of that instance and a `splitter` at width 3
-   * would publish three-bit outputs. Three pins teach the same encoding and are
-   * buildable with the parts this level hands out. The two spare codes publish
-   * zero rather than being an error, so the level's contract is total: every
-   * input the player can drive has a defined answer, including that one.
+   * 为什么选择器是三根一位引脚。六个运算装不进两位；而资料自己的指令字在操作字段上花三位
+   * （§6.3 的 `01` 模式，低六位携带它）——所以这里的选择器宽三位，奖励的 `alu8` 的 `op` 引脚
+   * 也是三位。不同的只是玩家如何拿到它：游戏里没有任何元件能拆开一根三位引脚，
+   * 因为实例的 `params.width` 会把该实例的每根引脚加宽，而宽度 3 的 `splitter` 会发布三位输出。
+   * 三根引脚教的是同一套编码，并且能用本关发放的元件搭出来。两个空码发布零而不是报错，
+   * 因此关卡的契约是完备的：玩家能驱动的每个输入都有确定的答案，包括那个。
    */
   {
     id: 'ch3-40-alu-1',
@@ -188,20 +167,14 @@ export const CH3_BATCH1: readonly LevelSpec[] = [
     index: 40,
     name: { zh: '逻辑整合', en: 'Arithmetic Logic Unit (ALU) 1' },
     brief: {
-      // THE THREE BITS ARE NAMED BY THEIR WEIGHT, and this brief had two of them
-      // swapped. The code is `op = op0 + 2*op1 + 4*op2`, so `op1` is the tens bit
-      // and is therefore the CLASS, `op0` is the ones bit and picks the operation
-      // inside the class (add/sub, AND/OR), and `op2` is the fours bit and asks
-      // for the inversion that turns AND into NAND and OR into NOR. The hint below
-      // always described this correctly; the brief described `op2` and `op0` the
-      // other way round, which is a sentence that sends a player to the wrong
-      // circuit. `aluOp` in this file and the `alu8` the level rewards are the
-      // authority, and both implement the reading above.
+      // 三位按权重命名，而这段说明曾经把其中两位写反了。编码是 `op = op0 + 2*op1 + 4*op2`，
+      // 所以 `op1` 是二位、是类别位，`op0` 是个位、选类别内的运算（加/减、与/或），
+      // `op2` 是四位、请求那步取反（把与变成与非、把或变成或非）。
+      // 下面的 hint 一直写对了；brief 曾把 `op2` 与 `op0` 说反，那是一句会把玩家送去错误电路的说明。
+      // 本文件的 `aluOp` 与关卡奖励的 `alu8` 才是权威，两者都实现上面的读法。
       //
-      // 'Read as the code' means the three bits in weight order, which is what
-      // "op2 op1 op0" was trying to say -- written out as the number instead,
-      // since "op2 op1 op0" reads like a bit order and is the other common way to
-      // get this wrong.
+      // "按权重读成编号"指按权重顺序看三位，也就是 "op2 op1 op0" 想表达的意思——
+      // 这里直接写成数字，因为 "op2 op1 op0" 读起来像位序，是另一种常见的出错方式。
       zh: 'a 与 b 各是一个字节。三个选择位按权重读成一个编号：op0 是个位、op1 是二位、op2 是四位。op1 是类别位（0 算术、1 逻辑），op0 在该类别内二选一，op2 把逻辑结果取反。于是编号 0 加、1 减、2 与、3 或、4 与非、5 或非；编号 6、7（op1 与 op2 同时为高）输出 0。减法按 256 取模：0 减 1 得 255。',
       en: 'a and b are each one byte. The three selector bits read as one number by weight: op0 is the ones bit, op1 the twos bit, op2 the fours bit. op1 is the class (0 arithmetic, 1 logic), op0 picks between the two operations inside that class, and op2 inverts the logic result. So the code is 0 add, 1 subtract, 2 AND, 3 OR, 4 NAND, 5 NOR, and 6 or 7 (op1 and op2 both high) output 0. Subtraction wraps modulo 256: 0 minus 1 is 255.',
     },
@@ -248,32 +221,22 @@ export const CH3_BATCH1: readonly LevelSpec[] = [
         inputs: {
           a: (s) => s.a ?? 0,
           b: (s) => s.b ?? 0,
-          // All three selector bits are drawn independently, so the eight codes
-          // are exercised; the level DEFINES six and folds 6 and 7 onto a
-          // zero-output rule of its own. Drawing them rather than pinning them
-          // is what makes the reserved-code case a test instead of a hope.
+          // 三个选择位各自独立抽取，因此八个码都会被走到；关卡定义了其中六个，
+          // 并把 6、7 折进它自己的"输出零"规则。抽取它们而不是钉死，才让保留码的情形成为测试而不是碰运气。
           op0: (s) => s.op0 ?? 0,
           op1: (s) => s.op1 ?? 0,
           op2: (s) => s.op2 ?? 0,
         },
         outputs: {
-          // Pin `opN` is BIT N OF THE ISA'S OPERATION FIELD, so the code is
-          // `op0 + 2*op1 + 4*op2` -- the pin names are the field's bit positions
-          // and nothing has to be transposed. The wired reference in
-          // `test/fixtures/ch3-references.ts` implements exactly this: it reads
-          // `op1` as the arithmetic-vs-logic class, `op0` as the operation inside
-          // the class and `op2` as the logic inversion. (This comment said `op0`
-          // for the class and `op1` for the operation, which is the transposition
-          // the assembly below had already been fixed out of -- prose that
-          // contradicts the line it annotates is how the next reader reintroduces
-          // the bug.)
+          // 引脚 `opN` 就是 ISA 操作字段的第 N 位，所以编号是 `op0 + 2*op1 + 4*op2`——
+          // 引脚名就是字段的位位置，不需要任何转置。`test/fixtures/ch3-references.ts` 里的
+          // 接好线的参考电路正是这样实现的：它把 `op1` 读作算术/逻辑类别、`op0` 读作类别内的运算、
+          // `op2` 读作逻辑取反。（本注释曾把 `op0` 说成类别、`op1` 说成运算，
+          // 那正是下面这行代码早已修掉的转置——与所注释的代码相矛盾的散文，就是下一位读者重新引入 bug 的方式。）
           //
-          // THIS IS THE LINE THE LEVEL GOT WRONG, and the reason it matters is
-          // worth keeping: the expectation and the `fuzz` generator that feeds it
-          // are the same function, so any encoding they share cannot be caught by
-          // grading the circuit they are checked against. The reference circuit
-          // and the `alu8` component are where the encoding is actually pinned,
-          // and this assembly has to agree with BOTH.
+          // 这一行就是关卡出错的那一行，它为什么重要值得记下来：期望与喂给它 `fuzz` 生成器
+          // 是同一个函数，所以它们共享的任何编码都无法通过"拿电路去评分"抓出来。
+          // 参考电路与 `alu8` 元件才是编码真正被钉住的地方，而这里的拼接必须与两者都一致。
           out: (v) =>
             aluOp((v.op0 ?? 0) | ((v.op1 ?? 0) << 1) | ((v.op2 ?? 0) << 2), v.a ?? 0, v.b ?? 0),
         },
@@ -284,31 +247,23 @@ export const CH3_BATCH1: readonly LevelSpec[] = [
   },
 
   /**
-   * ch3-41-registers -- Registers / 寄存器之间
+   * ch3-41-registers —— 寄存器之间 / Registers
    *
-   * SOURCED: the name in both languages, its position, and the source's concept
-   * line, which is about moving data between registers.
+   * SOURCED：双语名字、位置、以及资料的概念句，讲的是在寄存器之间搬运数据。
    *
-   * AUTHORED, and a rebuild: the level below is an ADDRESSABLE REGISTER BANK --
-   * one byte in, the addressed byte out, writes gated by an enable -- not a
-   * register-to-register copy. The reason is that the source's copy belongs to
-   * the instruction layer: §6.2 gives it as `move|sX|dY`, a two-field
-   * instruction, and this replica's plan (ruling 3) puts that instruction in
-   * levels 42 and 43 where a decoder and an instruction word exist. What is left
-   * for THIS level is the part both of those stand on: six bytes of stores, an
-   * address decoder, and a write enable. The source's own §6.5 lists `move` as
-   * one of the processor's four modes, which is where the player meets it.
+   * AUTHORED，而且是一处重设计：下面这一关是"可寻址寄存器堆"——一个字节进、
+   * 被寻址的字节出、写入由使能门控——而不是寄存器到寄存器的复制。
+   * 原因是资料里的复制属于指令层：§6.2 把它写成 `move|sX|dY`，一条两字段指令，
+   * 而本复刻的计划（ruling 3）把那条指令放在 42、43 关，那里已经有译码器和指令字。
+   * 留给"这一关"的，是两者脚下共同的部分：字节的存储、地址译码器、写使能。
+   * 资料自己的 §6.5 把 `move` 列为处理器四种模式之一，玩家会在那里遇到它。
    *
-   * The eight-part store is the level's real lesson: a register file is not six
-   * registers, it is one store per address plus a decoder that decides which one
-   * the enable reaches. `mem1` is the only part that already behaves this way,
-   * and there is no `decoder3`-shaped shortcut for eight addresses in the
-   * palette -- by design, so the player builds the tree.
+   * 八份存储是这一关真正的课程：寄存器堆不是六个寄存器，而是每个地址一份存储，
+   * 外加一个译码器决定使能落到哪一份。`mem1` 是唯一已经这样工作的元件，
+   * 而托盘里没有八地址的 `decoder3` 式的捷径——这是有意的，好让玩家自己搭那棵树。
    *
-   * AUTHORED: the pin shape, the three-bit address, the eight addresses, the
-   * script below (which asserts the HOLD as well as the write: a bank that
-   * ignores the enable would still pass a test that only ever wrote), and the
-   * measured target.
+   * AUTHORED：引脚形状、三位地址、八个地址、下面的脚本（它同时断言写入与保持：
+   * 一个无视使能的寄存器堆仍能通过"只会写"的测试）、以及实测目标。
    */
   {
     id: 'ch3-41-registers',
@@ -358,102 +313,76 @@ export const CH3_BATCH1: readonly LevelSpec[] = [
       {
         kind: 'script',
         steps: [
-          // TWO FACTS ABOUT `driveSteps` (src/levels/checks.ts) DECIDE THIS
-          // SCRIPT'S SHAPE, and both are easy to get wrong from the outside:
+          // 关于 `driveSteps`（src/levels/checks.ts）的两个事实决定了这段脚本的形状，
+          // 二者从外部都容易弄错：
           //
-          //  1. Every input the step does not name is written as ZERO. Inputs do
-          //     not persist between steps, so a step that means "hold everything,
-          //     just clock it" has to restate every pin it wants held.
-          //  2. `tick` is an ABSOLUTE target on the run's tick counter, not a
-          //     per-step count: the loop is `while (io.sim.tickCount < step.tick)
-          //     io.tick()`. A run of steps that all say `tick: 1` therefore
-          //     produces exactly ONE edge at the first of them and none after, so
-          //     a script written as a sequence of `tick: 1` steps silently stops
-          //     clocking. The steps below count up instead.
+          //  1. 每一步没有点名的输入都会被写成 ZERO。输入不在步骤之间保持，
+          //     所以"什么都不变、只打一拍"的步骤必须把它想保持的每根引脚都重写一遍。
+          //  2. `tick` 是本次运行节拍计数器上的绝对目标，不是每步的相对计数：
+          //     循环是 `while (io.sim.tickCount < step.tick) io.tick()`。
+          //     因此一串都写 `tick: 1` 的步骤只会产生一个时钟沿，后面的都不产生；
+          //     写成连续 `tick: 1` 的脚本会悄悄停止走时钟。下面的步骤是递增计数的。
           //
-          // ONE EDGE PER WRITE IS ALSO THE CIRCUIT'S REQUIREMENT. `reg8.load` is
-          // `we AND decoder[addr]`, combinational, so it is stable before an edge
-          // only if the inputs were written and settled first -- which `driveSteps`
-          // does. The edge that should LAND a byte is therefore the one whose step
-          // carries `we = 1`, and the read has to happen at a later tick with `we`
-          // back to 0 (a step that leaves `we` unset writes 0, which is what makes
-          // the read step safe).
+          // 一次写入对应一个时钟沿，也是电路本身的要求。`reg8.load` 是
+          // `we AND decoder[addr]`，组合逻辑，所以只有在输入先被写入并结算之后它才是稳定的——
+          // 这正是 `driveSteps` 做的。于是"应当落下一个字节"的沿，是带 `we = 1` 的那一步的沿，
+          // 而读取必须发生在更晚的节拍、且 `we` 回到 0（未写 `we` 的步骤会写 0，这正是读取步安全的原因）。
           { tick: 1, inputs: { clk: 1, we: 0, addr: 3, data: 0xa5 }, expect: { out: 0 } },
           { tick: 2, inputs: { clk: 1, we: 1, addr: 3, data: 0xa5 } },
           { tick: 3, inputs: { clk: 1, we: 0, addr: 3, data: 0xa5 }, expect: { out: 0xa5 } },
-          // A byte parked on `data` at a different address changes nothing: the
-          // enable is low, so no register's load line is asserted.
+          // 把另一个字节停在别的地址上什么也不会改变：使能为低，没有任何寄存器的 load 线被拉高。
           { tick: 4, inputs: { clk: 1, we: 0, addr: 0, data: 0x11 }, expect: { out: 0 } },
-          // The hold, read back at address 3 while `data` carries something else:
-          // a bank that latched `data` whenever it changed would show 0x11 here.
+          // 保持：在 `data` 携带别的值时回头读地址 3。一个"只要 data 变化就锁存"的寄存器堆，这里会读到 0x11。
           { tick: 5, inputs: { clk: 1, we: 0, addr: 3, data: 0x11 }, expect: { out: 0xa5 } },
-          // A second write, to the top address, leaves the first byte alone.
+          // 第二次写入，写到最高地址，前面的字节不受影响。
           { tick: 6, inputs: { clk: 1, we: 1, addr: 7, data: 0x5a } },
           { tick: 7, inputs: { clk: 1, we: 0, addr: 7, data: 0x5a }, expect: { out: 0x5a } },
           { tick: 8, inputs: { clk: 1, we: 0, addr: 3, data: 0x5a }, expect: { out: 0xa5 } },
         ],
       },
     ],
-    // The rebuilt reference's measured metrics. `tick: 8` is the script's last
-    // step: eight edges, one per write and read.
+    // 重建的参考电路实测出的指标。`tick: 8` 是脚本的最后一步：八次写入/读取，一次一个沿。
     threeStar: { gate: 267, delay: 3, tick: 8 },
     rewards: { components: ['regfile6'] },
   },
 
   /**
-   * ch3-42-alu-2 -- Arithmetic Logic Unit (ALU) 2 / 算术逻辑单元
+   * ch3-42-alu-2 —— 算术逻辑单元 / Arithmetic Logic Unit (ALU) 2
    *
-   * SOURCED: the name in both languages, its position (the 42nd level, the third
-   * of chapter 3), the source's one-line concept for it -- 加入 ADD/SUB, "adds
-   * ADD/SUB" -- and, from the same table's row for ALU 1, the four operations it
-   * adds to: NAND, OR, AND and NOR. The operation SET is the source's; nothing
-   * else about this level is.
+   * SOURCED：双语名字、位置（第 42 关，本章第三关）、资料的一句话概念——
+   * 加入 ADD/SUB——以及同一张表里"ALU 1"那一行给出的、它新增的四个运算：
+   * NAND、OR、AND、NOR。运算集合来自资料，除此之外一关都与资料无关。
    *
-   * AUTHORED: the pin shape (the same `IO_ALU` ALU 1 uses, three one-bit selector
-   * pins rather than one three-bit pin, for the reason that level's comment gives:
-   * no part in the game can split a three-bit value); the eight-code contract,
-   * including codes 6 and 7 publishing zero; the fuzz check; the palette; the
-   * measured three-star target; and the `alu2` reward.
+   * AUTHORED：引脚形状（与 ALU 1 相同的 `IO_ALU`，三根一位选择引脚而不是一根三位引脚，
+   * 理由见上一关注释：游戏里没有元件能拆开一个三位值）；八码契约（包括 6、7 号发布零）；
+   * 模糊测试；托盘；实测三星目标；以及 `alu2` 奖励。
    *
-   * THE SELECTOR IS THE ISA'S OPERATION FIELD, read exactly as ALU 1 and the
-   * calculation unit read it: `op0` is the ones bit, `op1` the twos and `op2` the
-   * fours, so the code is `op0 + 2*op1 + 4*op2`, and 0 is add, 1 subtract, 2 AND,
-   * 3 OR, 4 NAND, 5 NOR. The single authority for that table is `aluOp` in this
-   * file -- the same function the previous level's expectation calls, and the
-   * function `alu8` implements -- so this level's expectation, the previous
-   * level's and the registered part cannot disagree about what a code means. That
-   * coupling is deliberate: the defect the previous level shipped was an
-   * expectation that shared a misreading with its own generator, and the cure was
-   * to give the table one home rather than two.
+   * 选择器就是 ISA 的操作字段，读法与 ALU 1、计算单元完全一致：
+   * `op0` 是个位、`op1` 二位、`op2` 四位，所以编号是 `op0 + 2*op1 + 4*op2`，
+   * 0 加、1 减、2 与、3 或、4 与非、5 或非。这张表的唯一权威是本文件的 `aluOp`——
+   * 正是上一关期望调用的同一个函数，也是 `alu8` 实现的函数——所以本关期望、上一关期望、
+   * 注册元件三者不可能对"某个码是什么意思"产生分歧。这种耦合是刻意的：
+   * 上一关出的缺陷正是"期望与自己的生成器共享误读"，而解药是让这张表只有一个家，而不是两个。
    *
-   * THE OVERLAP WITH `ch3-40-alu-1`, ON THE RECORD. The source splits the machine's
-   * operation set across two levels: ALU 1 is the four logic operations and ALU 2
-   * adds ADD and SUB. This replica's ALU 1 predates that split -- it was authored
-   * as the chapter's arithmetic engine and answers all eight codes -- so as the two
-   * levels stand today they state the same function over the same interface, and a
-   * reader is owed that sentence rather than left to discover it. What ALU 2 owns
-   * is the whole table (the four logic operations plus add and subtract), which is
-   * also the contract of `alu8`, the part ALU 1 rewards and the calculation unit
-   * consumes; narrowing ALU 1 to its four logic operations is a change to THAT
-   * level's check, reference and target, and nothing here depends on it either
-   * way. The two `threeStar` targets are equal for the reason the two palettes are:
-   * the same construction is the cheapest circuit either level admits, and
-   * `test/fixtures/ch3-references.ts` files one graph for each so the measurement
-   * is written down twice rather than shared.
+   * 与 `ch3-40-alu-1` 的重叠，记录在案。资料把机器的运算集拆到两关：
+   * ALU 1 是四个逻辑运算，ALU 2 加上 ADD 与 SUB。本复刻的 ALU 1 早于这个拆分——
+   * 它是作为本章的算术引擎编写的，会回答全部八个码——所以按两关今天的写法，
+   * 它们在同一个接口上陈述同一个函数，读者有权得到这句话，而不是自己去发现。
+   * ALU 2 拥有的是整张表（四个逻辑运算加上加、减），这也是 `alu8` 的契约：
+   * 那个元件是本关奖励的、由计算单元消费的；把 ALU 1 收窄到它那四个逻辑运算，
+   * 是对"那一关"的检查、参考与目标的修改，本关无论如何不依赖它。
+   * 两关的 `threeStar` 目标相等，理由与两份托盘相同：同一套构造是两关各自允许的最便宜电路，
+   * 而 `test/fixtures/ch3-references.ts` 为两关各存了一份图，于是测量结果被写了两遍而不是共享。
    *
-   * WHY `alu8` IS NOT OFFERED, WHICH IS THE PALETTE RULE RATHER THAN AN OVERSIGHT.
-   * It is the previous level's reward, so the player owns it by now, and its pins
-   * are `a:8 b:8 op:3 -> out:8` -- this level's interface with the three selector
-   * pins packed by a `maker` at its registered eight-bit width and padded with rails
-   * on the five spare inputs (the same padding the decoder references use;
-   * `params.width = 3` is NOT the way, because an instance parameter widens every
-   * pin of that instance at once and the packer then reads its own inputs wrongly).
-   * Packing is free on both metrics, so one instance would answer the level in a
-   * single drop, measured at 264 gates and 1 delay against the 273-gate, five-deep
-   * circuit the level exists to teach. It is the same subtraction level 22 makes for
-   * `add8` and level 20 for `full_adder`: a part that is not this level's own reward
-   * and would answer the level by itself is withheld, and this comment is where the
-   * price is recorded.
+   * 为什么这里不发放 `alu8`——这是托盘规则，而不是疏忽。它是上一关的奖励，玩家现在已经有它；
+   * 它的引脚是 `a:8 b:8 op:3 -> out:8`，也就是本关接口把三根选择引脚用一个
+   * 注册宽度为 8 位的 `maker` 打包、五个空闲输入补上常量轨（译码器参考电路也这样补；
+   * `params.width = 3` 不是办法，因为实例参数会一次性加宽该实例的所有引脚，
+   * 打包器随后会错误地读自己的输入）。打包在两个指标上都是免费的，
+   * 所以一个实例就能用一次放置回答本关，实测 264 门、1 级延迟，
+   * 而本关存在的目的是教那套 273 门、五级深的电路。这与第 22 关对 `add8`、
+   * 第 20 关对 `full_adder` 做的是同一种减法：不是本关自己奖励的、
+   * 又能独自回答本关的元件会被扣下，本注释就是记录代价的地方。
    */
   {
     id: 'ch3-42-alu-2',
@@ -502,87 +431,71 @@ export const CH3_BATCH1: readonly LevelSpec[] = [
     checks: [
       {
         kind: 'fuzz',
-        // A fixed literal, and this level's own: nothing draws it at run time, so
-        // the same vectors are driven on every run and after every board edit. The
-        // high half reads as this level's global index; the low half is distinct
-        // from the previous level's `0x3915_00aa`, so the two levels never grade
-        // the same sequence.
+        // 一个固定字面量，而且属于本关：运行时没有任何东西抽取它，
+        // 所以每次运行、每次改板之后驱动的都是同一批向量。
+        // 高半部分读起来像本关的全局编号；低半部分与上一关的 `0x3915_00aa` 不同，
+        // 因此两关永远不会评同一串输入。
         seed: 0x4215_00ab,
         rounds: 64,
         inputs: {
           a: (s) => s.a ?? 0,
           b: (s) => s.b ?? 0,
-          // All three selector bits are drawn independently, so the eight codes are
-          // exercised; six of them are operations and two are the reserved pair the
-          // level folds onto a zero-output rule of its own. Drawing them rather
-          // than pinning them is what makes the reserved case a test rather than a
-          // hope, exactly as on the previous level.
+          // 三个选择位各自独立抽取，因此八个码都会被走到；其中六个是运算，
+          // 两个是保留对，关卡把它们折进自己的"输出零"规则。
+          // 抽取它们而不是钉死，才让保留码的情形成为测试而不是碰运气，与上一关完全一样。
           op0: (s) => s.op0 ?? 0,
           op1: (s) => s.op1 ?? 0,
           op2: (s) => s.op2 ?? 0,
         },
         outputs: {
-          // Pin `opN` is BIT N of the ISA's operation field, so the code is
-          // `op0 + 2*op1 + 4*op2` with nothing transposed, and `aluOp` is the
-          // table. The wired reference in `test/fixtures/ch3-references.ts` reads
-          // the same three pins the same way.
+          // 引脚 `opN` 就是 ISA 操作字段的第 N 位，所以编号是 `op0 + 2*op1 + 4*op2`，
+          // 没有任何转置，而 `aluOp` 就是那张表。`test/fixtures/ch3-references.ts` 里
+          // 接好线的参考电路也按同样方式读同样三根引脚。
           out: (v) =>
             aluOp((v.op0 ?? 0) | ((v.op1 ?? 0) << 1) | ((v.op2 ?? 0) << 2), v.a ?? 0, v.b ?? 0),
         },
       },
     ],
-    // Measured: the reference's own metrics, and they are the previous level's
-    // because the cheapest circuit either palette admits is the same construction
-    // -- one `not8` and one `mux8` pick the adder's addend (`b` or `~b`, with the
-    // same bit as the carry), an `add8` and an `and8`/`or8` pair with their own
-    // `mux8` picks, a `not8` for the NAND/NOR inversion, a `switch8` gated by
-    // `~op2` for the reserved codes, and two more `mux8`s to select the half and
-    // then the operation: 8 + 32 + 72 + 16 + 24 + 32 + 8 + 1 + 16 + 32 + 32 = 273
-    // NAND equivalents on a path five components deep. The overlap is recorded in
-    // the comment above rather than hidden by a different measurement.
+    // 实测：参考电路自己的指标，与上一关相同，因为两份托盘允许的最便宜电路是同一套构造——
+    // 一个 `not8` 和一个 `mux8` 选加法器的被加数（`b` 或 `~b`，同一位兼作进位），
+    // 一个 `add8` 和一对 `and8`/`or8` 各自用 `mux8` 选择，一个 `not8` 做与非/或非取反，
+    // 一个由 `~op2` 门控的 `switch8` 处理保留码，再用两个 `mux8` 先选半步、再选运算：
+    // 8 + 32 + 72 + 16 + 24 + 32 + 8 + 1 + 16 + 32 + 32 = 273 个与非门当量，
+    // 路径五级元件深。重叠写在上面的注释里，而不是靠换一个测量方式藏起来。
     threeStar: { gate: 273, delay: 5, tick: 0 },
-    // `alu2` USED TO BE NAMED HERE AS A REWARD, AND IT WAS A MISTAKE: the 2.x
-    // plan listed it as "a part no level hands out", but there is no `alu2` in
-    // `src/core/defs/` at all -- it was never a part, only the level's name. A
-    // reward naming an unregistered id can never appear in a palette, and
-    // `registry.test.ts` fails on it, so the line now hands out only parts that
-    // exist. OVERTURE's own ALU remains `alu8`, and this level does not list it:
-    // see the comment above for the measurement behind that.
+    // `alu2` 曾经在这里被写成奖励，那是个错误：2.x 计划把它列为"没有任何关卡发放的元件"，
+    // 但 `src/core/defs/` 里根本没有 `alu2`——它从来不是元件，只是关卡的名字。
+    // 奖励里写一个未注册的 id 永远不会出现在托盘中，`registry.test.ts` 会因此失败，
+    // 所以这一行现在只发放真实存在的元件。OVERTURE 自己的 ALU 仍然是 `alu8`，
+    // 而本关不列出它：测量依据见上面的注释。
     //
-    // `ashr8`, `rot_l8` and `rot_r8` land here because this level is what the 2.x
-    // realignment left in the removed Logic Engine's place: chapter 2 used to hand
-    // the shift and rotate family out at that capstone, and no surviving chapter-2
-    // level has a puzzle that calls for them. They are registered parts with a
-    // sandbox life of their own, so the choice was to hand them out here or leave
-    // them dead content; the design spec's §3.3 row moved with them.
+    // `ashr8`、`rot_l8`、`rot_r8` 落在这里，是因为本关就是 2.x 调整后"被移除的逻辑引擎"留下的位置：
+    // 第 2 章过去在那个压轴关发放移位与旋转家族，而幸存的第 2 章关卡里没有需要它们的谜题。
+    // 它们是注册元件，在沙盒里也有自己的用途，所以选择是在这里发放，还是让它们成为死内容；
+    // 设计规格 §3.3 的表格也跟着它们移动了。
     rewards: { components: ['ashr8', 'rot_l8', 'rot_r8'] },
   },
 
   /**
-   * ch3-43-the-foundry -- Component Factory / 元件工坊
+   * ch3-43-the-foundry —— 元件工坊 / Component Factory
    *
-   * SOURCED: the name in both languages, its position, and the source's concept
-   * line, which is about modularising a circuit into reusable parts.
+   * SOURCED：双语名字、位置、以及资料的概念句，讲的是把电路模块化成可复用元件。
    *
-   * AUTHORED, and a REBUILD -- the second divergence in this chapter, recorded
-   * here because the source's own reading of this level teaches a mechanic this
-   * level cannot: encapsulating a selection into a custom component is spec
-   * §3.4's blueprint, which was expected with the phase-3 editor and shipped in
-   * the phase after it (the wrap is a toolbar action on the board, not a level).
-   * Rather than leave the slot empty, this level teaches the part of that idea a
-   * single level can: one control word driving several destinations at once, with
-   * the two destinations deliberately out of step so that "fan the control bits
-   * out" cannot be done by wiring the whole word to both.
+   * AUTHORED，并且是一处重设计——本章第二处分歧，记录在这里，因为资料对这一关的解读
+   * 教的是一个本关无法提供的机制：把一段选择封装成自定义元件是设计规格 §3.4 的蓝图，
+   * 它原本预期随第 3 阶段编辑器出现，实际在第 3 阶段之后才交付
+   * （封装是画板上的工具栏动作，不是一关）。与其让这个位置空着，
+   * 本关教的是同一个想法里"一关能教"的部分：一个控制字同时驱动多个目的地，
+   * 而两个目的地故意不同步，使得"把控制位扇出"不能靠把整个字接到两边来完成。
    *
-   * The lesson is the one a module boundary has to get right anyway: a part that
-   * publishes two ports must derive each from the fields it needs, not from the
-   * word it was handed. `sel` 0 and 1 both put `data` on `a`; 2 and 3 put it on
-   * `b`. So `a` is `data AND NOT sel[1]` and `b` is `data AND sel[1]`, and a
-   * player who forwards `sel` wholesale gets the low case wrong.
+   * 这堂课正是模块边界无论如何都要做对的事：一个发布两个端口的元件，
+   * 必须从它需要的字段推导每个端口，而不是从交到它手里的整个字推导。
+   * `sel` 为 0 和 1 时都把 `data` 放到 `a` 上；为 2 和 3 时放到 `b` 上。
+   * 所以 `a` 是 `data AND NOT sel[1]`，`b` 是 `data AND sel[1]`，
+   * 而把 `sel` 整个转发的玩家会把低位那半做错。
    *
-   * AUTHORED: the pin shape, the two-bit selector, the script (which walks all
-   * four select codes and asserts the other output stays at zero -- the case a
-   * forwarding circuit fails), and the measured target.
+   * AUTHORED：引脚形状、两位选择器、脚本（走完全部四种选择码，并断言另一个输出保持为零——
+   * 正是"整体转发"电路失败的那种情形），以及实测目标。
    */
   {
     id: 'ch3-43-the-foundry',

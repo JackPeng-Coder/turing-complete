@@ -1,129 +1,95 @@
 import type { LevelSpec, ScriptStep, TruthRow } from '../../spec';
-// `LevelIo` -- the pin shape -- is `tables.ts`'s; `checks.ts` exports an
-// unrelated runtime interface of the same name (the bound simulation), so the
-// two must not be confused.
+// `LevelIo`——引脚形状——来自 `tables.ts`；`checks.ts` 还导出了一个同名的运行时接口
+//（已绑定仿真的接口），两者不能混淆。
 import { truthTable, type LevelIo } from '../../tables';
 
 /**
- * Chapter 2, levels 28-38: the storage and timing half of the chapter -- the
- * latch, the delay, the clock source, the selector, the register, the RAM and
- * the counter. It is the first chapter-2 batch the `script` checker carries.
+ * 第 2 章第 28~38 关：本章的存储与时序那一半——锁存器、延迟、时钟源、选择器、
+ * 寄存器、RAM 和计数器。它也是 `script` 检查器在第 2 章里第一个挑大梁的批次。
  *
- * WHAT THE SOURCE FIXES, AND WHAT IT DOES NOT. As in batches 1-3: the
- * compendium gives each of these levels exactly three things -- its name (English
- * and Chinese), its place in the chapter, and one line of teaching concept. It
- * gives no ports, no widths, no pass conditions, no targets and no rewards.
- * Everything else below is this replica's design, derived from the name and that
- * one line -- so every level carries a data comment split into `SOURCED` and
- * `AUTHORED`, and `test/levels/ch2-batch4.test.ts` fails if either marker is
- * missing. No number in this file may be presented as the source's own.
+ * 源资料固定了什么、没有固定什么。与批次 1~3 相同：资料集对这几关只给三样东西——
+ * 名称（中英文）、在本章中的位置、以及一行教学概念。它没有端口、位宽、通过条件、
+ * 目标和奖励。下面其余内容都是本复刻的设计，由名称和那一行概念推导而来——所以
+ * 每一关都带一段分成 `SOURCED` 与 `AUTHORED` 的数据注释，
+ * `test/levels/ch2-batch4.test.ts` 在缺少任一标记时失败。本文件里的任何数字都不能
+ * 被说成是源资料自己的。
  *
- * THE `script` CHECKER'S TICK SEMANTICS ARE LOAD-BEARING, and they are not the
- * obvious reading -- every script below is written to them. `runChecks` walks a
- * check's steps in tick order, and for each step it writes the step's inputs and
- * calls `settle()` BEFORE it advances the clock to that step's tick
- * (`levels/checks.ts`, the script branch: `while (io.sim.tickCount < step.tick)
- * io.tick()`). Two consequences:
+ * `script` 检查器的节拍语义至关重要，而且不是显而易见的读法——下面每个脚本都是按它
+ * 写的。`runChecks` 按节拍顺序遍历检查的步骤，对每一步先写入该步的输入并调用
+ * `settle()`，然后才把时钟推进到该步的节拍（`levels/checks.ts` 的 script 分支：
+ * `while (io.sim.tickCount < step.tick) io.tick()`）。两个后果：
  *
- *  * `tick` is an ABSOLUTE target, and the edges a step runs are the difference
- *    from the previous step's tick. A step at tick 0 runs NO edge at all, so its
- *    `expect` reads the post-`reset` state -- which is why every walk below
- *    starts with a tick-0 step and starts writing one tick in.
- *  * a step's inputs drive the edges that REACH that step's tick, so an `expect`
- *    at tick T reads the value the edge into T just sampled. A delay line
- *    therefore reads exactly like a wire while the input changes at every step,
- *    and the only way a script can show that a value is HELD is a second step at
- *    the SAME tick: no edge runs, the inputs change, and the OLD value must
- *    still be on the output. Levels 28, 29, 35, 36 and 38 each carry such a
- *    pair, and the test file measures that they do -- a wire, a two-tick delay
- *    and a register that ignores its load enable all fail on exactly those
- *    steps.
+ *  * `tick` 是绝对目标（ABSOLUTE），一步实际执行的边沿数是它与上一步节拍之差。节拍 0 的步骤
+ *    一个边沿都不执行，所以它的 `expect` 读到的是 `reset` 之后的状态——这就是下面
+ *    每个遍历都从 tick 0 步骤开始、并且从第 1 拍才写起的原因。
+ *  * 一步的输入驱动的是「到达该步节拍」的那些边沿，所以第 T 拍的 `expect` 读到的是
+ *    进入 T 的那个边沿刚采到的值。于是当输入每步都在变时，延迟线的读数与导线完全
+ *    一样；脚本要证明一个值被「保持」，唯一办法是在同一个节拍再放一步（SAME tick）：不执行边沿、
+ *    输入改变，而输出上必须仍是旧值。第 28、29、35、36、38 关各带这样一对步骤，
+ *    测试文件实测它们确实如此——导线、两拍延迟、以及忽略 load 使能的寄存器都会
+ *    恰好在这两步上失败。
  *
- * DIVIDING THE WORK WITH THE KERNEL, since a level is pure data (Global
- * Constraint 7) and cannot ask for either of these itself:
+ * 与内核分工，因为关卡是纯数据（全局约束 7），无法自己要求下面任何一件事：
  *
- *  * STABILITY IS AN OUTCOME OF `settle()`, NOT A CHECK KIND. A combinational
- *    loop exhausts `SETTLE_LIMIT` and raises `UnstableCircuitError`, which
- *    `runChecks` turns into an `unstable` failure; a loop broken by a storage
- *    element settles. Level 28 is the level about that, and it says so in its
- *    brief, because there is no `stable` check to author.
- *  * PERIODICITY IS A PROPERTY OF AN EXPECTATION SEQUENCE, not of one tick.
- *    Level 30's check asserts sixteen alternating ticks and four held ones; a
- *    check that asserted a single tick would pass a circuit that was simply
- *    stuck high.
+ *  * 稳定性是 `settle()` 的结果，而不是一种检查类型。纯组合回路会耗尽 `SETTLE_LIMIT`
+ *    并抛出 `UnstableCircuitError`，`runChecks` 把它记成 `unstable` 失败；被存储
+ *    元件打断的回路则能结算。第 28 关就是讲这件事的关卡，它在自己的 brief 里写明，
+ *    因为没有 `stable` 这种检查可写。
+ *  * 周期性是一个期望序列的性质，而不是单个节拍的性质。第 30 关的检查断言十六个
+ *    交替节拍和四个保持节拍；只断言一个节拍的检查会让一个恒为高的电路通过。
  *
- * FOUR THINGS THIS BATCH OWES A READER, and each says so in its own level
- * comment rather than only here:
+ * 本批次有四件事需要向读者交代，且各自写在自己的关卡注释里，而不仅在这里：
  *
- *  * LEVEL 30 HAS NO COMPUTABLE SPEC IN THE SOURCE AT ALL -- "构建振荡电路
- *    （时钟信号发生器）" gives no period, no duty cycle and no gating rule -- so
- *    the period, the hold-when-disabled rule and the sixteen-tick run are this
- *    replica's design, and the check's assertion of them is the level.
- *  * LEVEL 34 CHANGES THE SOURCE LEVEL'S KIND. The source says only "共享数据
- *    传输线路的概念" and spec 3.1 forbids a bus protocol ("不做总线协议（多驱动
- *    仲裁）"), so a literal shared/tri-state bus is unimplementable by design in
- *    this engine; the level teaches driver selection instead, and both its
- *    comment and its brief say so plainly.
- *  * LEVEL 37 HAS AN AUTHORED DEFINITION OF 装满. The source gives one line and
- *    no capacity, no address width and no definition of "full"; this replica
- *    defines it as all 256 bytes of a `ram8` being addressable and writable with
- *    every address reading back what was written, states that definition in the
- *    brief, and asserts it over the whole range.
- *  * LEVEL 38 CARRIES THE SOURCE'S ACHIEVEMENT, as a record rather than a pass
- *    condition: "成就：≤ 65 个门". See that level's comment for the mapping and
- *    for why 65 is not this level's `threeStar.gate`.
+ *  * 第 30 关在源资料里完全没有可计算的规格——「构建振荡电路（时钟信号发生器）」
+ *    没有周期、没有占空比、也没有门控规则——所以周期、禁用时保持的规则以及十六拍
+ *    的运行都是本复刻的设计，而检查对这些的断言就是这一关。
+ *  * 第 34 关改变了源资料关卡的类型。源资料只说「共享数据传输线路的概念」，
+ *    而规格 3.1 禁止总线协议（「不做总线协议（多驱动仲裁）」），所以在本引擎里，
+ *    字面意义上的共享/三态总线按设计就是不可实现的；这一关改为教驱动选择，
+ *    它的注释和 brief 都直说了这一点。
+ *  * 第 37 关的「装满」有一个自创定义。源资料只给一行字，没有容量、没有地址位宽、
+ *    也没有「满」的定义；本复刻把它定义成：`ram8` 的 256 个字节全部可寻址、可写入，
+ *    且每个地址都能读回写进去的内容；这个定义写进 brief，并在整个范围上断言。
+ *  * 第 38 关携带源资料的成就，作为记录而不是通过条件：「成就：≤ 65 个门」。
+ *    映射方式以及为什么 65 不是本关 `threeStar.gate`，见该关注释。
  *
- * THE PALETTE RULE, inherited from batch 2 and stated once more because this
- * batch uses it twice: a level offers the parts unlocked at or before it whose
- * pins can attach to something on it, plus its own rewards, MINUS any part that
- * is not its own reward and would answer the level by itself. Level 28 withholds
- * `mem1` (its pins ARE the level's pins, and it would hide the loop the level
- * teaches) and level 38 withholds `counter8` (the same, one drop-in counter).
- * Both are measured in the test file, neither is listed anywhere it would answer
- * the level, and both comments say which rule is being applied. The "plus its own
- * rewards" half is bounded too: a level lists its own rewards only where those
- * pins can ATTACH, which is why level 28 -- one bit wide throughout -- hands out
- * `ram8` without listing it (batch 1's level-14 reason), exactly as chapter 1's
- * capstone rewards `mem1` without listing it.
+ * 托盘规则继承自批次 2，这里再写一次，因为本批次用了它两次：一关提供在它之前或当时
+ * 已解锁、且引脚能接到本关某处的元件，加上它自己的奖励，再减去任何「不是本关奖励、
+ * 而且能单独答出本关」的元件。第 28 关扣下 `mem1`（它的引脚就是本关的引脚，而且它会
+ * 藏起本关要教的回路），第 38 关扣下 `counter8`（同理，一颗直接放入的计数器）。
+ * 两者都在测试文件里实测，都没有出现在任何会答出本关的清单里，两处注释都写明用的是
+ * 哪条规则。「加上自己的奖励」这一半同样有边界：一关只列出那些引脚能接得上的自己
+ * 的奖励——这就是第 28 关（从头到尾一位宽）发放 `ram8` 却不列出它的原因（批次 1
+ * 第 14 关的理由），与第 1 章收尾关奖励 `mem1` 却不列出它完全一致。
  *
- * STORAGE IS FREE ON BOTH METRICS BY RULING, and that decides what several
- * targets in this batch can be. `delay8`, `reg8`, `counter8` and `ram8` state no
- * `gateCost` and cost no delay unit (`core/defs/wide.ts`, the storage section
- * note: the gate metric measures what the PLAYER built, and a storage element
- * cuts the combinational path in both directions). So the floor for a level whose
- * answer is an unlocked storage part is that part's own 0/0, and this file states
- * that floor rather than the price of rebuilding the part from gates -- levels
- * 29, 35, 36 and 37 do exactly that, and each of their comments says what the
- * hand-built alternative measures, because a player who builds the loop instead
- * of dropping the part in should know why it scores one star.
+ * 按裁决，存储在两个指标上都是免费的，这决定了本批几个目标能取什么值。`delay8`、
+ * `reg8`、`counter8` 和 `ram8` 不声明 `gateCost`，也不计延迟单位（`core/defs/wide.ts`
+ * 存储一节的注记：门指标衡量的是玩家搭建了什么，而存储元件从两个方向切断组合路径）。
+ * 所以对于答案是某个已解锁存储元件的关卡，下限就是该元件自身的 0/0，本文件陈述这个
+ * 下限，而不是用门重建该元件的价格——第 29、35、36、37 关正是这样做的，它们的注释
+ * 各自说明了手工搭建的替代写法的实测值，因为选择搭回路而不是直接放入元件的玩家，
+ * 应当知道它为什么只拿一星。
  *
- * TWO COINCIDENCES THE BRIEF'S OWN TABLE CREATES, recorded here so a reviewer
- * does not read them as slips:
+ * 任务书自己的表造成了两处巧合，记录在这里，免得评审误读成笔误：
  *
- *  * levels 28 and 35 ask for the same storage rule under different pin names
- *    (`set`/`value` against `d`/`load`). They are framed differently -- 28 is
- *    where the loop is built and its palette withholds the packaged part; 35 is
- *    where the packaged part is used -- and their checks assert different things.
- *  * levels 33 and 34 have the same shape and the same behaviour. 33 is the byte
- *    selector graded by 256 fuzz vectors; 34 is the shared line graded by a
- *    four-row truth table. Batch 1 recorded the same coincidence for levels 15
- *    and 16.
+ *  * 第 28 关与第 35 关用不同的引脚名要求同一条存储规则（`set`/`value` 对
+ *    `d`/`load`）。它们的框法不同——28 是搭回路的地方，其托盘扣下封装好的元件；
+ *    35 是使用封装元件的地方——而且它们的检查断言的是不同的事。
+ *  * 第 33、34 关形状相同、行为相同。33 是用 256 个 fuzz 向量评分的字节选择器；
+ *    34 是用四行真值表评分的共享线路。批次 1 为第 15、16 关记录过同样的巧合。
  *
- * JOINED: this batch is the fourth and last slice of `CH2_LEVELS`
- * (`ch2/index.ts`), which `content/index.ts` appends to chapter 1, so these
- * eleven levels ship as levels 28-38 of the game's own `LEVELS`. All four
- * batches are joined, which is what makes chapter 2 the 26 levels at indices
- * 13-38; `test/levels/unlock-chain.test.ts` holds that to a number. Each batch
- * test imports its own batch and every earlier one, and the two cross-cutting
- * tests -- `level-buildability.test.ts` and `unlock-chain.test.ts` -- reach the
- * whole chapter through `ch2/index.ts`, the module that joins the four.
+ * 接入方式：本批次是 `CH2_LEVELS`（`ch2/index.ts`）的第四段也是最后一段，
+ * `content/index.ts` 把它接在第 1 章之后，所以这十一关以游戏 `LEVELS` 的第 28~38 关
+ * 发布。四个批次全部接入，才使第 2 章成为索引 13~38 的 26 关；
+ * `test/levels/unlock-chain.test.ts` 用数字钉住这一点。每个批次测试各自 import 自己的
+ * 批次和更早的每个批次，两个横切测试——`level-buildability.test.ts` 和
+ * `unlock-chain.test.ts`——则通过 `ch2/index.ts`（汇合四个批次的模块）到达整章。
  */
 
 /**
- * The one-bit shelf every level here draws from: chapter 1's gates, its two
- * constants and the delay line, in the order chapter 1 hands them out.
- * `delay_line` is level 28's storage element -- the only one that can break a
- * one-bit loop without also being the level's answer.
+ * 这里每一关都从中取材的一比特货架：第 1 章的门、两个常量和延迟线，顺序与第 1 章
+ * 发放它们时一致。`delay_line` 是第 28 关的存储元件——唯一能在不成为该关答案的
+ * 前提下打断一位回路的元件。
  */
 const GATES_1BIT = [
   'nand',
@@ -140,23 +106,22 @@ const GATES_1BIT = [
   'delay_line',
 ] as const;
 
-/** The level's own plumbing: always in the palette, never unlocked (`defs/index.ts`). */
+/** 关卡自己的接线：始终在托盘里，从不属于解锁（`defs/index.ts`）。 */
 const LEVEL_IO = ['level_input', 'level_output'] as const;
 
-/** What batch 1's level 13 unlocked: the two byte packers and the byte constant. */
+/** 批次 1 第 13 关解锁的东西：两个字节打包器与字节常量。 */
 const BYTE_WIRING = ['splitter', 'maker', 'const8'] as const;
 
 /**
- * Level 22's one-bit conditional pass. It is a 1-bit part with 1-bit pins, so it
- * attaches on every one-bit level in this batch; this file offers it wherever a
- * "take this or keep that" choice is part of the level (28, 30, 31, 32, 35) and
- * leaves it off the byte-wide ones, where a player would reach for gates anyway.
+ * 第 22 关的一位条件通断。它是一颗 1 位引脚的一比特元件，所以在本批每个一位关卡上
+ * 都接得上；本文件在「取这个还是留那个」的选择属于关卡内容时提供它
+ *（28、30、31、32、35），在字节宽的关卡上则不列，因为那里的玩家反正会用门。
  */
 const SWITCH_1 = ['switch'] as const;
 
 /**
- * The five pin shapes this batch uses, so a level's io is one named constant
- * instead of six lines of literal in the middle of a spec.
+ * 本批用到的五种引脚形状，这样一关的 io 就是一个有名字的常量，
+ * 而不是写在 spec 中间的六行字面量。
  */
 const IO_SET_VALUE_OUT: LevelIo = {
   inputs: [
@@ -223,26 +188,23 @@ const IO_EN1_RESET1_OUT8: LevelIo = {
 };
 
 /**
- * Level 33's fuzz seed: the level's index in the high byte and the byte width in
- * the low one, exactly as batches 2 and 3 seed their levels.
+ * 第 33 关的 fuzz 种子：高字节是关卡序号，低字节是字节宽度，与批次 2、3 给它们的
+ * 关卡播种的方式完全一样。
  *
- * A fixed literal, not a drawn one: the same seed produces the same 256 vectors
- * on every run and on every board edit, which is what makes the level's coverage
- * -- that both `sel` values are driven, many times each -- a fact about the level
- * rather than about the run. The test file measures it against this literal.
+ * 用固定字面量而不是随机抽取：同一个种子在每次运行、每次修改画板后都产生同样的
+ * 256 个向量，这才让本关的覆盖范围——两个 `sel` 取值都被驱动、而且各被驱动很多次
+ * ——成为「关卡的事实」而不是「本次运行的事实」。测试文件拿这个字面量来实测。
  */
 const SEED_33 = 0x3308;
 
 /**
- * The four vectors level 34's table states, and the rule they publish.
+ * 第 34 关的表所陈述的四个向量，以及它们发布的规则。
  *
- * Four rows rather than 2^17 combinations, which is the brief's shape for this
- * level: it states WHO DRIVES THE LINE, at a scale a reader can check by eye,
- * while the byte-wide coverage belongs to level 33's fuzz check. Both `sel`
- * values appear on the same pair of operands, so the table separates "the
- * selected line" from "always the first" and "always the second", and the two
- * operand pairs are asymmetric patterns, so a circuit that shuffled the bits
- * within the byte would fail one of them.
+ * 用四行而不是 2^17 种组合，这是任务书为这一关规定的形状：它以读者肉眼可核对的
+ * 小规模陈述「谁在驱动这条线」，而字节宽的覆盖属于第 33 关的 fuzz 检查。两个 `sel`
+ * 取值出现在同一对操作数上，所以这张表把「被选中的那条线」与「总是第一条」「总是
+ * 第二条」区分开；两对操作数又是不对称的模式，所以打乱字节内位序的电路会在其中
+ * 一行上失败。
  */
 const BUS_VECTORS: readonly { readonly a: number; readonly b: number; readonly sel: number }[] = [
   { a: 0x00, b: 0xff, sel: 0 },
@@ -251,43 +213,38 @@ const BUS_VECTORS: readonly { readonly a: number; readonly b: number; readonly s
   { a: 0x0f, b: 0xf0, sel: 1 },
 ];
 
-/** The bus rule the level teaches: exactly the selected line reaches `out`. */
+/** 本关要教的「总线」规则：恰好是被选中的那条线到达 `out`。 */
 function selectedLine(a: number, b: number, sel: number): number {
   return sel === 1 ? b : a;
 }
 
-/** Level 34's four rows, with each row's output stated by the rule above. */
+/** 第 34 关的四行，每行输出由上面的规则给出。 */
 const BUS_ROWS: readonly TruthRow[] = BUS_VECTORS.map(({ a, b, sel }) => ({
   inputs: { a, b, sel },
   outputs: { out: selectedLine(a, b, sel) },
 }));
 
 /**
- * The byte level 37 writes into address `k`.
+ * 第 37 关写入地址 `k` 的那个字节。
  *
- * `k * 7 + 1` modulo 256 is a bijection (7 is odd, so it is invertible), so no
- * two addresses hold the same byte. That is what makes an address decode which
- * aliases two cells -- or ignores `addr` altogether -- visible: the read-back
- * pass decides one address at a time, and the byte it expects there is one no
- * other address was written with. `k = 73` is the single address this stores a 0
- * in, and it is one of 256 expectations rather than the whole test.
+ * 模 256 的 `k * 7 + 1` 是一个双射（7 是奇数，所以可逆），因此没有两个地址存放
+ * 相同的字节。这正是让「把两个单元混叠」或「干脆忽略 `addr`」的地址译码暴露出来的
+ * 原因：回读阶段一次判定一个地址，而它期望的字节没有任何其他地址写过。
+ * `k = 73` 是这个函数唯一存入 0 的地址，它只是 256 个期望之一，而不是整个测试。
  */
 function boxByte(k: number): number {
   return (k * 7 + 1) & 0xff;
 }
 
 /**
- * Level 37's script: write all 256 addresses, then read all 256 back.
+ * 第 37 关的脚本：写满全部 256 个地址，再把 256 个全部读回。
  *
- * THE CHECK THAT MAKES "装满" MEAN SOMETHING, and the reason it is generated
- * rather than written out. Step `k + 1` (one clock edge each, starting one tick
- * in because a step at tick 0 runs no edge) writes `boxByte(k)` into address `k`
- * with `load` high, and asserts the byte on the output on the same step. Steps
- * 257..512 then re-read every address with `load` LOW and `d` driven with the
- * COMPLEMENT of the stored byte, after all 256 writes have happened -- so the
- * pass proves the box holds 256 bytes at once rather than that the last one
- * written can be read, and every read would have to come back as `~stored` for a
- * wire from `d` to pass a single one of them.
+ * 这个检查让「装满」有了意义，也是它要生成而不是手写出来的原因。第 `k + 1` 步
+ *（每步一个时钟沿，从第 1 拍开始，因为节拍 0 的步骤不执行边沿）在 `load` 为高时
+ * 把 `boxByte(k)` 写进地址 `k`，并在同一步断言输出上的字节。第 257..512 步则在
+ * 256 次写入全部发生之后，以 `load` 为低、`d` 接所存字节的补码，重新读取每个地址
+ * ——所以通过证明的是盒子同时装着 256 个字节，而不是最近一次写入能被读出；
+ * 而且如果 `d` 到 `out` 之间有导线，每一次读都会读到 `~stored`，一步都过不了。
  */
 function littleBoxSteps(): ScriptStep[] {
   const steps: ScriptStep[] = [
@@ -311,23 +268,19 @@ function littleBoxSteps(): ScriptStep[] {
 }
 
 /**
- * Level 38's script: reset, 256 enabled edges, the wrap, and the precedence of
- * `reset` over `en`.
+ * 第 38 关的脚本：复位、256 个使能的边沿、回绕，以及 `reset` 对 `en` 的优先级。
  *
- * 265 steps. The run from tick 2 to tick 257 is 256 consecutive edges whose
- * expectations are the count itself, so the check walks every byte and comes
- * back to 0 at exactly 256: a counter that wrapped at 128, or that saturated at
- * 255, fails one of those 256 expectations rather than a hand-picked one. Tick
- * 260 then asserts `reset` over `en` on an edge where BOTH are high and the
- * count is 2 -- if the enable won, the output would be 3. The last two steps sit
- * on tick 263: the first runs the edge that resumes the count, the second runs
- * no edge at all and must still read 1, which is what a circuit that counted
- * combinationically would fail.
+ * 265 步。从第 2 拍到第 257 拍是 256 个连续边沿，其期望值就是计数本身，所以检查
+ * 走遍每个字节并在恰好 256 时回到 0：在 128 处回绕、或在 255 处饱和的计数器，
+ * 会在这 256 个期望中的某一个上失败，而不是在某个挑出来的值上失败。
+ * 第 260 拍随后在一个两者都为高、计数为 2 的边沿上断言 `reset` 压过 `en`——
+ * 如果使能赢了，输出会是 3。最后两步都落在第 263 拍：第一步执行恢复计数的边沿，
+ * 第二步一个边沿都不执行，却必须仍读到 1——组合式计数的电路会在这里失败。
  */
 function counterSteps(): ScriptStep[] {
   const steps: ScriptStep[] = [
     { tick: 0, inputs: { en: 0, reset: 1 }, expect: { out: 0 } },
-    // One edge with `reset` and `en` both high: the clear wins, so this reads 0.
+    // 一个 `reset` 和 `en` 同时为高的边沿：清零获胜，所以这里读到 0。
     { tick: 1, inputs: { en: 1, reset: 1 }, expect: { out: 0 } },
   ];
   for (let edge = 1; edge <= 256; edge += 1) {
@@ -344,18 +297,14 @@ function counterSteps(): ScriptStep[] {
 }
 
 /**
- * Level 30's two scripts: the beat, the hold, and the resumption; then the held-low
- * case on its own.
+ * 第 30 关的两个脚本：节拍、保持与恢复；然后单独测保持低电平的情况。
  *
- * Sixteen enabled ticks whose expectations alternate 0/1/0/1 -- eight whole
- * periods, because "the output has a period" is not measurable from one tick --
- * followed by four ticks with `enable` low that must all read the 1 the last
- * enabled tick left, and four more that resume the beat from that held value
- * (a falling edge first: `1 XOR 1` is 0). The second script holds `enable` low
- * from reset for eight ticks and demands 0 throughout, which is the other way a
- * clock source fails: an oscillator with no gate on it satisfies the first
- * script's first sixteen ticks and fails at tick 16, and it fails this one at
- * tick 1.
+ * 十六个使能节拍，其期望交替为 0/1/0/1——八个完整周期，因为「输出有周期」无法从
+ * 单个节拍测出——随后是四个 `enable` 为低的节拍，必须都读到最后一个使能节拍留下的
+ * 1，再四个节拍从那保持值恢复节拍（先是一个下降沿：`1 XOR 1` 是 0）。第二个脚本
+ * 让 `enable` 从复位起一直为低八拍，并要求全程为 0，这是时钟源失败的另一种方式：
+ * 没有门控的振荡器满足第一个脚本的前十六拍，却在第 16 拍失败；它也在本脚本的
+ * 第 1 拍就失败。
  */
 const OSCILLATOR_STEPS: readonly ScriptStep[] = [
   ...Array.from({ length: 16 }, (_, tick) => ({
@@ -375,70 +324,54 @@ const OSCILLATOR_STEPS: readonly ScriptStep[] = [
   })),
 ];
 
-/** The held-low half: `enable` low from reset, so a gated source never moves. */
+/** 保持低电平的那一半：`enable` 从复位起为低，所以带门控的时钟源永远不动。 */
 const HELD_LOW_STEPS: readonly ScriptStep[] = Array.from({ length: 8 }, (_, tick) => ({
   tick,
   inputs: { enable: 0 },
   expect: { out: 0 },
 }));
 
+/** 第 2 章本批次的关卡数据，按 `index` 顺序排列；章节顺序由 `ch2/index.ts` 汇合、`content/index.ts` 统一排序。 */
 export const CH2_BATCH4: readonly LevelSpec[] = [
   /**
-   * ch2-17-circular-dependency -- Circular Dependency / 循环依赖
+   * ch2-17-circular-dependency —— 循环依赖 / Circular Dependency
    *
-   * SOURCED: the name in both languages, its position (the 28th level, and the
-   * first of the chapter's storage half), and the source's one-line concept --
-   * '引入反馈回路概念，构建基本锁存器' (introduce the idea of a feedback loop and
-   * build a basic latch). It gives no ports, no widths, no pass condition, no
-   * target and no reward.
+   * SOURCED（有出处）：两种语言的名称、位置（第 28 关，本章存储那一半的第一关），以及源资料的
+   * 一行概念——「引入反馈回路概念，构建基本锁存器」。它没有端口、位宽、通过条件、
+   * 目标和奖励。
    *
-   * AUTHORED (this replica's design): the `set:1 value:1 -> out:1` shape; the
-   * nine-step script; the measured three-star target; the `ram8` reward; and the
-   * palette. The check's shape is decided by `runChecks`'s tick semantics (module
-   * note): a step's inputs are written and settled before its tick advances, so
-   * the step at tick 1 reads the bit the edge into tick 1 just sampled, and the
-   * four same-tick pairs are what prove the bit is HELD rather than passed
-   * through -- a circuit that published `set ? value : 0` would fail at tick 0,
-   * long before the loop is under test.
+   * AUTHORED（本复刻的设计）：`set:1 value:1 -> out:1` 形状；九步脚本；实测三星目标；
+   * `ram8` 奖励；以及托盘。检查的形状由 `runChecks` 的节拍语义决定（模块注记）：
+   * 一步的输入在节拍推进前写入并结算，所以第 1 拍的步骤读到的正是进入第 1 拍的
+   * 边沿刚采到的位；四对同拍步骤才证明这个位是被保持的，而不是透传的——一个发布
+   * `set ? value : 0` 的电路会在节拍 0 就失败，远早于回路被测试。
    *
-   * STABILITY, WHICH IS THIS LEVEL'S CORE ASSERTION AND HAS NO CHECK KIND OF ITS
-   * OWN. A purely combinational loop never reaches a fixed point: `settle()`
-   * exhausts `SETTLE_LIMIT` and raises `UnstableCircuitError`, which `runChecks`
-   * records as an `unstable` failure, so a latch built out of gates alone cannot
-   * pass this level however it is wired. The reference really does contain a
-   * loop -- `validateGraph` reports `feedback-loop` (a warning, because only the
-   * simulator can say whether a loop with storage in it settles) -- and it
-   * settles. The test file asserts both sides directly against `settle()`, not
-   * through "the level passed": the reference settles, and a cross-coupled NOR
-   * latch, a NOT feeding itself and two NOTs in a ring all throw
-   * `UnstableCircuitError`. Asserting only that the reference passes would prove
-   * nothing about loops at all.
+   * 稳定性是这一关的核心断言，而它没有自己的检查类型。纯组合回路永远到不了不动点：
+   * `settle()` 耗尽 `SETTLE_LIMIT` 并抛出 `UnstableCircuitError`，`runChecks` 把它
+   * 记为 `unstable` 失败，所以只用门搭成的锁存器无论怎么接都过不了这一关。
+   * 参考解确实含有一个回路——`validateGraph` 会报 `feedback-loop`（只是警告，因为
+   * 只有仿真器才能判断含存储的回路是否会结算）——而它能结算。测试文件直接对
+   * `settle()` 断言两边，而不是通过「关卡通过了」来断言：参考解能结算，而交叉耦合的
+   * NOR 锁存器、自己喂自己的 NOT、以及两个 NOT 组成的环都抛出
+   * `UnstableCircuitError`。只断言参考解通过，根本无法证明关于回路的任何事。
    *
-   * WHY THE PALETTE WITHHOLDS `mem1`, the one part that would answer this level
-   * in a single drop. `mem1` is unlocked (chapter 1's capstone rewards it), it
-   * is not this level's own reward, and its pins ARE this level's pins --
-   * `set`/`value` in, `out` out -- so batch 2's rule applies exactly (level 22's
-   * `add8`, level 24's `neg8`): a part that is not the level's own reward and
-   * would answer the level by itself is offered nowhere on it. Dropping it in
-   * would hide the loop the source's line asks the player to build, which is the
-   * whole level. It is measured in the test file rather than argued about: it
-   * passes, for 0 gates and 0 delay, and level 35 -- whose concept is the
-   * packaged conditional write -- offers it.
+   * 为什么托盘扣下 `mem1`——唯一能一步答出本关的元件。`mem1` 已解锁（第 1 章收尾关
+   * 奖励它），它不是本关自己的奖励，而它的引脚就是本关的引脚——`set`/`value` 进、
+   * `out` 出——所以批次 2 的规则完全适用（第 22 关的 `add8`、第 24 关的 `neg8`）：
+   * 不是本关奖励、却能单独答出本关的元件，在它上面任何地方都不提供。直接放入会藏起
+   * 源资料那句话要求玩家搭建的回路，而那就是整关。这一点在测试文件里实测而不是争论：
+   * 它能通过，0 门 0 延迟，而第 35 关（概念是封装好的条件写入）提供它。
    *
-   * THE TARGET is the reference's own measured metrics: 8 NAND equivalents, 3
-   * delay units, tick 4 (the last tick the script drives). The reference builds
-   * the choice out of two `switch` parts and an `or` rather than an AND/NOT/AND
-   * mux: `switch` is the part this level's hint names. It is not a cheaper cell
-   * -- the registered `and` is `cost: 1` / `gateCost: 2`, exactly `switch`'s pair
-   * (`core/defs/index.ts`, `core/defs/wide.ts`), so the AND/NOT/AND mux measures
-   * the same 8/3; only a hand-built AND (a NAND into a NOT) costs two delay
-   * units. The path through `set` is what sets this level's delay.
+   * 目标是参考解自身的实测指标：8 个 NAND 等价门、3 个延迟单位、tick 4（脚本驱动的
+   * 最后一个节拍）。参考解用两个 `switch` 和一个 `or` 搭出这个选择，而不是 AND/NOT/AND
+   * 多路器：`switch` 正是本关提示点名的元件。它并不是更便宜的单元——注册的 `and` 是
+   * `cost: 1` / `gateCost: 2`，恰好等于 `switch` 的那一对（`core/defs/index.ts`、
+   * `core/defs/wide.ts`），所以 AND/NOT/AND 多路器实测同样是 8/3；只有手工搭的 AND
+   *（一个 NAND 接一个 NOT）会多花两个延迟单位。经过 `set` 的那条路径决定了本关的延迟。
    *
-   * `ram8` is this level's reward and is deliberately not in its palette: every
-   * pin here is one bit wide, so an eight-bit part has nothing to attach to
-   * (batch 1's level-14 reason), exactly as chapter 1's capstone rewards `mem1`
-   * without listing it. The reward is still handed out -- it is what level 37's
-   * little box is built from.
+   * `ram8` 是本关的奖励，且故意不在托盘中：这里每个引脚都是一位宽，八位元件没有东西
+   * 可接（批次 1 第 14 关的理由），与第 1 章收尾关奖励 `mem1` 却不列出它完全一致。
+   * 奖励仍然发放——第 37 关的小盒子就是用它的字节搭的。
    */
   {
     id: 'ch2-17-circular-dependency',
@@ -460,8 +393,8 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
         kind: 'script',
         steps: [
           { tick: 0, inputs: { set: 0, value: 0 }, expect: { out: 0 } },
-          // No edge has run yet, so a circuit that mirrored set/value would show
-          // 1 here: this step is the "it is storage, not logic" assertion.
+          // 还没有执行过边沿，所以一个把 set/value 直接透传的电路会在这里显示 1：
+          // 这一步就是「它是存储，不是逻辑」的断言。
           { tick: 0, inputs: { set: 1, value: 1 }, expect: { out: 0 } },
           { tick: 1, inputs: { set: 1, value: 1 }, expect: { out: 1 } },
           { tick: 1, inputs: { set: 0, value: 0 }, expect: { out: 1 } },
@@ -473,46 +406,36 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
         ],
       },
     ],
-    // Measured: `not` (1) + two `switch` (2 each) + `or` (3) = 8 NAND equivalents,
-    // with the delay line free on both metrics and a path three components deep
-    // (NOT -> switch -> OR). See the comment above for what the construction and
-    // the palette withholding are for.
+    // 实测：`not`（1）+ 两个 `switch`（各 2）+ `or`（3）= 8 个 NAND 等价门，
+    // 延迟线在两个指标上免费，路径三个元件深（NOT -> switch -> OR）。
+    // 上面的注释说明了这个构造和托盘扣留的用意。
     threeStar: { gate: 8, delay: 3, tick: 4 },
-    // `switch` is handed out HERE rather than at the level that used to give it
-    // (the byte adder, now level 27) because the 2.x realignment put this level
-    // first: its own hint builds the two-way choice out of two switches, and a
-    // palette may not offer a part the player has not earned yet. That makes level
-    // 24 (Bit Switch, the level named after the part) a re-teach rather than an
-    // introduction -- the design spec's §3.3 records the ruling.
+    // `switch` 在这里发放，而不是在原来发放它的关卡（字节加法器，现在是第 27 关），
+    // 因为 2.x 改版把本关放到了前面：本关自己的提示就用两个 switch 搭出二选一，
+    // 而托盘不能提供玩家还没获得的元件。这让第 24 关（Bit Switch，以该元件命名的
+    // 关卡）变成一次再教学而不是初次介绍——设计规格 §3.3 记录了这个裁定。
     rewards: { components: ['ram8', 'switch'] },
   },
 
   /**
-   * ch2-20-delayed-lines -- Delayed Lines / 延迟线
+   * ch2-20-delayed-lines —— 晚点到站 / Delayed Lines
    *
-   * SOURCED: the name in both languages, its position (29th), and the concept --
-   * '信号延迟一拍输出': a signal that comes out one tick late. No ports, no
-   * widths, no pass condition, no target and no reward.
+   * SOURCED（有出处）：两种语言的名称、位置（第 29 关），以及概念——「信号延迟一拍输出」：
+   * 一个晚一个节拍才出来的信号。没有端口、位宽、通过条件、目标和奖励。
    *
-   * AUTHORED: the `a:8 -> out:8` shape; the ten-step script; the measured target;
-   * the `reg8`/`delay8` rewards; and the palette.
+   * AUTHORED（自创）：`a:8 -> out:8` 形状；十步脚本；实测目标；`reg8`/`delay8` 奖励；以及托盘。
    *
-   * THE SAME-TICK PAIRS ARE THE LEVEL'S WHOLE TEST, and they exist because of the
-   * tick semantics in the module note. The step at tick T drives `a` and then
-   * advances to T, so the byte sampled at that edge is the byte the same step
-   * drove -- which means a delay line reads exactly like a wire if the input
-   * changes at every step. The step that repeats tick T with a NEW byte on `a`
-   * and still demands the OLD one is what tells them apart: no edge runs between
-   * the two, so a wire shows the new byte and a delay shows the stored one. The
-   * test file grades all three shapes against this script -- a wire fails at
-   * tick 0, one tick of delay passes, two ticks of delay fail at tick 1.
+   * 同拍步骤对是这一关的全部测试，它们的存在源于模块注记里的节拍语义。第 T 拍的
+   * 步骤先驱动 `a` 再推进到 T，所以那个边沿采到的字节就是同一步驱动的字节——这意味
+   * 着如果每一步输入都在变，延迟线的读数与导线完全一样。真正区分它们的是「重复第 T
+   * 拍、在 `a` 上给一个新字节、却仍要求旧字节」的那一步：两步之间不执行边沿，所以导线
+   * 显示新字节，而延迟线显示存下的字节。测试文件用这个脚本给三种形状评分——导线在
+   * 节拍 0 失败，一拍延迟通过，两拍延迟在节拍 1 失败。
    *
-   * THREE SPELLINGS TIE ON BOTH METRICS, asserted in the test file rather than
-   * claimed here: the `delay8` this level hands out, eight 1-bit `delay_line`s
-   * behind a splitter and a maker, and a `reg8` with its `load` tied high all
-   * measure 0 gates / 0 delay / tick 4. Storage is free on both metrics by the
-   * chapter's ruling (module note), so this level's target is the floor, and what
-   * the level teaches is the tick rather than a particular part.
+   * 三种写法在两个指标上打平，这一点在测试文件里实测而不是在这里声称：本关发放的
+   * `delay8`、位拆分器加位合并器后面的八条 1 位 `delay_line`、以及把 `load` 接高的
+   * `reg8`，都实测 0 门 / 0 延迟 / tick 4。按本章裁决（模块注记），存储在两个指标上
+   * 免费，所以本关的目标就是下限，而本关教的是这一拍，而不是某个特定元件。
    */
   {
     id: 'ch2-20-delayed-lines',
@@ -546,49 +469,39 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
         ],
       },
     ],
-    // Measured: the `delay8` reference is 0 NAND equivalents and 0 delay units
-    // (a storage element is free on both), and the tick metric is the last tick
-    // the script drives. The eight-delay-line and register spellings measure the
-    // same pair -- see the comment above.
+    // 实测：`delay8` 参考解是 0 个 NAND 等价门、0 延迟单位（存储元件在两者上都免费），
+    // 而 tick 指标是脚本驱动的最后一个节拍。八条延迟线与寄存器两种写法实测同一对
+    // 数字——见上面的注释。
     threeStar: { gate: 0, delay: 0, tick: 4 },
     rewards: { components: ['reg8', 'delay8'] },
   },
 
   /**
-   * ch2-23-odd-cycles -- Odd Ticks / 奇变偶不变
+   * ch2-23-odd-cycles —— 奇变偶不变 / Odd Ticks
    *
-   * SOURCED: the name in both languages, its position (30th), and the concept,
-   * which is the whole of what the source says: '构建振荡电路（时钟信号发生器）' --
-   * build an oscillating circuit, a clock-signal generator. It gives NO period,
-   * NO duty cycle and NO rule for what a disabled clock does.
+   * SOURCED（有出处）：两种语言的名称、位置（第 30 关），以及概念，而这就是源资料的全部：
+   *「构建振荡电路（时钟信号发生器）」——搭一个振荡电路，也就是时钟信号发生器。
+   * 它没有给周期、占空比，也没有规定禁用时时钟该怎样。
    *
-   * AUTHORED, and everything computable here is authored because of that: the
-   * `enable:1 -> out:1` shape; the period (two ticks: high for one, low for the
-   * next); the rule that `enable` low HOLDS the output rather than clearing it
-   * (nothing in the source gates the clock at all, and "hold" is what makes a
-   * clock source stoppable and restartable without losing its phase); the
-   * sixteen-tick alternating run, the four held ticks and the four resumed ones
-   * the first script states, and the eight held-low ticks the second one states;
-   * the measured target; and the palette.
+   * AUTHORED（自创），而且这里每个可计算的量都因此是自创的：`enable:1 -> out:1` 形状；周期
+   *（两个节拍：高一拍、低一拍）；`enable` 为低时保持输出而不是清零的规则（源资料
+   * 根本没有门控时钟，而「保持」才让时钟源可以停下、再重新启动而不丢相位）；
+   * 第一个脚本陈述的十六拍交替、四个保持拍与四个恢复拍，以及第二个脚本陈述的八拍
+   * 保持低电平；实测目标；以及托盘。
    *
-   * PERIODICITY IS THE ASSERTION, AND ONE TICK WOULD PROVE NOTHING. A single
-   * "tick 1 is high" would be satisfied by a wire to the rail; what the check
-   * states is a regular alternation -- 周期性 (periodicity), a period of two
-   * ticks -- across sixteen consecutive ticks: eight whole periods, every
-   * consecutive pair differing. Four ticks follow with `enable` low that must all
-   * read the value the last enabled tick left, and four more that resume the beat
-   * from it. The test file measures that shape out of the check data and grades
-   * three circuits against it: the reference passes, a clock that never ticks
-   * fails at tick 1, and an UNGATED oscillator -- one that flips whatever
-   * `enable` says -- satisfies all sixteen beats and fails at tick 16, the first
-   * held tick, with `expected 1, actual 0`.
+   * 周期性（periodicity）才是断言，一个节拍什么也证明不了。单说「第 1 拍为高」，一根接到电源的
+   * 导线就满足了；检查陈述的是规律的交替——周期性，周期为两拍——跨越十六个连续
+   * 节拍：八个完整周期，每对相邻节拍都不同。随后四个 `enable` 为低的节拍必须都读到
+   * 最后一个使能拍留下的值，再四个节拍从它恢复节拍。测试文件从检查数据里量出这个
+   * 形状，并用它给三个电路评分：参考解通过；从不翻转的时钟在第 1 拍失败；而一个
+   * 没有门控的振荡器——不管 `enable` 说什么都翻转——满足全部十六拍，却在第 16 拍
+   *（第一个保持拍）失败，报 `expected 1, actual 0`。
    *
-   * `out XOR enable` IS BOTH HALVES IN ONE GATE: XOR with 1 inverts (the beat)
-   * and XOR with 0 keeps (the hold), and the enable is the gate. The reference is
-   * that XOR plus a 1-Bit Memory whose `set` is tied high so it samples every
-   * edge -- 4 NAND equivalents on a path one delay unit deep, measured. `mem1` is
-   * offered here although level 28 withholds it: the level's answer is the XOR
-   * and the storage together, so neither part answers it alone.
+   * `out XOR enable` 用一个门同时做好两半：与 1 异或是取反（节拍），与 0 异或是保持
+   *（保持），而 enable 就是那个 0 或 1，也是门控。参考解就是那个 XOR 加一颗 `set`
+   * 接高的 1 位存储器，让它每个边沿都采样——实测 4 个 NAND 等价门、路径一个延迟
+   * 单位。`mem1` 在这里被提供，尽管第 28 关扣下了它：本关的答案是 XOR 与存储合在
+   * 一起，两个元件单独都答不出它。
    */
   {
     id: 'ch2-23-odd-cycles',
@@ -609,43 +522,34 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
       { kind: 'script', steps: OSCILLATOR_STEPS },
       { kind: 'script', steps: HELD_LOW_STEPS },
     ],
-    // Measured: one `xor` (4 NAND equivalents) on a path one delay unit deep,
-    // with the 1-Bit Memory and the constant free on both metrics. The tick
-    // metric is the last tick the longer script drives.
+    // 实测：一个 `xor`（4 个 NAND 等价门）、路径一个延迟单位深，1 位存储器与常量在
+    // 两个指标上都免费。tick 指标是较长那个脚本驱动的最后一个节拍。
     threeStar: { gate: 4, delay: 1, tick: 23 },
   },
 
   /**
-   * ch2-24-bit-switch -- Bit Switch / 1 位开关
+   * ch2-24-bit-switch —— 二进制开关 / 1 位开关
    *
-   * SOURCED: the name in both languages, its position (32nd), and the concept --
-   * '条件通断信号（类似与门但可级联省或门）': a conditional pass, like an AND gate
-   * but cascadeable in a way that saves OR gates.
+   * SOURCED（有出处）：两种语言的名称、位置（第 32 关），以及概念——
+   *「条件通断信号（类似与门但可级联省或门）」：一种条件通断，像与门，但级联方式
+   * 能省掉或门。
    *
-   * AUTHORED: the `a:1 on:1 -> out:1` shape; the four rows; the measured target;
-   * and the palette.
+   * AUTHORED（自创）：`a:1 on:1 -> out:1` 形状；四行表；实测目标；以及托盘。
    *
-   * THE PART IS OLD NEWS BY THE TIME THIS LEVEL ARRIVES, and this comment is where
-   * that is recorded. The source teaches `switch` here -- its own level 32 is
-   * literally named Bit Switch -- but this replica slides the part from chapter 1
-   * into chapter 2 (spec 3.3) and the level data unlocks it, with `switch8`, at
-   * level 22, the 8-bit adder whose ripple carry chain needs the conditional pass;
-   * level 28's reference is built from two of them. So the player has held `switch`
-   * for ten levels when this level opens, and level 32 is a RE-TEACH rather than an
-   * introduction: what it verifies is that the player can put the behaviour on the
-   * pins (`on` high passes `a`, `on` low holds 0) rather than that they can meet a
-   * new part. Nothing else about the level changes for it -- the four rows, the
-   * 2/1 target and the palette are as they were, and
-   * `test/levels/unlock-chain.test.ts` pins the unlock at level 22.
+   * 这一关到来时，该元件早已不是新东西，而这段注释就是把这件事记录下来的地方。
+   * 源资料在这里教 `switch`——它自己的第 32 关就直叫 Bit Switch——但本复刻把该元件
+   * 从第 1 章挪进了第 2 章（规格 3.3），关卡数据在第 22 关连同 `switch8` 一起解锁它：
+   * 第 22 关是八位加法器，它的行波进位链需要这个条件通断；第 28 关的参考解就用了
+   * 两颗。所以本关开放时，玩家已经持有 `switch` 十关了，第 32 关是一次再教学而不是
+   * 初次介绍：它验证的是玩家能不能把行为落到引脚上（`on` 为高放行 `a`，为低保持 0），
+   * 而不是能不能认识新元件。关卡其他方面没有为此改变——四行表、2/1 目标和托盘都
+   * 保持原样，`test/levels/unlock-chain.test.ts` 把解锁钉在第 22 关。
    *
-   * THE SOURCE'S "LIKE AN AND GATE" IS MEASURED RATHER THAN ASSERTED, and that is
-   * what makes it safe for this level to offer the part it is named after:
-   * `and(a, on)` is 2 NAND equivalents on one delay unit, and the registered
-   * `switch` part is exactly the same 2/1, so the test file grades both and
-   * asserts the tie. A player who reads the level's name and drops the Switch in
-   * gets the same circuit and the same score as a player who builds the AND,
-   * which is the honest way to teach that the two are one thing. Nothing else in
-   * the palette is needed: one AND is the whole level.
+   * 源资料说它「类似与门」，这句话是被实测而不是被断言的，这也正是本关可以放心提供
+   * 它名字所指元件的原因：`and(a, on)` 是 2 个 NAND 等价门、一个延迟单位，而注册的
+   * `switch` 元件恰好也是同样的 2/1，所以测试文件给两者评分并断言打平。读了关卡名就
+   * 直接放入 Switch 的玩家，与亲手搭与门的玩家得到同一个电路、同一个分数——这是教
+   * 「两者是同一件事」最诚实的方式。托盘里不需要别的东西：一个与门就是整关。
    */
   {
     id: 'ch2-24-bit-switch',
@@ -663,37 +567,30 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
     allowedComponents: [...GATES_1BIT, ...SWITCH_1, ...LEVEL_IO],
     io: IO_A1_ON1_OUT1,
     checks: [truthTable(IO_A1_ON1_OUT1, { out: ({ a, on }) => (a ?? 0) & (on ?? 0) })],
-    // Measured: one `and` (2 NAND equivalents) on a path one gate deep. The
-    // `switch` part measures the same pair -- see the comment above.
+    // 实测：一个 `and`（2 个 NAND 等价门）、路径一个门深。`switch` 元件实测同一对
+    // 数字——见上面的注释。
     threeStar: { gate: 2, delay: 1, tick: 0 },
   },
 
   /**
-   * ch2-28-bit-inverter -- Bit Inverter / 1 位取反器
+   * ch2-28-bit-inverter —— 可控反相器 / 1 位取反器
    *
-   * SOURCED: the name in both languages, its position (31st), and the concept --
-   * '使用 XOR 进行位翻转': use XOR to flip a bit.
+   * SOURCED（有出处）：两种语言的名称、位置（第 31 关），以及概念——「使用 XOR 进行位翻转」：
+   * 用异或翻转一位。
    *
-   * AUTHORED: the `a:1 inv:1 -> out:1` shape -- the source names the gate and not
-   * the pins, so which one is the control and which is the data is this file's
-   * choice, and `inv` is the control; the four rows, built by `truthTable`, which
-   * refuses a table that leaves a declared output pin uncompared; the measured
-   * target; and the palette (one-bit parts only: every pin here is one bit wide,
-   * so the wide parts levels 9-27 unlocked have nothing to attach to -- batch 1's
-   * level-14 reason).
+   * AUTHORED（自创）：`a:1 inv:1 -> out:1` 形状——源资料只点名了门、没点名引脚，所以哪个是控制、
+   * 哪个是数据是本文件的选择，而 `inv` 是控制；四行表，由 `truthTable` 构建，它拒绝
+   * 留下未比较声明输出引脚的表；实测目标；以及托盘（只有一位元件：这里每个引脚都是
+   * 一位宽，第 9~27 关解锁的宽位元件没有东西可接——批次 1 第 14 关的理由）。
    *
-   * THE TARGET SEPARATES ONE CORRECT ANSWER FROM ANOTHER, measured in the test
-   * file rather than asserted here: `xor(a, inv)` is 4 NAND equivalents -- the
-   * classic four-NAND cell -- on a path one gate deep, while the sum-of-products
-   * spelling of the same function, `(a AND NOT inv) OR (NOT a AND inv)`, is 9
-   * NAND equivalents on a path three components deep: correct, and one star. The
-   * `xor` part is offered because it is a chapter-1 part every level here already
-   * owns; it TIES this target rather than beating it, so offering it costs the
-   * level nothing.
+   * 目标区分一种正确解法与另一种，这一点在测试文件里实测而不是在这里断言：
+   * `xor(a, inv)` 是 4 个 NAND 等价门——经典的四与非单元——路径一个门深；而同一函数
+   * 的积之和写法 `(a AND NOT inv) OR (NOT a AND inv)` 是 9 个 NAND 等价门、路径三个
+   * 元件深：正确，但只拿一星。提供 `xor` 元件，是因为它是这里每一关都已经拥有的
+   * 第 1 章元件；它与本目标打平而不是击败它，所以提供它对本关没有代价。
    *
-   * `switch` is offered and is not useful here: it is a 1-bit conditional pass,
-   * which is level 32's function rather than this one, and batch 1/2 offered
-   * plenty of parts a level cannot use.
+   * `switch` 也被提供，但在这里没什么用：它是一位条件通断，属于第 32 关的功能而
+   * 不是本关的，而批次 1、2 提供过大量一关用不上的元件。
    */
   {
     id: 'ch2-28-bit-inverter',
@@ -711,50 +608,39 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
     allowedComponents: [...GATES_1BIT, ...SWITCH_1, ...LEVEL_IO],
     io: IO_A1_INV1_OUT1,
     checks: [truthTable(IO_A1_INV1_OUT1, { out: ({ a, inv }) => (a ?? 0) ^ (inv ?? 0) })],
-    // Measured: one `xor` (4 NAND equivalents) on a path one gate deep, with the
-    // two level pins as the sources. The sum-of-products spelling is 9 and 3, one
-    // star -- see the comment above.
+    // 实测：一个 `xor`（4 个 NAND 等价门）、路径一个门深，两个关卡引脚作为源。
+    // 积之和写法是 9 和 3，一星——见上面的注释。
     threeStar: { gate: 4, delay: 1, tick: 0 },
   },
 
   /**
-   * ch2-30-multiplexer -- Input Selector / 数据选择器
+   * ch2-30-multiplexer —— 数据选择器 / Input Selector
    *
-   * SOURCED: the name in both languages, its position (33rd), and the concept --
-   * '2-to-1 多路复用器（MUX）': a 2-to-1 multiplexer. No ports, no widths, no pass
-   * condition, no target and no reward.
+   * SOURCED（有出处）：两种语言的名称、位置（第 33 关），以及概念——
+   *「2-to-1 多路复用器（MUX）」：一个二选一多路器。没有端口、位宽、通过条件、
+   * 目标和奖励。
    *
-   * AUTHORED: the `a:8 b:8 sel:1 -> out:8` shape; the fuzz check (the brief fixes
-   * its kind, its 256 rounds and its fixed-seed discipline; the seed, the pin
-   * maps and the expectation function are written here); the measured target; the
-   * `mux8` reward; and the palette.
+   * AUTHORED（自创）：`a:8 b:8 sel:1 -> out:8` 形状；fuzz 检查（任务书固定其类型、256 轮与固定
+   * 种子纪律；种子、引脚映射和期望函数写在这里）；实测目标；`mux8` 奖励；以及托盘。
    *
-   * WHY THIS LEVEL IS FUZZED WHERE LEVEL 34 IS TABLED: 2^17 input vectors cannot
-   * be written out as rows, and a byte selector is exactly the kind of circuit
-   * where one mis-wired bit costs half the vectors. The seed is a fixed literal
-   * (`0x3308`: the level index in the high byte, the byte width in the low one,
-   * as batches 2 and 3 seed theirs), so the coverage is a fact about the level.
-   * The test file measures it: how many of the 256 rounds drive `sel` low and how
-   * many drive it high (both well over fifty -- either branch alone would leave
-   * half the circuit ungraded), that the sequence repeats exactly on a second
-   * run, and that `out <- a` fails on the first round whose `sel` is high.
+   * 为什么这一关用 fuzz 而第 34 关用表：2^17 个输入向量没法写成行，而字节选择器
+   * 恰好是那种「接错一位就丢掉一半向量」的电路。种子是固定字面量（`0x3308`：
+   * 高字节是关卡序号、低字节是字节宽度，与批次 2、3 的播种方式一致），所以覆盖范围
+   * 是关卡的事实。测试文件实测它：256 轮里多少轮驱动 `sel` 为低、多少轮为高
+   *（两者都远超五十——只测其中一个分支会让半个电路不被评分）、序列在第二次运行时
+   * 完全重复，以及 `out <- a` 在第一个 `sel` 为高的轮次失败。
    *
-   * THE REFERENCE IS THE PART THIS LEVEL HANDS OUT. `mux8` is 8 x 4-NAND 2:1
-   * muxes = 32 NAND equivalents on a path one delay unit deep, and it is in this
-   * level's palette by the app's own-reward rule (a level's own rewards are
-   * offered on it, `paletteDefsFor`).
+   * 参考解就是本关发放的元件。`mux8` 是 8 个四与非 2:1 多路器 = 32 个 NAND 等价门、
+   * 路径一个延迟单位深；按应用自己的奖励规则（`paletteDefsFor` 会提供关卡自己的
+   * 奖励），它在本关托盘里。
    *
-   * WHAT THE TARGET ACTUALLY SEPARATES, measured in the test file for this level
-   * and level 34 rather than asserted here, and the answer is not the obvious
-   * one: a hand-built selector -- one NOT of `sel` shared by all eight bits, then
-   * three NANDs per bit (a NAND is ONE NAND equivalent, so a shared inverter
-   * really is shared) -- measures 25 gates on a path THREE components deep. It is
-   * therefore CHEAPER on gates than the part's own documented cell, which prices
-   * one inverter per bit, and it still scores one star: the delay column is what
-   * declines it, because `mux8` is a single node and the built version is three.
-   * The level's target is the part's own metrics, and the part wins on score
-   * (32 + 4 = 36 against 25 + 12 = 37) as well as on stars. Nothing here denies
-   * three stars to a construction that meets both bounds.
+   * 目标实际区分了什么，对本关和第 34 关都在测试文件里实测而不是在这里断言，答案
+   * 并不显然：手工搭的选择器——`sel` 的一个 NOT 由全部八位共享，然后每位三个 NAND
+   *（一个 NAND 就是一个 NAND 等价门，所以共享的反相器确实是共享的）——实测 25 门、
+   * 路径三个元件深。因此它在门数上比元件自身记录在案的单元（按每位一个反相器定价）
+   * 更便宜，却仍只拿一星：拒绝它的是延迟那一列，因为 `mux8` 是一个节点，而手工版
+   * 是三个。本关的目标是元件自身的指标，而元件在分数上（32 + 4 = 36 对 25 + 12 = 37）
+   * 和星数上都赢。这里没有任何东西会拒绝一个同时满足两个上限的构造拿三星。
    */
   {
     id: 'ch2-30-multiplexer',
@@ -781,59 +667,47 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
           b: (sample) => sample.b ?? 0,
           sel: (sample) => sample.sel ?? 0,
         },
-        // No mask is needed and none is written: the result is one of the two
-        // operands, both of which are already inside the pin.
+        // 不需要掩码，也没有写掩码：结果就是两个操作数之一，而两者本来就在引脚
+        // 范围内。
         outputs: { out: (v) => ((v.sel ?? 0) === 1 ? (v.b ?? 0) : (v.a ?? 0)) },
       },
     ],
-    // Measured: `mux8` is 8 x MUX2 = 32 NAND equivalents on a path one delay
-    // unit deep. The hand-built 25/3 selector is one star too -- see the comment.
+    // 实测：`mux8` 是 8 x MUX2 = 32 个 NAND 等价门，路径一个延迟单位深。
+    // 手工搭的 25/3 选择器同样一星——见注释。
     threeStar: { gate: 32, delay: 1, tick: 0 },
     rewards: { components: ['mux8'] },
   },
 
   /**
-   * ch2-32-the-bus -- The bus / 总线
+   * ch2-32-the-bus —— 总线 / The bus
    *
-   * SOURCED: the name in both languages, its position (34th), and the source's
-   * concept, which is one line and nothing else: '共享数据传输线路的概念' -- the
-   * idea of a data line that several sources share. No ports, no widths, no
-   * arbitration rule, no pass condition, no target and no reward.
+   * SOURCED（有出处）：两种语言的名称、位置（第 34 关），以及源资料的概念，只有一行、别无其他：
+   *「共享数据传输线路的概念」——多个源共享一条数据线的想法。没有端口、位宽、
+   * 仲裁规则、通过条件、目标和奖励。
    *
-   * AUTHORED, AND THE FIRST THING IT RECORDS IS A CHANGE OF KIND. The source's
-   * concept is not computable as written in this engine, and not because this
-   * replica skipped it. Spec 3.1 forbids a bus protocol, in its own words
-   * 不做总线协议（多驱动仲裁）. `validateGraph` reports a second wire on one input
-   * pin as a `multiple-drivers` ERROR, and nothing in the kernel resolves which
-   * of several drivers owns a line. A literal shared/tri-state bus is therefore
-   * unimplementable BY DESIGN.
-   * The level is reframed as the bus's other half: exactly one driver is active
-   * at a time, so `out` equals the line `sel` selects. In other words this level
-   * teaches driver selection, and its brief tells the player the same thing in
-   * both languages rather than pretending the source's line is a circuit spec.
-   * This is one of the three places in this phase where a level's kind knowingly
-   * changes, and it is recorded as such.
+   * AUTHORED（自创），而它记录的第一件事是类型的改变（kind）。源资料的概念按字面在本引擎里不可计算，
+   * 而且不是本复刻跳过了它。规格 3.1 禁止总线协议，原话是「不做总线协议
+   *（多驱动仲裁）」。`validateGraph` 把同一输入引脚上的第二根导线报成 `multiple-drivers`
+   * 错误，内核中没有任何东西会裁定几个驱动里谁拥有这条线。所以字面意义上的共享/
+   * 三态总线「按设计」不可实现。关卡被重新框定为总线的另一半：任何时刻恰好一个
+   * 驱动有效，所以 `out` 等于 `sel` 选中的那条线。换言之，本关教驱动选择（driver selection），它的 brief
+   * 用两种语言告诉玩家同一件事，而不是假装源资料那句话是电路规格。这是本阶段三个
+   * 有意改变关卡类型的地方之一，并照此记录。
    *
-   * AUTHORED (the rest): the `a:8 b:8 sel:1 -> out:8` shape; the four-row table
-   * and its vectors; the measured target; and the palette.
+   * AUTHORED（其余部分）：`a:8 b:8 sel:1 -> out:8` 形状；四行表及其向量；实测目标；
+   * 以及托盘。
    *
-   * THE TABLE IS FOUR ROWS BY THE BRIEF'S DECISION, not for want of a generator:
-   * this level states the RULE at a scale a reader can check by eye, and the
-   * byte-wide coverage is level 33's fuzz check. Both `sel` values appear on the
-   * same pair of operands (so the table separates "the selected line" from
-   * "always the first" and "always the second"), and the two operand pairs are
-   * asymmetric byte patterns, so a circuit that shuffled bits within the byte
-   * would fail one of the four.
+   * 这张表只有四行，是任务书的决定，而不是缺一个生成器：本关以读者肉眼可核对的规模
+   * 陈述规则，而字节宽的覆盖属于第 33 关的 fuzz 检查。两个 `sel` 取值都出现在同一对
+   * 操作数上（所以表把「被选中的线」与「总是第一条」「总是第二条」区分开），两对
+   * 操作数又是不对称的字节模式，所以打乱字节内位序的电路会在四行中的某一行失败。
    *
-   * THE FUNCTION IS LEVEL 33'S, WHICH IS THE BRIEF'S OWN TABLE RATHER THAN A
-   * SLIP: one shape, one behaviour, two frames -- 33 is the byte selector graded
-   * by 256 random vectors, 34 is the shared line graded by a four-row truth
-   * table. (Batch 1 recorded the same coincidence for levels 15 and 16.) The
-   * reference is `mux8`, unlocked by level 33 and offered here, and it measures
-   * exactly the metrics level 33's target states, because it is the same circuit;
-   * the hand-built selector measures the same 25 gates / 3 delay units / one star
-   * here as it does there, and level 33's comment is where that measurement is
-   * written out.
+   * 函数与第 33 关相同，这是任务书自己的表而不是笔误：一个形状、一种行为、两种框法
+   * ——33 是用 256 个随机向量评分的字节选择器，34 是用四行真值表评分的共享线路。
+   *（批次 1 为第 15、16 关记录过同样的巧合。）参考解是 `mux8`（第 33 关解锁，这里
+   * 提供），它实测的指标与第 33 关目标陈述的完全相同，因为它是同一个电路；手工搭的
+   * 选择器在这里与在那里实测同样 25 门 / 3 个延迟单位 / 一星，而第 33 关的注释就是
+   * 把这个测量写出来的地方。
    */
   {
     id: 'ch2-32-the-bus',
@@ -851,42 +725,33 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
     allowedComponents: [...GATES_1BIT, ...BYTE_WIRING, ...SWITCH_1, 'mux8', ...LEVEL_IO],
     io: IO_A8_B8_SEL1_OUT8,
     checks: [{ kind: 'truth-table', rows: BUS_ROWS }],
-    // Measured: the same `mux8` as level 33 -- 32 NAND equivalents, one delay
-    // unit, no ticks (a purely combinational level). See the comment above.
+    // 实测：与第 33 关相同的 `mux8`——32 个 NAND 等价门、一个延迟单位、无节拍
+    //（纯组合关卡）。见上面的注释。
     threeStar: { gate: 32, delay: 1, tick: 0 },
   },
 
   /**
-   * ch2-33-saving-gracefully -- Saving Gracefully / 优雅存储
+   * ch2-33-saving-gracefully —— 优雅存储 / Saving Gracefully
    *
-   * SOURCED: the name in both languages, its position (35th), and the concept --
-   * '1 位锁存器/寄存器（条件写入）': a one-bit latch or register, written
-   * conditionally.
+   * SOURCED（有出处）：两种语言的名称、位置（第 35 关），以及概念——
+   *「1 位锁存器/寄存器（条件写入）」：一位锁存器或寄存器，条件性写入。
    *
-   * AUTHORED: the `d:1 load:1 -> out:1` shape; the eleven-step script and its
-   * same-tick pairs; the measured target; and the palette.
+   * AUTHORED（自创）：`d:1 load:1 -> out:1` 形状；十一步脚本及其同拍步骤对；实测目标；以及托盘。
    *
-   * THE SAME STORAGE RULE AS LEVEL 28 UNDER DIFFERENT PIN NAMES, which is the
-   * brief's own table rather than a slip: 28 reads `set`/`value` and this level
-   * reads `d`/`load`, and both ask for "store the data bit while the enable is
-   * high, hold it otherwise". They are framed differently and their checks assert
-   * different things -- 28 is where the LOOP is built, its check asserts that the
-   * loop settles, and its palette withholds the packaged part; this level is
-   * where the packaged part is USED, and its script walks load low/high/low across
-   * six ticks, each tick stating both its edge and the no-edge re-read that
-   * follows it. The test file grades the hand-built loop against this level too,
-   * and it is correct for one star.
+   * 与第 28 关相同的存储规则，只是引脚名不同，这是任务书自己的表而不是笔误：
+   * 28 读的是 `set`/`value`，本关读的是 `d`/`load`，两者都要求「使能为高时存下数据位，
+   * 否则保持不变」。它们的框法不同，检查断言的东西也不同——28 是搭回路的地方，其检查
+   * 断言回路能结算，托盘扣下封装元件；本关是使用封装元件的地方，脚本在六个节拍里走
+   * load 低/高/低，每一拍同时陈述它的边沿和其后的无边沿重读。测试文件也用手工搭的
+   * 回路对本关评分，它正确，但只值一星。
    *
-   * `mem1` IS OFFERED HERE AND IS THE REFERENCE. Its `set` pin is the write enable
-   * and its `value` pin is the data, so `load` and `d` wire straight into it --
-   * which is exactly the source's concept, a one-bit register with a conditional
-   * write. The measured target (0 gates / 0 delay / tick 5) is therefore that
-   * part's own metrics, and storage is free on both metrics by the chapter's
-   * ruling (module note): the unlocked part IS the floor, and rebuilding it from
-   * gates is a correct answer worth one star. The test file measures the built
-   * version too (one delay line, two switches, a NOT and an OR: 8 gates, 3 delay
-   * units), so the price of building the loop rather than dropping the part in is
-   * a number in this batch rather than a sentence.
+   * `mem1` 在这里被提供，而且它就是参考解。它的 `set` 引脚是写使能、`value` 引脚是
+   * 数据，所以 `load` 和 `d` 直接接进去——这正是源资料的概念：一颗带条件写入的一位
+   * 寄存器。因此实测目标（0 门 / 0 延迟 / tick 5）就是那颗元件自身的指标，而按本章
+   * 裁决（模块注记），存储在两个指标上免费：已解锁的元件就是下限，用门重建它是正确
+   * 答案但只值一星。测试文件也实测了手工版（一条延迟线、两个 switch、一个 NOT 和一个
+   * OR：8 门、3 个延迟单位），所以选择搭回路而不是直接放入元件的代价，在本批里是一个
+   * 数字而不是一句话。
    */
   {
     id: 'ch2-33-saving-gracefully',
@@ -908,7 +773,7 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
         kind: 'script',
         steps: [
           { tick: 0, inputs: { d: 0, load: 0 }, expect: { out: 0 } },
-          // No edge has run: a latch that published `load ? d : 0` would show 1.
+          // 还没有执行过边沿：一个发布 `load ? d : 0` 的锁存器会显示 1。
           { tick: 0, inputs: { d: 1, load: 0 }, expect: { out: 0 } },
           { tick: 1, inputs: { d: 1, load: 0 }, expect: { out: 0 } },
           { tick: 1, inputs: { d: 1, load: 1 }, expect: { out: 0 } },
@@ -922,39 +787,33 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
         ],
       },
     ],
-    // Measured: the `mem1` reference is 0 NAND equivalents and 0 delay units (a
-    // storage element is free on both) with tick 5 as the script's last tick. The
-    // hand-built loop is 8 gates and 3 delay units, one star -- see the comment.
+    // 实测：`mem1` 参考解是 0 个 NAND 等价门、0 延迟单位（存储元件在两者上都免费），
+    // tick 5 是脚本的最后一个节拍。手工搭的回路是 8 门、3 个延迟单位，一星
+    //——见注释。
     threeStar: { gate: 0, delay: 0, tick: 5 },
   },
 
   /**
-   * ch2-34-saving-bytes -- Saving Bytes / 存储一字节
+   * ch2-34-saving-bytes —— 整存整取 / Saving Bytes
    *
-   * SOURCED: the name in both languages, its position (36th), and the concept --
-   * '8 位寄存器': an eight-bit register. No ports, no widths, no pass condition,
-   * no target and no reward.
+   * SOURCED（有出处）：两种语言的名称、位置（第 36 关），以及概念——「8 位寄存器」：
+   * 一个八位寄存器。没有端口、位宽、通过条件、目标和奖励。
    *
-   * AUTHORED: the `d:8 load:1 -> out:8` shape; the fourteen-step script and its
-   * same-tick pairs; the measured target; the `counter8` reward; and the palette.
+   * AUTHORED（自创）：`d:8 load:1 -> out:8` 形状；十四步脚本及其同拍步骤对；实测目标；
+   * `counter8` 奖励；以及托盘。
    *
-   * THE REFERENCE IS THE REGISTER THIS LEVEL'S REWARD LIST NAMES: `reg8` with
-   * `reset` tied low is 0 gates and 0 delay on the chapter's ruling, and the
-   * target is its own measured metrics. The bit-sliced alternative -- eight 1-Bit
-   * Memories with `load` on all eight `set` pins, behind a splitter and a maker --
-   * measures exactly the same pair, and the test file grades both and asserts the
-   * tie rather than picking one and calling it the answer.
+   * 参考解就是本关奖励清单点名的那颗寄存器：把 `reset` 接低的 `reg8` 按本章裁决是
+   * 0 门 0 延迟，而目标就是它自身的实测指标。位切片替代写法——八颗 1 位存储器，
+   * `load` 接到全部八个 `set` 引脚，前面是位拆分器、后面是位合并器——实测恰好同一对
+   * 数字，测试文件给两者评分并断言打平，而不是挑一个出来称之为答案。
    *
-   * `counter8` IS HANDED OUT HERE AND IS OFFERED IN THIS LEVEL'S OWN PALETTE. It
-   * cannot answer the level -- it has no way to take a byte IN, which is the whole
-   * of what this level asks for -- so offering it is the app's own-reward rule
-   * rather than a shortcut. Level 38, whose answer it IS, does not offer it; that
-   * level's comment records why.
+   * `counter8` 在这里被发放，并且在本关自己的托盘里被提供。它答不出本关——它没有
+   * 办法把一个字节「读进来」，而这是本关的全部要求——所以提供它是应用自己的奖励规则，
+   * 而不是抄近路。第 38 关的答案确实是它，但那一关不提供它；那一关的注释记录了原因。
    *
-   * The script's same-tick pairs are the level's test of "hold" (module note): the
-   * step that repeats a tick with a different byte on `d` and still demands the
-   * stored one is failed by a wire and passed by a register, and the level's
-   * counterexample in the test file is exactly that wire.
+   * 脚本的同拍步骤对就是本关对「保持」的测试（模块注记）：重复一个节拍、在 `d` 上
+   * 换一个字节、却仍要求存下的那个字节——导线会失败，寄存器会通过，而本关在测试
+   * 文件里的反例正是那根导线。
    */
   {
     id: 'ch2-34-saving-bytes',
@@ -1000,50 +859,40 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
         ],
       },
     ],
-    // Measured: the `reg8` reference is 0 NAND equivalents (the storage element
-    // and the constant are both free on the gate metric) and 0 delay units, with
-    // tick 6 as the script's last tick. Eight 1-Bit Memories measure the same
-    // pair -- see the comment above.
+    // 实测：`reg8` 参考解是 0 个 NAND 等价门（存储元件与常量在门指标上都免费）、
+    // 0 个延迟单位，tick 6 是脚本的最后一个节拍。八颗 1 位存储器实测同一对数字
+    //——见上面的注释。
     threeStar: { gate: 0, delay: 0, tick: 6 },
     rewards: { components: ['counter8'] },
   },
 
   /**
-   * ch2-38-little-box -- Little Box / 小盒子
+   * ch2-38-little-box —— 方寸之间 / Little Box
    *
-   * SOURCED: the name in both languages, its position (37th), and the source's
-   * concept, which is one line and nothing else: '刚好装满存储空间的电路设计' -- a
-   * circuit design that exactly fills its storage space. The source gives NO
-   * capacity, NO address width, and NO definition of what "full" means.
+   * SOURCED（有出处）：两种语言的名称、位置（第 37 关），以及源资料的概念，只有一行、别无其他：
+   *「刚好装满存储空间的电路设计」——一个恰好填满其存储空间的电路设计。源资料没有给
+   * 容量、没有地址位宽，也没有定义「满」是什么意思。
    *
-   * AUTHORED, AND WHAT IT DEFINES IS THE LEVEL. This replica defines the level as
-   * `d:8 addr:8 load:1 -> out:8` over a `ram8`'s 256 bytes, and defines 装满
-   * ("full") as: ALL 256 addresses are addressable and writable, and every
-   * address reads back what was written into it. That definition is the level's
-   * contract, it is stated in the brief in both languages, and the check asserts
-   * it over the whole range rather than sampling it.
+   * AUTHORED（自创），而它所定义的东西就是这一关。本复刻把关卡定义为 `d:8 addr:8 load:1 -> out:8`
+   * 作用在 `ram8` 的 256 个字节上，并把「装满」定义为：全部 256 个地址都可寻址（addressable）、
+   * 可写入，且每个地址都能读回写进去的内容。这个定义（defines）就是本关的契约，用两种语言写进
+   * brief，检查在整个范围上断言它而不是抽样。
    *
-   * THE CHECK COVERS THE WHOLE RANGE, WHICH IS THE POINT OF THE DEFINITION: 513
-   * steps. The first 256 write a distinct byte into every address 0-255, one
-   * clock edge each (`boxByte` is a bijection of 0..255, so no two cells hold the
-   * same value), and assert the byte on the output on the same step; the last 256
-   * re-read every address with `load` LOW and `d` driven with the COMPLEMENT of
-   * the stored byte, after all 256 writes have happened. So the pass proves the
-   * box holds all 256 bytes at once rather than that the most recent write can be
-   * read, and a circuit that passed `d` through to `out` would fail every one of
-   * the 256 read steps. A check that touched two addresses would not test "full",
-   * and both shapes are graded in the test file: a single register that ignores
-   * `addr` fails on the first read-back (with `expected` the byte address 0 was
-   * written with), and a wire from `d` fails on that same step, because `d` is
-   * the complement of the byte the level expects.
+   * 检查覆盖整个范围，而这正是定义的意义：513 步。前 256 步把一个互不相同的字节写进
+   * 地址 0~255 的每一个，每步一个时钟沿（`boxByte` 是 0..255 的双射，所以没有两个
+   * 单元存相同值），并在同一步断言输出上的字节；后 256 步在 256 次写入全部发生之后，
+   * 以 `load` 为低、`d` 接所存字节的补码，重新读取每个地址。所以通过证明的是盒子
+   * 同时装着全部 256 个字节，而不是最近一次写入能被读出；把 `d` 透传到 `out` 的电路
+   * 会在 256 个读步骤的每一个上失败。只碰两个地址的检查测不出「装满」，而测试文件给
+   * 两种错误形状都评分：忽略 `addr` 的单颗寄存器在第一次回读时失败（`expected` 是
+   * 地址 0 被写入的字节），而从 `d` 接来的导线在同一步失败，因为 `d` 是本关期望字节的
+   * 补码。
    *
-   * THE REFERENCE IS `ram8`, unlocked by level 28: 0 gates, 0 delay, and tick 512
-   * -- the script's last tick. Storage is free on both metrics (module note), a
-   * 256-byte memory is the one part that can BE a 256-byte box, and the brief
-   * says the other way honestly: 256 bytes of one-bit latches would work and
-   * would be a board-sized circuit. That is why this level has no gate target to
-   * fight: the level is about the address range, and the range is what the check
-   * measures.
+   * 参考解是 `ram8`（第 28 关解锁）：0 门、0 延迟、tick 512——脚本的最后一个节拍。
+   * 按模块注记，存储在两个指标上免费，256 字节的存储器是唯一能「成为」256 字节盒子的
+   * 元件，而 brief 也诚实地说了另一条路：256 个一位锁存器也能用，但那会是一块画板
+   * 大小的电路。这就是本关没有门数目标要争的原因：本关讲的是地址范围，而范围正是
+   * 检查所测量的东西。
    */
   {
     id: 'ch2-38-little-box',
@@ -1069,65 +918,50 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
     ],
     io: IO_D8_ADDR8_LOAD1_OUT8,
     checks: [{ kind: 'script', steps: littleBoxSteps() }],
-    // Measured: the `ram8` reference is 0 NAND equivalents and 0 delay units (a
-    // storage element is free on both; the read path following `addr` is still a
-    // sequential element's own output on the delay graph), and the tick metric is
-    // the script's last tick -- 256 writes and 256 read-backs.
+    // 实测：`ram8` 参考解是 0 个 NAND 等价门、0 个延迟单位（存储元件在两者上都免费；
+    // 跟随 `addr` 的读取路径在延迟图上仍是时序元件自身的输出），而 tick 指标是脚本的
+    // 最后一个节拍——256 次写入与 256 次回读。
     threeStar: { gate: 0, delay: 0, tick: 512 },
   },
 
   /**
-   * ch2-39-counter -- Counter / 计数器
+   * ch2-39-counter —— 计数器 / Counter
    *
-   * SOURCED: the name in both languages, its position (38th, the last level of
-   * the chapter), the concept -- '自增寄存器': a register that increments itself
-   * -- AND the source's own achievement note, quoted in full: '成就：≤ 65 个门'
-   * (achievement: no more than 65 gates).
+   * SOURCED（有出处）：两种语言的名称、位置（第 38 关，本章最后一关）、概念——「自增寄存器」：
+   * 一个会自己加一的寄存器——以及源资料自己的成就注记，全文引用：「成就：≤ 65 个门」
+   *（成就：不超过 65 个门）。
    *
-   * AUTHORED: the `en:1 reset:1 -> out:8` shape; the 265-step script; the measured
-   * target; and the palette.
+   * AUTHORED（自创）：`en:1 reset:1 -> out:8` 形状；265 步脚本；实测目标；以及托盘。
    *
-   * HOW THE ACHIEVEMENT IS RECORDED, AND WHAT IT IS NOT. The source's note is an
-   * achievement, not a pass condition: it grades no circuit here, and nothing in
-   * this file treats 65 as this level's `threeStar.gate`. It is also a count of
-   * BASIC LOGIC GATES in the source's own metric, while this replica's `gate`
-   * metric counts NAND equivalents (spec 5.4; the basis table is in
-   * `core/defs/index.ts`), and those two are not the same quantity -- batch 2 made
-   * exactly this distinction for level 21's five components and level 22's delay
-   * of 35. What `threeStar.gate` carries is the MEASURED NAND-equivalent count of
-   * this replica's own reference solution: 41, which is inside the source's 65 by
-   * any reading of it. So 65 is recorded in this comment as the source's
-   * achievement -- an achievement, not a pass condition -- and it is not this
-   * level's `threeStar.gate`, nor any number this level grades a circuit on.
+   * 成就如何记录、以及它不是什么。源资料这条注记是成就，不是通过条件（achievement, not a pass condition）：它在这里不给
+   * 任何电路评分，本文件里也没有任何东西把 65 当作本关的 `threeStar.gate`。它统计的
+   * 还是源资料自己度量下的「基本逻辑门」数，而本复刻的 `gate` 指标统计 NAND 等价门
+   *（规格 5.4；基准表在 `core/defs/index.ts`），两者不是同一个量——批次 2 曾为第 21 关
+   * 的五个元件和第 22 关的延迟 35 做过同样的区分。`threeStar.gate` 携带的是本复刻自身
+   * 参考解「实测的」NAND 等价门数：41，按任何读法都在源资料的 65 以内。所以 65 作为
+   * 源资料的成就在此记录——是成就，不是通过条件——它既不是本关的 `threeStar.gate`，
+   * 也不是本关给任何电路评分的数字。
    *
-   * THE PALETTE WITHHOLDS `counter8`, THE ONE PART THAT ANSWERS THIS LEVEL IN A
-   * SINGLE DROP: it is unlocked by level 36, it is not this level's own reward, and
-   * its pins (`en`/`reset` -> `out`) are exactly this level's -- batch 2's rule
-   * (level 22's `add8`, level 24's `neg8`, and level 28's `mem1` earlier in this
-   * batch), used once more here. Offered, it would score 0 gates and 0 delay
-   * (storage is free on both metrics) in one component, which would both answer
-   * the level and make the source's own achievement vacuous. The test file
-   * measures that drop-in -- it passes, at 0/0/tick 263 -- and asserts it is not
-   * in the palette. The increment has to be built here.
+   * 托盘扣下 `counter8`——唯一能一步答出本关的元件：它由第 36 关解锁，不是本关自己的
+   * 奖励，而它的引脚（`en`/`reset` -> `out`）恰好就是本关的引脚——批次 2 的规则
+   *（第 22 关的 `add8`、第 24 关的 `neg8`，以及本批更早的第 28 关 `mem1`）在这里
+   * 再用一次。提供它的话，一颗元件就能拿 0 门 0 延迟（存储在两个指标上都免费），
+   * 既答出本关，又让源资料自己的成就变得空洞。测试文件实测了那个直接放入——它能通过，
+   * 0/0/tick 263——并断言它不在托盘里。加法必须在这里亲手搭。
    *
-   * THE REFERENCE IS THE REGISTER PLUS A HAND-BUILT INCREMENTER: `bit0 = NOT x0`,
-   * `bit_i = x_i XOR c_i`, `c_(i+1) = x_i AND c_i` with `c_1 = x0`, and the last
-   * carry is never built because there is no carry-out pin -- one NOT, seven XORs
-   * and six ANDs, measured 41 NAND equivalents on a path seven components deep.
-   * `en` goes to the register's `load` and the level's `reset` to its `reset`, so
-   * the decided precedence (reset beats load/en, `core/defs/wide.ts`) is the
-   * register's own and costs no gate. The alternative the palette DOES offer is
-   * `add8(x, 0, 1)`: correct, 72 gates, one delay unit deep, one star -- the
-   * target states both metrics, and the test file measures it.
+   * 参考解是寄存器加一个手工搭的增量器：`bit0 = NOT x0`、`bit_i = x_i XOR c_i`、
+   * `c_(i+1) = x_i AND c_i`，其中 `c_1 = x0`；最后一个进位从不搭建，因为没有进位输出
+   * 引脚——一个 NOT、七个 XOR、六个 AND，实测 41 个 NAND 等价门、路径七个元件深。
+   * `en` 接寄存器的 `load`、关卡的 `reset` 接它的 `reset`，所以已定的优先级
+   *（reset 压过 load/en，`core/defs/wide.ts`）由寄存器自己提供，不花门。托盘确实提供
+   * 的替代解是 `add8(x, 0, 1)`：正确、72 门、一个延迟单位深、一星——目标同时陈述两个
+   * 指标，测试文件也实测它。
    *
-   * WRAP AND PRECEDENCE ARE BOTH ASSERTED IN THE CHECK. 256 consecutive enabled
-   * edges walk the count through every byte and back to 0 at exactly 256 (a
-   * counter that wrapped at 128, or that saturated at 255, fails one of those 256
-   * expectations rather than a hand-picked one); the discarded carry IS the wrap,
-   * because nine bits do not fit an eight-bit register; and the step where `reset`
-   * and `en` are both high while the count is 2 expects 0 -- a register that let
-   * the enable win would read 3. The final two steps sit on the same tick to prove
-   * the count does not move without an edge.
+   * 回绕与优先级都在检查里被断言。256 个连续使能边沿让计数走遍每个字节并在恰好 256
+   * 时回到 0（在 128 处回绕、或在 255 处饱和的计数器，会在这 256 个期望中的某一个上
+   * 失败，而不是在某个挑出来的值上失败）；被丢弃的进位就是回绕，因为九位装不进八位
+   * 寄存器；而 `reset` 与 `en` 同时为高、计数为 2 的那一步期望 0——让使能赢的寄存器
+   * 会读到 3。最后两步落在同一节拍，以证明没有边沿时计数不动。
    */
   {
     id: 'ch2-39-counter',
@@ -1155,11 +989,10 @@ export const CH2_BATCH4: readonly LevelSpec[] = [
     ],
     io: IO_EN1_RESET1_OUT8,
     checks: [{ kind: 'script', steps: counterSteps() }],
-    // Measured: one `not` (1) + seven `xor` (28) + six `and` (12) = 41 NAND
-    // equivalents, with the register, the splitter and the maker free, a path
-    // seven components deep (the carry chain), and tick 263 as the script's last
-    // tick. The source's "≤ 65 gates" is recorded in the comment above as an
-    // achievement and is NOT this number.
+    // 实测：一个 `not`（1）+ 七个 `xor`（28）+ 六个 `and`（12）= 41 个 NAND 等价门，
+    // 寄存器、位拆分器和位合并器免费，路径七个元件深（进位链），tick 263 是脚本的
+    // 最后一个节拍。源资料的「≤ 65 个门」作为成就在上面的注释里记录，而不是这个
+    // 数字。
     threeStar: { gate: 41, delay: 7, tick: 263 },
   },
 ];

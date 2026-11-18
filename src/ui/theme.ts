@@ -1,104 +1,96 @@
 /**
- * The board's palette and shape metrics.
+ * 画板与界面的颜色、间距和几何常量：整个 UI 唯一的取色与取尺寸来源。
  *
- * THE PALETTE IS NO LONGER THE ORIGINAL'S. It was sampled from reference
- * screenshots -- `#2e2b3c` chrome, `#353245` cards, `#364765` paper, `#ef9a23`
- * wires -- and the repository owner has since asked for a brighter, cyberpunk
- * red/green/blue scheme instead. The layout has also moved on: it is a workbench
- * of docks now (see `style.css`), so the board is framed by panels rather than
- * floating under them; the pin-major test panel is unchanged.
+ * 本文件不 import 任何模块：绘制代码（ui/board/ 下的绘制函数）、各个面板和状态栏
+ * 都从这里取值，界面里不许再写颜色字面量。
+ * 这里的值与 `style.css` 里的一组 CSS 变量（--slab、--slab-lit、--hair 等）互为镜像，
+ * 改色时必须两边一起改，否则画板与面板会呈现成两种材质。
  *
- * EVERY COLOUR HERE OBEYS ONE RULE:
+ * 全部颜色只服从一条规则：
  *
- *   GREEN is 1. RED is 0. BLUE is wider than one bit.
+ *   绿色 = 1；红色 = 0；蓝色 = 宽于 1 位。
  *
- * A wire, a pin, a part's body and a bit cell all say the same thing in the same
- * three colours, so a board is read with one skill instead of four. A part of
- * the rule that matters most: a value nothing has driven yet is NEUTRAL SLATE,
- * never red -- a half-built circuit must not read as a board full of zeroes,
- * which is a claim the app cannot make before it has run anything.
+ * 导线、引脚、元件外壳、比特格都用同一套三色说话，所以画板只需要学一种读法。
+ * 最容易被误解的一条边界：尚未被任何信号驱动的值是中性石板灰（idle），不是红色。
+ * 半成品电路不能看起来像「满板都是 0」——在仿真跑起来之前，应用无权给出那个断言。
  */
 export const THEME = {
-  /** The near-black behind the board and the docks. */
+  /** 画板与各个停靠面板后面的近黑色底。 */
   backdrop: '#04070d',
   /**
-   * Board paper: a deep navy, dark enough for a lit wire to glow against.
+   * 画板纸面：深海军蓝，暗到足以让一条点亮的导线在上面显出发光。
    *
-   * Darkened with the chrome when the interface was rebuilt as an instrument:
-   * the panels are near-black slabs now, and a mid-navy board between two of
-   * them read as a different material rather than as the bench they sit on.
+   * 界面改成「仪器工作台」风格时与整体一起压暗了：面板现在近乎黑色的厚板，
+   * 若画板仍保持中等明度的蓝，就会像夹在中间的另一种材料，而不是它们所在的台面。
    */
   board: '#070d18',
   /**
-   * The fine diagonal weave over the paper -- a circuit board's grain.
+   * 纸面上的细斜纹——电路板的织纹。
    *
-   * Deliberately only three to five levels above the paper. The original's
-   * weave is the same ratio (+4/+5) and it is calibrated that way on purpose:
-   * the first pass at this palette used +8/+21/+30, which on a board this dark
-   * is a sixty per cent brightness swing and read as noise competing with the
-   * wires rather than as paper.
+   * 刻意只比纸面亮三到五级：原作织纹也是同样的比例（+4/+5），是有意校准的。
+   * 本调色板第一版用了 +8/+21/+30，在这么暗的板上相当于六成的亮度摆动，
+   * 看起来会像与导线抢注意力的噪点，而不是纸纹。
    */
   boardHatch: '#0a1220',
-  /** The snap grid's major line, drawn over the weave: a hint, not a fence. */
+  /** 吸附网格的主线，画在织纹之上：它是提示，不是围栏。 */
   boardGrid: '#14304c',
 
-  /** The chrome slabs: the top bar, the sidebars and the bottom panel. Mirrors `--slab` in `style.css`. */
+  /** 界面厚板：顶栏、左右侧栏与底部面板。与 `style.css` 的 --slab 同值。 */
   chrome: '#080e18',
-  /** Cards and tool buttons. Mirrors `--slab-lit`. */
+  /** 卡片与工具按钮的底色。与 --slab-lit 同值。 */
   panel: '#0f1a28',
   panelHover: '#16273a',
-  /** The hairline every panel is bounded by. Mirrors `--hair`. */
+  /** 每个面板四周的一根细边线。与 --hair 同值。 */
   panelEdge: '#17334a',
 
-  /** The level name in the top bar; the instrument's own voice. */
+  /** 顶栏中的关卡名；青色代表「仪器自己的声音」。 */
   title: '#22e0ff',
-  /** Pin labels down the left of the test panel. */
+  /** 测试面板左列的引脚名。 */
   label: '#7fd8ee',
   text: '#d7e6f5',
   textMuted: '#6b8aa8',
 
-  // -- green: a single bit carrying 1, and a part producing one -------------
-  /** A live 1-bit wire, a lit bit cell, a pin at 1. */
+  // -- 绿色：单比特的 1，以及正在输出 1 的元件 -------------------------------
+  /** 带电的 1 位导线、点亮的比特格、值为 1 的引脚。 */
   on: '#00ff9c',
-  /** A part body that is producing a 1: readable white-on-green, not a glare. */
+  /** 正在输出 1 的元件外壳：在绿色上可读的偏白，不刺眼。 */
   onBody: '#00b86b',
 
-  // -- red: a single bit carrying 0 ----------------------------------------
-  /** A lit-off bit cell, a pin at 0. */
+  // -- 红色：单比特的 0 -----------------------------------------------------
+  /** 熄灭的比特格、值为 0 的引脚。 */
   off: '#ff2b4e',
-  /** A part body that is producing a 0. */
+  /** 正在输出 0 的元件外壳。 */
   offBody: '#c81e46',
-  /** A 1-bit wire carrying 0: red, but not glowing, so it reads as quiet. */
+  /** 携带 0 的 1 位导线：是红色，但不发光，所以读起来是安静的。 */
   offWire: '#7d1730',
 
-  // -- blue: anything wider than one bit -----------------------------------
-  /** A bus's body, a wide pin, a part carrying a word. */
+  // -- 蓝色：任何宽于 1 位的东西 --------------------------------------------
+  /** 总线的外壳、宽引脚、携带一个字的元件。 */
   bus: '#0a84ff',
-  /** The bus's bright core: one line down the middle of the body. */
+  /** 总线的亮芯：沿外壳中间走的一条线。 */
   busCore: '#5fd8ff',
-  /** A part body carrying a word. */
+  /** 携带一个「字」（多位值）的元件外壳。 */
   busBody: '#1250a8',
 
-  // -- neutral: nothing has been simulated ---------------------------------
-  /** An undriven pin, an unknown bit, a wire with no value. */
+  // -- 中性：还没有仿真过任何东西 -------------------------------------------
+  /** 未被驱动的引脚、未知的比特、没有值的导线。 */
   idle: '#16233a',
-  /** A part body with no value to report. */
+  /** 没有值可报告的元件外壳。 */
   idleBody: '#101b2c',
   idleEdge: '#1d3450',
-  /** The olive-grey the original used for an unknown bit, kept as the third cell. */
+  /** 原作用来表示未知位的橄榄灰，保留为第三种比特格。 */
   unknown: '#3d4d66',
 
   /**
-   * THE OPERATOR'S COLOUR, and the one colour that is never a value.
+   * 操作者的颜色，也是唯一一种绝不表示数值的颜色。
    *
-   * Selection, the rubber band and the armed pin are all things the PLAYER is
-   * doing, so they wear the same magenta the chrome uses for its controls --
-   * the interface's rule, stated once in `style.css`: cyan is the instrument's
-   * voice, magenta is the operator's hand. It cannot be confused with the red of
-   * a 0 because a selection is a 2px ring AROUND a part and a 0 is a fill.
+   * 选框、橡皮筋框选和已装填的引脚都表示「玩家正在做什么」，
+   * 所以它们统一使用洋红——界面规则只在 `style.css` 里声明一次：
+   * 青色是仪器的声音，洋红是操作者的手。
+   * 它不会和表示 0 的红色混淆：选框是环绕元件的 2px 圆环，而 0 是填充。
    */
   selection: '#ff2d78',
-  /** The rubber band and the armed pin. */
+  /** 橡皮筋框选与已装填的引脚。 */
   armed: '#ff2d78',
   error: '#ff2b4e',
   success: '#00ff9c',
@@ -107,22 +99,22 @@ export const THEME = {
 } as const;
 
 /**
- * What a part's body is saying about itself.
+ * 元件外壳此刻在「说」什么。
  *
- * `bus` wins over `on`/`off` because a wide part has no single bit to report:
- * painting a byte-wide adder red because its low bit is 0 would be a lie about
- * the part, where painting it blue is a statement about its width.
+ * `bus` 优先于 `on`/`off`：宽元件没有单个比特可报告。
+ * 因为低比特是 0 就把 8 位加法器画成红色，是对元件撒谎；
+ * 画成蓝色则是在陈述它的位宽。
  */
 export type PartState = 'on' | 'off' | 'bus' | 'idle';
 
-/** The state a part is in, from the width and the value it is carrying. */
+/** 由位宽与当前携带的值，推出元件外壳应处于的状态。 */
 export function partStateOf(width: number, value: number | undefined): PartState {
   if (value === undefined) return 'idle';
   if (width > 1) return 'bus';
   return value === 1 ? 'on' : 'off';
 }
 
-/** The body colour a state is painted in. */
+/** 某个状态对应的外壳填充色。 */
 export function bodyColourOf(state: PartState): string {
   switch (state) {
     case 'on':
@@ -136,7 +128,7 @@ export function bodyColourOf(state: PartState): string {
   }
 }
 
-/** The glow colour a state is haloed in, or `null` when it is not lit. */
+/** 某个状态对应的光晕色；不发光的状态（off 与 idle）返回 `null`。 */
 export function glowColourOf(state: PartState): string | null {
   switch (state) {
     case 'on':
@@ -148,43 +140,40 @@ export function glowColourOf(state: PartState): string | null {
   }
 }
 
-/** World pixels a part snaps to. */
+/** 元件吸附到的世界像素网格间距。 */
 export const GRID = 8;
 /**
- * Radius of a hit-testable pin, in world pixels.
+ * 可点选引脚的半径（世界像素）。
  *
- * Generous on purpose: the pins are what a player aims at, and the board's own
- * end-to-end tests drag wires with a mouse. `view.ts` adds three more pixels of
- * tolerance on top.
+ * 故意给得宽松：引脚是玩家瞄准的目标，画板的端到端测试也用鼠标拖导线。
+ * `view.ts` 会在此之上再加 3px 容差。
  */
 export const PIN_RADIUS = 6;
 /**
- * A part's body, in world pixels.
+ * 元件外壳的尺寸（世界像素）。
  *
- * Measured off the original at 1080p, where a gate is about 74 by 75. The
- * geometry is not decoration -- `view.ts` derives every pin position from these
- * two numbers and the end-to-end tests drag wires at the coordinates they
- * produce -- so they are stated here once and nowhere else.
+ * 按原作 1080p 的截图量得，一个门大约 74×75。这两个数字不是装饰：
+ * `view.ts` 由它们推出每个引脚的位置，端到端测试也在它们算出的坐标上拖导线，
+ * 所以只在这里写一次，别处不再重复。
  */
 export const INSTANCE_WIDTH = 72;
 export const INSTANCE_HEIGHT = 72;
 
-/** Vertical distance between two pins on the same edge, in world pixels. */
+/** 同一侧相邻两个引脚的垂直间距（世界像素）。 */
 export const PIN_SPACING = 24;
 
 /**
- * Corner radius of a part body, in world pixels.
+ * 元件外壳的圆角半径（世界像素）。
  *
- * Six, not fourteen. The rest of the interface is built from hard edges -- see
- * the note at the top of `style.css` -- and a pill-shaped gate was the last soft
- * thing on the board. A part is a chip on a bench, so its corners are cut, not
- * rounded off; the shapes that are CURVED (the D of an AND, the shield of an OR,
- * a level connector's disc) are curved because that curve is the symbol.
+ * 是 6，不是 14。界面其余部分都由硬边构成（见 `style.css` 顶部的说明），
+ * 药丸形的门曾是画板上最后一件柔软的东西。元件是台面上的芯片，边角是切角而非磨圆；
+ * 真正呈弧形的形状（AND 的 D 形、OR 的盾形、关卡连接器的圆盘）之所以弯，
+ * 是因为那条弧线本身就是符号。
  */
 export const PART_RADIUS = 6;
 
-/** Thickness of a 1-bit wire, in world pixels. */
+/** 1 位导线的粗细（世界像素）。 */
 export const WIRE_WIDTH = 8;
 
-/** Thickness of a multi-bit bus, in world pixels. */
+/** 多位总线的粗细（世界像素）。 */
 export const BUS_WIDTH = 14;

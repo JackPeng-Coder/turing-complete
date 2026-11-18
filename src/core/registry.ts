@@ -1,41 +1,70 @@
 import type { CustomComponentDef } from './graph';
 import type { PortValue } from './signal';
 
+/**
+ * 元件定义（ComponentDef）与注册表：仿真内核认识的"元件目录"。
+ *
+ * 每个 ComponentDef 描述一种元件：id、双语名称、引脚表、延迟代价 cost、
+ * NAND 等价门数 gateCost，以及可选的组合逻辑函数 evaluate / 时钟沿函数
+ * clockEdge / 自定义元件的内部电路 body。注册表就是 id 到定义的映射，
+ * net.ts 的 compile() 通过它把文档里的元件 id 解析成定义。
+ *
+ * 关键不变量：
+ *  - 组合元件的 evaluate 必须是纯函数，且不能读 state；
+ *  - 时序元件的 evaluate 只发布 state、不读输入（唯一例外是 RAM 的地址选择），
+ *    clockEdge 只采样输入写 state、不写输出；
+ *  - 自定义元件没有自己的 evaluate 和 state，它的代价由展开后的内部电路计算。
+ *
+ * 依赖：只依赖 graph.ts 与 signal.ts 的类型；使用者是 net.ts（编译时解析
+ * 元件 id）、defs/（注册具体元件），以及测试（按 category 核对家族边界；
+ * 应用层没有任何地方按 category 给托盘分组）。
+ */
 export type ComponentCategory =
   | 'logic1'
   | 'memory1'
   | 'wide'
-  // The CPU family (phase 2, task 2): the six parts chapter 3 hands out, defined
-  // in `defs/cpu.ts`. A family of its own rather than `wide` because the
-  // families are pinned by registration tuples and tests -- `logic1` IS the ten
-  // one-bit gates, `wide` IS the wide module's ids, `level` IS the two IO
-  // connectors -- and these six are not any of those.
+  // CPU 家族（phase 2 任务 2）：第 3 章发放的六个元件，定义在 defs/cpu.ts 里。
+  // 之所以独立成族而不是塞进 wide：各家族都被注册元组与测试精确钉死——
+  // logic1 就是那十个 1 位逻辑门，wide 就是宽位模块的 id 集合，level 就是
+  // 两个 IO 连接器——而这六个元件哪个都不属于。
   | 'cpu'
   | 'io'
   | 'display'
   | 'probe'
   | 'level'
   /**
-   * A part the PLAYER built: a custom component, handed to the registry as a def
-   * whose `body` is its circuit (`graph.ts`'s `CustomComponentDef`).
+   * 玩家自己搭建的元件：自定义元件。注册时以 ComponentDef 的形式交给注册表，
+   * 其 body 就是它的内部电路（graph.ts 的 CustomComponentDef）。
    *
-   * Its own category rather than `logic1` or `wide` because it is not a gate and
-   * its cost is not its own: `gateCost` and `delayOf` expand the body, so the
-   * category only has to answer "is this one of ours", which is also what the
-   * palette's group heading reads.
+   * 它独立成分类而不是 logic1 或 wide，因为它既不是门、代价也不由自己承担：
+   * gateCost 与 delayOf 会把它的 body 展开来算，所以这个分类只需要回答
+   * "它是不是我们自己造的"，元件托盘的分组标题也只用到这里。
    */
   | 'custom';
 
+/**
+ * 一个引脚的声明：id 是网表与关卡数据里使用的名字，width 是位宽（1 位是
+ * 普通逻辑信号，8/16/32 位是宽位数据），label 是可选的双语显示名。
+ * 实例的 params.width 可以覆盖这里声明的位宽，见 net.ts 的 effectiveWidth。
+ */
 export interface PinDef {
   readonly id: string;
   readonly width: number;
   readonly label?: { zh: string; en: string };
 }
 
+/** 求值上下文：tick 是已经走过的时钟沿数量（从 0 开始计数）。 */
 export interface EvalContext {
   readonly tick: number;
 }
 
+/**
+ * 一种元件的完整定义。注册表按 id 索引它，net.ts 在编译时按 id 取出它。
+ *
+ * 结构上分三类：纯组合元件（只有 evaluate）、时序元件（evaluate 负责发布
+ * 所存的值，clockEdge 负责在时钟沿采样），以及自定义元件（只有 body，
+ * 没有自己的逻辑，展开后由内部元件实现）。
+ */
 export interface ComponentDef {
   readonly id: string;
   readonly name: { zh: string; en: string };
@@ -43,58 +72,48 @@ export interface ComponentDef {
   readonly inputs: readonly PinDef[];
   readonly outputs: readonly PinDef[];
   /**
-   * DELAY cost: what one pass through this part costs the longest-path metric.
-   * Sources and wires cost 0, every gate costs 1, and a wide part costs 1 as
-   * well -- a `delayOf` node is a component, not a NAND (spec §3.2: 宽位组件
-   * （如 8 位加法器）同样记为 1).
+   * 延迟代价 cost：信号穿过这个元件要花几个"基础门延迟"，供最长路径
+   * delayOf 使用。电源和导线类元件为 0，每个门为 1，宽位元件同样记为 1
+   * （规格 §3.2：8 位加法器这类宽位组件也只算 1）。
    *
-   * This is NOT the gate metric. `cost` is read per node by `delayOf`
-   * (`net.ts`) only; the gate metric counts NAND equivalents and reads
-   * `gateCost` below.
+   * 它不是门数指标：门数指标由下面的 gateCost 承担。cost 只被 delayOf
+   * 按节点读取一次。
    */
   readonly cost: number;
   /**
-   * NAND-equivalent GATE cost: how many 2-input NAND gates this part expands to
-   * once custom and wide components are flattened (spec §5.4). Read by
-   * `gateCost()` in `levels/grader.ts` and by nothing else.
+   * NAND 等价门数 gateCost：把这个元件展开成 2 输入与非门后需要多少门
+   * （规格 §5.4）。只被 levels/grader.ts 的门数统计读取。
    *
-   * The two metrics expand wide parts differently on purpose: an `add8` is one
-   * unit of delay but 72 NAND equivalents, so this cannot share a field with
-   * `cost`.
+   * 两个指标故意对宽位元件给出不同数值：一个 add8 在延迟上只算 1 个单位，
+   * 在门数上是 72 个与非门，所以不能共用一个字段。
    *
-   * It is also not "one per gate": the NAND basis prices a 1-bit `and` at 2 and
-   * an `or` at 3 (the table is in `defs/index.ts`), and a wide part scales with
-   * its width -- one bit of `and8` is those same 2 NANDs, so the part is 16. The
-   * two numbers coincide for `nand` and `not` only, and every gate states this
-   * field explicitly so no count is inherited by accident.
+   * 它也不是"每个门记 1"：在与非门基底下，1 位 and 记 2、or 记 3
+   * （对照表在 defs/index.ts），宽位元件按位宽倍增——and8 的一位就是那 2 个
+   * 与非门，所以整个元件是 16。只有 nand 和 not 两个数恰好相同；每个门都
+   * 显式写出这个字段，避免有人的计数靠继承"碰巧"正确。
    *
-   * Absent means "same as `cost`", which is a real case rather than a legacy
-   * default: a rail (`const_on`), a level connector, a wire-like packer and the
-   * storage elements are zero on BOTH metrics, so a second explicit 0 would only
-   * give the two zeroes a way to drift apart. Any def whose part is worth more
-   * than one NAND states the field.
+   * 缺省表示"与 cost 相同"，这是真实情况而不是遗留默认值：电源
+   * （const_on）、关卡连接器、纯导线性质的打包器以及所有存储元件在两个
+   * 指标上都是 0，再显式写一个 0 只会给两个 0 制造分头漂移的机会。凡代价
+   * 超过一个与非门的元件都显式写这个字段。
    */
   readonly gateCost?: number;
-  /** Storage elements sample on the clock edge and do not add combinational delay. */
+  /** 时序元件在时钟沿采样，不计组合延迟（最长路径在其中被切断）。 */
   readonly sequential: boolean;
   /**
-   * Combinational transfer function: reads inputs, writes outputs, must be pure.
+   * 组合传递函数：读 inputs、写 outputs，必须是纯函数。
    *
-   * Storage elements use it to PUBLISH the value they are holding: they read
-   * `state` (the third parameter) and must never read `inputs`, otherwise a
-   * delay line degrades into a wire. The exception is exactly one input that
-   * only SELECTS among bytes already in `state`, and nothing else: a memory's
-   * read ADDRESS (`ram8.addr`), which is an index into `state`, never a value
-   * that could become the published byte -- every byte it selects is one a
-   * clock edge wrote (see the def). Any second input read, or an address read
-   * as a value rather than an index, is the wire this rule forbids.
-   * Combination components ignore `state` and keep the two-argument
-   * `(i, o) => …` shape.
+   * 时序元件用同一个函数来"发布"它持有的值：读第三个参数 state，且绝不能
+   * 读 inputs，否则延迟线就退化成了导线。唯一的例外是一个只用于在 state
+   * 已有的字节里做选择的输入——存储器的读地址（ram8 的 addr）：它只是 state
+   * 的下标，永远不会成为被发布的字节，它选中的每个字节都是某个时钟沿写进去
+   * 的（见该元件的定义）。除它之外的任何输入读取，或把地址当值而不是当下标，
+   * 都是这条规则禁止的"导线"。组合元件忽略 state，保持 (i, o) => ... 的
+   * 两参数形状。
    *
-   * `state` is typed `Uint8Array | undefined` rather than `Uint8Array` so that
-   * a storage element cannot pretend it always has state. It is a required
-   * parameter, not an optional one -- TypeScript rejects omitting it -- so
-   * combinational call sites pass `undefined` explicitly.
+   * state 的类型写成 Uint8Array | undefined 而不是 Uint8Array，是为了让
+   * 时序元件无法假装自己总有状态。它是必填参数而不是可选参数（TypeScript
+   * 会拒绝省略），所以组合元件必须显式传 undefined。
    */
   readonly evaluate?: (
     inputs: readonly PortValue[],
@@ -103,9 +122,8 @@ export interface ComponentDef {
     ctx: EvalContext,
   ) => void;
   /**
-   * Storage update, applied at the clock edge from pre-edge inputs.
-   * Samples into `state` only -- it must not write `outputs`, which are
-   * published by `evaluate` (and by the kernel at reset/tick).
+   * 存储更新：时钟沿到来时用沿前的输入采样进 state。
+   * 只写 state，不许写 outputs——输出由 evaluate 负责发布。
    */
   readonly clockEdge?: (
     inputs: readonly PortValue[],
@@ -113,33 +131,37 @@ export interface ComponentDef {
     state: Uint8Array,
     ctx: EvalContext,
   ) => void;
-  /** Bytes of private state per instance. 0 for pure combinational defs. */
+  /** 每个实例的私有状态字节数；纯组合元件为 0。 */
   readonly stateBytes: number;
-  /** Hidden from the palette (used by level plumbing). */
+  /** 是否从元件托盘中隐藏（关卡内部管线元件使用）。 */
   readonly hidden?: boolean;
   /**
-   * The circuit this part stands for, when the PLAYER built it.
+   * 当元件由玩家自己搭建时，这里就是它所代表的电路。
    *
-   * A def with a body is a custom component (`graph.ts`'s
-   * `CustomComponentDef`): it has no `evaluate` and no state of its own, because
-   * `compile` never instantiates it -- it walks the body and emits the leaves,
-   * one set of storage slots per instance (`core/net.ts`). That is what makes a
-   * component a NAME for a circuit rather than a box the simulator has to know
-   * how to open, and it is why one definition can be instanced twice without the
-   * two instances sharing a single bit of state.
+   * 带 body 的定义就是自定义元件（graph.ts 的 CustomComponentDef）：它没有
+   * evaluate、也没有自己的状态，因为 compile 从不会实例化它——compile 会走
+   * 它的 body、把内部的元件逐个展开，每个实例各分配一套存储槽（core/net.ts）。
+   * 这正是"元件是电路的名字"而不是"仿真器必须学会打开的盒子"的原因，也是
+   * 同一个定义能被实例化两次而两个实例不共享任何一位状态的原因。
    *
-   * `cost` and `gateCost` are 0 on such a def: its price is the sum of what its
-   * body contains, computed by `gateCostOf`/`delayOf` as they expand it, so
-   * charging anything here would charge the wire AND the gates inside it.
+   * 这种定义的 cost 和 gateCost 都是 0：它的代价等于它 body 里所含元件的
+   * 总和，由 gateCostOf / delayOf 展开时计算，所以在这里再记一笔就会既算
+   * 导线又算门。
    *
-   * THE WHOLE DEFINITION, not just the graph inside it: the surface (which pins
-   * the component has, and which body pin each one binds to) is what `compile`
-   * resolves a wire through, so a def carrying only its body would know what the
-   * component computes and not what its pins are.
+   * 存的是完整定义而不只是里面那张图：表面（这个元件有哪些引脚、每个引脚
+   * 绑定到 body 的哪个引脚）正是 compile 解析导线时用的东西，只带 body 的
+   * 定义会知道元件算什么、却不知道它的引脚是什么。
    */
   readonly body?: CustomComponentDef;
 }
 
+/**
+ * 元件注册表：id 到定义的只读映射。
+ *
+ * get 对未知 id 抛错（调用方应先 has）；register 对重复 id 抛错，因此
+ * "注册表里有什么"在注册完成后是稳定、可枚举的。all() 的顺序就是注册顺序，
+ * defs/index.ts 依赖它固定元件在托盘中的顺序。
+ */
 export interface Registry {
   readonly size: number;
   get(id: string): ComponentDef;
@@ -149,6 +171,12 @@ export interface Registry {
   register(def: ComponentDef): void;
 }
 
+/**
+ * 用给定的定义列表建一个注册表；列表为空也可以，之后再 register。
+ *
+ * 重复 id 会在注册时抛错——同一个 id 对应两种元件会让关卡数据与网表对不上，
+ * 属于装配期错误，应当尽早暴露。
+ */
 export function createRegistry(defs: readonly ComponentDef[] = []): Registry {
   const map = new Map<string, ComponentDef>();
   const registry: Registry = {

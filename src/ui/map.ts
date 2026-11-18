@@ -5,20 +5,17 @@ import { isUnlocked } from '../app/progress';
 import { THEME } from './theme';
 
 /**
- * The chapter map: one tile per level, in level order, banded by chapter.
+ * 章节地图：按关卡顺序每关一块瓷砖，并按章节分带。
  *
- * A tile is disabled while its level is locked (`isUnlocked` is strictly
- * linear: level 1 is always open, every other level needs its predecessor
- * passed), carries the star count of a passed level, and is highlighted while
- * it is the level the board has open. Selecting a tile is reported through
- * `onSelect`; the map never changes the level itself, because the caller owns
- * the graph, the undo stack and the briefing that a level change implies.
+ * 关卡未解锁时瓷砖禁用（`isUnlocked` 是严格线性的：第 1 关永远开放，
+ * 其余每一关都要先通过它的前一关），已通过的关卡带着星数，
+ * 而画板当前打开的关卡会被高亮。选中瓷砖通过 `onSelect` 上报；
+ * 地图本身从不切换关卡，因为切换关卡牵连的电路图、撤销栈和简报都由调用方拥有。
  *
- * THE BANDS ARE THE POINT. Forty-seven tiles in one grid was a list; the levels
- * are seven chapters and where a chapter ends is the single most useful fact on
- * this screen. Each band carries its own key -- the chapter, how many levels it
- * holds, and how many of its stars the player has -- so progress is legible
- * without counting tiles.
+ * 分带才是这张图的意义。几十块瓷砖挤进一个网格只是一份清单；
+ * 关卡按章节组织（战役整体规划为七章），而「一章到哪里结束」是这一屏上最有用的一条信息。
+ * 每一带自带说明：章节号、本带关卡数、玩家在本带已拿到的星数，
+ * 所以不用数瓷砖就能读懂进度。
  */
 export function mountMap(
   root: HTMLElement,
@@ -70,9 +67,8 @@ export function mountMap(
         const record = progress.levels[level.id];
         const unlocked = isUnlocked(progress, level.id, order, dev);
         tile.disabled = !unlocked;
-        // The number lives in its own element rather than in the tile's text: it
-        // is an address, it belongs in the address column, and it stays in the
-        // button's accessible name by being a real node.
+        // 序号放在自己的元素里而不是瓷砖的文本里：它是一个地址，属于地址列；
+        // 作为真实节点，它又仍然会留在按钮的无障碍名称里。
         const order0 = document.createElement('span');
         order0.className = 'map-tile-index';
         order0.textContent = String(level.index);
@@ -89,10 +85,9 @@ export function mountMap(
       section.append(band);
     }
 
-    // THE SANDBOX IS NOT A CHAPTER, but it is the same KIND of thing to a player:
-    // somewhere to go. So it gets the chapter band's own shape -- a key column on
-    // the left, a door on the right -- rather than a button dropped under the last
-    // grid, which read as an afterthought and broke the page's left edge.
+    // 沙盒不是一个章节，但对玩家来说，它是同一类东西：一个可以去的地方。
+    // 所以它沿用章节带的形状——左边一列说明，右边一扇门——
+    // 而不是在最后一个网格下面丢一个按钮；那样看起来像补丁，还破坏了页面的左边缘。
     const sandbox = document.createElement('section');
     sandbox.className = 'map-chapter map-sandbox';
     const key = document.createElement('div');

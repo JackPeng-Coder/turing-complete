@@ -1,29 +1,23 @@
 /**
- * The agent panel: a conversation, a settings card, and the button that opens it.
+ * 智能体面板：一段对话、一张设置卡，以及打开它们的入口按钮。
  *
- * WHAT THIS FILE IS NOT. It is not a second editor. Every circuit change comes
- * from a tool call, every tool call goes through `AgentHost` into the same
- * command stack the player's mouse uses, and this panel only ever draws what the
- * loop reports. If the agent is stopped mid-build, the board is exactly where it
- * stopped and 撤销 still walks back through it.
+ * 本文件不是什么：它不是第二个编辑器。电路上的每一次改动都来自一次工具调用，
+ * 每一次工具调用都经 `AgentHost` 进入玩家鼠标所用的同一条命令栈（可撤销），
+ * 本面板只负责把运行循环上报的内容画出来。智能体若在搭建中途被停止，
+ * 画板就停在它停下的位置，撤销依然能一步步退回去。
  *
- * THE THREE STATES A TOOL ROW HAS come from what a person actually needs to see:
- * the call has been asked for (`准备`), it is running (`执行`), it is done and
- * whether it worked (`完成` / `失败`). While a step is running the row is the
- * only place the player can see what is being done to their circuit, and after it
- * has finished the row is the record of it -- so the result line is kept, not
- * cleared.
+ * 一行工具记录只有三种状态，取的是玩家真正需要看到的信息：
+ * 调用已被提出（准备）、正在执行（执行）、已经结束以及是否成功（完成 / 失败）。
+ * 某一步执行期间，这一行是玩家唯一能看到"自己的电路正在被怎么改"的地方；
+ * 执行结束之后，这一行就是这次改动的记录，所以结果行保留而不是清空。
  *
- * THE PANEL REPORTS A MISSING CONFIGURATION; IT DOES NOT INTERRUPT FOR ONE. A
- * first run used to open the settings over the board, which put a question the
- * player had not asked for in front of the thing they came to do. Now the panel
- * carries one line -- 还没有配置 API -- with a button to the settings, and the
- * board is never covered. The game plays fine without any of it.
+ * 面板只报告"缺少配置"，不为此打断玩家。最初的做法是首次运行时把设置卡盖在画板上，
+ * 等于把玩家没问过的问题挡在他本来要做的事情前面。现在面板里只写一行"还没有配置 API"，
+ * 旁边给一个打开设置的按钮，画板永远不会被遮住；不配置它，游戏照常能玩。
  *
- * STREAMING TEXT IS APPENDED, NOT RE-RENDERED. The log is rebuilt whenever its
- * shape changes and a text delta is one `appendData` on a node that already
- * exists, because re-rendering on every token would throw away and rebuild the
- * whole conversation sixty times a second.
+ * 流式文本是追加，不是重渲染。日志只在结构变化时重建；每来一段文本增量，
+ * 只往已存在的节点上追加文本。因为如果每来一个 token 都重渲染，
+ * 整段对话每秒会被丢弃重建许多次，既慢又会打断滚动。
  */
 import {
   DEFAULT_MAX_STEPS,
@@ -48,7 +42,7 @@ import {
 } from '../agent/format';
 import { iconSvg } from './shell';
 
-/** One tool call, as a row in the log. */
+/** 一次工具调用在日志里的一行记录。 */
 interface ToolRow {
   readonly name: string;
   state: 'start' | 'end';
@@ -57,21 +51,20 @@ interface ToolRow {
 }
 
 /**
- * One step of the model's work, as the log holds it.
+ * 模型的一步工作，按日志保存的样子。
  *
- * `thought` and `text` are kept apart because they are read differently: the
- * reasoning is the long part that only matters WHILE it is being written, and the
- * answer is the short part that matters after. Keeping them apart is also what
- * lets the block fold away without taking the answer with it.
+ * `thought`（思考过程）与 `text`（正式回答）分开保存，因为两者的阅读方式不同：
+ * 思考是长文本，只在"正在写"的时候有意义；回答是短文本，写完之后才有意义。
+ * 分开保存还让思考块能够折叠收起，而不会把回答一起带走。
  */
 interface AgentEntry {
   readonly kind: 'agent';
   thought: string;
   text: string;
   readonly tools: ToolRow[];
-  /** Still arriving. A live step shows a few lines; a finished one folds. */
+  /** 是否还在到达：进行中的一步显示最后几行，已结束的一步折叠成一行。 */
   live: boolean;
-  /** The player opened the folded block, and it stays open across renders. */
+  /** 玩家手动展开了折叠块；该展开状态在多次重绘之间保持。 */
   opened: boolean;
 }
 
@@ -79,45 +72,47 @@ type Entry =
   | { readonly kind: 'user'; readonly text: string }
   | AgentEntry
   | { readonly kind: 'notice'; readonly text: string; readonly tone: 'info' | 'error' }
-  /** The step budget ran out; the row carries the button that buys another one. */
+  /** 步数预算用尽；这一行带着"再买一段预算"的按钮。 */
   | { readonly kind: 'cap'; readonly limit: number }
-  /** One finished request's readings: time, tokens, speed, cache. */
+  /** 一次已结束请求的读数：耗时、token 数、速度、缓存命中。 */
   | { readonly kind: 'run'; readonly stats: RunStats };
 
-/** The two places a panel lives in the workbench: its rail button and its dock. */
+/** 面板在工作台中的两个落脚点：左侧活动栏上的按钮，以及它停靠的侧边栏。 */
 export interface AgentPanelHosts {
-  /** The activity rail, where the button that opens the panel goes. */
+  /** 左侧活动栏：打开面板的按钮挂在这里。 */
   readonly toggle: HTMLElement;
-  /** The secondary sidebar, where the conversation is docked. */
+  /** 次级侧边栏：对话内容停靠在这里。 */
   readonly sidebar: HTMLElement;
 }
 
+/** 挂载面板所需的外部依赖：宿主接口、配置读写与可见性回调。 */
 export interface AgentPanelOptions {
   readonly host: AgentHost;
-  /** The settings as they stand, or `null` when the player has never set them. */
+  /** 当前设置；玩家从未配置过时为 `null`。 */
   readonly config: () => AgentConfig | null;
-  /** Called when the settings card is saved. */
+  /** 设置卡保存时调用。 */
   readonly onSave: (config: AgentConfig) => void;
-  /** Called when the player asks for the key to be forgotten. */
+  /** 玩家要求忘记 key 时调用。 */
   readonly onClear: () => void;
-  /** Called when the panel claims or gives back its dock. */
+  /** 面板占用或交还它的停靠位时调用。 */
   readonly onVisibility?: (open: boolean) => void;
-  /** Injectable so a test can run a scripted turn without a network. */
+  /** 可注入，便于测试在无网络的情况下跑一轮脚本化的对话。 */
   readonly run?: typeof runAgent;
 }
 
+/** 面板对外暴露的四个操作，供组合根与测试调用。 */
 export interface AgentPanel {
-  /** Redraws the log, the buttons and the status line. */
+  /** 重绘日志、按钮与状态行。 */
   render(): void;
-  /** Opens the settings card (the 设置 button and a missing configuration use it). */
+  /** 打开设置卡；「设置」按钮和"缺少配置"的提示都用它。 */
   openSettings(): void;
-  /** Opens the conversation card, e.g. from the rail. */
+  /** 打开对话卡，例如从活动栏点进来。 */
   open(): void;
-  /** Gives the dock back to the board. */
+  /** 把停靠位交还给画板。 */
   close(): void;
 }
 
-/** A tool result as one readable line, rather than the raw JSON envelope. */
+/** 把工具结果压成一行可读文字，而不是直接显示原始 JSON 外壳。 */
 function summarise(text: string): string {
   try {
     const parsed = JSON.parse(text) as { ok?: boolean; error?: string; result?: unknown };
@@ -131,10 +126,10 @@ function summarise(text: string): string {
 }
 
 /**
- * The tooltip of one request's row: the exact numbers the one-line reading hides.
+ * 一次请求那一行的悬浮提示：显示被单行摘要藏起来的具体数字。
  *
- * A PROVIDER THAT REPORTS NO USAGE SAYS SO rather than showing zeros: "没有返回
- * 用量" is information, and `0 tok` would be a measurement nobody made.
+ * 提供方没有返回用量时，这里明说，而不是显示 0：「没有返回用量」是一条信息，
+ * 而 `0 tok` 会假装做过一次没人做过的测量。
  */
 function runDetail(stats: RunStats): string {
   const lines: string[] = [];
@@ -170,42 +165,42 @@ function button(label: string, className: string): HTMLButtonElement {
 }
 
 /**
- * How many characters of a streaming step the live window keeps in the DOM.
+ * 流式输出的一步在实时窗口里保留多少字符（放在 DOM 中的尾部长度）。
  *
- * A reasoning model can write tens of thousands of characters into one step, and
- * the live box only ever shows the last six lines of it. Re-filling that box with
- * the WHOLE stream on every token made each delta copy the text, lay it out and
- * scroll it -- work that grows with the thought and a panel that stutters the
- * longer the model thinks. The tail is bounded instead: a few thousand characters
- * overfill six lines by an order of magnitude, so `scrollTop = scrollHeight` still
- * lands on the newest line while one delta costs the same at token 10 and at
- * token 10,000. The full text is still accumulated on the entry, which is what the
- * folded block renders from once the step ends.
+ * 推理模型一步可能写下几万个字符，而实时框只显示最后六行。若每个 token 都把
+ * 整段流重新填进框里，每次增量都要复制全文、重新排版并滚动——工作量随思考长度增长，
+ * 模型想得越久面板越卡。这里改为只保留一个有上限的尾部：几千字符已比六行多一个数量级，
+ * 于是把滚动条设到底部（scrollTop = scrollHeight）仍会落在最新一行，
+ * 而第 10 个 token 和第 10000 个 token 的增量开销相同。
+ * 完整文本仍会累积在条目上，步骤结束后折叠块就是从那里渲染的。
  */
 const LIVE_TAIL_CHARS = 4096;
 
+/**
+ * 挂载智能体面板：在活动栏放开关按钮、在侧边栏放对话卡，返回控制句柄。
+ *
+ * 本函数只做 DOM 组装与事件接线，并立即完成第一次渲染（不会自动展开面板）。
+ * 所有电路改动都经 options.host 进入玩家的命令栈，面板自己从不直接改电路；
+ * 返回的 render 可被外部再次调用以刷新读数与按钮状态。
+ */
 export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptions): AgentPanel {
   const run = options.run ?? runAgent;
   const entries: Entry[] = [];
-  /** The conversation as the API sees it: no system message, which the loop adds. */
+  /** 按 API 视角保存的对话历史：不含系统提示词，循环会自己补上。 */
   const history: WireMessage[] = [];
   let current: AgentEntry | null = null;
   /**
-   * The body of the step that is being written right now.
+   * 当前正在写入的那一步的正文节点。
    *
-   * A reference rather than a re-render per token: the tail of the stream is what
-   * is visible, so each delta only has to extend the text and keep the box
-   * scrolled to the bottom.
+   * 持有引用而不是每个 token 重渲染：可见的只是流的尾部，
+   * 所以每次增量只需要扩展文本并把框滚到底部。
    */
   let liveBody: HTMLElement | null = null;
   /**
-   * The last `LIVE_TAIL_CHARS` characters of the stream, and which field the tail
-   * currently ends with.
+   * 流中最后 `LIVE_TAIL_CHARS` 个字符，以及这个尾部当前结束在哪个字段上。
    *
-   * The box shows six lines; keeping only a bounded tail means the work of one
-   * delta does not grow with how long the model has been thinking. The full text
-   * still accumulates on the entry -- the tail is a window onto it, not a second
-   * copy of the record.
+   * 框只显示六行；只保留有界尾部意味着单次增量的工作量不随模型思考时长增长。
+   * 完整文本仍累积在条目上——尾部是它的一扇窗，不是记录的第二份拷贝。
    */
   let liveTail = '';
   let liveField: 'thought' | 'text' | null = null;
@@ -213,21 +208,20 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   let busy = false;
   let status = '';
   /**
-   * The in-flight run's readings, so the totaliser is live rather than final.
+   * 进行中那一轮请求的读数，让累计器在运行期间就"活着"，而不是只显示最终值。
    *
-   * The loop emits a `progress` event at every step boundary; the panel sums
-   * those with the settled runs and ticks the elapsed time between events.
+   * 运行循环在每个步骤边界发出 `progress` 事件；面板把这些与已结束的轮次相加，
+   * 并在事件之间自己跳动已用时间。
    */
   let live: { readonly stats: RunStats; readonly steps: number } | null = null;
   let liveStartedAt = 0;
   let liveTimer: ReturnType<typeof setInterval> | null = null;
   /**
-   * The readings, summed over this panel's lifetime.
+   * 读数，按本面板的整个生命期累加。
    *
-   * NOT PERSISTED, and not part of the conversation: it is a totalising counter
-   * on the instrument, and a reload starts it at zero the way a real meter does.
-   * The per-request rows in the log keep their own numbers, so resetting the
-   * total loses nothing that was said.
+   * 不持久化，也不属于对话内容：它是这台"仪表"上的累计计数器，刷新页面后从零开始，
+   * 就像真实的电表一样。日志里每一行请求记录各自保留数字，
+   * 因此清零总计不会丢失任何已经写下的信息。
    */
   const totals = {
     runs: 0,
@@ -242,9 +236,8 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     costCny: null as number | null,
   };
 
-  // THE RAIL BUTTON IS ICON-ONLY, because the rail is 48px wide: its accessible
-  // name and its warning class are what say "not configured yet", and the panel
-  // itself is where that fact is explained.
+  // 活动栏按钮只有图标，因为活动栏宽 48px：它靠无障碍名称和警告样式来表达
+  // "还没配置"，而具体解释放在面板内部。
   const toggle = document.createElement('button');
   toggle.type = 'button';
   toggle.className = 'activity-btn agent-toggle';
@@ -286,9 +279,9 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   actions.append(sendBtn, stopBtn, statusLine);
   compose.append(input, actions);
 
-  // THE PANEL'S OWN ANSWER TO "NOTHING IS CONFIGURED": a line, not a dialog.
-  // It sits above the composer, because that is where the player is about to
-  // find out that sending cannot work, and it says what to do with one button.
+  // 面板对"尚未配置"的自家回答：一行文字，而不是弹窗。
+  // 它放在输入框上方，因为玩家即将在这里发现"发送不出去"；
+  // 旁边一个按钮直接指出去处。
   const setupHint = document.createElement('div');
   setupHint.className = 'agent-setup-hint';
   const setupHintText = document.createElement('span');
@@ -298,20 +291,18 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   setupHint.append(setupHintText, setupHintOpen);
   setupHint.hidden = true;
 
-  // THE PANEL'S TOTALISER, under the conversation: the same readings as the
-  // per-request rows, summed over this session. Hidden until there is something
-  // to count, and never a substitute for the rows themselves.
+  // 面板的累计器，放在对话下方：与每行请求记录同样的读数，但按本次会话求和。
+  // 没有可统计的数字时隐藏；它永远不能替代那些逐行记录。
   const sessionStats = document.createElement('div');
   sessionStats.className = 'agent-session-stats';
   sessionStats.hidden = true;
 
   card.append(head, log, sessionStats, setupHint, compose);
 
-  // -- the settings card, which is a card of its own so it can stand alone -----
-  // THE SETTINGS CARD IS A MODAL OF ITS OWN. The conversation card's own `hidden`
-  // now means "the dock is closed", so the settings cannot ride on it; they get
-  // their own overlay, their own `hidden`, and the body as their parent -- a
-  // fixed overlay inside a collapsed sidebar could never be seen.
+  // -- 设置卡：它是一张独立的卡，因此可以单独存在 ---------------------------
+  // 设置卡是一个独立的模态层。对话卡自己的 `hidden` 现在表示"停靠位已关闭"，
+  // 设置不能再挂在它上面；它有自己的遮罩、自己的 `hidden`，并以 <body> 为父节点——
+  // 放在已折叠侧边栏里的固定定位遮罩根本不可能被看到。
   const setup = document.createElement('section');
   setup.className = 'agent-card agent-setup';
 
@@ -360,15 +351,14 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   const setupOverlay = document.createElement('div');
   setupOverlay.className = 'overlay overlay-agent-setup';
   setupOverlay.append(setup);
-  // HIDDEN ON THE OVERLAY, NOT ON THE CARD. The overlay is what covers the stage
-  // and takes the pointer; a hidden card inside a live overlay is a screen that
-  // looks closed and swallows every click on the board behind it.
+  // 隐藏的是遮罩本身，不是卡。遮罩才是盖住舞台、接管指针的东西；
+  // 若只把卡藏起来而遮罩仍在，屏幕看起来是关闭的，却会吞掉画板上的每一次点击。
   setupOverlay.hidden = true;
   document.body.append(setupOverlay);
 
-  // ------------------------------------------------------------------ render --
+  // ------------------------------------------------------------------ 渲染 --
 
-  /** A step with nothing in it yet. */
+  /** 新建一个还没有任何内容的一步。 */
   const newAgentEntry = (): AgentEntry => ({
     kind: 'agent',
     thought: '',
@@ -378,20 +368,17 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     opened: false,
   });
 
-  /** Everything the model has said in this step, reasoning first. */
+  /** 这一步里模型说过的全部内容，思考在前。 */
   const streamOf = (entry: AgentEntry): string =>
     [entry.thought, entry.text].filter((part) => part !== '').join('\n');
 
   /**
-   * The foldable block a step's prose lives in.
+   * 承载一步文字内容的可折叠块。
    *
-   * WHILE IT IS BEING WRITTEN it is a fixed-height window onto the last few
-   * lines: a model thinking out loud produces far more text than a panel can
-   * show, and the only part worth watching is the newest. ONCE THE STEP IS DONE
-   * it folds to one line -- the reasoning has served its purpose the moment the
-   * work it describes is on the board -- and the player can open it again by
-   * clicking the header. An `article` of a thousand words that nobody asked to
-   * keep is what makes a log unreadable.
+   * 正在写入时，它是固定高度、只显示最后几行的窗口：模型"边想边说"产生的文字
+   * 远多于面板能显示的量，值得看的只有最新部分。步骤结束后它折叠成一行——
+   * 它描述的工作一旦落到画板上，推理本身也就完成了使命——玩家点标题即可重新展开。
+   * 否则一篇没人要求保留的千字长文会把日志变得无法阅读。
    */
   function thinkBlock(text: string, entry: AgentEntry, live: boolean): HTMLElement {
     const wrap = document.createElement('div');
@@ -415,20 +402,19 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     if (live) {
       liveBody = bodyEl;
       liveTail = text.length <= LIVE_TAIL_CHARS ? text : text.slice(-LIVE_TAIL_CHARS);
-      // The stream is `thought` then `text` (`streamOf`), so whichever part it
-      // ends with is the field the next delta continues.
+      // 流的内容顺序是先 `thought` 后 `text`（见 `streamOf`），
+      // 所以它结束在哪个字段，下一次增量就接着写到哪个字段。
       liveField = entry.text !== '' ? 'text' : entry.thought !== '' ? 'thought' : null;
     }
     return wrap;
   }
 
   /**
-   * The totaliser under the log: settled between runs, live during one.
+   * 日志下方的累计器：空闲时显示已结算的值，运行中显示实时值。
    *
-   * DURING A RUN the elapsed time comes from this panel's clock and ticks every
-   * 200 ms; the tokens, speed, cache share and cost come from the loop's progress
-   * events at each step boundary -- a provider sends its usage frame with the
-   * answer, so per-step is the finest honest granularity for tokens.
+   * 运行期间，已用时间来自本面板的时钟，每 200ms 跳一次；token 数、速度、
+   * 缓存占比和费用来自运行循环在每个步骤边界的 progress 事件——
+   * 提供方是随回答一起发送用量帧的，所以"每步"是 token 数最细的诚实粒度。
    */
   const renderTotals = (): void => {
     const running = busy;
@@ -499,9 +485,8 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
         continue;
       }
       if (entry.kind === 'cap') {
-        // The budget ran out mid-build. The button is the shortcut: one click
-        // buys another budget for the same conversation instead of making the
-        // player retype the request.
+        // 预算在搭建中途用尽。这个按钮是捷径：点一下就给同一段对话再买一段预算，
+        // 免得玩家重新打一遍请求。
         const line = document.createElement('article');
         line.className = 'agent-line agent-cap';
         const note = document.createElement('span');
@@ -514,9 +499,8 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
         continue;
       }
       if (entry.kind === 'run') {
-        // One finished request, measured: the same four readings DSH shows,
-        // without the dialog -- the exact counts and the first-token average
-        // live in the tooltip.
+        // 一次已结束请求的度量：四个读数与 DSH 显示的一致，
+        // 但不弹对话框——精确计数和首字平均耗时放在悬浮提示里。
         const line = document.createElement('div');
         line.className = 'agent-run-stats';
         const text = summariseRun(entry.stats);
@@ -532,12 +516,12 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
       if (entry.live) {
         line.append(thinkBlock(stream, entry, true));
       } else if (worked) {
-        // The step touched the board, so its prose was working talk: folded,
-        // whatever it said, because the tool rows underneath now say more.
+        // 这一步动过画板，所以它的文字是"工作过程"：无论写了什么都折叠起来，
+        // 因为下面的工具记录行说得更多。
         if (stream !== '') line.append(thinkBlock(stream, entry, false));
       } else {
-        // The step called no tool, so this is the ANSWER. Its reasoning folds
-        // above it and the sentence itself stays where it can be read.
+        // 这一步没有调用任何工具，所以它就是"回答"。上面的推理折叠起来，
+        // 回答正文留在可直接阅读的位置。
         if (entry.thought !== '') line.append(thinkBlock(entry.thought, entry, false));
         if (entry.text !== '') {
           const text = document.createElement('p');
@@ -571,13 +555,12 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   };
 
   /**
-   * Extends the step being written, without rebuilding the log.
+   * 延长正在写入的这一步，不重建日志。
    *
-   * A delta is an append to the tail the box already holds, not a re-render of the
-   * step: the box is a six-line window, so the part that scrolled out of it is
-   * gone from the DOM on purpose (`LIVE_TAIL_CHARS`) and the whole text lives on
-   * the entry. Reasoning and answer are two fields of one window, and a field
-   * switch starts a new line exactly as `streamOf` joins them in the folded body.
+   * 一次增量是往框里已有尾部的追加，而不是重渲染整步：框是六行高的窗口，
+   * 滚出窗口的部分是有意从 DOM 里丢掉的（见 `LIVE_TAIL_CHARS`），
+   * 完整文本存在条目上。思考与回答是同一个窗口的两个字段，
+   * 切换字段时补一个换行，恰好对应 `streamOf` 在折叠正文中把两者拼起来的方式。
    */
   const appendStream = (text: string, field: 'thought' | 'text'): void => {
     if (current === null) {
@@ -599,12 +582,12 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     log.scrollTop = log.scrollHeight;
   };
 
-  /** Marks the step in flight as finished: its prose folds from here on. */
+  /** 把正在执行的一步标记为结束：它的文字从此刻起折叠。 */
   const settle = (): void => {
     if (current !== null) current.live = false;
   };
 
-  // ------------------------------------------------------------------ events --
+  // ------------------------------------------------------------------ 事件 --
 
   const handleEvent = (event: AgentEvent): void => {
     if (event.kind === 'progress') {
@@ -634,8 +617,8 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
         entries.push(current);
       }
       if (event.phase === 'start') {
-        // The prose was the run-up to this call, so it folds now and the row
-        // below it takes over as the record of what happened.
+        // 这段文字是这个调用之前的铺垫，所以现在就折叠，
+        // 由下面的工具记录行接替成为"发生了什么"的记录。
         settle();
         current.tools.push({ name: event.name, state: 'start', ok: true, summary: '' });
         status = `正在执行 ${event.name}…`;
@@ -644,8 +627,8 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
         const target = row ?? { name: event.name, state: 'end' as const, ok: true, summary: '' };
         target.state = 'end';
         target.ok = event.ok ?? true;
-        // The tool's own sentence when it has one; the raw result is for the
-        // model, not for the person watching the board.
+        // 工具有自己的说明文字就用它；原始结果是给模型看的，
+        // 不是给盯着画板的人看的。
         target.summary = event.note ?? summarise(event.text ?? '');
         if (row === undefined) current.tools.push(target);
         status = target.ok ? `已完成 ${event.name}` : `${event.name} 失败：${target.summary}`;
@@ -665,14 +648,14 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     render();
   };
 
-  /** One run of the loop, shared by 发送 and the cap's 继续执行 button. */
+  /** 运行一次智能体循环；「发送」和步数上限处的「继续执行」共用它。 */
   const startRun = (config: AgentConfig): void => {
     busy = true;
     live = null;
     liveStartedAt = globalThis.performance?.now() ?? Date.now();
     if (liveTimer !== null) clearInterval(liveTimer);
-    // The clock is this panel's; the tokens arrive on progress events. A timer
-    // only while a run is in flight is also why a settled panel costs nothing.
+    // 时钟由本面板负责，token 数随 progress 事件到达。
+    // 定时器只在运行期间存在，这也是空闲面板不消耗任何资源的原因。
     liveTimer = setInterval(() => {
       if (busy) renderTotals();
     }, 200);
@@ -689,9 +672,8 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
       .then((result) => {
         history.length = 0;
         history.push(...result.messages);
-        // The request's own readings go into the log and the totaliser. They are
-        // appended even for an aborted or refused run: the seconds were spent,
-        // and the row is the record of what was bought for them.
+        // 这次请求自己的读数进入日志和累计器。即使这一轮被中止或被拒绝也要追加：
+        // 时间已经花掉了，这一行就是"花时间买到了什么"的记录。
         entries.push({ kind: 'run', stats: result.stats });
         totals.runs += 1;
         totals.steps += result.steps;
@@ -750,11 +732,10 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   };
 
   /**
-   * The cap's own button: another budget for the same conversation.
+   * 步数上限处的按钮：给同一段对话再来一段预算。
    *
-   * NO SYNTHETIC USER LINE. The history already ends with the tool result the
-   * last round asked for, so continuing is exactly the request the loop would
-   * have made had the budget been larger. The button press is the record.
+   * 不伪造用户消息。历史已经以最后一轮所请求的工具结果结尾，所以继续执行
+   * 恰好就是"如果预算更大、循环本来会发出的那次请求"。按下按钮本身就是记录。
    */
   const continueRun = (): void => {
     const config = options.config();
@@ -763,7 +744,7 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   };
 
   const openSettings = (): void => {
-    // The settings belong to the panel, so asking for them also claims the dock.
+    // 设置属于面板，所以请求打开设置时也顺带占用停靠位。
     open();
     const config = options.config() ?? emptyConfig();
     baseUrl.value = config.baseUrl;
@@ -801,8 +782,8 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     controller?.abort();
   });
   input.addEventListener('keydown', (event) => {
-    // Enter sends, Shift+Enter is a newline: the same contract as the IDE's own
-    // editor, so a player who writes programs here does not have to learn twice.
+    // Enter 发送，Shift+Enter 换行：与 IDE 自带编辑器相同的约定，
+    // 让在这里写过程序的玩家不必学第二套习惯。
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       send();
@@ -829,8 +810,7 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
     render();
   });
   laterBtn.addEventListener('click', () => {
-    // Closing without saving: the panel keeps its own line about what is
-    // missing, and the game keeps playing.
+    // 不保存直接关闭：面板仍保留自己那一行"缺少什么"的提示，游戏继续能玩。
     setupOverlay.hidden = true;
     render();
   });
@@ -842,9 +822,8 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
   });
 
   render();
-  // NOTHING OPENS ITSELF. The settings are one button away, and a missing
-  // configuration is reported inside the panel, so a first run lands on the
-  // board -- the thing the player came for -- rather than on a question about an
-  // optional feature.
+  // 面板不会自己弹出来。设置只隔一个按钮，缺少配置也在面板内部报告，
+  // 所以第一次运行时玩家落在画板上——他本来要做的事——
+  // 而不是被一个关于可选功能的问题拦住。
   return { render, openSettings, open, close };
 }

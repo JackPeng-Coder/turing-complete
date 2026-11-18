@@ -1,30 +1,28 @@
 /**
- * The two value types the application state and the board share.
+ * 应用状态与画板共享的两个值类型。
  *
- * They are declared here, in `app/`, rather than beside the board that draws
- * with them, because `AppState` is what holds them: the camera is a field of
- * the state and a drag in flight has an endpoint in it. A type declared in
- * `ui/board/` would make `app/` import upwards, which the layer rule in
- * `test/conventions.test.ts` forbids -- and the rule is worth more than the
- * tidier address, because `ui/` is allowed to read `app/` while the reverse is
- * how a UI layer becomes un-replaceable.
+ * 它们声明在 `app/` 里，而不是声明在负责使用它们的画板旁边：真正持有它们的是
+ * `AppState`——相机是状态中的一个字段，进行中的拖动也把端点存在状态里。如果把
+ * 类型声明到 `ui/board/`，`app/` 就必须向上 import，而 `test/conventions.test.ts`
+ * 中的分层规则禁止这样做。这条规则比"类型离使用处更近"更值得坚持：`ui/` 允许
+ * 读 `app/`，反过来则会让 UI 层变得不可替换。
  *
- * Both are pure data with no behaviour, so the board imports them as types
- * only: nothing here is in the runtime graph.
+ * 两者都是没有行为的纯数据，所以画板只把它们当作类型 import：本模块不会进入
+ * 运行时依赖图，打包后不产生任何值。
  */
 
-/** A point in board coordinates. */
+/** 画板坐标系中的一个点。位置是纯几何量，本身不关心缩放。 */
 export interface Point {
   readonly x: number;
   readonly y: number;
 }
 
 /**
- * Which part of the board is on screen.
+ * 画板当前显示的是哪一块区域（相机）。
  *
- * `x` / `y` are the world point drawn at the top-left corner, in screen pixels
- * at zoom 1. The fields are mutable: the camera is advanced in place by pan,
- * wheel and keyboard gestures rather than rebuilt per frame.
+ * `x` / `y` 是画在屏幕左上角的世界坐标点，单位是 zoom 为 1 时的屏幕像素。
+ * 字段可变：平移、滚轮和键盘手势会原地推进相机，而不是每帧重建一个对象——
+ * 相机每帧都在变，重建对象只会给 GC 增加无谓的压力。
  */
 export interface Camera {
   x: number;

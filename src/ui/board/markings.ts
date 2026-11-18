@@ -1,36 +1,29 @@
 /**
- * The marking painted on a part's body.
+ * 画在元件本体上的标记（丝印）。
  *
- * The original labels its components the way a chip is marked: `NAND`, `NOT`,
- * `MUX`, `ADD` -- a short uppercase mnemonic, never a name. The width travels
- * separately, in the corner badge, which is why `and` and `and8` carry the same
- * `AND` and are told apart by the `8` on the second one. A board of Chinese
- * component names read as a menu; a board of markings reads as a schematic, and
- * it is legible at any zoom because four capital letters survive being drawn
- * small.
+ * 原作标注元件的方式就像芯片顶面的丝印：`NAND`、`NOT`、`MUX`、`ADD` ——
+ * 短短的大写助记符，而不是名字。位宽单独放在角标里，所以 `and` 和 `and8` 都印 `AND`，
+ * 靠后者角上的 `8` 区分。一块写满中文元件名的画板读起来像菜单；
+ * 一块写满丝印缩写的画板读起来像原理图，而且四个大写字母在任何缩放下都看得清。
  *
- * IT IS A TABLE, NOT A FIELD ON THE COMPONENT, and that is a deliberate split.
- * A marking is a DRAWING decision -- how many characters fit inside a D, a
- * shield, a 72-pixel box at the zoom the player is working at -- and `core/` has
- * no business knowing about that. The palette still shows the Chinese name, which
- * is what a player reads when choosing a part, and the tooltip carries the
- * English name and this marking, so the two vocabularies are connected at the
- * moment they need to be.
+ * 它是一张“表”，而不是元件定义上的字段，这是有意拆开的：
+ * 丝印是绘制决策——几个字符能塞进一个 D 形、盾形或 72 像素的方块里，取决于玩家当前的缩放；
+ * `core/` 没有理由知道这些。元件托盘仍然显示中文名（玩家挑元件时读的是它），
+ * tooltip 同时给出英文名与丝印，两套词汇表在需要的时候才被对上。
  *
- * `appearance.test.ts` walks the whole registry and fails if any part has no
- * entry here, or one that is longer than six characters or not uppercase: a part
- * added later cannot quietly ship labelled `8 位算术右移`.
+ * `appearance.test.ts` 会遍历整个注册表：任何元件缺条目、条目超过六个字符或不是大写都会失败。
+ * 这样后来新增的元件就不能悄悄顶着 `8 位算术右移` 出厂。
  */
 import type { ComponentDef } from '../../core/registry';
 
-/** Every registered part, by its def id. */
+/** 每个已注册元件的丝印，按元件定义 id 索引。 */
 const MARKING: Readonly<Record<string, string>> = {
-  // -- sources ---------------------------------------------------------------
+  // -- 信号源
   const_on: 'ON',
   const_off: 'OFF',
   const8: 'CONST',
 
-  // -- the ten one-bit parts -------------------------------------------------
+  // -- 十个 1 位元件
   nand: 'NAND',
   not: 'NOT',
   and: 'AND',
@@ -42,15 +35,15 @@ const MARKING: Readonly<Record<string, string>> = {
   or3: 'OR3',
   full_adder: 'FA',
 
-  // -- level plumbing --------------------------------------------------------
+  // -- 关卡接线
   level_input: 'IN',
   level_output: 'OUT',
 
-  // -- storage ---------------------------------------------------------------
+  // -- 存储
   delay_line: 'DELAY',
   mem1: 'MEM',
 
-  // -- the byte operators: the WIDTH is the badge, not the marking -----------
+  // -- 字节运算器：位宽靠角标表达，不写进丝印
   and8: 'AND',
   or8: 'OR',
   nand8: 'NAND',
@@ -60,7 +53,7 @@ const MARKING: Readonly<Record<string, string>> = {
   not8: 'NOT',
   add8: 'ADD',
   neg8: 'NEG',
-  // Signed and unsigned less-than, in the mnemonics every ISA uses for them.
+  // 有符号与无符号“小于”比较，沿用各指令集通用的助记符。
   less_s: 'SLT',
   less_u: 'SLTU',
   equal8: 'EQ',
@@ -73,10 +66,9 @@ const MARKING: Readonly<Record<string, string>> = {
   div8: 'DIV',
   splitter: 'SPLIT',
   maker: 'MAKE',
-  // The sandbox packers at 16 and 32 bits. One marking per operation, the same as
-  // `and` / `and8`: the width is carried by the pins (and, in the tray, by the
-  // name), not by the legend -- a splitter's first output is one bit, so its
-  // corner badge cannot be the word it splits.
+  // 沙盒里 16 位与 32 位的打包/拆包器。每种操作只有一个丝印，和 `and` / `and8` 同理：
+  // 位宽由引脚表达（在托盘里则由名字表达），不靠丝印——
+  // 分离器的第一个输出只有 1 位，所以它角上的徽标不可能写着“它拆出来的那个字”。
   splitter16: 'SPLIT',
   maker16: 'MAKE',
   splitter32: 'SPLIT',
@@ -92,7 +84,7 @@ const MARKING: Readonly<Record<string, string>> = {
   decoder2: 'DEC2',
   decoder3: 'DEC3',
 
-  // -- the machine -----------------------------------------------------------
+  // -- 机器
   alu8: 'ALU',
   regfile6: 'RF',
   instr_decoder: 'DECODE',
@@ -102,12 +94,14 @@ const MARKING: Readonly<Record<string, string>> = {
 };
 
 /**
- * The marking for one part.
+ * 一个元件的丝印缩写。
  *
- * The fallback is a guard, not a policy: it uppercases the id and cuts it to six
- * characters, and `appearance.test.ts` fails before anything can reach it -- a
- * def with no marking of its own would come out as `FULL_A`, and the test names
- * it instead.
+ * 兜底分支是保险，不是策略：它把 id 转成大写、只保留字母和数字、再截到六个字符。
+ * `appearance.test.ts` 会先一步失败，所以正常构建永远走不到这里；
+ * 真有没有丝印的元件时，输出会是 `FULL_A` 这种东西，测试会直接点名它。
+ *
+ * @param def 元件定义
+ * @returns 丝印：最多六个大写字母/数字
  */
 export function partCodeOf(def: ComponentDef): string {
   const marked = MARKING[def.id];

@@ -7,63 +7,59 @@ import {
 } from '../levels/blueprints';
 
 /**
- * The circuit file: what "export" writes and "import" reads.
+ * 电路文件：导出时写、导入时读的东西。
  *
- * THE FORMAT IS THE SPEC'S (`docs/superpowers/specs/2026-09-25-turing-complete-replica-design.md`
- * §8.1, `tc-circuit`): a document with a `format`, a `version`, the instances, the
- * wires and the components it uses. It is deliberately the same shape as a
- * `Graph` plus a header, so exporting is not a translation that can lose
- * something and importing is not a parser that has to guess.
+ * 格式来自规格（`docs/superpowers/specs/2026-09-25-turing-complete-replica-design.md`
+ * §8.1，`tc-circuit`）：一个带 `format`、`version`、实例、导线以及所用元件的
+ * 文档。它刻意做成"`Graph` 再加一个文件头"的形状，于是导出不是一次可能丢东西
+ * 的翻译，导入也不是一个需要猜的解析器。
  *
- * COMPONENTS TRAVEL INLINE. A file is how a circuit leaves the machine it was
- * built on, and a player's component is part of the circuit -- a file that
- * referenced `bp1` and hoped the reader had one would be a file that half the time
- * does not open. `Progress.blueprints` is the durable library and this is the
- * carrier; importing merges what the file brought into the library.
+ * 元件随文件内联保存。文件是电路离开它被搭建的那台机器的方式，而玩家的自定义
+ * 元件是电路的一部分——一个引用 `bp1`、指望读者本地正好也有 `bp1` 的文件，有
+ * 一半场合打不开。`Progress.blueprints` 是持久元件库，这里则是它的载体；导入
+ * 时会把文件带来的元件合并进已有库。
  *
- * NOTHING PARTIALLY LOADS. Every failure -- wrong format, unknown version, a
- * field of the wrong type -- returns a message instead of a circuit, because the
- * one outcome worth ruling out is a bad file silently replacing the board.
+ * 绝不部分加载。任何失败——格式不对、版本未知、字段类型错误——都返回一条说明
+ * 而不是一个电路，因为唯一必须排除的结果是"坏文件悄悄替换了画板"。
  */
 export const CIRCUIT_FORMAT = 'tc-circuit';
 export const CIRCUIT_VERSION = 1;
 
-/** The file, as an object. `JSON.stringify` this to write one. */
+/** 文件的对象形态。写文件就是把它 `JSON.stringify` 出去。 */
 export interface CircuitFile {
   readonly format: typeof CIRCUIT_FORMAT;
   readonly version: typeof CIRCUIT_VERSION;
   readonly level: string;
   readonly instances: readonly Instance[];
   readonly wires: readonly Wire[];
-  /** The components the circuit uses, in dependency order. */
+  /** 电路用到的自定义元件，按依赖顺序排列。 */
   readonly blueprints: readonly Graph[] | readonly unknown[];
 }
 
-/** What a file says: a circuit, and the components it brought with it. */
+/** 一个文件所表达的内容：一个电路，以及它带来的元件。 */
 export interface ParsedCircuit {
   readonly graph: Graph;
   readonly blueprints: BlueprintLibrary;
 }
 
 /**
- * A file that could not be read, as a value at a key.
+ * 读不出来的文件，用"键 + 值"的形式表达。
  *
- * A DISCRIMINATED ARM, not a bare message. The reader returns one of two shapes,
- * and 'error' in parsed is how a caller tells them apart -- an arm without a
- * property of its own would be indistinguishable from a successful read of a
- * circuit that happens to have a zh field, and the type would not narrow.
+ * 采用可判别的分支（discriminated arm），而不是裸字符串消息。读取函数返回两种
+ * 形状之一，调用方靠结果里有没有 `error` 来区分——若错误分支没有自己的专属属性，
+ * 它就与"成功读到一份恰好有个 zh 字段的电路"无法区分，类型也无法收窄。
+ * 文案同时给中英两份，是为了让状态栏与命令行都能直接显示。
  */
 export interface CircuitRefusal {
   readonly error: { readonly zh: string; readonly en: string };
 }
 
 /**
- * A document as a file.
+ * 把文档写成文件文本。
  *
- * `blueprints` is the CLOSURE the caller computed (`libraryClosure`): the
- * components the instances name, plus whatever those components instance. The
- * graph's own `customComponents` is not consulted -- the library is where a
- * component lives, so that is what travels.
+ * `blueprints` 是调用方算好的闭包（`libraryClosure`）：实例所命名的元件，加上
+ * 那些元件自己又实例化的元件。图的 `customComponents` 在这里不被查询——元件
+ * 住在元件库里，所以随文件走的就是库里的那份。
  */
 export function serializeCircuit(graph: Graph, components: readonly unknown[]): string {
   const file = {
@@ -74,23 +70,21 @@ export function serializeCircuit(graph: Graph, components: readonly unknown[]): 
     wires: graph.wires,
     blueprints: components,
   };
-  // Pretty-printed: an exported circuit is a text file a player may well open, and
-  // a diffable one is worth the bytes.
+  // 带缩进并补上末尾换行：导出的电路是玩家很可能打开来看的文本文件，
+  // 多花几个字节换来可读、可 diff 是值得的。
   return `${JSON.stringify(file, null, 2)}\n`;
 }
 
 /**
- * A file as a document, or the reason it is not one.
+ * 把文件文本读成文档；不是文档时给出原因。
  *
- * `existing` IS THE READER'S OWN LIBRARY, and it is what makes an import safe: the
- * components the file brings are merged into it with the clashing ids renamed
- * (`mergeLibrary`), and the circuit is repointed at the names it ended up with.
- * Leaving it out reads the file against an empty library, which is what a test
- * wants and what a caller with nothing to lose gets.
+ * `existing` 是读取方自己的元件库，这正是导入安全的关键：文件带来的元件会用
+ * 冲突 id 改名的方式合并进去（`mergeLibrary`），随后电路再被重新指向它最终
+ * 得到的名字。省略该参数表示对着空库读取，这既是测试想要的，也是"没什么可
+ * 失去"的调用方自然得到的默认。
  *
- * The graph is returned WITH the components it needs (`customComponents`), so a
- * caller can hand it to `compile` through a registry composed from the returned
- * library and get the same circuit the writer had.
+ * 返回的图带着它需要的元件（`customComponents`），这样调用方可以把返回的库与
+ * 这些元件组成注册表交给 `compile`，得到与写出方相同的电路。
  */
 export function parseCircuit(
   text: string,
@@ -148,15 +142,21 @@ export function parseCircuit(
   const base: Graph = {
     instances: cloneInstances(file.instances),
     wires: cloneWires(file.wires),
-    // Inline, so the document stands on its own even before the library merge:
-    // `compile` reads the definition from either place (`core/net.ts`).
+    // 内联一份，使文档在元件库合并之前也能独立成立：`compile` 从两处中的任一处
+    // 都能读到定义（`core/net.ts`）。
     customComponents: Object.values(incoming).map((entry) => entry.def),
   };
   if (typeof file.level === 'string' && file.level !== '') base.level = file.level;
   return { graph: repointComponents(base, renamed), blueprints: library };
 }
 
-/** Typechecks the instance list rather than trusting the file's word for it. */
+/**
+ * 逐条类型检查实例列表，而不是相信文件自己的说法。
+ *
+ * 规则是"跳过坏条目，保留好条目"：一份半损坏的文件仍然能给出玩家搭过的那部分
+ * 电路，缺失的坐标补 0、缺失的旋转补 0、缺失的参数补空表，于是下游不必到处
+ * 判空。只要 `id` 与 `def` 不是字符串就丢弃——这两项是实例的身份，猜不出来。
+ */
 function cloneInstances(raw: readonly unknown[]): Instance[] {
   const out: Instance[] = [];
   for (const entry of raw) {
@@ -175,7 +175,7 @@ function cloneInstances(raw: readonly unknown[]): Instance[] {
   return out;
 }
 
-/** The same, for the wires. A wire with a nameless end is dropped. */
+/** 导线同理：任意一端没有名字的导线被丢弃，因为无法知道它连到哪里。 */
 function cloneWires(raw: readonly unknown[]): Wire[] {
   const out: Wire[] = [];
   for (const entry of raw) {

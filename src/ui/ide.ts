@@ -3,57 +3,50 @@ import { iconSvg, type IconName } from './shell';
 import { THEME } from './theme';
 
 /**
- * The assembly editor: the text a player writes, and what it becomes.
+ * 汇编编辑器：玩家写的文本，以及它变成的东西。
  *
- * WHAT IT IS. A textarea with a line-number gutter, a status line, a byte view
- * and the four controls a program needs: 汇编 to read the text, 单步 to clock one
- * edge, 运行/停止 to clock them on a timer, and 测试 to hand the level its own
- * test run. Nothing here runs a circuit -- `main.ts` owns the `ProgramRun` and
- * answers through `IdeOptions`, exactly as it owns the board's own clock for the
- * toolbar -- so the panel is a view with controls, and the run it describes has
- * one owner.
+ * 它是什么：一个带行号槽、状态行、字节视图的 textarea，加上一个程序需要的四个控件：
+ * 汇编（读文本）、单步（走一个时钟沿）、运行/停止（用定时器连续走沿）、
+ * 测试（把本关自己的测试跑一遍）。这里不运行任何电路——`main.ts` 拥有 `ProgramRun`
+ * 并通过 `IdeOptions` 回答问题，就像它替工具栏拥有画板时钟一样，
+ * 所以本面板是「视图 + 控件」，它描述的那次运行只有一个所有者。
  *
- * WHERE THE TEXT LIVES. In the store, keyed by level (`AppState.programs`), which
- * is also what the checker grades and what the save keeps. The panel READS it
- * there and writes every keystroke back through `onEdit`; it keeps no copy of its
- * own, so a reload, a level change or a migrated save cannot leave an editor
- * showing text the level does not have.
+ * 文本存在哪：存在 store 里、按关卡分开（`AppState.programs`），判定器评的就是它，
+ * 存档保存的也是它。面板只从那里读，每次按键都通过 `onEdit` 写回；
+ * 面板不保留自己的副本，因此刷新、切关或迁移存档都不会让编辑器显示关卡没有的文本。
  *
- * THE BYTE VIEW IS ON DEMAND. Assembling on every keystroke would rebuild a hex
- * dump of a program the player is halfway through typing, so the view appears
- * when they ask for it -- 汇编, or any control that needs the program loaded --
- * and is hidden again the moment the text changes. What does NOT wait is the
- * status line's refusal: `main.ts` hands over the run's own errors, and a program
- * that will not assemble says so before anything is stepped.
+ * 字节视图按需出现：每次按键都汇编，会反复重建一个玩家还没写完的程序的十六进制转储，
+ * 所以它只在玩家要求时出现——点「汇编」，或任何需要已加载程序的操作——文本一变就隐藏。
+ * 不等的是状态行里的拒绝：`main.ts` 把运行自身的错误交过来，
+ * 汇编不了的程序会在任何单步之前就说明原因。
  *
- * THE KEYS ARE THE EDITOR'S. The board's global handler (`ui/board/interact.ts`)
- * treats Backspace and Delete as "delete the selected parts" and Ctrl+Z as undo,
- * and it listens on `window` -- so a keystroke in a textarea would edit the
- * CIRCUIT. This is the one place that can tell the two apart, and it stops its own
- * keys before they leave the textarea.
+ * 键盘事件归编辑器管。画板的全局处理器（`ui/board/interact.ts`）把 Backspace 和 Delete
+ * 当作「删除选中的元件」、把 Ctrl+Z 当作撤销，而且它监听在 `window` 上——
+ * 于是 textarea 里的一次按键会去编辑电路。这里是唯一能区分两者的地方，
+ * 它在按键离开 textarea 之前就停住传播。
  */
 export interface IdeOptions {
-  /** Which reader this level's programs are written for. */
+  /** 本关的程序按哪种格式读。 */
   format(): 'asm' | 'bytes';
-  /** The text changed: `main.ts` stores it and drops the run built from the old one. */
+  /** 文本变了：`main.ts` 把它存起来，并丢弃用旧文本构建的运行。 */
   onEdit(text: string): void;
-  /** Read the text as a program now, and show what came out. */
+  /** 现在就把文本读成程序，并显示结果。 */
   onAssemble(): void;
-  /** Start or stop the level's own test run. */
+  /** 开始或停止本关自己的测试运行。 */
   onTest(): void;
-  /** Apply one clock edge to the program run. */
+  /** 对程序运行走一个时钟沿。 */
   onStep(): void;
-  /** Start or stop stepping the program on a timer. */
+  /** 开始或停止用定时器连续单步程序。 */
   onToggleRun(): void;
-  /** True while the program is being stepped on a timer. */
+  /** 程序正在被定时器连续单步时为真。 */
   running(): boolean;
-  /** True while the level's own cases are being played. */
+  /** 本关自己的用例正在逐个播放时为真。 */
   testing(): boolean;
-  /** The step pace, as the existing vocabulary labels it (`8×`). */
+  /** 单步节奏，沿用既有词汇的写法（如 8×）。 */
   rate(): string;
-  /** Steps through the step paces. */
+  /** 在几档单步节奏之间循环。 */
   onCycleRate(): void;
-  /** What the current run holds, or `null` when nothing has been assembled yet. */
+  /** 当前运行持有什么；还没汇编过时为 `null`。 */
   result(): {
     readonly bytes: readonly number[];
     readonly errors: readonly string[];
@@ -62,11 +55,10 @@ export interface IdeOptions {
 }
 
 /**
- * The monospace editor's two labels, by the reader the level's programs use.
+ * 等宽编辑器按本关程序所用的阅读器给出的两个标签。
  *
- * The label is how a player learns which language to write: the punchcard level
- * speaks bytes and every other level speaks assembly, and a placeholder alone
- * would be a hint they might not look at.
+ * 标签是玩家得知该写哪种语言的途径：打孔卡关卡读字节，其它关卡读汇编，
+ * 而只给 placeholder 等于给一个玩家可能不会去看的提示。
  */
 const LABELS: Record<'asm' | 'bytes', { editor: string; placeholder: string }> = {
   asm: { editor: '汇编程序编辑器', placeholder: 'move|inp|d1' },
@@ -99,14 +91,14 @@ export function mountIde(
   assemble.title = '汇编：把当前文本读成程序映像';
   head.append(title, gap, rate, assemble);
 
-  // The gutter is a second column of the same text: `main.ts`'s textarea scrolls,
-  // and the numbers follow it in its own `scroll` handler below.
+  // 行号槽是同一段文本的第二列：`main.ts` 的 textarea 会滚动，
+  // 下面的 `scroll` 处理器让数字跟着它一起滚。
   const editor = document.createElement('div');
   editor.className = 'ide-editor';
   const gutter = document.createElement('div');
   gutter.className = 'ide-gutter';
-  // Decorative: every number it holds is also a line of the text beside it, and a
-  // screen reader reading 1, 2, 3 before the program would be reading punctuation.
+  // 装饰性内容：它里面的每个数字旁边文本里都有对应的一行；
+  // 让屏幕阅读器在程序之前先读 1、2、3，等于在读标点。
   gutter.setAttribute('aria-hidden', 'true');
   const code = document.createElement('textarea');
   code.className = 'ide-code';
@@ -145,8 +137,8 @@ export function mountIde(
     render();
   });
   assemble.addEventListener('click', () => {
-    // Assembling is what makes the run current, so the panel renders AFTER the
-    // callback: the byte count and the hex it shows are the ones just produced.
+    // 汇编才会让这次运行变成「当前」的，所以面板在回调之后才渲染：
+    // 它显示的字节数和十六进制正是刚刚产出的那一份。
     options.onAssemble();
     render();
   });
@@ -157,27 +149,26 @@ export function mountIde(
   code.addEventListener('scroll', () => {
     gutter.scrollTop = code.scrollTop;
   });
-  // The board's handler is on `window`: stopping the event here is what keeps a
-  // Backspace in the editor from deleting the selected parts of the circuit.
+  // 画板的处理器挂在 `window` 上：在这里止住事件，
+  // 编辑器里的 Backspace 才不会删掉电路里选中的元件。
   code.addEventListener('keydown', (event) => {
     event.stopPropagation();
   });
 
-  /** The level's text, as the app holds it: the store is the one copy. */
+  /** 本关的文本，以应用持有的那份为准：store 是唯一的副本。 */
   const text = (): string => {
     const { level, programs } = store.get();
     return programs[level.id] ?? '';
   };
 
   /**
-   * What the two expensive halves of the panel were last built from.
+   * 面板两处「昂贵」的部分上一次是依据什么构建的。
    *
-   * A PANEL RE-RENDER IS NOT A PROGRAM EDIT: `main.ts` re-renders on every store
-   * change, and panning, zooming or clicking a part all go through the store -- so
-   * without these the gutter and the hex view would be rebuilt from scratch dozens
-   * of times a second for a program that has not moved. The text (a string) and
-   * the image (an array the run owns, so identity is the honest test) are the two
-   * things that actually say whether there is anything new to draw.
+   * 面板重渲染不等于程序被编辑：`main.ts` 在任何 store 变化时都会重渲染，
+   * 而平移、缩放、点选元件都要经过 store——没有这两个缓存，行号槽和十六进制视图
+   * 会为一个根本没动过的程序每秒重建几十次。
+   * 真正决定「有没有新东西要画」的只有两样：文本（字符串）和映像（运行持有的数组，
+   * 用引用相等来判断才是诚实的）。
    */
   let shownText: string | null = null;
   let shownBytes: readonly number[] | null = null;
@@ -187,8 +178,8 @@ export function mountIde(
     const labels = LABELS[options.format()];
     code.setAttribute('aria-label', labels.editor);
     code.placeholder = labels.placeholder;
-    // Only when the player is not in it: replacing the value of a focused
-    // textarea would put the caret at the end on the next keystroke.
+    // 只在玩家不在输入框里时才写回值：替换一个已聚焦 textarea 的 value，
+    // 会让下一次按键把光标跳到末尾。
     if (document.activeElement !== code && code.value !== current) code.value = current;
     if (shownText !== current) {
       shownText = current;
@@ -209,10 +200,9 @@ export function mountIde(
 
     const result = options.result();
     const error = result?.errors[0];
-    // A REFUSED PROGRAM CANNOT BE STEPPED, and the buttons say so rather than
-    // doing nothing: the status line right above them is the reader's own
-    // sentence about which line is wrong. While the text is merely unassembled
-    // the controls stay live, because asking for a step assembles it first.
+    // 被拒绝的程序不能单步，按钮直接禁用而不是按了没反应：
+    // 正上方的状态行会说明是哪一行错了。文本只是「还没汇编」时控件仍然可用，
+    // 因为请求单步本身会先触发汇编。
     const refused = result !== null && result.errors.length > 0;
     step.disabled = refused;
     run.disabled = refused;
@@ -220,8 +210,7 @@ export function mountIde(
       status.textContent = '尚未汇编';
       status.style.color = THEME.textMuted;
     } else if (error !== undefined) {
-      // The reader's own sentence, which names the line: a refusal is not a
-      // program, so there is no byte count to show beside it.
+      // 阅读器自己给出的句子，会指明出错的行：拒绝不是程序，所以旁边没有字节数可显示。
       status.textContent = error;
       status.style.color = THEME.error;
     } else {
@@ -232,8 +221,7 @@ export function mountIde(
     const showBytes = result !== null && error === undefined && result.bytes.length > 0;
     bytes.hidden = !showBytes;
     if (!showBytes) {
-      // Nothing to show: the cells go with the view, so a later program cannot be
-      // drawn beside the previous one's.
+      // 没有可显示的东西：格子随视图一起清掉，免得下一个程序挨着上一个程序的残留画出来。
       if (shownBytes !== null) {
         bytes.replaceChildren();
         shownBytes = null;
@@ -248,7 +236,7 @@ export function mountIde(
   return { render };
 }
 
-/** One byte of the image view, as two hex digits. */
+/** 映像视图中的一个字节，显示为两位十六进制数字。 */
 function byteCell(value: number): HTMLElement {
   const cell = document.createElement('span');
   cell.className = 'ide-byte';
@@ -257,10 +245,10 @@ function byteCell(value: number): HTMLElement {
 }
 
 /**
- * One number per line of the text, in the same order.
+ * 文本每行一个数字，顺序与文本一致。
  *
- * The gutter is rebuilt rather than diffed: a program is a few hundred lines at
- * most, and a diff would be a second place for the two columns to disagree.
+ * 行号槽整体重建而不做差量：一个程序最多几百行，
+ * 做 diff 反而会让两列多出一个可能对不上的地方。
  */
 function renderGutter(gutter: HTMLElement, text: string): void {
   const count = text.split('\n').length;
@@ -275,13 +263,11 @@ function renderGutter(gutter: HTMLElement, text: string): void {
 }
 
 /**
- * One of the transport controls, as an icon-only button.
+ * 走带控件之一，只显示图标。
  *
- * The same vocabulary as the board's toolbar: the icons are the shell's own
- * (`测试`, `单步`, `运行`/`停止`), and a player who has run the board's clock
- * already knows what they mean. The label is on `aria-label` and `title`, which
- * is what the toolbar does for the same reason -- a panel button whose text was a
- * glyph would leak that glyph into anything reading the panel's text.
+ * 沿用画板工具栏的同一套词汇：图标来自外壳（`测试`、`单步`、`运行`/`停止`），
+ * 跑过画板时钟的玩家已经知道它们的意思。标签放在 `aria-label` 和 `title` 上，
+ * 工具栏也是这么做的，原因相同——面板按钮的文字若是字形，就会漏进任何读取面板文本的地方。
  */
 function iconButton(
   label: string,
@@ -291,9 +277,8 @@ function iconButton(
 ): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
-  // `tool-btn` rather than a copy of it: these are the same transport controls
-  // the toolbar draws, one panel over, and a second set of sizes and states would
-  // be a second thing to keep in step with them.
+  // 直接用 `tool-btn` 而不是复制一份样式：这些就是工具栏画的那几个走带控件，
+  // 只隔了一个面板；再维护一套尺寸与状态，就是第二个需要与之同步的东西。
   button.className = `tool-btn ${className}`;
   button.setAttribute('aria-label', label);
   button.title = label;

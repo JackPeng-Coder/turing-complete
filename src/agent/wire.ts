@@ -1,41 +1,41 @@
 /**
- * The wire format of an OpenAI-compatible chat completion, written out by hand.
+ * OpenAI 兼容 chat completion 的线上报文格式，全部手写。
  *
- * WHY HAND-WRITTEN TYPES AND NOT A CLIENT LIBRARY. This project ships no runtime
- * dependency at all (`test/conventions.test.ts` fails the build if one appears),
- * and an SDK would bring its own transport, retry policy and error type into a
- * program whose whole job is to talk to a `fetch` the browser already has.
+ * 为什么手写类型而不用客户端库：本项目不携带任何运行时依赖
+ * （一旦出现，test/conventions.test.ts 会让构建失败），
+ * 而一个 SDK 会把自带的传输层、重试策略和错误类型塞进一个
+ * 只想用浏览器已有 fetch 说话的程序里。
  *
- * ONLY THE FIELDS THIS APP SENDS OR READS ARE HERE. The real schema is far
- * larger -- logprobs, tool choice, response formats, audio -- and every field
- * declared is a field the code has to be kept honest about. What is missing is
- * missing on purpose: a provider that returns extra fields returns them into
- * nothing, which is exactly what should happen.
+ * 这里只声明本应用会发送或读取的字段。真实的 schema 大得多——
+ * logprobs、tool choice、response format、音频——而每声明一个字段，
+ * 代码就必须对它保持诚实。缺的字段是有意缺席的：
+ * 对方多返回的字段会落进「什么都不对应」里，这正是应该发生的事。
  *
- * The one place the shapes are load-bearing is the STREAMING TOOL CALL, whose
- * arguments arrive as a string split across chunks (`StreamToolCallDelta`). See
- * `client.ts` for how the fragments are put back together.
+ * 唯一真正承重的地方是流式工具调用：
+ * 它的参数是一个被切成多块的 JSON 字符串（StreamToolCallDelta）。
+ * 碎片如何拼回去，见 client.ts。
  */
 
-/** A function's arguments as a JSON Schema object, restricted to what is used. */
+/** 函数参数用的 JSON Schema 对象，只限本应用实际用到的部分。 */
 export interface JsonSchema {
   readonly type: 'object';
   readonly properties: Readonly<Record<string, JsonSchemaProperty>>;
   readonly required?: readonly string[];
-  /** Always `false`: a model that invents an argument should be told, not ignored. */
+  /** 始终为 false：模型若编造参数，应该被明确告知，而不是被忽略。 */
   readonly additionalProperties?: false;
 }
 
+/** 一个参数属性的声明：类型、说明，以及可选的取值范围或元素类型。 */
 export interface JsonSchemaProperty {
   readonly type: 'string' | 'number' | 'integer' | 'boolean' | 'array';
   readonly description: string;
-  /** When present, the only values accepted. */
+  /** 存在时，只接受其中列出的值。 */
   readonly enum?: readonly string[];
-  /** For `array` only, and only strings: a list of instance ids, never objects. */
+  /** 仅用于 array，且元素只能是字符串：一串实例 id，不会是对象。 */
   readonly items?: { readonly type: 'string' };
 }
 
-/** A tool as the model sees it: name, description, parameters. Nothing else. */
+/** 模型看到的一个工具：名字、说明、参数。仅此三项。 */
 export interface WireTool {
   readonly type: 'function';
   readonly function: {
@@ -45,45 +45,47 @@ export interface WireTool {
   };
 }
 
+/** 模型请求的一次工具调用：调用 id、函数名，以及原始 JSON 参数文本。 */
 export interface WireToolCall {
   readonly id: string;
   readonly type: 'function';
   readonly function: { readonly name: string; readonly arguments: string };
 }
 
-/** One entry of the conversation, in the shape the API expects it back. */
+/** 对话历史中的一条，按 API 期望的格式回传。 */
 export interface WireMessage {
   readonly role: 'system' | 'user' | 'assistant' | 'tool';
-  /** `null` on an assistant turn that only called tools, as the API returns it. */
+  /** 只在调用工具的助手轮里为 null，与 API 返回的形状一致。 */
   readonly content: string | null;
-  /** On an assistant turn that asked for tools. */
+  /** 出现在请求工具的助手轮上。 */
   readonly tool_calls?: readonly WireToolCall[];
-  /** On a `tool` message: which call it answers. */
+  /** 在 tool 消息上：它回答的是哪一次调用。 */
   readonly tool_call_id?: string;
 }
 
+/** 一次 chat completion 请求的报文体。 */
 export interface ChatRequest {
   readonly model: string;
   readonly messages: readonly WireMessage[];
   readonly tools?: readonly WireTool[];
   readonly stream: true;
   /**
-   * Ask the provider for a final frame carrying the token counts.
+   * 请求对方在最后一帧带上 token 计数。
    *
-   * OpenAI-compatible streaming omits `usage` unless this is set; without it the
-   * panel can measure time but not a single token, and the usage line would be
-   * blank on every provider that follows the spec.
+   * OpenAI 兼容的流式响应默认不返回 usage；不打开它，
+   * 面板能测时间却一个 token 都测不到，
+   * 在任何遵循该规范的服务商上，用量那一行都会是空白。
    */
   readonly stream_options?: { readonly include_usage: true };
 }
 
 /**
- * The provider's own accounting, in the two dialects that exist in the wild.
+ * 服务商自己的用量口径，实际存在两种方言。
  *
- * OpenAI nests the cache figure under `prompt_tokens_details.cached_tokens`;
- * DeepSeek (and several compatible endpoints) put `prompt_cache_hit_tokens` and
- * `prompt_cache_miss_tokens` at the top level. Both are read, neither is
- * required: a provider that reports only `prompt_tokens` still gives a total.
+ * OpenAI 把缓存数字放在 prompt_tokens_details.cached_tokens 里；
+ * DeepSeek（以及若干兼容端点）把 prompt_cache_hit_tokens 与
+ * prompt_cache_miss_tokens 放在顶层。两种都读，且都不强求：
+ * 只报 prompt_tokens 的服务商仍然能给出总数。
  */
 export interface WireUsage {
   readonly prompt_tokens?: number;
@@ -93,29 +95,31 @@ export interface WireUsage {
   readonly prompt_cache_miss_tokens?: number;
   readonly prompt_tokens_details?: { readonly cached_tokens?: number };
   readonly completion_tokens_details?: { readonly reasoning_tokens?: number };
-  /** A provider that omits the counts entirely (or a `null` payload). */
+  /** 对方完全没有报计数（或负载是 null）时，本字段的取值。 */
   readonly [field: string]: unknown;
 }
 
-/** One frame of the stream: the envelope, with everything optional. */
+/** 流中的一帧：一个信封，所有字段都可选。 */
+/** 服务端流式返回的一帧。 */
 export interface StreamChunk {
   readonly choices?: readonly {
     readonly delta?: {
       readonly content?: string | null;
-      /** Sent by reasoning models; deliberately ignored -- it is not the answer. */
+      /** 推理模型会发它；本程序有意忽略——它不是答案。 */
       readonly reasoning_content?: string | null;
       readonly tool_calls?: readonly StreamToolCallDelta[];
     };
     readonly finish_reason?: string | null;
   }[];
-  /** Present instead of `choices` when the request failed mid-stream. */
+  /** 请求在流中途失败时，它取代 choices 出现。 */
   readonly error?: { readonly message?: string; readonly type?: string };
-  /** Token accounting, on the frame `stream_options.include_usage` asked for. */
+  /** token 用量，出现在 stream_options.include_usage 要求的那一帧。 */
   readonly usage?: WireUsage | null;
 }
 
+/** 流式工具调用的一块碎片：同一次调用的参数会逐块追加。 */
 export interface StreamToolCallDelta {
-  /** Which call this fragment belongs to: the only stable key while streaming. */
+  /** 这块碎片属于哪一次调用：流式传输期间唯一稳定的键。 */
   readonly index: number;
   readonly id?: string;
   readonly type?: string;

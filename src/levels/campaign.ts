@@ -1,23 +1,27 @@
 /**
- * The campaign's shape: which levels exist, in which chapter, at which global
- * index, under which name.
+ * 战役的形状：有哪些关卡、各属第几章、全局序号是多少、中英文名各是什么。
  *
- * This table is the 2.x baseline, transcribed from `GAME_RESEARCH_2026-10-03.md`
- * §5 ("完整关卡流程（93 关全表）", the sourced Steam-guide table). Chapters 5-7
- * (levels 57-93) are not built yet and are not listed here; this file covers the
- * 56 levels of chapters 1-4, which is what the replica ships.
+ * 这张表以 2.x 版为准，转录自 `GAME_RESEARCH_2026-10-03.md` 的 §5
+ * （“完整关卡流程（93 关全表）”，一张有出处的 Steam 攻略表）。第 5~7 章
+ * （第 57~93 关）尚未制作，所以不列在这里；本文件覆盖第 1~4 章的 56 关，
+ * 也就是本项目实际发布的全部关卡。
  *
- * It exists as data rather than as prose so that `test/levels/campaign-shape.test.ts`
- * can hold the level specs to it: the id, the chapter, the global `index` and
- * both names have to agree exactly, in this order. Before this table, the shape
- * lived only in the plans -- and drifted: the campaign used to spend two of its
- * 47 slots on one puzzle (Binary Racer, once at chapter 1's capstone and once in
- * chapter 2) and left two parts (`decoder2`, `alu2`) with no level to hand them
- * out.
+ * 之所以把战役形状写成数据而不是文字说明，是为了让
+ * `test/levels/campaign-shape.test.ts` 能用它约束关卡规格：id、章节号、
+ * 全局 `index` 与中英文名必须逐项、按序完全一致。在有了这张表之前，形状
+ * 只活在设计计划里，而且确实漂移过：战役曾把 47 个格子中的两个花在同一个
+ * 谜题上（Binary Racer 既是第 1 章的压轴、又在第 2 章出现），还漏掉了两个
+ * 元件（decoder2、alu2），没有任何关卡负责把它们发给玩家。
  *
- * `index` is the GLOBAL position, not the position within the chapter: chapter 2
- * starts at 14 because chapter 1 has 13 levels. The id repeats it
- * (`ch2-14-binary-racer`), so the two must be changed together.
+ * `index` 是全局位次，不是章内位次：第 2 章从 14 开始，因为第 1 章有
+ * 13 关。id 里也重复了这个位次（`ch2-14-binary-racer`），所以两者必须
+ * 一起改，否则关卡地图的序号会与 id 对不上。
+ */
+/**
+ * 战役表中的一行：一关的“身份”。
+ *
+ * 它只描述关卡在战役里的位置和名字，不含玩法数据；玩法规格在
+ * `content/` 下按关实现，测试保证两边的 id 与名字一致。
  */
 export interface CampaignEntry {
   readonly id: string;
@@ -27,9 +31,14 @@ export interface CampaignEntry {
   readonly en: string;
 }
 
-/** Chapters 1-4 of the 2.x campaign, in unlock order. */
+/**
+ * 2.x 战役的第 1~4 章，按解锁顺序排列。
+ *
+ * 数组顺序即解锁顺序；测试拿它和 `content/` 里各关的规格逐项对照，
+ * 所以改战役形状应改这里，而不是去改某一关的关卡对象。
+ */
 export const CAMPAIGN: readonly CampaignEntry[] = [
-  // Chapter 1 -- 布尔代数 (Boolean Logic), 13 levels
+  // 第 1 章 —— 布尔代数（Boolean Logic），13 关
   { id: 'ch1-01-humble-beginnings', chapter: 1, index: 1, zh: '从零开始', en: 'Humble Beginnings' },
   { id: 'ch1-02-nand-gate', chapter: 1, index: 2, zh: '与非门', en: 'NAND Gate' },
   { id: 'ch1-03-not-gate', chapter: 1, index: 3, zh: '非门', en: 'NOT Gate' },
@@ -44,7 +53,7 @@ export const CAMPAIGN: readonly CampaignEntry[] = [
   { id: 'ch1-12-xnor-gate', chapter: 1, index: 12, zh: '同或门', en: 'XNOR Gate' },
   { id: 'ch1-13-logic-exam', chapter: 1, index: 13, zh: '逻辑试炼', en: 'Logic Exam' },
 
-  // Chapter 2 -- 算术运算、存储器 (Arithmetic, Memory), 26 levels
+  // 第 2 章 —— 算术运算、存储器（Arithmetic, Memory），26 关
   { id: 'ch2-14-binary-racer', chapter: 2, index: 14, zh: '二进制速算', en: 'Binary Racer' },
   { id: 'ch2-15-double-detection', chapter: 2, index: 15, zh: '成双成对', en: 'Double Detection' },
   {
@@ -96,7 +105,7 @@ export const CAMPAIGN: readonly CampaignEntry[] = [
   { id: 'ch2-38-little-box', chapter: 2, index: 38, zh: '方寸之间', en: 'Little Box' },
   { id: 'ch2-39-counter', chapter: 2, index: 39, zh: '计数器', en: 'Counter' },
 
-  // Chapter 3 -- 处理器架构 (CPU Architecture, OVERTURE), 10 levels
+  // 第 3 章 —— 处理器架构（CPU Architecture, OVERTURE），10 关
   {
     id: 'ch3-40-alu-1',
     chapter: 3,
@@ -132,7 +141,7 @@ export const CAMPAIGN: readonly CampaignEntry[] = [
   { id: 'ch3-48-program', chapter: 3, index: 48, zh: '程序', en: 'Program' },
   { id: 'ch3-49-turing-complete', chapter: 3, index: 49, zh: '图灵完备', en: 'Turing Complete' },
 
-  // Chapter 4 -- 编程 (Programming), 7 levels
+  // 第 4 章 —— 编程（Programming），7 关
   {
     id: 'ch4-50-punchcard-programming',
     chapter: 4,

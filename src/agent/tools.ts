@@ -1,33 +1,27 @@
 /**
- * The tool registry: the only way the model is allowed to touch the app.
+ * 工具注册表：模型能够触碰这个应用的唯一通道。
  *
- * A TOOL IS A NAME, A DESCRIPTION, A PARAMETER SCHEMA AND A FUNCTION. That is the
- * whole protocol, and it is deliberately the same four things the API expects,
- * so `toolWire` below is a rename rather than a translation. What this file adds
- * on top of the raw call is the part that decides whether a run survives a bad
- * model turn:
+ * 一个工具就是「名字 + 说明 + 参数 schema + 函数」，整套协议只有这四样，
+ * 而且刻意与 API 期望的四样一致，所以下面的 toolWire 只是改名而不是翻译。
+ * 本文件在「裸调用」之上补的那部分，才决定一次运行能否扛住模型的坏回合：
  *
- *   - ARGUMENTS ARE VALIDATED BEFORE THE FUNCTION RUNS. The API promises
- *     schema-shaped JSON, and models mostly keep that promise, but "mostly" is
- *     not a contract: a streamed argument can arrive truncated, a number can
- *     arrive as a string, and a hallucinated key can slip in. Every one of those
- *     is answered with a sentence the MODEL can act on ("参数 x 应该是整数"),
- *     because a thrown exception ends the run where a correcting message gets a
- *     second attempt.
+ *   - 参数先校验、后执行。API 承诺给出符合 schema 的 JSON，模型大多遵守，
+ *     但「大多」不是契约：流式参数可能被截断，数字可能以字符串到达，
+ *     还可能混进一个编造的键。每一种都用模型能照做的中文句子回答
+ *     （例如「参数 x 应该是整数」），
+ *     因为抛出异常会结束整次运行，而一句纠正的话能换来第二次尝试。
  *
- *   - A REFUSAL IS A RESULT, NOT A CRASH. `ToolError` is the one exception type
- *     that means "I will not do that, and here is why" -- an unknown pin, a part
- *     that does not exist, an import that was malformed. Anything else escaping a
- *     tool is a bug in this repository, and it is reported as one so the model
- *     does not spend the rest of the run apologising for it.
+ *   - 拒绝是一种结果，不是崩溃。ToolError 是唯一一种表示
+ *     「我不做这件事，原因如下」的异常——未知引脚、不存在的元件、
+ *     格式错误的导入。从工具里逃出来的其他异常都是本仓库的 bug，
+ *     会按 bug 报告，免得模型把余下的预算都用来道歉。
  *
- *   - NOTHING HERE IS ASYNCHRONOUS-BLIND. `run` may return a promise (the test
- *     run and the import both do), and `runTool` awaits it, so a caller cannot
- *     accidentally treat a pending step as a finished one.
+ *   - 这里不会把异步当成已完成。run 可以返回 Promise（测试运行和导入都是），
+ *     runTool 会 await 它，调用方就不可能把「还在跑」误当成「已跑完」。
  */
 import type { JsonSchema, WireTool } from './wire';
 
-/** A refusal the model should read and respond to, in Chinese. */
+/** 一种模型应该读懂并作出回应的拒绝，用中文写。 */
 export class ToolError extends Error {
   constructor(message: string) {
     super(message);
@@ -35,41 +29,46 @@ export class ToolError extends Error {
   }
 }
 
+/** 一份已通过校验的工具参数。 */
 export type ToolArgs = Readonly<Record<string, unknown>>;
 
-/** Everything a tool is allowed to know about the run it is part of. */
+/** 一个工具被允许知道的、关于本次运行的一切。 */
 export interface ToolContext {
-  /** Aborted when the player presses 停止; a long tool must honour it. */
+  /** 玩家按下「停止」时会被中止；耗时的工具必须尊重它。 */
   readonly signal: AbortSignal;
 }
 
+/** 一个工具的完整声明：给模型看的三个字段，加一个执行函数。 */
 export interface ToolSpec {
   readonly name: string;
   readonly description: string;
   readonly parameters: JsonSchema;
+  /** 执行这个工具；可以是异步的，runTool 会 await 它。 */
   run(args: ToolArgs, context: ToolContext): unknown | Promise<unknown>;
   /**
-   * One line for the PLAYER, from a result the model is about to read as JSON.
+   * 给玩家看的一行话，依据是模型马上就要当成 JSON 去读的结果。
    *
-   * THE TWO AUDIENCES ARE NOT THE SAME. The model needs `{"id":"i1","x":160}` --
-   * it has to name that part in its next call -- and a person watching needs
-   * "在 (160,160) 放了与非门（i1）". Rendering the JSON for the player is what makes
-   * a working panel read like a debug console, and rendering prose for the model
-   * is what makes it guess. So the result stays JSON and this function, when a
-   * tool has one, says the same thing in a sentence.
+   * 两个受众并不相同。模型需要 {"id":"i1","x":160}——
+   * 它下一步得叫出这个元件的名字；而旁观的人需要
+   * 「在 (160,160) 放了与非门（i1）」。
+   * 把 JSON 直接渲染给玩家，会让一个能用的面板读起来像调试控制台；
+   * 而把散文给模型，它就只能猜。所以结果保持 JSON，
+   * 这个函数（如果工具提供了）负责用一句话说同一件事。
    */
   present?(result: unknown, args: ToolArgs): string | undefined;
 }
 
-/** What goes back to the model: JSON text, always, success or refusal. */
+/** 回到模型手里的东西：JSON 文本，无论成功还是拒绝。 */
 export interface ToolOutcome {
+  /** 这次调用是成功还是被拒绝。 */
   readonly ok: boolean;
+  /** 回到模型手里的 JSON 文本。 */
   readonly text: string;
-  /** The same outcome as one line of Chinese, when the tool knows how to say it. */
+  /** 同一结果的单行中文，前提是工具知道该怎么说。 */
   readonly note: string;
 }
 
-/** The tools as the API wants to see them; the description schema is the same one. */
+/** 工具在 API 眼里的样子；说明用的就是同一份 schema。 */
 export function toolWire(specs: readonly ToolSpec[]): WireTool[] {
   return specs.map((spec) => ({
     type: 'function',
@@ -77,15 +76,17 @@ export function toolWire(specs: readonly ToolSpec[]): WireTool[] {
   }));
 }
 
+/** 按名字找工具；没有就返回 null，调用方据此回一句「没有这个工具」。 */
 export function findTool(specs: readonly ToolSpec[], name: string): ToolSpec | null {
   return specs.find((spec) => spec.name === name) ?? null;
 }
 
-/** The tools' names, for a message that tells the model what it may call. */
+/** 所有工具名连成一句，用于告诉模型它可以调用哪些工具。 */
 export function toolNames(specs: readonly ToolSpec[]): string {
   return specs.map((spec) => spec.name).join('、');
 }
 
+/** 按声明逐项校验一个参数，返回第一条中文错误；没问题时返回 null。 */
 function checkProperty(
   key: string,
   value: unknown,
@@ -116,15 +117,15 @@ function checkProperty(
   }
 }
 
+/** 参数校验的结果：要么是已检查的参数，要么是一句给模型的纠正。 */
 export type ArgCheck = { readonly ok: true; readonly args: ToolArgs } | { readonly ok: false; readonly error: string };
 
 /**
- * Turns the raw argument string into checked arguments, or into a correction.
+ * 把原始参数字符串变成「已检查的参数」，或者变成一句纠正。
  *
- * The string is what the model actually sent, fragments already joined, and it is
- * parsed here rather than in the transport for one reason: only this layer knows
- * what the arguments were supposed to be, so only this layer can say what is
- * wrong with them.
+ * 字符串就是模型实际发来的内容（碎片已经拼好），在这里解析而不是在传输层，
+ * 原因只有一个：只有这一层知道参数本来应该是什么样，
+ * 所以也只有这一层能说清它错在哪里。
  */
 export function checkArguments(spec: ToolSpec, raw: string): ArgCheck {
   let parsed: unknown;
@@ -152,18 +153,18 @@ export function checkArguments(spec: ToolSpec, raw: string): ArgCheck {
   return { ok: true, args: record };
 }
 
+/** 把任意异常值变成一句可读的说明。 */
 function describe(cause: unknown): string {
   if (cause instanceof Error) return cause.message;
   return String(cause);
 }
 
 /**
- * Checks the arguments, runs the tool, and reports whatever happened as JSON.
+ * 先校验参数，再运行工具，最后把发生的一切都写成 JSON 报告。
  *
- * THE RESULT IS ALWAYS JSON, AND ALWAYS HAS `ok`. A model reading a tool result
- * has no other way to tell "the pin does not exist" from "the wire was added":
- * both are just text, and a run that cannot tell them apart keeps building on a
- * step that never happened.
+ * 结果永远是 JSON，而且永远带 ok。
+ * 模型读工具结果时没有别的办法区分「引脚不存在」和「导线已连上」：
+ * 两者都只是文本；如果一次运行分不清，它就会在一个从未发生过的步骤上继续施工。
  */
 export async function runTool(
   spec: ToolSpec,
@@ -186,8 +187,8 @@ export async function runTool(
       try {
         note = spec.present(value, checked.args) ?? '';
       } catch {
-        // A presentation bug must never fail the step it is describing: the
-        // circuit changed, and the log falls back to the raw result.
+        // 展示函数的 bug 绝不能让它所描述的那一步失败：
+        // 电路已经改了，日志退回原始结果即可。
         note = '';
       }
     }
@@ -204,19 +205,22 @@ export async function runTool(
   }
 }
 
-/** A string argument, already checked; the cast is the check's own guarantee. */
+/** 取一个字符串参数（已校验）；这里的类型断言由校验本身保证。 */
 export function stringArg(args: ToolArgs, key: string): string {
   return args[key] as string;
 }
 
+/** 取一个数字参数（已校验）。 */
 export function numberArg(args: ToolArgs, key: string): number {
   return args[key] as number;
 }
 
+/** 取一个字符串数组参数（已校验）。 */
 export function stringArrayArg(args: ToolArgs, key: string): string[] {
   return args[key] as string[];
 }
 
+/** 取一个可选的字符串参数；不存在或类型不对都返回 undefined。 */
 export function optionalString(args: ToolArgs, key: string): string | undefined {
   const value = args[key];
   return typeof value === 'string' ? value : undefined;

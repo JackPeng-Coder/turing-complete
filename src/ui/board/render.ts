@@ -1,21 +1,19 @@
 /**
- * Canvas painting for the board.
+ * 画板的 Canvas 绘制。
  *
- * Drawing is a pure function of the store's current state: the caller decides
- * when to repaint (state change, clock edge or resize), never a rAF loop -- a
- * static board must not repaint 60 times a second. Panning, zooming and dragging
- * all go through `store.set`, so every frame in which something actually moves
- * still repaints.
+ * 绘制是 store 当前状态的纯函数：什么时候重绘由调用方决定（状态变化、时钟边沿或窗口缩放），
+ * 绝不使用 rAF 循环——静止的画板不该每秒重绘 60 次。
+ * 平移、缩放和拖拽都要经过 `store.set`，所以只要这一帧里真有东西在动，就仍然会重绘。
  *
- * Layers, bottom to top: paper, snap grid, wires, part bodies, pins, badges.
+ * 图层自下而上：纸面、吸附网格、导线、元件（本体、丝印与角标、引脚）；
+ * 拖拽预览、框选和手持预览由 `renderBoard` 在最后补画。
  *
- * THE LOOK IS THE ORIGINAL'S. Slate blue paper with a woven texture, orange
- * 1-bit wires and teal buses routed at right angles with rounded corners, blue
- * bodies for primitive gates and green for the wide machine parts, crimson pills
- * and circles for a level's own pins -- all sampled from reference screenshots
- * and named in `theme.ts`. What is NOT taken from the original is the geometry:
- * `view.ts` owns where a part and its pins sit, and the end-to-end tests drag
- * wires at the coordinates that geometry produces.
+ * 视觉风格参考原作：深色纸面配编织纹、直角带圆角的走线、关卡引脚做成胶囊或圆。
+ * 但配色已经按本项目的“仪器化”规则重定，全部取自 `theme.ts`：
+ * 绿 = 1，红 = 0，蓝 = 宽于一位，slate 灰 = 还没仿真。
+ * 元件的形状表达它“是什么”（经典逻辑符号），颜色表达它“此刻在做什么”（见 `partAppearance`）。
+ * 不取自原作的是几何：`view.ts` 决定元件与引脚的位置，
+ * 端到端测试正是按那套几何产生的坐标去拖导线。
  */
 import {
   BUS_WIDTH,
@@ -33,72 +31,66 @@ import {
 import type { AppState, Store } from '../../app/store';
 import { instanceRect, placementAt, pinPosition, worldToScreen, type Camera, type Point } from './view';
 import { instanceHeight } from './geometry';
-// The ghost previews the id and width the DROP will give the connector, so it
-// asks the same function the drop uses rather than a second copy of the rule.
+// 手持预览要显示“放下时”连接器将得到的 id 与位宽，
+// 所以它直接询问放置时用的同一个函数，而不是再抄一份规则。
 import { levelIoPlacement } from './interact';
 import { CORNER_RADIUS, cornerRadii, longestSegment, routeWire } from './routing';
 import { planRoutes } from './routes';
 import { partCodeOf } from './markings';
 import type { Graph, Instance } from '../../core/graph';
 import type { ComponentDef, Registry } from '../../core/registry';
-// The pin-width rule is the compiler's, not a copy of it: a renderer that
-// disagreed with `core/net.ts` would draw a wire as one bit wide and route a
-// byte through it.
+// 引脚位宽的规则属于编译器，这里不抄一份：若渲染器与 `core/net.ts` 理解不一致，
+// 它就会把一根总线画成一位宽，或者把字节当一位来布线。
 import { effectiveWidth } from '../../core/net';
 
 /**
- * Everything the board paints that the store does not hold.
+ * 画板要画、但 store 里并不保存的全部东西。
  *
- * Produced by `signals.ts` (the values) and by `main.ts` (the view flags), and
- * passed in rather than read from the store: the board is also painted by tests
- * and by the resize handler, and neither of those has a simulation to hand.
+ * 由 `signals.ts`（数值）和 `main.ts`（视图开关）生产，以参数形式传入而不是从 store 读取：
+ * 测试和窗口缩放处理也会重绘画板，而它们手边并没有一份仿真。
  */
 export interface BoardView {
-  /** Value at an output pin, keyed `${instanceId}.${portId}`. */
+  /** 输出引脚的值，键为 `${instanceId}.${portId}`。 */
   readonly outputs: ReadonlyMap<string, number>;
-  /** False when the circuit never reached a fixed point: no value is trustworthy. */
+  /** 电路没有到达不动点时为 false：任何数值都不可信。 */
   readonly stable: boolean;
-  /** Whether the snap grid is drawn. */
+  /** 是否绘制吸附网格。 */
   readonly grid: boolean;
   /**
-   * Where the pointer is, in world units, or `null` when it is off the board.
+   * 指针所在的世界坐标；指针不在画板上时为 `null`。
    *
-   * View state rather than store state: it belongs beside the camera, it changes
-   * on every mouse move, and the only thing on the board that reads it is the
-   * ghost of the part armed in the palette.
+   * 属于视图状态而不是 store 状态：它应该和相机放在一起，每次鼠标移动都会变，
+   * 而画板上唯一读它的东西，就是元件托盘里那个手持预览。
    */
   readonly ghost: Point | null;
 }
 
 /**
- * The silhouette a part is drawn in.
+ * 元件本体的轮廓形状。
  *
- * The original gives every gate its own outline, and it is worth copying: a
- * board of identical boxes tells a player nothing about what they are looking
- * at, and the shapes are read faster than the labels are. They are the classic
- * logic symbols, which is what the original's are too.
+ * 原作给每种门单独的轮廓，值得照抄：一整板一模一样的方框不会告诉玩家他看的是什么，
+ * 而形状比标签读得更快。这些就是经典逻辑符号，原作用的也是它们。
  */
 export type GateShape = 'box' | 'd' | 'or' | 'xor' | 'triangle' | 'block' | 'split' | 'make';
 
+/** 一个元件的外观：轮廓族，以及它是否反相（输出端带气泡）。 */
 export interface GateLook {
-  /** The outline family. `box` is everything that is not a boolean gate. */
+  /** 轮廓族。`box` 表示所有非布尔门的元件。 */
   readonly shape: GateShape;
-  /** True when the gate inverts: its output carries the classic bubble. */
+  /** 为 true 时该门反相：输出端画经典的小圆圈（气泡）。 */
   readonly bubble: boolean;
 }
 
 /**
- * The look of a part, keyed on its id.
+ * 一个元件的外观，按 id 查表。
  *
- * The two inversion families are told apart by the bubble and not by the body,
- * which is how a logic diagram works and what makes `nand` distinct from `and`:
- * ten boolean parts, ten silhouettes -- a triangle for NOT, a D for AND and its
- * three-input form, a shield for OR, a shield with a second arc for XOR, a
- * bubble on the four that invert, and a chamfered block for the full adder,
- * which is a circuit rather than a gate and is drawn as one.
+ * 两个反相族靠气泡区分，而不是靠本体——逻辑图就是这么画的，也是 `nand` 与 `and` 的区别：
+ * 十个布尔元件、十种轮廓——NOT 是三角形，AND 及其三输入形式是 D 形，OR 是盾形，
+ * XOR 是带第二道弧的盾形，四个反相门在输出端加气泡，全加器是切角方块，
+ * 因为它是电路而不是门，就按电路来画。
  *
- * A test walks the registry's `logic1` family and fails on any that falls
- * through to `box`, so a gate added later cannot quietly ship without a shape.
+ * 有测试遍历注册表的 `logic1` 家族，任何落进 `box` 的成员都会失败，
+ * 后来新增的门因此不能悄悄没有形状。
  */
 export function gateLookOf(def: ComponentDef): GateLook {
   switch (def.id) {
@@ -120,13 +112,11 @@ export function gateLookOf(def: ComponentDef): GateLook {
       return { shape: 'xor', bubble: true };
     case 'full_adder':
       return { shape: 'block', bubble: false };
-    // The two packers are the only parts whose shape is their FUNCTION rather
-    // than their family: a funnel, narrow where the word is and wide where the
-    // bits are. One word in and a bit per output out (`split`), or the same
-    // picture reversed (`make`). The 16/32-bit variants the sandbox registers are
-    // the same part at another width, so they are the same silhouette -- and like
-    // every width-suffixed id they share the base marking, because the width is
-    // what the pins say.
+    // 两个打包/拆包器是唯一“形状即功能”而不是“形状即家族”的元件：
+    // 一个漏斗，写字的一端窄、出位的一端宽。
+    // 一个字节进去、每位一个输出出来（`split`），或者同一幅图反过来（`make`）。
+    // 沙盒注册的 16/32 位变体是同一个元件换了位宽，所以轮廓相同——
+    // 和所有带位宽后缀的 id 一样共用基础丝印，因为位宽由引脚说明。
     case 'splitter':
     case 'splitter16':
     case 'splitter32':
@@ -140,28 +130,26 @@ export function gateLookOf(def: ComponentDef): GateLook {
   }
 }
 
-/** Room reserved at the output edge for the inversion bubble, in world pixels. */
+/** 输出端为反相气泡预留的空间，单位：世界像素。 */
 const BUBBLE_ROOM = 13;
-/** How far an XOR's body sits behind its extra arc, in world pixels. */
+/** XOR 的本体比它多出的那道弧后退多少，单位：世界像素。 */
 const XOR_BACK = 9;
-/** Half the height of a funnel's narrow end, in world pixels. */
+/** 漏斗窄端高度的一半，单位：世界像素。 */
 const FLAT_END = 9;
 
 /**
- * The face every marking and readout on the board is drawn in.
+ * 画板上所有丝印与读数使用的字体。
  *
- * The same stack `style.css` gives the chrome, so a `NAND` on a gate and the
- * `门 4 个` in the top bar are visibly the same instrument's lettering. Chinese
- * never reaches this: a part's marking is Latin, and the numbers are numbers.
+ * 与 `style.css` 给界面外壳的字体是同一套，于是门上的 `NAND` 和顶栏的 `门 4 个`
+ * 看起来来自同一台仪器。中文永远到不了这里：元件丝印是拉丁字母，数字就是数字。
  */
 const MONO = 'ui-monospace, "Cascadia Mono", Consolas, monospace';
 
 /**
- * Where a label sits in a body, as a fraction of its width.
+ * 文字在元件本体里的横向位置，取本体宽度的比例。
  *
- * Text centred in a silhouette rather than a rectangle lands on the arc or runs
- * off the point: a triangle's mass is behind its apex, a D's is left of its
- * semicircle, a shield's left of its point.
+ * 文字若居中于“轮廓”而不是“矩形”，就会落到弧线上或跑出尖端：
+ * 三角形的质量在顶点之后，D 形的质量在半圆左侧，盾形的质量在尖端左侧。
  */
 const LABEL_CENTRE: Record<GateShape, number> = {
   box: 0.5,
@@ -170,20 +158,19 @@ const LABEL_CENTRE: Record<GateShape, number> = {
   or: 0.45,
   xor: 0.42,
   triangle: 0.36,
-  // A funnel's mass is at its wide end, where the bits are.
+  // 漏斗的质量在它宽的一端，也就是出位的那一端。
   split: 0.58,
   make: 0.42,
 };
 
-/** The corner a block has cut off: the diagram's mark for "this is a circuit". */
+/** 方块被切掉的角：原理图里“这是一块电路”的记号。 */
 const BLOCK_CHAMFER = 14;
 
 /**
- * Begins the path of a part's body.
+ * 开始勾勒元件本体的路径。
  *
- * `box` is left to `roundedRect`; the rest are the classic symbols. Every gate
- * that inverts gives up `BUBBLE_ROOM` at its output edge so the bubble has
- * somewhere to sit that is not on top of the pin.
+ * `box` 交给 `roundedRect`；其余是经典符号。每个反相门都在输出边缘让出 `BUBBLE_ROOM`，
+ * 好让气泡有地方放，而不至于压在引脚上。
  */
 function traceBody(
   ctx: CanvasRenderingContext2D,
@@ -205,8 +192,7 @@ function traceBody(
   ctx.beginPath();
   switch (look.shape) {
     case 'block': {
-      // A rounded rectangle with its top-left corner cut off: the long-standing
-      // mark for a block that is a circuit rather than a gate.
+      // 一个圆角矩形切掉左上角：这是“方块代表电路而不是门”的长期记号。
       const cut = BLOCK_CHAMFER * zoom;
       const r = Math.min(PART_RADIUS * zoom, h / 4);
       ctx.moveTo(x + cut, y);
@@ -227,9 +213,8 @@ function traceBody(
       ctx.closePath();
       break;
     case 'split': {
-      // THE FUNNEL, and the shape is the part's whole job: one word arrives at a
-      // point on the left and a bit leaves for every output down the right. The
-      // flat at the point is the single wide pin's landing.
+      // 漏斗。形状就是该元件的全部工作：一个字从左边的一点进入，
+      // 每个输出从右边带一位出去。尖端这一小段平面就是那个宽引脚的落脚点。
       const flat = Math.min(FLAT_END * zoom, h / 4);
       ctx.moveTo(x + FLAT_END * 1.6 * zoom, y);
       ctx.lineTo(right, y);
@@ -241,8 +226,7 @@ function traceBody(
       break;
     }
     case 'make': {
-      // The same funnel the other way round: a bit per input down the left, one
-      // word out of the point on the right.
+      // 同一个漏斗反过来：左边每位一个输入，右边尖点吐出整个字。
       const flat = Math.min(FLAT_END * zoom, h / 4);
       ctx.moveTo(x, y);
       ctx.lineTo(right - FLAT_END * 1.6 * zoom, y);
@@ -254,8 +238,8 @@ function traceBody(
       break;
     }
     case 'd':
-      // Flat where the inputs arrive, semicircular where the output leaves --
-      // and the flat run has to stop short of the arc by its own radius.
+      // 输入到达的一侧是平的，输出离开的一侧是半圆——
+      // 而且平直段必须比圆弧提前一个半径结束，否则接不上圆弧。
       ctx.moveTo(x, y);
       ctx.lineTo(right - radius, y);
       ctx.arc(right - radius, cy, radius, -Math.PI / 2, Math.PI / 2);
@@ -263,7 +247,7 @@ function traceBody(
       ctx.closePath();
       break;
     default: {
-      // OR and XOR: a concave back, and two convex curves meeting in a point.
+      // OR 与 XOR：凹进去的背，以及两条凸曲线在尖端汇合。
       const back = look.shape === 'xor' ? x + XOR_BACK * zoom : x;
       const belly = x + (right - x) * 0.58;
       ctx.moveTo(back, y);
@@ -277,8 +261,7 @@ function traceBody(
 }
 
 /**
- * The marks a silhouette carries beyond its outline: XOR's second arc at the
- * input edge, and the bubble on the four gates that invert.
+ * 轮廓之外的记号：XOR 在输入边的第二道弧，以及四个反相门上的气泡。
  */
 function paintMarks(
   ctx: CanvasRenderingContext2D,
@@ -312,21 +295,18 @@ function paintMarks(
 }
 
 /**
- * A part's body is its own state, not its family.
+ * 元件的本体颜色表示它自己的状态，而不是它的家族。
  *
- * It used to be keyed on `def.category` -- blue for the primitive gates, green
- * for the wide ones -- which said what a part IS. The board now says what a part
- * is DOING: green while it produces a 1, red while it produces a 0, blue for a
- * word, slate until something has run. The family is still legible from the
- * silhouette (`gateLookOf`), so nothing was lost by spending the colour on state.
+ * 过去按 `def.category` 上色——原始门蓝色、多位元件绿色——那表达的是“元件是什么”。
+ * 现在画板表达的是“元件正在做什么”：产出 1 时绿色、产出 0 时红色、
+ * 处理一个字时蓝色、还没运行过时 slate 灰。
+ * 家族仍然能从轮廓看出来（`gateLookOf`），所以把颜色花在状态上并没有丢信息。
  *
- * THE WIDEST PIN DECIDES, not the first output. Reading `outputs[0]` painted the
- * splitter green whenever its bit 0 happened to be high -- a word-handling part
- * wearing a bit's colour, next to a maker painted blue because ITS first output
- * was the byte -- and the two halves of one packer pair disagreed about what
- * they were. A part is as wide as its widest pin: `and8` and `equal8` are word
- * parts, the splitter and the maker are word parts, and the answer a comparison
- * produces is still legible on the wire leaving it, which is green or red.
+ * 由最宽的引脚决定，而不是第一个输出。读 `outputs[0]` 会让分离器在 bit 0 恰好为高时变成绿色——
+ * 一个处理字的元件穿着一位的颜色；而合并器因为它的第一个输出是字节而被画成蓝色——
+ * 一对打包器的两半对“自己是什么”各执一词。
+ * 元件有多宽由最宽的引脚决定：`and8` 和 `equal8` 是字元件，分离器和合并器是字元件，
+ * 而比较运算产生的答案仍然能从那根离开它的导线上读出来，那是绿色或红色。
  */
 function partAppearance(
   def: ComponentDef,
@@ -340,11 +320,10 @@ function partAppearance(
 }
 
 /**
- * How wide a part reports itself: its WIDEST pin, inputs and outputs together.
+ * 一个元件自称的宽度：输入与输出一起取最宽的那个。
  *
- * Exported because the rule is worth stating on its own -- `appearance.test.ts`
- * walks the parts whose two ends disagree about their width, which is where
- * reading the wrong end showed up.
+ * 单独导出是因为这条规则值得单独说明——`appearance.test.ts` 会遍历“两端宽度不一致”的元件，
+ * 而那正是“读错了一端”会暴露出来的地方。
  */
 export function partWidthOf(def: ComponentDef, inst: Instance): number {
   let width = 1;
@@ -354,7 +333,7 @@ export function partWidthOf(def: ComponentDef, inst: Instance): number {
   return width;
 }
 
-/** What a part has to report: its own output, or what a sink is being fed. */
+/** 一个元件该报告什么值：它自己的输出，或者它作为接收端被喂进去的值。 */
 function outValueOf(
   def: ComponentDef,
   inst: Instance,
@@ -376,35 +355,31 @@ function roundedRect(
   r: number | readonly number[],
 ): void {
   ctx.beginPath();
-  // `roundRect` is the fast path on every current browser; the rectangle
-  // fallback keeps an older one from throwing once per frame.
+  // `roundRect` 在所有现代浏览器上都是快路径；
+  // 矩形兜底让旧浏览器不至于每帧抛一次异常。
   if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, r as number);
   else ctx.rect(x, y, w, h);
 }
 
 /**
- * The outline of a part's body that is NOT a boolean gate: a level pin is a pill
- * or a circle, everything else a rounded rectangle.
+ * 非布尔门元件本体的轮廓圆角半径：关卡引脚是胶囊或圆，其余是圆角矩形。
  */
 function boxRadiusOf(def: ComponentDef, h: number, zoom: number): number {
   return def.category === 'level' ? h / 2 : PART_RADIUS * zoom;
 }
 
 /**
- * The silhouette a part is drawn in, decided once for both the board and the
- * hand.
+ * 元件用哪种轮廓绘制；画板与手持预览共用同一份决定。
  *
- * THE GHOST AND THE PLACED PART USED TO HAVE DIFFERENT BODIES, and the level
- * connector is where it showed: the ghost passed `PART_RADIUS` to `traceBody`
- * while a placed part asked `boxRadiusOf`, so `关卡输出` previewed as a rounded
- * rectangle and landed as a circle. The level input had the mirror-image bug on
- * its other axis: the ghost keyed the arrow off the DEF id, the board off the
- * INSTANCE id prefix, so a spare `level_input` (allocated `i1` once the level's
- * pins were taken) was previewed as an arrow and drawn as a box.
+ * 手持预览和已放置元件过去用的是不同的本体，关卡连接器正是露馅的地方：
+ * 预览把 `PART_RADIUS` 传给 `traceBody`，而已放置元件问的是 `boxRadiusOf`，
+ * 于是“关卡输出”预览时是圆角矩形、落下后却变成圆。
+ * 关卡输入在另一条轴上有一模一样的毛病：预览按“定义 id”判断是否画箭头，
+ * 画板按“实例 id 前缀”判断，于是一个多余的 `level_input`
+ * （关卡引脚放完后被分配成 `i1`）预览时是箭头、画出来却是方块。
  *
- * One function, two callers: a preview cannot disagree with the result about
- * geometry again. The arrow is the level input's own symbol; a level output is a
- * body with a full-height radius, i.e. a circle at the part's size.
+ * 一个函数、两个调用方：预览再也不可能和结果在几何上意见不一。
+ * 箭头是关卡输入自己的符号；关卡输出是“圆角半径等于高度一半”的本体，也就是元件尺寸下的圆。
  */
 export type PartSilhouette =
   | { readonly kind: 'level-arrow' }
@@ -415,7 +390,7 @@ export function silhouetteOf(def: ComponentDef, h: number, zoom: number): PartSi
   return { kind: 'body', look: gateLookOf(def), radius: boxRadiusOf(def, h, zoom) };
 }
 
-/** Traces a silhouette at a rectangle; the single drawing path for both states. */
+/** 在指定矩形上勾勒一种轮廓；已放置元件与手持预览共用的唯一绘制路径。 */
 export function traceSilhouette(
   ctx: CanvasRenderingContext2D,
   silhouette: PartSilhouette,
@@ -432,11 +407,10 @@ export function traceSilhouette(
 }
 
 /**
- * The width a part declares, before an instance overrides it.
+ * 元件定义声明的位宽，在实例覆盖它之前。
  *
- * What a ghost previews: the drop will put the def's own width on an ordinary
- * part, and a level connector's width comes from the pin instead (see
- * `drawGhost`).
+ * 手持预览汇报的就是这个值：普通元件放下时会采用定义自己的位宽，
+ * 而关卡连接器的位宽来自引脚（见 `drawGhost`）。
  */
 export function declaredWidthOf(def: ComponentDef): number {
   let width = 1;
@@ -445,23 +419,19 @@ export function declaredWidthOf(def: ComponentDef): number {
 }
 
 /**
- * The paper: a flat slate blue with a soft diagonal weave over it.
+ * 纸面：一层平的深导航蓝，上面覆着柔和的斜向编织纹。
  *
- * The weave is a pattern rather than a run of `stroke()` calls because the
- * original's is not a hairline. Sampling its board along one row shows the paper
- * ramping from `#364765` up to about `#354c6b` and back over NINE pixels of a
- * twenty-four pixel period, with the pale plateau covering roughly a quarter of
- * the area. A single 1px line per period renders as a sparse scratch, and five
- * overlapping strokes peaked two levels above the paper -- both measured, both
- * wrong.
+ * 编织纹用 pattern 而不是一串 `stroke()` 调用，因为原作里的它不是一根发丝线。
+ * 早期沿参考图的一行采样过：纸面在一个 24 像素周期里先升后降，
+ * 较亮的高原大约覆盖四分之一面积；每个周期只画一条 1 像素线像稀疏的划痕，
+ * 五条重叠描边又会高出纸面两级——两者都量过，都不对。
  *
- * So the band is filled: one 24 unit tile holds the region `3 ≤ x + y ≤ 13`
- * (a band 7 units wide across, at 45 degrees) painted with a gradient that fades
- * in and out along its normal. Repeating the tile reproduces `x + y ≡ c (mod 24)`
- * seamlessly -- the band continues across tile edges, which is why it is a
- * polygon and not a stroked line. It is drawn through the camera transform, so
- * the weave is part of the board's material: panning carries it with the circuit
- * instead of sliding a texture underneath it.
+ * 于是改成填充色带：一个 24 单位的方块覆盖区域 `3 ≤ x + y ≤ 13`
+ * （斜 45 度、宽 7 单位的带），用沿法线方向渐隐的渐变填充。
+ * 重复这个方块就能无缝重现 `x + y ≡ c (mod 24)`——色带跨过方块边界继续延伸，
+ * 这也是它必须是多边形而不是描边线的原因。它在相机变换下绘制，
+ * 所以编织纹是画板材质的一部分：平移时它跟着电路一起走，而不是在下面滑一张贴图。
+ * （现行配色由 `theme.ts` 决定，编织纹与纸面的亮度差控制在三到五级。）
  */
 let weaveTile: HTMLCanvasElement | null = null;
 const weavePatterns = new WeakMap<CanvasRenderingContext2D, CanvasPattern>();
@@ -470,7 +440,7 @@ const WEAVE_TILE = 24;
 const WEAVE_INNER = 3;
 const WEAVE_OUTER = 13;
 
-/** `#rrggbb` as `r, g, b`, for the stops that fade a band out to nothing. */
+/** 把 `#rrggbb` 拆成 `r, g, b`，用于构造渐隐到透明的渐变端点。 */
 function rgbTriplet(hex: string): string {
   const n = Number.parseInt(hex.slice(1), 16);
   return `${(n >> 16) & 0xff}, ${(n >> 8) & 0xff}, ${n & 0xff}`;
@@ -485,8 +455,7 @@ function weaveFor(ctx: CanvasRenderingContext2D): CanvasPattern | null {
     tile.height = WEAVE_TILE;
     const tctx = tile.getContext('2d');
     if (!tctx) return null;
-    // The gradient runs along the band's normal, `(1, 1)`, from one edge of the
-    // band to the other; its midpoint is the band's centre line.
+    // 渐变沿色带的法线 `(1, 1)` 方向，从色带一边到另一边；渐变中点就是色带中心线。
     const ramp = tctx.createLinearGradient(
       WEAVE_INNER / 2,
       WEAVE_INNER / 2,
@@ -519,7 +488,7 @@ function drawPaper(ctx: CanvasRenderingContext2D, camera: Camera, w: number, h: 
   const pattern = weaveFor(ctx);
   if (!pattern) return;
   ctx.save();
-  // The world-to-screen transform, so the pattern is measured in world units.
+  // 世界到屏幕的变换，这样 pattern 的单位就是世界坐标。
   ctx.translate(camera.x * camera.zoom, camera.y * camera.zoom);
   ctx.scale(camera.zoom, camera.zoom);
   ctx.fillStyle = pattern;
@@ -528,9 +497,8 @@ function drawPaper(ctx: CanvasRenderingContext2D, camera: Camera, w: number, h: 
 }
 
 /**
- * The snap grid: one line every eight world cells, which is the lattice a part
- * lands on. The minor lines are gone on purpose -- the weave is the texture, and
- * two competing grids made the board read as graph paper rather than a board.
+ * 吸附网格：每 8 个世界单元一条线，也就是元件落点的格点。
+ * 细网格线被刻意去掉了——编织纹已经是纹理，两套网格叠在一起会让画板读成坐标纸而不是画板。
  */
 function drawGrid(ctx: CanvasRenderingContext2D, camera: Camera, w: number, h: number): void {
   const step = GRID * 8 * camera.zoom;
@@ -558,7 +526,7 @@ function drawGrid(ctx: CanvasRenderingContext2D, camera: Camera, w: number, h: n
   ctx.stroke();
 }
 
-/** Screen-space polyline with rounded corners, ready to be filled or stroked. */
+/** 屏幕空间里带圆角的折线路径，可以直接填充或描边。 */
 function tracePath(ctx: CanvasRenderingContext2D, points: readonly Point[], camera: Camera): void {
   const screen = points.map((p) => worldToScreen(camera, p));
   const radii = cornerRadii(points, CORNER_RADIUS * camera.zoom);
@@ -572,7 +540,7 @@ function tracePath(ctx: CanvasRenderingContext2D, points: readonly Point[], came
   ctx.lineTo(last.x, last.y);
 }
 
-/** The value at an output pin, or `undefined` when nothing is known about it. */
+/** 某个输出引脚的值；不知道时返回 `undefined`。 */
 function outputValue(
   view: BoardView | null | undefined,
   instId: string,
@@ -583,16 +551,15 @@ function outputValue(
 }
 
 /**
- * Paints one wire in the board's value colours: green for a live bit, a dark red
- * trace for a bit at 0, a blue cable with a bright core for a word.
+ * 按画板的值配色画一根导线：1 位为 1 时绿色，1 位为 0 时暗红色，
+ * 多位总线是蓝色电缆加一条亮芯。
  *
- * LIT WIRES GLOW, and the glow is a second wide stroke under the solid one
- * rather than a canvas shadow: `shadowBlur` re-renders the path through a blur
- * pass per stroke, and a board is hundreds of strokes. Two passes at one alpha
- * cost a stroke each and read the same.
+ * 点亮的导线会发光，而光晕是实线下方第二道更宽的描边，不是 Canvas 阴影：
+ * `shadowBlur` 会让每条描边都额外跑一遍模糊，而一块画板有数百条描边。
+ * 两遍描边各一次绘制、读数效果一样。
  *
- * `value === undefined` is the neutral colour, not red: a value the app has not
- * simulated must not be painted as a confident 0.
+ * `value === undefined` 用中性色而不是红色：应用还没仿真出的值，
+ * 不能被画成一个理直气壮的 0。
  */
 function drawWire(
   ctx: CanvasRenderingContext2D,
@@ -642,15 +609,13 @@ function drawWire(
 }
 
 /**
- * Where a bus's value is written: the SCREEN point at the middle of its longest
- * run, or `null` when the label would not fit.
+ * 总线的数值写在哪儿：最长那一段的“屏幕”中点；标签放不下时返回 `null`。
  *
- * Its own function because the camera is not optional here and the bug was
- * exactly that. The painter used to call `worldToScreen({ x: 0, y: 0, zoom },
- * segment.mid)` -- a camera with no pan -- so the label was drawn
- * `camera.x * zoom` pixels away from its wire: a fifth of a screen at zoom 4,
- * and moving further off with every click of the zoom button, which is what the
- * player noticed. The number belongs ON the wire, at every zoom and every pan.
+ * 单独成一个函数，因为这里相机不是可选的，而过去的 bug 恰恰出在这。
+ * 画笔曾经调用 `worldToScreen({ x: 0, y: 0, zoom }, segment.mid)`——一个没有平移的相机——
+ * 于是标签被画到离导线 `camera.x * zoom` 像素远的地方：缩放 4 倍时能差出五分之一屏，
+ * 而且每点一次缩放按钮就偏得更远，玩家注意到并且报告的正是这个。
+ * 数字应该在线上，任何缩放和平移下都是。
  */
 export function valueLabelAt(
   points: readonly Point[],
@@ -662,13 +627,11 @@ export function valueLabelAt(
 }
 
 /**
- * A bus's value, written on its longest segment.
+ * 一根总线的数值，写在它最长的那一段上。
  *
- * Room is the constraint, not the number: a label longer than the wire it sits
- * on is unreadable, so the leading digits are dropped until it fits -- which is
- * why the original shows `5` and `25` where a wider wire shows `255`. The label
- * is stroked first in the paper's own dark and then filled, so it stays legible
- * over both the dark bus body and the bright core.
+ * 约束是空间而不是数字：比导线还长的标签读不出来，所以从高位开始丢数字直到放得下——
+ * 这就是为什么原作在宽线上会显示 `5`、`25` 而不是 `255`。
+ * 标签先用纸面自身的深色描边、再填充，这样压在深色总线体和亮芯上都清楚。
  */
 function drawValueLabel(
   ctx: CanvasRenderingContext2D,
@@ -700,16 +663,14 @@ function drawValueLabel(
 }
 
 /**
- * Bold white text with a dark outline: readable on every body colour.
+ * 深色描边的白色粗体：在任何本体颜色上都可读。
  *
- * `maxWidth` shrinks the type until the label fits the body it sits on. Canvas
- * would squash a too-long string into the width instead, and a horizontally
- * compressed `8 位非门` is harder to read than a smaller one.
+ * `maxWidth` 会不断缩小字号直到标签放得下。Canvas 会把过长的字符串横向压扁，
+ * 而一个被压扁的 `8 位非门` 比小一号的更难读。
  *
- * `family` is the interface's monospace by default, because a part's marking is
- * a chip legend and the numbers in a level connector are a readout -- both are
- * measurements, and the instrument face is what the rest of the chrome uses.
- * A caller with prose to draw passes `THEME`'s reading face instead.
+ * `family` 默认用界面的等宽字体：元件丝印是芯片顶面的字，关卡连接器里的数字是读数——
+ * 两者都是“测量值”，而仪器面板的字体就是界面其余部分用的那套。
+ * 需要画散文的调用方传入 `THEME` 的阅读字体。
  */
 function outlinedText(
   ctx: CanvasRenderingContext2D,
@@ -738,27 +699,26 @@ function outlinedText(
 }
 
 /**
- * The pin's name, printed in a badge at a part's top-left corner.
+ * 引脚的名字，印在元件左上角的角标里。
  *
- * A level's arrow and its circle say what they are carrying but not WHICH pin
- * they are, and a level with four visually identical outputs -- or two identical
- * inputs -- left the player guessing. The badge is the board's half of the
- * answer; the other half is the ordinal in the test panel's label column.
+ * 关卡的箭头和圆告诉你它们运送什么，却不告诉你是“哪一个”引脚；
+ * 一个有四个外观相同的输出的关卡（或两个相同输入）会让玩家只能猜。
+ * 角标是画板给出的那一半答案；另一半是测试面板标签列里的序号。
  *
- * The name comes from the instance id, which is what binds the part to the level
- * (`IN_a`, `OUT`, `OUT_out3`), so it is the same string `bindLevelIo` matches on
- * and cannot drift from it.
+ * 名字来自实例 id，而实例 id 正是把元件绑定到关卡的东西（`IN_a`、`OUT`、`OUT_out3`），
+ * 所以它就是 `bindLevelIo` 用来匹配的字符串，不会和它漂移。
  */
 function levelPinName(inst: Instance): string {
   return pinNameOf(inst.id);
 }
 
-/** The name a level connector's badge shows, from the id that binds it. */
+/** 关卡连接器角标显示的名字，由绑定它的实例 id 得出。 */
 function pinNameOf(id: string): string {
   const name = id.replace(/^IN_/, '').replace(/^OUT_?/, '');
   return name.length > 0 ? name : 'out';
 }
 
+/** 元件左上角的引脚名角标：深色半透明底、浅色字，尺寸跟着缩放。 */
 function drawNameBadge(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -783,10 +743,9 @@ function drawNameBadge(
 }
 
 /**
- * The bit width of a part's pins, printed in a corner badge.
+ * 元件引脚的位宽，印在角标里。
  *
- * Cyan rather than one of the three value colours: a width is not a value, and a
- * green or red badge on a part would be read as one.
+ * 用青色而不是三种数值色：位宽不是数值，若画成绿或红会被读成一个值。
  */
 function drawWidthBadge(
   ctx: CanvasRenderingContext2D,
@@ -818,8 +777,8 @@ function drawWires(
   view: BoardView | null | undefined,
 ): void {
   const byId = new Map(graph.instances.map((i) => [i.id, i]));
-  // One plan for the whole board, so a wire is routed against the wires already
-  // placed rather than against nothing: see `routes.ts`.
+  // 整块画板共用一份规划，于是每根导线都是对着“已经放好的导线”绕行的，而不是对着空无一物：
+  // 见 `routes.ts`。
   const plan = planRoutes(graph, registry);
   for (const wire of graph.wires) {
     const from = byId.get(wire.from.inst);
@@ -845,16 +804,14 @@ function drawWires(
 }
 
 /**
- * One pin's marker.
+ * 一个引脚的标记。
  *
- * Shape carries the width: a square for a single bit, a ringed circle for a bus
- * -- which is the original's own split, and the reason a wide pin is legible at
- * a glance in a circuit full of thin ones.
+ * 形状表达位宽：单位是方块，总线是带环的圆——这是原作自己的划分，
+ * 也让宽引脚在一堆细引脚里一眼可辨。
  *
- * Colour carries the value, in the board's own three: green a live bit, red a
- * bit at 0, blue a word, slate a pin nothing is driving. A lit pin also gets the
- * same halo a lit wire does, so a signal reads as one continuous thing from the
- * part that produced it to the pin that received it.
+ * 颜色表达数值，用画板的三种颜色：绿是活的 1 位，红是 0，蓝是一个字，
+ * slate 灰是没有任何东西驱动的引脚。点亮的引脚还会得到与点亮导线相同的光晕，
+ * 于是一个信号从产生它的元件到接收它的引脚，读起来是一整条连续的东西。
  */
 function drawPin(
   ctx: CanvasRenderingContext2D,
@@ -908,13 +865,12 @@ function drawPin(
 }
 
 /**
- * Every input pin's value, keyed `${instanceId}.${portId}`.
+ * 每个输入引脚的值，键为 `${instanceId}.${portId}`。
  *
- * An input pin's value is its driver's -- the netlist gathers it bit by bit from
- * `drive`, and `drive` points at the driving output -- so the board reads it the
- * same way instead of re-deriving it: walk the wires, look up the source output.
- * Without this every input pin would be olive, and the original's lit green pins
- * at the far end of a wire are half of what makes a working circuit legible.
+ * 输入引脚的值就是它驱动源的值——网表按位从 `drive` 收集它，而 `drive` 指向产生它的输出引脚——
+ * 所以画板也用同样的办法读取，而不是自己再推导一遍：沿着导线走，查源输出。
+ * 没有这一步，每个输入引脚都会显示成“未驱动”的中性色；而原作里导线远端那些点亮的绿色引脚，
+ * 正是“电路工作正常”的一半可读性。
  */
 function drivenInputs(
   graph: Graph,
@@ -929,21 +885,17 @@ function drivenInputs(
 }
 
 /**
- * A level input's silhouette: the original's arrow, a bar the signal arrives at
- * and a triangle whose apex sits exactly on the output pin -- so the wires leave
- * the point of the arrow instead of the middle of a box.
+ * 关卡输入的轮廓：原作的那支箭头——信号到达的一根竖条，以及一个顶点正好落在输出引脚上的三角形，
+ * 于是导线从箭头的尖离开，而不是从方块中间离开。
  *
- * ONE PATH, and that is the whole point of it being a path rather than a pair of
- * fills. It used to be a rounded bar and a triangle filled one after the other,
- * which left two artefacts at the joint: a hairline SEAM, because two
- * antialiased edges that merely touch never quite cover the pixel between them,
- * and a NOTCH in the shoulder, because the bar's right corners were rounded and
- * the triangle's edge slopes away from them. Rounded on the LEFT only, closed in
- * one subpath, and traced here so the body can be filled, stroked, haloed and
- * bevelled from the same outline every other part uses.
- * Exported for `appearance.test.ts`, which records the calls it makes: the defect
- * it fixes was structural -- a shape drawn as two subpaths -- and structure is
- * what a test can hold on to. A screenshot cannot.
+ * 只画一条路径，这正是“路径”而不是“两次填充”的全部意义。过去它是一个圆角条加一个三角形，
+ * 先后填充，接缝处留下两处瑕疵：一条极细的缝——两条仅仅相接的抗锯齿边缘永远盖不满中间那个像素；
+ * 以及肩部的一个缺口——竖条的右角是圆的，而三角形那条边从角上斜着离开。
+ * 现在只把左边做圆、闭合在同一条子路径里，并在这里勾勒：
+ * 这样本体也能像其他元件一样，用同一份轮廓去填充、描边、加光晕和做顶部高光。
+ *
+ * 导出给 `appearance.test.ts`：它会记录本函数发出的调用，因为这里修的缺陷是结构性的
+ * （一个形状被画成两条子路径），而结构正是测试能抓住的东西——截图抓不住。
  */
 export function traceLevelArrow(
   ctx: CanvasRenderingContext2D,
@@ -969,13 +921,11 @@ export function traceLevelArrow(
 }
 
 /**
- * The selection band, while Ctrl is being dragged.
+ * Ctrl 拖拽时的选择框。
  *
- * Filled and outlined in the operator's colour, the same one a selected part's
- * outline uses, because it is the same statement: "these are the ones I mean".
- * It is drawn in WORLD coordinates through the same transform as everything
- * else, so it stays glued to the parts it is sweeping over while the board is
- * panned mid-drag.
+ * 用操作者的颜色填充并描边，与选中元件的描边同色，因为它们是同一个陈述：
+ * “这些是我要的”。它和其他东西一样通过相机变换用世界坐标绘制，
+ * 所以拖拽中途平移画板时，框仍然粘在它扫过的元件上。
  */
 function drawMarquee(ctx: CanvasRenderingContext2D, state: AppState, camera: Camera): void {
   const drag = state.dragging;
@@ -995,11 +945,10 @@ function drawMarquee(ctx: CanvasRenderingContext2D, state: AppState, camera: Cam
 }
 
 /**
- * The wire being pulled out of a pin, from that pin to the pointer.
+ * 正从引脚里拉出来的导线，从那个引脚画到指针。
  *
- * Dashed and in the armed colour, so it reads as a proposal rather than as a
- * connection: nothing exists in the graph until the pointer is released on an
- * input pin.
+ * 用虚线、用“手持”色，读起来是一个提议而不是一条连接：
+ * 直到在某个输入引脚上松开，电路图里才真正出现这根线。
  */
 function drawDragPreview(
   ctx: CanvasRenderingContext2D,
@@ -1037,23 +986,22 @@ function drawInstance(
   const w = rect.w * camera.zoom;
   const h = rect.h * camera.zoom;
   const isSelected = selected.includes(inst.id);
-  // The same silhouette the ghost draws: by def, never by instance id (a spare
-  // level_input would otherwise be previewed as an arrow and land as a box).
+  // 和手持预览画的是同一种轮廓：按定义判断，绝不按实例 id
+  // （否则一个多余的 level_input 会预览成箭头、落下后却是方块）。
   const silhouette = silhouetteOf(def, h, camera.zoom);
   const arrowInput = silhouette.kind === 'level-arrow';
   const gate = gateLookOf(def);
   const { colour, glow } = partAppearance(def, inst, view, driven);
 
-  // Whichever silhouette this part has, it is painted the same way: one path,
-  // haloed when lit, filled, outlined, and bevelled along the top. A level input
-  // used to be the exception -- two flat fills and nothing else -- which is why
-  // it looked like a sticker next to the gates it feeds.
+  // 无论这个元件是哪种轮廓，画法都一样：一条路径、点亮时加光晕、填充、描边，
+  // 再沿顶部做高光。关卡输入过去是例外——只有两层平面填充——所以它在一排门旁边
+  // 看起来像一张贴纸。
   const trace = (): void => {
     traceSilhouette(ctx, silhouette, p, w, h, camera.zoom);
   };
 
-  // A lit part is haloed by a wide translucent stroke of its own body path, the
-  // same two-pass glow a lit wire gets: one reading, everywhere.
+  // 点亮的元件用一道宽而半透明的自身轮廓描边做光晕，
+  // 与点亮的导线是同一种两遍画法：全板读数一致。
   if (glow) {
     ctx.save();
     ctx.globalAlpha = 0.28;
@@ -1069,8 +1017,7 @@ function drawInstance(
   trace();
   ctx.fill();
   ctx.stroke();
-  // A light bevel along the top: the original's parts are lit from above, and it
-  // is what keeps a flat fill from reading as a placeholder.
+  // 顶部一道浅色高光：原作的元件受光于上方，正是它让平面填充不至于读成占位符。
   ctx.save();
   trace();
   ctx.clip();
@@ -1082,25 +1029,21 @@ function drawInstance(
   const outputWidth = def.outputs[0] ? effectiveWidth(inst, def.outputs[0]) : 1;
   const value = def.outputs[0] ? outputValue(view, inst.id, def.outputs[0].id) : undefined;
 
-  // A level connector is NAMED by its badge and CARRIES a value; it is not
-  // labelled. Its body used to print the instance id (`IN_b3`, `OUT_out3`),
-  // which is the string that binds the part to the level -- the app's own
-  // bookkeeping, drawn on the board for the player to read, and a duplicate of
-  // the badge above it.
+  // 关卡连接器靠角标“报名字”、身上“带数值”，并不写标签。
+  // 它的本体过去印的是实例 id（`IN_b3`、`OUT_out3`），那是把元件绑定到关卡的字符串——
+  // 是应用自己的簿记，画在画板上给玩家看，而且和上面的角标重复。
   //
-  // BOTH ENDS SHOW THE NUMBER, and the input is not a special case: a disc that
-  // says what it holds and an arrow that says nothing is one connector drawn two
-  // ways. What the input holds is what it is DRIVING, which is the same reading
-  // the left-hand panel takes -- `level_input` has an output pin, so the value is
-  // read exactly as an output's is.
+  // 两端都显示数字，输入不是特例：一个说自己装什么的圆盘，和一个什么都不说的箭头，
+  // 是同一个连接器被画成了两种样子。输入“装”的是它正在驱动的东西，
+  // 这与左侧面板的读法完全一致——`level_input` 也有一个输出引脚，所以它的值就和输出一样读取。
   const bound = def.category === 'level' && /^(IN_|OUT)/.test(inst.id);
   if (bound) {
     if (value !== undefined) {
       outlinedText(
         ctx,
         String(value),
-        // The arrow's mass is behind its apex, so its number sits further left
-        // than a disc's: centred, the last digit of `255` runs off the slope.
+        // 箭头的质量在顶点之后，所以它的数字比圆盘上的更靠左：
+        // 若居中，`255` 的最后一位会跑到斜边外面去。
         p.x + w * (arrowInput ? 0.42 : 0.5),
         p.y + h / 2,
         Math.max(12, 20 * camera.zoom),
@@ -1109,8 +1052,8 @@ function drawInstance(
       );
     }
   } else {
-    // The marking, not the name: `NAND` where the palette says 与非门. See
-    // `markings.ts` for why the two vocabularies live apart.
+    // 写丝印而不是名字：元件托盘里叫“与非门”的东西，画板上印 `NAND`。
+    // 两套词汇表为何分开，见 `markings.ts`。
     const label = partCodeOf(def);
     const size = Math.max(10, Math.min(16, 15 * camera.zoom));
     const centre = LABEL_CENTRE[gate.shape];
@@ -1121,8 +1064,7 @@ function drawInstance(
       p.y + h / 2,
       size,
       camera.zoom,
-      // A silhouette is not a rectangle: a triangle has room for about half the
-      // width a box does, and a shield's point takes the rest.
+      // 轮廓不是矩形：三角形能容纳的宽度大约只有方框的一半，而盾形的尖端还要占掉剩下的部分。
       w * (gate.shape === 'triangle' ? 0.46 : gate.shape === 'box' ? 0.84 : 0.66),
       THEME.text,
       MONO,
@@ -1132,8 +1074,7 @@ function drawInstance(
   if (outputWidth > 1) {
     drawWidthBadge(ctx, p.x + w - 8 * camera.zoom, p.y + 3 * camera.zoom, outputWidth, camera.zoom);
   }
-  // The pin's own name, opposite the width badge. Level parts only: an ordinary
-  // gate is already labelled in the middle of its body.
+  // 引脚自己的名字，印在位宽角标的对面。只给关卡元件：普通门在本体中间已经有丝印了。
   if (def.category === 'level') {
     const width = 22 * camera.zoom;
     drawNameBadge(
@@ -1171,19 +1112,15 @@ function drawInstance(
 }
 
 /**
- * The part armed in the palette, following the pointer at 45% opacity.
+ * 元件托盘里手持的元件，以 45% 不透明度跟着指针。
  *
- * It is drawn at the position the drop WOULD take (`placementAt`, the same
- * function the drop itself uses), so the preview is not an approximation of the
- * result: what you see under the cursor is where the part lands, on the grid,
- * with the same silhouette it will have (one `traceSilhouette` call for both
- * states, so the ghost and the placed part cannot disagree about the body), the
- * marking an ordinary part will carry, and the width and pin-name badges it will
- * carry -- those are identity, not a reading: a preview of an 8-bit part has to
- * look 8-bit before it is dropped.
+ * 它画在“放下后会是哪里”的位置（`placementAt`，与真正放下用的是同一个函数），
+ * 所以预览不是对结果的近似：光标下面看到的就是落点，在网格上、有它将会有的轮廓
+ * （两个状态共用一次 `traceSilhouette` 调用，预览和已放置元件不可能对本体意见不一），
+ * 有普通元件会带的丝印，也有将会带的位宽与引脚名角标——
+ * 那些是“身份”而不是“读数”：一个 8 位元件的预览在放下之前就必须看起来是 8 位。
  *
- * No values and no pins: this is a part that does not exist yet, and anything on
- * it that reported a signal would be reporting one from nowhere.
+ * 没有数值、也没有画引脚：这是一个尚不存在的元件，上面任何报告信号的东西都是在无中生有。
  */
 function drawGhost(
   ctx: CanvasRenderingContext2D,
@@ -1209,9 +1146,8 @@ function drawGhost(
   ctx.lineWidth = Math.max(1, 1.5 * camera.zoom);
   ctx.stroke();
   if (def.category === 'level') {
-    // A level connector carries its value in the body and its pin name in the
-    // corner; there is no value before it exists, so the ghost is the shape plus
-    // the name it would be given.
+    // 关卡连接器把数值写在身上、把引脚名写在角上；它还不存在时没有数值可写，
+    // 所以手持预览只画形状和它将会得到的名字。
     if (placement !== undefined) {
       drawNameBadge(
         ctx,
@@ -1240,6 +1176,18 @@ function drawGhost(
   ctx.restore();
 }
 
+/**
+ * 把整块画板画到画布上。
+ *
+ * 这是画面唯一的入口：每次调用都先按设备像素比调整后备缓冲，
+ * 再依次绘制纸面、网格、导线、拖拽预览、元件、选择框和手持预览。
+ * 调用方决定何时重绘（store 变化、时钟边沿、窗口缩放），这里从不自己安排帧。
+ *
+ * @param canvas 目标画布
+ * @param store 应用状态：电路图、注册表、相机、选区、拖拽状态
+ * @param camera 本帧使用的相机（由调用方传入，便于测试固定视口）
+ * @param view 仿真数值与视图开关；没有仿真时传 null/undefined，画板只画结构
+ */
 export function renderBoard(
   canvas: HTMLCanvasElement,
   store: Store<AppState>,
@@ -1249,9 +1197,8 @@ export function renderBoard(
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  // Backing store follows the CSS box times the device pixel ratio; reassigning
-  // `width`/`height` reallocates the buffer and clears it, so only do it when
-  // the size actually changed.
+  // 后备缓冲 = CSS 尺寸 × 设备像素比；给 `width`/`height` 赋值会重新分配缓冲并清空它，
+  // 所以只在尺寸真的变化时才赋值。
   const dpr = globalThis.devicePixelRatio || 1;
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
@@ -1269,12 +1216,11 @@ export function renderBoard(
   const state = store.get();
   const { graph, registry } = state;
   const driven = drivenInputs(graph, view);
-  // Wires under parts: a part body must stay readable where a wire runs into it.
+  // 导线画在元件下面：导线接进元件的地方，元件本体必须保持可读。
   drawWires(ctx, graph, camera, registry, view);
   drawDragPreview(ctx, state, camera);
   for (const inst of graph.instances) drawInstance(ctx, state, inst, camera, view, driven);
   drawMarquee(ctx, state, camera);
-  // The ghost last: it is the thing the player is holding, and nothing on the
-  // board should be painted over it.
+  // 手持预览最后画：它是玩家正拿着的东西，画板上不该有东西盖在它上面。
   drawGhost(ctx, state, camera, view?.ghost ?? null);
 }

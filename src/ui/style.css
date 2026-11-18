@@ -1,62 +1,55 @@
-/* ============================================================ the instrument ==
+/* ============================================================ 仪器 ==
 
-   This is not a page with cards on it. It is a bench instrument: a patch bay on
-   the right, probes on the left, a test log along the bottom, and a board that
-   runs the whole width underneath all of them. The chrome is therefore styled as
-   HARDWARE -- flat slabs separated by hairlines and hue -- rather than as the
-   soft floating cards a web app would wear.
+   这不是一页摆着卡片的网页，而是一台台式仪器：右边是接线板，左边是探针，
+   底部是一条测试日志，一块画板在它们下方横贯整个宽度。因此界面外壳按
+   硬件来设计——平坦的厚板，用细线和色相分隔——而不是网页应用那种
+   柔软漂浮的卡片。
 
-   TWO COLOUR AXES, and keeping them apart is the whole design:
+   两条颜色轴，把它们分开就是整个设计：
 
-     * ON THE BOARD, the value rule from `theme.ts` holds: GREEN is 1, RED is 0,
-       BLUE is wider than one bit, SLATE is nothing simulated yet. Nothing here
-       touches it.
+     * 在画板上，`theme.ts` 的取值规则生效：绿色是 1，红色是 0，
+       蓝色宽于一位，石板灰表示还没有仿真。这里的东西一概不碰它。
 
-     * ON THE CHROME, cyan is the INSTRUMENT'S VOICE -- titles, labels, measured
-       numbers, rules -- and magenta is the OPERATOR'S HAND: every control the
-       player can press. Magenta never appears on the board, so "pink means I can
-       touch this" can never be misread as a value.
+     * 在界面上，青色是仪器自己的声音——标题、标签、测量出来的数字、
+       分隔线——洋红是操作者的手：玩家能按的每一个控件。洋红从不出现在
+       画板上，所以「粉色意味着我能碰」永远不会被误读成一个值。
 
-   NO SHADOWS ANYWHERE. Not one `box-shadow`, not one `text-shadow`, no blur of
-   any kind. Separation comes from a 1px hairline and a change of surface, and
-   emphasis comes from a solid fill or a 2px rule. This is a deliberate limit, not
-   an omission: a soft shadow is the one thing that would make this read as a web
-   page instead of a panel bolted to a chassis.
+   任何地方都没有阴影。没有一处 `box-shadow`，没有一处 `text-shadow`，
+   也没有任何模糊。分隔来自 1px 细线和底色的变化，强调来自实心填充或
+   2px 的线。这是一条刻意的限制，不是遗漏：一点柔和的阴影就会让它读起来
+   像网页，而不是一块拧在机箱上的面板。
 
-   NO ROUNDED CORNERS EITHER, with exactly one exception: the bit arrow, which is
-   round because its POINT carries the value (see `.bit`). A circle that means
-   something survives; a 10px corner radius that means nothing does not.
+   也没有圆角，只有一个例外：比特箭头。它是圆的，因为它的「尖」承载着值
+   （见 `.bit`）。有含义的圆保留下来；没有含义的 10px 圆角则不行。
 
-   THE WORKBENCH IS DOCKED. The board is the document in the middle, the parts
-   tray and the component library are a sidebar on its left, the assistant is a
-   sidebar on its right, the level's cases and the programming bench are a panel
-   under it, and the activity rail at the far left says which view the first
-   sidebar is showing. Every panel is in flow: a tool beside the board rather than
-   a translucent layer over it, so no panel can cover a wire being drawn. */
+   工作台是停靠式的。画板是中间的文档，元件托盘和元件库是它左边的侧栏，
+   助手是右边的侧栏，关卡的用例和编程台是它下面的面板，最左边的活动栏
+   则说明第一条侧栏正在显示哪个视图。每个面板都在文档流里：它是画板旁边
+   的工具，而不是盖在画板上的一层半透明浮层，所以没有任何面板能遮住
+   正在画的导线。 */
 :root {
   color-scheme: dark;
-  /* Two faces, two jobs. Monospace is the instrument -- every label, every
-     measured number, every part name. The reading face is for PROSE only: a
-     level's brief, the epilogue, the one place a player reads sentences rather
-     than scans a readout. */
+  /* 两种字体，各司其职。等宽字体属于仪器——每个标签、每个测量数字、每个
+   元件名。阅读字体只用于散文：关卡的简报、尾声，那是玩家唯一需要读句子
+   而不是扫读数的地方。 */
   --face-ui: ui-monospace, "Cascadia Mono", "Consolas", "SFMono-Regular", "Menlo", monospace;
   --face-read: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
 
-  /* -- surfaces: three, flat, in ascending order of "closer to the operator" -- */
+  /* -- 表面：三层，平坦，按「离操作者更近」的顺序递增 -- */
   --void: #04070d;
   --slab: #080e18;
   --slab-lit: #0f1a28;
   --hair: #17334a;
   --hair-lit: #2c6383;
 
-  /* -- the instrument's voice -- */
+  /* -- 仪器自己的声音 -- */
   --neon: #22e0ff;
   --neon-dim: #1487a8;
-  /* -- the operator's hand: controls only, never a value -- */
+  /* -- 操作者的手：只有控件，从不承载数值 -- */
   --hot: #ff2d78;
   --hot-dim: #7d1637;
 
-  /* -- values: the board's own rule, mirrored from `theme.ts` -- */
+  /* -- 数值：画板自己的规则，镜像自 `theme.ts` -- */
   --on: #00ff9c;
   --off: #ff2b4e;
   --bus: #0a84ff;
@@ -67,20 +60,17 @@
   --text: #d7e6f5;
   --text-muted: #6b8aa8;
 
-  /* The docks' own measurements. The sidebars have fixed widths -- the parts
-     tray needs a name plus a hint per row, and the conversation needs a line
-     long enough to read -- while the board takes whatever is left. */
+  /* 停靠面板自己的尺寸。两条侧栏是固定宽度——元件托盘每行要放得下名称加
+   提示，对话要有一行足够长的文字可读——画板则拿走剩下的全部。 */
   --primary-w: 252px;
   --secondary-w: 348px;
-  /* Height of the bottom panel. It holds four tabs: the level's cases, the
-     program, the debugger, and the I/O readout, and it is worth three tenths of
-     the workbench. It still scrolls when a level has more pins than this holds. */
+  /* 底部面板的高度。它容纳四个标签页：关卡的用例、程序、调试器和 I/O 读数，
+   值工作台的三成。当关卡的引脚比这里放得下的更多时，它仍然可以滚动。 */
   --panel-h: clamp(180px, 34vh, 340px);
 
-  /* THE SIGNATURE: a scale of 1px ticks. It replaces the drop shadow as the
-     thing that finishes an edge, and it is used in exactly the two places where
-     something is MEASURED -- the cost readout in the top bar and the case matrix
-     along the bottom. Anywhere else would be decoration. */
+  /* 标志性的细节：一排 1px 的刻度。它取代投影，成为给一条边收尾的东西，
+   而且只用在两个需要「测量」的地方——顶栏的代价读数和底部的用例矩阵。
+   用在别处就只是装饰。 */
   --ruler-h: repeating-linear-gradient(90deg, var(--hair-lit) 0 1px, transparent 1px 9px);
 }
 * { box-sizing: border-box; }
@@ -94,16 +84,15 @@ html, body {
 }
 #app { display: flex; flex-direction: column; height: 100vh; }
 
-/* SCROLLBARS ARE PART OF THE INSTRUMENT. Chromium and WebKit draw them from
-   these pseudo-elements: a 10px track on the slab, a square thumb in the
-   hairline colour, magenta under the pointer. Firefox cannot use them, so it
-   gets the standard properties instead -- and those are fenced behind a
-   Firefox-only feature, because since Chrome 121 a specified `scrollbar-color`
-   or `scrollbar-width` makes Chrome IGNORE `::-webkit-scrollbar` (the standard
-   property wins; see
-   https://frontendmasters.com/blog/heads-up-on-custom-scrollbars-chrome-is-supporting-the-standard-now-which-overrides-the-old-pseudo-elements/).
-   The fence is what lets both worlds have the better half: Chromium keeps the
-   drawn bar, Firefox keeps a thin themed one. */
+/* 滚动条是仪器的一部分。Chromium 与 WebKit 通过下面这些伪元素绘制：
+   厚板上的 10px 轨道、细线颜色的方形滑块、指针悬停时变洋红。Firefox 用不了
+   这些伪元素，于是改用标准属性——而标准属性被一道只对 Firefox 生效的
+   特性查询围住，因为从 Chrome 121 起，一旦指定了 `scrollbar-color` 或
+   `scrollbar-width`，Chrome 就会忽略 `::-webkit-scrollbar`（标准属性胜出；
+   见
+   https://frontendmasters.com/blog/heads-up-on-custom-scrollbars-chrome-is-supporting-the-standard-now-which-overrides-the-old-pseudo-elements/）。
+   这道围栏让两个世界都拿到更好的那一半：Chromium 保留自绘的滚动条，
+   Firefox 保留一条细的、跟随主题的滚动条。 */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--slab); }
 ::-webkit-scrollbar-thumb { background: var(--hair-lit); border: 2px solid var(--slab); }
@@ -116,15 +105,14 @@ html, body {
   }
 }
 
-/* Keyboard focus is always visible and always magenta -- the operator's colour,
-   so "the thing that will respond to me" reads the same way whether it is hovered
-   or tabbed to. */
+/* 键盘焦点永远可见，而且永远是洋红——操作者的颜色，
+   这样「会响应我的东西」无论是悬停还是 Tab 聚焦，读起来都一样。 */
 :focus-visible { outline: 2px solid var(--hot); outline-offset: 1px; }
 button { font-family: inherit; }
 
-/* ---------------------------------------------------------------- top bar -- */
-/* The bar is the instrument's nameplate: the machine's status on the left, the
-   level's address in the middle, and the cost readout -- on its ruler -- right. */
+/* ---------------------------------------------------------------- 顶栏 -- */
+/* 这条栏是仪器的铭牌：左边是机器状态，中间是关卡地址，
+   右边是代价读数——以及它下面的标尺。 */
 .shell-bar {
   position: relative;
   flex: 0 0 auto;
@@ -137,7 +125,7 @@ button { font-family: inherit; }
   background: var(--slab);
   border-bottom: 1px solid var(--hair);
 }
-/* The scale along the edge the bar shares with the board. */
+/* 顶栏与画板共享的那条边上的刻度。 */
 .shell-bar::after {
   content: '';
   position: absolute;
@@ -149,8 +137,8 @@ button { font-family: inherit; }
   opacity: 0.75;
   pointer-events: none;
 }
-/* The hint pops out under the bar, out of the grid's flow. A slab with a magenta
-   top rule: it is a thing the operator asked for. */
+/* 提示从顶栏下方弹出，不占网格流的位置。一块带洋红顶线的厚板：
+   它是操作者主动要来的东西。 */
 .shell-hint {
   position: absolute;
   top: calc(100% + 6px);
@@ -176,8 +164,8 @@ button { font-family: inherit; }
   gap: 10px;
   white-space: nowrap;
 }
-/* The level's address, boxed: `1-4`. Boxed rather than written because on this
-   instrument the address is the thing you navigate by. */
+/* 关卡地址，装在一个框里：`1-4`。用框而不是直接写，是因为在这台仪器上，
+   地址就是你用来导航的东西。 */
 .shell-index {
   padding: 2px 7px;
   border: 1px solid var(--hot);
@@ -191,8 +179,8 @@ button { font-family: inherit; }
   font-weight: 600;
   letter-spacing: 0.16em;
 }
-/* Icon-only buttons: the icon is an SVG child, so the button's text content --
-   which the panel tests read as the part's name -- stays empty here. */
+/* 纯图标按钮：图标是 SVG 子元素，因此按钮的文本内容——面板测试会把它
+   读成元件名——在这里保持为空。 */
 .shell-icon {
   width: 34px;
   height: 34px;
@@ -216,12 +204,11 @@ button { font-family: inherit; }
   white-space: nowrap;
   padding-left: 8px;
 }
-/* The cost readout: the measured half of the bar, in the instrument's colour,
-   sitting directly on the ruler. */
+/* 代价读数：顶栏中被测量的那一半，用仪器的颜色，直接坐在标尺上。 */
 .shell-metrics { font-size: 12.5px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
-/* THE DEV LIGHT: on whenever `?dev=1` is, and never subtle. A mode that opens
-   every gate has to be visible from across the room, or a report of "progress is
-   broken" is about a tab nobody remembers turning into a sandbox. */
+/* 开发模式指示灯：只要 `?dev=1` 就亮，而且绝不低调。一个能打开所有门禁的
+   模式必须隔着房间也看得见，否则「进度坏了」的报告说的其实是一个没人记得
+   被切成沙盒的标签页。 */
 .shell-dev {
   padding: 3px 9px;
   border: 1px solid var(--amber);
@@ -235,49 +222,46 @@ button { font-family: inherit; }
 }
 .shell-dev:hover { background: var(--amber); color: var(--void); }
 
-/* ---------------------------------------------------------------- screens -- */
-/* One screen at a time fills the space below the shell bar. */
+/* ---------------------------------------------------------------- 各屏幕 -- */
+/* 一次只显示一个屏幕，填满外壳栏下方的空间。 */
 .screens { flex: 1 1 auto; min-height: 0; display: flex; }
 .screen { flex: 1 1 auto; min-width: 0; min-height: 0; }
-/* `hidden` has to beat `.screen-board`'s own `display: flex`. An author rule
-   outranks the user-agent `[hidden] { display: none }` whatever its specificity,
-   so without this the board stays on screen next to the map -- it merely stops
-   being the flex child that grows. */
+/* `hidden` 必须压过 `.screen-board` 自己的 `display: flex`。作者样式无论
+   特异性如何都压过用户代理的 `[hidden] { display: none }`，所以没有这条
+   规则，画板就会继续留在地图旁边——它只是不再作为可伸缩的 flex 子项而已。 */
 .screen[hidden] { display: none; }
 .screen-board { display: flex; flex-direction: column; }
 .screen-map {
   overflow: auto;
   padding: 22px 24px 40px;
-  /* Empty space on this screen is a work surface, so it gets a graticule rather
-     than a flat fill. Two hairline gradients -- no blur, no image. */
+  /* 这个屏幕上的空白是工作台面，所以给它一层坐标网格而不是平涂。
+   两道细线渐变——没有模糊，没有图片。 */
   background-image:
     linear-gradient(rgba(34, 224, 255, 0.045) 1px, transparent 1px),
     linear-gradient(90deg, rgba(34, 224, 255, 0.045) 1px, transparent 1px);
   background-size: 34px 34px;
 }
 
-/* ------------------------------------------------------------------ board -- */
+/* ------------------------------------------------------------------ 画板 -- */
 .board-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; background: var(--void); }
-/* The board is an ordinary in-flow flex child of the stage, never an absolutely
-   positioned layer: its DOM box and its drawable area have to be the same
-   rectangle, or canvas.clientWidth/clientHeight stop matching the pointer
-   coordinates. */
+/* 画板是舞台里一个普通的、在文档流中的 flex 子项，绝不是绝对定位的图层：
+   它的 DOM 盒子和可绘制区域必须是同一个矩形，否则 canvas.clientWidth /
+   clientHeight 就会和指针坐标对不上。 */
 .board { display: block; width: 100%; height: 100%; background: var(--void); touch-action: none; cursor: crosshair; }
 
-/* The one floating thing left: the agent's settings modal. */
+/* 唯一还漂浮着的东西：智能体的设置弹窗。 */
 .overlay { position: absolute; pointer-events: none; z-index: 2; }
 .overlay > * { pointer-events: auto; }
 
-/* -------------------------------------------------------------- workbench -- */
-/* Five docks. The rail and both sidebars run the full height; the bottom panel
-   sits under the editor only, the way a terminal does in a code editor. */
+/* -------------------------------------------------------------- 工作台 -- */
+/* 五个停靠区。活动栏和两条侧栏占满整个高度；底部面板只坐在编辑器下面，
+   就像代码编辑器里的终端那样。 */
 .workspace {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  /* Six columns and three rows, every measurement a variable `main.ts` writes:
-     the 4px tracks between the docks ARE the splitters, and collapsing a dock
-     sets its own width (and its handle's) to zero. */
+  /* 六列三行，每个尺寸都是 `main.ts` 写入的变量：停靠区之间的 4px 轨道
+   就是分隔条，折叠一个停靠区会把它自己的宽度（以及它手柄的宽度）设为零。 */
   grid-template-columns:
     48px var(--primary-w, 252px) var(--p-split-w, 4px)
     minmax(0, 1fr) var(--s-split-w, 4px) var(--secondary-w, 348px);
@@ -292,10 +276,9 @@ button { font-family: inherit; }
 .workspace.secondary-collapsed .sidebar-secondary,
 .workspace.secondary-collapsed .s-split { display: none; }
 .workspace.panel-collapsed .h-split { display: none; }
-/* The drag handles. Invisible until the pointer is on them, then a magenta
-   hairline -- the same rule as every other control. Each one is placed into the
-   grid area its column/row was named for; without these three rules the handles
-   are auto-placed into implicit tracks and the bottom one lands off-screen. */
+/* 拖拽手柄。指针不在上面时不可见，移上去后是一条洋红细线——和其他所有
+   控件同一条规则。每个手柄都被放进以它所在列/行命名的网格区域；没有这
+   三条规则，手柄会被自动排进隐式轨道，最下面那条会跑到屏幕外。 */
 .p-split { grid-area: p-split; }
 .s-split { grid-area: s-split; }
 .h-split { grid-area: h-split; }
@@ -355,7 +338,7 @@ button { font-family: inherit; }
 }
 .sidebar-tab[aria-pressed='true'] { color: var(--neon); border-bottom-color: var(--neon); }
 .sidebar-tab:hover { color: var(--text); }
-/* The chevron that folds the sidebar away, beside its two view tabs. */
+/* 把侧栏折起来的箭头，位于两个视图标签旁边。 */
 .sidebar-collapse {
   flex: 0 0 auto;
   width: 26px;
@@ -428,19 +411,19 @@ button { font-family: inherit; }
 }
 .status-bar .shell-status { padding-left: 0; max-width: none; flex: 1 1 auto; }
 .status-bar .shell-metrics { flex: 0 0 auto; }
-/* The I/O readout makes its cards sit side by side in the panel, so the clock
-   and the level's pins are read in one glance rather than scrolled through. */
+/* I/O 读数让它的卡片在面板里并排摆放，于是时钟和关卡引脚一眼就能读完，
+   不用滚动。 */
 .io-panel { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; align-content: flex-start; }
-/* It is a fixed strip under the palette, not a third tab: driving an input bit
-   is part of wiring, so it stays in view while the parts tray does. */
+/* 它是元件托盘下方的一条固定窄条，不是第三个标签页：驱动一个输入位是
+   接线的一部分，所以元件托盘可见时它也应该一直可见。 */
 .sidebar-io {
   flex: 0 0 auto;
   max-height: 42%;
   overflow-y: auto;
   border-top: 1px solid var(--hair);
 }
-/* TWO COLUMNS, like the tool grid: 98px has no room for a paragraph, so the prose
-   spans both cells and the actions split into them. */
+/* 两列，和工具网格一样：98px 放不下一段话，所以散文横跨两格，
+   操作按钮则分到两格里。 */
 .blueprints {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -508,8 +491,8 @@ button { font-family: inherit; }
 .blueprints-wrap { grid-column: 1 / -1; margin: 0 8px; text-align: left; line-height: 1.3; }
 .blueprints-pick { border: 0; background: transparent; text-align: left; width: 100%; padding: 4px 8px; }
 .blueprints-confirm { border-color: var(--hot); color: var(--hot); }
-/* The bottom panel's chevron: the panel takes three tenths of the workbench, and
-   a player wiring a big circuit wants that height back. */
+/* 底部面板的折叠箭头：这个面板占了工作台的三成，正在接大电路的玩家
+   会想把这份高度拿回去。 */
 .panel-toggle {
   margin-left: auto;
   align-self: center;
@@ -526,18 +509,17 @@ button { font-family: inherit; }
 }
 .panel-toggle:hover { color: var(--hot); border-color: var(--hot); }
 
-/* THE PLATE: every panel's header, one shape everywhere.
+/* 铭牌：每个面板的标题栏，处处都是同一种形状。
 
-   A colour block, a wide-tracked name, and a hairline running to the panel's
-   edge. It is the instrument's label strip -- the thing that says which module
-   you are looking at -- and it is why no panel needs a shadow to look raised. */
+   一块色块、一个宽字距的名称，以及一条一直延伸到面板边缘的细线。
+   它是仪器的标签条——告诉你正在看哪个模块——也是每个面板都不需要
+   阴影就能显得抬起的原因。 */
 .card,
 .palette,
 .truth-table,
 .blueprints { background: var(--slab); }
-/* The components panel carries a border like a card, but not the same one: it is
-   the primary sidebar's second view rather than a card under the palette, so its
-   edge is the sidebar's own hairline. */
+/* 元件面板像卡片一样带边框，但不是同一种边框：它是主侧栏的第二个视图，
+   而不是元件托盘下方的一张卡片，所以它的边就是侧栏自己的细线。 */
 .card,
 .blueprints { border: 1px solid var(--hair); }
 .card-head {
@@ -564,7 +546,7 @@ button { font-family: inherit; }
 }
 .card-head button:hover { color: var(--hot); }
 
-/* ------------------------------------------------------------- io readout -- */
+/* ------------------------------------------------------------- I/O 读数 -- */
 .io-group { padding: 8px 10px 6px; }
 .io-group + .io-group { border-top: 1px solid var(--hair); }
 .io-group h3 {
@@ -574,13 +556,12 @@ button { font-family: inherit; }
   color: var(--text-muted);
   letter-spacing: 0.24em;
 }
-/* ONE LINE PER PIN, and the line wraps only when a byte needs the room.
- 
-   The pin, its cells and its number are one readout row: `1. b3  ◗  0`. It used
-   to be three stacked lines per pin, which on a four-in four-out level ran past
-   the bottom of the window -- a readout that cannot be read is not a readout.
-   A wide pin's cells are the one thing that will not fit beside their name, so
-   they wrap to a second line and the row grows only where it has to. */
+/* 每个引脚一行，只有当一个字节需要空间时这一行才换行。
+
+   引脚、它的格子与它的编号构成一行读数：`1. b3  ◗  0`。以前每个引脚是三行
+   堆叠，在一个四进四出的关卡上会超出窗口底部——读不了的读数就不是读数。
+   宽引脚的格子是唯一放不进名字旁边的部分，所以它们折到第二行，
+   这一行只在必须变高时才变高。 */
 .io-pin {
   display: flex;
   flex-wrap: wrap;
@@ -591,20 +572,17 @@ button { font-family: inherit; }
 .io-pin-name { flex: 0 0 auto; font-size: 11px; color: var(--text-muted); letter-spacing: 0.06em; }
 .io-bits { display: flex; gap: 3px; margin-left: auto; }
 .io-value { flex: 0 0 auto; min-width: 2ch; text-align: right; font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
-/* The clock's edge count: a sentence, not a column of digits. */
+/* 时钟的边沿计数：一句话，而不是一列数字。 */
 .io-tick { display: block; padding: 8px 10px 9px; text-align: left; letter-spacing: 0.06em; }
 
-/* The bit cell: a round arrow whose point carries the value.
+/* 比特格：一个圆形箭头，它的尖端承载着值。
 
-   A 1 is a round body with its point at the UPPER RIGHT, a 0 the same body with
-   its point at the LOWER LEFT, and an unknown value a plain dot -- no point at
-   all, which is the honest shape for "no direction known yet". Shape carries the
-   value alongside colour, so the two states stay apart for a player who cannot
-   separate the red from the green.
+   1 是一个圆身、尖端指向右上；0 是同样的圆身、尖端指向左下；未知值则是一个
+   普通的圆点——完全没有尖，这是「方向还不知道」最诚实的形状。形状与颜色
+   一起承载值，所以分不清红绿这两种颜色的玩家也能把两个状态区分开。
 
-   NO HALO. A lit bit used to be box-shadowed green; at this size the colour and
-   the point already say it, and a blur would be the one soft thing on a panel
-   built from hard edges. */
+   没有光晕。点亮的位以前带绿色 box-shadow；在这个尺寸上，颜色和尖端已经
+   说清楚了，而模糊会是这块由硬边构成的面板上唯一柔软的东西。 */
 .bit { width: 15px; height: 15px; display: inline-block; background: var(--bit-unknown); border-radius: 50%; }
 .bit-1 { background: var(--on); border-radius: 50% 0 50% 50%; }
 .bit-0 { background: var(--off); border-radius: 50% 50% 50% 0; }
@@ -612,9 +590,8 @@ button { font-family: inherit; }
 .io-bits .bit { cursor: pointer; }
 .io-bits .bit:hover { outline: 2px solid var(--hot); outline-offset: 1px; }
 .io-empty { font-size: 11px; color: var(--text-muted); padding-bottom: 4px; }
-/* A sandbox connector's width chip: there the connector IS the pin, so its width
-   is the player's to choose. A level's pins are the level's contract and carry no
-   chip (see `IoPanelOptions.onCycleWidth`). */
+/* 沙盒连接器的宽度小标签：在那里连接器就是引脚，所以宽度由玩家选择。
+   关卡的引脚是关卡的契约，不带小标签（见 `IoPanelOptions.onCycleWidth`）。 */
 .io-width {
   flex: 0 0 auto;
   padding: 0 4px;
@@ -628,7 +605,7 @@ button { font-family: inherit; }
 }
 .io-width:hover { border-color: var(--hot); color: var(--hot); }
 
-/* ---------------------------------------------------------------- toolbar -- */
+/* ---------------------------------------------------------------- 工具栏 -- */
 .tools { display: grid; grid-template-columns: repeat(2, 46px); gap: 6px; }
 .tool-btn {
   width: 46px;
@@ -645,8 +622,8 @@ button { font-family: inherit; }
   transition: border-color 90ms linear, color 90ms linear, background-color 90ms linear;
 }
 .tool-btn:hover { border-color: var(--hot); color: var(--hot); }
-/* A pressed tool is an OPERATOR state, so it is magenta -- and it is a real 2px
-   border rather than an inset ring, because a ring is a shadow by another name. */
+/* 被按下的工具是操作者状态，所以是洋红——而且用真正的 2px 边框而不是
+   内嵌的环，因为环只是换了名字的阴影。 */
 .tool-btn[aria-pressed='true'] {
   background: var(--slab-lit);
   border-color: var(--hot);
@@ -654,12 +631,11 @@ button { font-family: inherit; }
 }
 .tool-btn:disabled { color: #3b4d5e; cursor: not-allowed; }
 .tool-btn svg { width: 20px; height: 20px; display: block; }
-/* The grid has an odd number of buttons, so the last cell is left empty rather
-   than stretched. */
+/* 网格里的按钮是奇数个，所以最后一格留空，而不是拉伸。 */
 .tool-gap { width: 46px; height: 46px; }
 
-/* ---------------------------------------------------------------- palette -- */
-/* The patch bay: a rack of labelled slots. */
+/* ---------------------------------------------------------------- 元件托盘 -- */
+/* 接线板：一排带标签的插槽。 */
 .palette {
   height: 100%;
   overflow-y: auto;
@@ -685,8 +661,8 @@ button { font-family: inherit; }
   color: var(--neon);
 }
 .palette h2::before { content: ''; width: 3px; height: 12px; background: var(--neon); }
-/* The way back to holding nothing. In the plate, so it is where the eye already
-   is when the tray is holding a part, and magenta because it is a control. */
+/* 回到「手里什么都不拿」的路。它在铭牌里，所以托盘正拿着元件时，视线
+   本来就在那里；用洋红是因为它是一个控件。 */
 .palette-release {
   margin-left: auto;
   width: 20px;
@@ -701,8 +677,8 @@ button { font-family: inherit; }
   cursor: pointer;
 }
 .palette-release:hover { background: var(--hot); color: var(--void); }
-/* A category key: a rule that runs out to the panel's edge, so the groups read as
-   dividers in one rack rather than as headings in a list. */
+/* 分类标题：一条一直延伸到面板边缘的线，让各组读起来像一个机架里的
+   分隔，而不是列表里的标题。 */
 .palette-group {
   display: flex;
   align-items: center;
@@ -732,9 +708,9 @@ button { font-family: inherit; }
   border-left-color: var(--hot);
   color: #fff;
 }
-/* THE ARMED SLOT, which is the part in your hand: filled magenta like every
-   other control that is ON, and it stays lit until the part is placed and the
-   player lets go of it. The ghost under the pointer is the same statement. */
+/* 已装填的插槽，也就是你手里拿着的元件：像其他所有「开着」的控件一样
+   填满洋红，而且一直亮到元件被放下、玩家松手为止。指针下的幽灵预览
+   是同一个声明。 */
 .palette-item-armed,
 .palette-item-armed:hover {
   background: rgba(255, 45, 120, 0.18);
@@ -744,10 +720,9 @@ button { font-family: inherit; }
 }
 .palette-item:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* ------------------------------------------------------------ test panel -- */
-/* The test log: the level's cases, one column each, and one of the only two
-   places on the board that carries the ruler -- because this is where the machine
-   is measured against what the level asked for. */
+/* ------------------------------------------------------------ 测试面板 -- */
+/* 测试日志：关卡的用例，每条一列，也是画板上仅有的两处带标尺的地方之一
+   ——因为这里正是拿机器去对照关卡要求的地方。 */
 .truth-table {
   position: relative;
   height: 100%;
@@ -773,13 +748,12 @@ button { font-family: inherit; }
   font-weight: 600;
   letter-spacing: 0.18em;
 }
-/* The panel's own controls: the button that plays the columns below it, and the
-   pace it plays them at. The panel can be collapsed, which is why the toolbar
-   carries the same control -- see `toolbar.ts`. */
+/* 面板自己的控件：播放下面各列的按钮，以及播放的速度。面板可以被折叠，
+   所以工具栏带着同一个控件——见 `toolbar.ts`。 */
 .case-head { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; }
 .case-gap { flex: 1 1 auto; }
-/* THE PRIMARY CONTROL of the whole app: the operator's hand, filled magenta, and
-   the only filled control on the board screen. */
+/* 整个应用的主控件：操作者的手，填满洋红，也是画板屏幕上唯一一个
+   实心填充的控件。 */
 .case-test,
 .case-rate {
   font-family: inherit;
@@ -809,42 +783,37 @@ button { font-family: inherit; }
 .case-cell .bit { width: 16px; height: 16px; }
 .case-note { color: var(--text-muted); font-size: 12px; }
 .case-count { color: var(--text-muted); font-size: 12px; letter-spacing: 0.06em; }
-/* THE RUN'S COLUMN IS ONE BOX, not a ladder of outlines.
+/* 运行中的那一列是一个整盒，不是一叠描边。
 
-   The fill sits on the `td`, so every cell of the column stacks into a single
-   continuous band, and the two ends are rounded by the `cap-top` / `cap-bottom`
-   classes the panel puts on the first and last row. No outline anywhere: a ring
-   around each cell said the same thing twelve times and chopped the column into
-   twelve pieces. */
+   填充画在 `td` 上，所以这一列的每个单元格会叠成一条连续的带子，两端由
+   面板加在首行和末行上的 `cap-top` / `cap-bottom` 类收圆。任何地方都没有
+   描边：每个单元格一圈的环把同一件事说了十二遍，还把这一列切成了十二块。 */
 .case-active { background-color: rgba(255, 45, 120, 0.14); }
 .cap-top { border-top-left-radius: 10px; border-top-right-radius: 10px; }
 .cap-bottom { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
-/* A WRONG PAIR IS ONE BOX TOO: the expectation and the value that came out are
-   adjacent rows of the same column, so they are framed together -- translucent,
-   rounded, and in the value's own red.
+/* 一对错误的组合也是一个整盒：期望值和实际值结果是同一列里相邻的两行，
+   所以它们被框在一起——半透明、圆角，并使用结果值自己的红色。
 
-   Drawn as a background IMAGE over the column's background COLOUR, so a mismatch
-   inside the running column shows red on top of magenta instead of the two
-   fighting over one property. */
+   它画成一幅背景图片叠在列的背景颜色之上，这样正在运行的那一列里出现
+   不匹配时，红色会显示在洋红上面，而不是让两者在同一个属性上打架。 */
 .case-bad { background-image: linear-gradient(rgba(255, 43, 78, 0.3), rgba(255, 43, 78, 0.3)); }
 .bad-cap-top { border-top-left-radius: 10px; border-top-right-radius: 10px; }
 .bad-cap-bottom { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
 .case-detail { color: var(--off); font-size: 12px; margin: 2px 0; }
 .case-error { color: var(--off); font-size: 13px; margin: 0 0 6px; }
-/* The failing-vector table is still a table: `panels.test.ts` reads its cells to
-   prove that a failure which drove no vector fabricates no `0`. */
+/* 失败向量表仍然是一张表：`panels.test.ts` 会读它的单元格，以证明一次
+   没有驱动任何向量的失败不会凭空造出一个 `0`。 */
 .truth-table table { margin: 0 auto; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .truth-table td, .truth-table th { padding: 2px 10px; text-align: left; }
 .truth-table th { color: var(--text-muted); font-weight: 500; font-size: 12px; }
 
-/* ------------------------------------------------------ programming bench -- */
-/* THE EDITOR AND THE DEBUGGER, one per tab in the bottom panel.
+/* ------------------------------------------------------ 编程台 -- */
+/* 编辑器和调试器，底部面板每个标签页各一个。
 
-   The role of the `汇编 IDE` row in the spec's UI table: the board screen is where
-   a program is watched, so the text and the machine's state sit under the circuit
-   rather than on a screen of their own. They are mounted only while the level
-   grades a program the player wrote (`levelExpectsProgram`), so levels 1-49 keep
-   the board they have always had. */
+   对应设计规格 UI 表里 `汇编 IDE` 那一行：画板屏幕是观看程序的地方，
+   所以文本和机器状态坐在电路下方，而不是各占一个屏幕。只有在关卡要对
+   玩家写的程序评分时（`levelExpectsProgram`）它们才会挂载，因此第 1-49
+   关仍然保留它们一直有的那块画板。 */
 .ide, .debug {
   display: flex;
   flex-direction: column;
@@ -853,11 +822,10 @@ button { font-family: inherit; }
 }
 .ide-gap, .debug-gap { flex: 1 1 auto; }
 
-/* -- the editor ------------------------------------------------------------ */
-/* The gutter is a SECOND COLUMN OF THE SAME TEXT: one number per line, the same
-   size and the same leading as the textarea beside it, and never a scrollbar of
-   its own -- the panel copies the textarea's `scrollTop` into it, which is what
-   keeps a number on the line it names. */
+/* -- 编辑器 ------------------------------------------------------------ */
+/* 行号槽是同一段文本的第二列：每行一个数字，与旁边的 textarea 同字号、
+   同行距，而且自己从不出现滚动条——面板把 textarea 的 `scrollTop` 复制
+   过去，这才让数字留在它所标记的那一行上。 */
 .ide-editor { display: flex; min-height: 0; background: var(--void); }
 .ide-gutter {
   flex: 0 0 auto;
@@ -870,8 +838,8 @@ button { font-family: inherit; }
   user-select: none;
 }
 .ide-line { white-space: pre; }
-/* Monospace, and no wrapping: a program's columns line up, and a long line is
-   read by scrolling rather than by reflowing the instruction into two. */
+/* 等宽字体，不换行：程序的各列要对齐，长行靠滚动来读，而不是把一条
+   指令折成两行。 */
 .ide-code {
   flex: 1 1 auto;
   min-width: 0;
@@ -889,8 +857,8 @@ button { font-family: inherit; }
 }
 .ide-code::placeholder { color: var(--text-muted); opacity: 0.55; }
 
-/* The status line: the byte count, or the first refusal in the reader's own
-   words. `anywhere` because a sentence about a line is longer than the column. */
+/* 状态行：字节数，或者阅读器用自己的话给出的第一次拒绝。用 `anywhere`
+   是因为一句关于某一行的话比这一列更宽。 */
 .ide-status {
   padding: 6px 10px;
   border-top: 1px solid var(--hair);
@@ -900,10 +868,9 @@ button { font-family: inherit; }
   overflow-wrap: anywhere;
 }
 
-/* The assembled image: one boxed byte per instruction, wrapped. Hidden until the
-   player asks for it -- a hex dump halfway through typing is noise -- and
-   `[hidden]` has to beat the `display: flex` below (the same fight `.screen`
-   documents). */
+/* 汇编后的镜像：每条指令一个带框的字节，自动换行。玩家要它之前保持隐藏
+   ——打到一半的十六进制转储只是噪音——而 `[hidden]` 必须压过下面的
+   `display: flex`（和 `.screen` 记录的是同一场仗）。 */
 .ide-bytes {
   display: flex;
   flex-wrap: wrap;
@@ -926,7 +893,7 @@ button { font-family: inherit; }
 
 .ide-actions { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--hair); }
 
-/* -- the debugger ---------------------------------------------------------- */
+/* -- 调试器 ---------------------------------------------------------- */
 .debug-regs { display: flex; flex-direction: column; padding: 2px 0; }
 .debug-reg, .debug-pc {
   display: flex;
@@ -943,8 +910,7 @@ button { font-family: inherit; }
 .debug-ticks { color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .debug-halt { font-size: 11.5px; letter-spacing: 0.1em; }
 
-/* The RAM window's head: which addresses are on screen, which page, and the two
-   buttons that move it. */
+/* RAM 窗口的头部：屏幕上显示哪些地址、哪一页，以及移动它的两个按钮。 */
 .debug-ram-head {
   display: flex;
   align-items: center;
@@ -980,13 +946,12 @@ button { font-family: inherit; }
   color: var(--text);
   font-size: 11.5px;
 }
-/* THE BYTE BEING EXECUTED. A fill rather than an outline, so it reads from a
-   glance away, and the instrument's cyan rather than a value colour: which
-   address the counter is on is not a bit. */
+/* 正在执行的那个字节。用填充而不是描边，所以余光一瞥也能读到；用仪器的
+   青色而不是某个值的颜色：计数器停在哪一个地址不是一个比特。 */
 .debug-byte-pc { background: var(--neon-dim); color: var(--text); }
 .debug-ram-empty { color: var(--text-muted); font-size: 11.5px; }
 
-/* -------------------------------------------------------------------- map -- */
+/* -------------------------------------------------------------------- 地图 -- */
 .map h2 {
   display: flex;
   align-items: center;
@@ -998,9 +963,9 @@ button { font-family: inherit; }
   color: var(--neon);
 }
 .map h2::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--hair); }
-/* A chapter is a band of the map: its key on the left, its levels to the right.
-   The levels shipped as one undifferentiated grid; they are seven chapters, and
-   the band is what says so. */
+/* 一个章节是地图上的一条带：左边是它的编号，右边是它的关卡。
+   这些关卡以前是一整片没有区分的网格；它们其实是七个章节，这条带就是
+   在说明这件事。 */
 .map-chapter {
   display: grid;
   grid-template-columns: 74px 1fr;
@@ -1021,7 +986,7 @@ button { font-family: inherit; }
 .map-chapter-key b { font-size: 20px; font-weight: 600; color: var(--neon); letter-spacing: 0; }
 .map-chapter-key span { color: var(--text-muted); }
 .map-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 6px; }
-/* A level tile is a slot on the rack: an address column, a name, and a state. */
+/* 一个关卡格是机架上的一个插槽：一列地址、一个名称、一个状态。 */
 .map-tile {
   display: flex;
   align-items: stretch;
@@ -1036,8 +1001,8 @@ button { font-family: inherit; }
   letter-spacing: 0.04em;
   transition: border-color 90ms linear, background-color 90ms linear;
 }
-/* The address column: the same shape on every slot, so numbers line up down the
-   rack and a level is found by counting rather than by reading. */
+/* 地址列：每个插槽上都是同一种形状，于是数字沿着机架对齐，找一关靠数
+   而不是靠读。 */
 .map-tile-index {
   flex: 0 0 auto;
   width: 30px;
@@ -1050,7 +1015,7 @@ button { font-family: inherit; }
 .map-tile-name { flex: 1 1 auto; padding: 9px 11px; min-width: 0; }
 .map-tile:hover:not(:disabled) { background: var(--slab-lit); border-color: var(--hair-lit); }
 .map-tile:disabled { opacity: 0.34; cursor: not-allowed; }
-/* The level the board has open -- the operator's current position, so magenta. */
+/* 画板当前打开的那一关——操作者当前的位置，所以是洋红。 */
 .map-tile-current { border-color: var(--hot); background: var(--slab-lit); }
 .map-tile-current .map-tile-index {
   background: var(--hot);
@@ -1058,11 +1023,10 @@ button { font-family: inherit; }
   border-right-color: var(--hot);
 }
 
-/* ------------------------------------------------------------- the sandbox -- */
-/* The sandbox wears the chapter band's own geometry -- key on the left, a door on
-   the right -- because that is what it is to a player: somewhere to go, at the end
-   of the list. What it does NOT wear is a chapter's key: `自由` is not a number,
-   and the door is not gated, so nothing here dims. */
+/* ------------------------------------------------------------- 沙盒 -- */
+/* 沙盒沿用章节带的几何——左边是编号，右边是一扇门——因为对玩家来说它
+   就是这样：列表尽头的一个去处。它不沿用章节编号：`自由` 不是一个数字，
+   那扇门也没有门禁，所以这里没有任何东西变暗。 */
 .map-sandbox { padding-bottom: 20px; }
 .map-sandbox .map-chapter-key b { font-size: 15px; letter-spacing: 0.12em; }
 .map-sandbox-body { display: flex; }
@@ -1086,10 +1050,9 @@ button { font-family: inherit; }
 .map-sandbox-name { color: var(--neon-dim); font-size: 14px; }
 .map-sandbox-note { font-size: 11px; color: var(--text-muted); letter-spacing: 0.02em; }
 
-/* ----------------------------------------------------------- pass dialog -- */
-/* The original's own panel: a titled bar, a summary on the left, the medal and
-   the ways onward on the right. Deliberately narrow enough to read at 1280x800
-   without covering the board the player just finished. */
+/* ----------------------------------------------------------- 过关对话框 -- */
+/* 原作自己的面板：一条带标题的栏，左边是总结，右边是奖章和继续前进的路。
+   刻意做得足够窄，在 1280x800 下阅读时不会盖住玩家刚刚完成的画板。 */
 .result {
   position: fixed;
   inset: 0;
@@ -1152,8 +1115,7 @@ button { font-family: inherit; }
 .result-heading::before { content: ''; width: 3px; height: 11px; background: var(--neon); }
 .result-heading + .result-unlocks { margin-bottom: 18px; }
 .result-unlocks { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-/* An unlocked part is a thing the machine gained, so it wears the bus colour --
-   flat, boxed, no halo. */
+/* 解锁的元件是机器新得到的东西，所以它使用总线颜色——平坦、带框、没有光晕。 */
 .result-chip {
   display: inline-flex;
   flex-direction: column;
@@ -1196,8 +1158,8 @@ button { font-family: inherit; }
   line-height: 1.85;
   color: var(--text-muted);
 }
-/* The medal: the one place on this panel allowed to be loud. Flat green, a black
-   gutter, a second green ring -- a stamped disc, not a glowing orb. */
+/* 奖章：这个面板上唯一允许张扬的地方。平坦的绿色、一圈黑色凹槽、
+   第二道绿色圆环——一枚压出来的圆章，不是一个发光的球。 */
 .result-medal {
   width: 96px;
   height: 96px;
@@ -1225,12 +1187,11 @@ button { font-family: inherit; }
 }
 .result-actions button:hover:not(:disabled) { border-color: var(--hot); color: var(--hot); }
 .result-actions button:disabled { opacity: 0.35; cursor: not-allowed; }
-/* The way onward is the operator's move, so it is the filled magenta control. */
+/* 继续前进是操作者的动作，所以用实心洋红控件。 */
 .result-next { background: var(--hot) !important; border-color: var(--hot) !important; color: var(--void) !important; }
 
-/* --------------------------------------------------------------- briefing -- */
-/* The one screen with prose on it, so it is the one screen that switches to the
-   reading face. */
+/* --------------------------------------------------------------- 简报 -- */
+/* 唯一一个带散文的屏幕，所以也是唯一一个切换到阅读字体的屏幕。 */
 .briefing {
   position: fixed;
   inset: 0;
@@ -1252,7 +1213,7 @@ button { font-family: inherit; }
   color: var(--text);
   margin: 0;
 }
-/* The strip above the prose: which level this is, and that it is a briefing. */
+/* 散文上方的窄条：这是哪一关，以及这是一份简报。 */
 .briefing-tag {
   display: flex;
   align-items: center;
@@ -1276,10 +1237,10 @@ button { font-family: inherit; }
 }
 .briefing button:hover { background: var(--hot); color: var(--void); }
 
-/* ----------------------------------------------------------------- the agent --
-   The conversation is the secondary sidebar's whole content. Its rail button is
-   styled with the other rail buttons; the warning colour is the one thing it adds
-   to itself, because not being set up is a fact about the assistant. */
+/* ----------------------------------------------------------------- 智能体 --
+   对话是第二条侧栏的全部内容。它的活动栏按钮和其他活动栏按钮用同一套样式；
+   警告色是它给自己加的唯一一样东西，因为「没有配置好」是关于助手的
+   一个事实。 */
 .agent-toggle-warn { color: var(--amber); }
 .agent-card {
   display: flex;
@@ -1325,8 +1286,8 @@ button { font-family: inherit; }
   padding: 2px;
 }
 .agent-line { margin: 0; font-size: 12px; line-height: 1.5; }
-/* The player's own words wear the operator's colour and the agent's the
-   instrument's, exactly as the rest of the chrome does. */
+/* 玩家自己的话用操作者的颜色，智能体的话用仪器的颜色，和界面其余部分
+   完全一致。 */
 .agent-user {
   border-left: 2px solid var(--hot);
   padding-left: 8px;
@@ -1335,11 +1296,10 @@ button { font-family: inherit; }
 }
 .agent-reply { border-left: 2px solid var(--neon-dim); padding-left: 8px; }
 .agent-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-/* THE FOLDABLE BLOCK a step's prose lives in. While the model is writing, only
-   the newest lines are worth watching, so the body is a fixed-height window --
-   six lines -- pinned to its own bottom. When the step is done the block closes
-   to its header, because the reasoning has served its purpose the moment the work
-   it describes is on the board; clicking the header opens it again. */
+/* 一步的散文所栖身的可折叠块。模型正在写的时候，只有最新的几行值得看，
+   所以正文是一个固定高度的窗口——六行——钉在自己的底部。一步结束后，
+   这个块收起到标题，因为它所描述的工作一旦落到画板上，推理就完成了使命；
+   点击标题可以重新展开。 */
 .agent-think { margin: 2px 0 4px; padding-left: 8px; border-left: 2px solid var(--hair-lit); }
 .agent-think-head {
   display: block;
@@ -1364,7 +1324,7 @@ button { font-family: inherit; }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* Six lines of 1.5 line-height: the tail of the stream, and nothing older. */
+/* 六行、1.5 倍行高：流的尾巴，再旧的内容不显示。 */
 .agent-think-live .agent-think-body { max-height: 9em; overflow-y: auto; }
 .agent-think-body[hidden] { display: none; }
 .agent-tool { margin-top: 3px; font-size: 11px; color: var(--text-muted); overflow-wrap: anywhere; }
@@ -1373,7 +1333,7 @@ button { font-family: inherit; }
 .agent-notice { font-size: 11px; padding-left: 8px; }
 .agent-info { color: var(--text-muted); }
 .agent-error { color: var(--off); }
-/* The budget's row: the fact plus the one button that buys another budget. */
+/* 预算那一行：事实，加上一个用来购买下一份预算的按钮。 */
 .agent-cap {
   display: flex;
   align-items: center;
@@ -1384,9 +1344,8 @@ button { font-family: inherit; }
   font-size: 11px;
 }
 .agent-cap span { flex: 1 1 auto; }
-/* The readings under a finished request, and the session totaliser. Both are
-   measurements, so they sit small and muted: the board is the thing to look at,
-   and these are the meter's numbers rather than a message. */
+/* 一次请求结束后的读数，以及会话总计。两者都是测量值，所以它们小
+   而淡：画板才是该看的东西，这些是仪表的数字，不是消息。 */
 .agent-run-stats {
   margin: 2px 0 0;
   padding-left: 8px;
@@ -1428,12 +1387,11 @@ button { font-family: inherit; }
 .agent-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .agent-status { flex: 1 1 auto; font-size: 10px; color: var(--text-muted); }
 .agent-status-bad { color: var(--off); }
-/* The first-run card is a modal: it dims the bench and takes the pointer, because
-   the one thing it asks for cannot be answered anywhere else on the screen.
-   IT SITS ABOVE THE BRIEFING (`z-index: 10`) rather than under it. A first launch
-   raises the level's briefing at the same moment, and a setup card underneath it
-   would be a card nobody can answer: the question has to be the topmost thing on
-   screen, and the briefing is still there to read once it is answered. */
+/* 首次运行卡片是一个模态框：它让工作台变暗并接管指针，因为它要问的那件
+   事在屏幕上别处都答不了。它位于简报之上（`z-index: 10`），而不是之下。
+   首次启动会在同一时刻升起关卡简报，而一张被压在下面的设置卡是一张没人
+   能回答的卡：问题必须是屏幕最上层的东西，而简报在问题回答完之后还在那里
+   可读。 */
 .overlay-agent-setup {
   position: fixed;
   inset: 0;
@@ -1462,7 +1420,7 @@ button { font-family: inherit; }
 .agent-note { margin: 0; font-size: 10px; line-height: 1.5; color: var(--text-muted); }
 .agent-setup .agent-actions { padding-top: 2px; }
 
-/* The panel's own line about a missing configuration: a fact, not a dialog. */
+/* 面板自己关于缺少配置的一行说明：一个事实，不是对话框。 */
 .agent-setup-hint {
   display: flex;
   align-items: center;
@@ -1479,9 +1437,8 @@ button { font-family: inherit; }
 .agent-setup-hint button { flex: 0 0 auto; white-space: nowrap; }
 
 /* ---------------------------------------------------------- 开发板 panel --
-   The Arduino panel is three cards in the bottom panel: the image, the local
-   bridge and the board. It is wider than the cases table, so it uses a
-   three-column grid and falls back to one column when the dock is narrow. */
+   Arduino 面板是底部面板里的三张卡片：镜像、本地桥和开发板。它比用例表
+   更宽，所以用三列网格，并在停靠区变窄时回退到一列。 */
 .flash-panel {
   display: grid;
   grid-template-columns: repeat(3, minmax(280px, 1fr));
@@ -1557,7 +1514,7 @@ button { font-family: inherit; }
 .flash-pin-list .flash-pin-name { flex: 0 0 5.6em; }
 .flash-pin-list .flash-input { flex: 1 1 auto; font-size: 11px; }
 
-/* Accessibility floor: nothing moves that does not have to. */
+/* 无障碍底线：非必要的动画一律不出现。 */
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }

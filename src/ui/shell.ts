@@ -1,34 +1,39 @@
+/**
+ * 应用外壳：顶栏、状态栏和整套图标。
+ *
+ * 顶栏说明「你在哪里」——关卡地址与名字——并给出去章节地图的入口；
+ * 状态栏报告画板上那件东西的代价与判定。两者都只从 store 读，不保存自己的状态。
+ * 图标是只描边的 24×24 路径，颜色由按钮的 currentColor 驱动，
+ * 所以 `ui/toolbar.ts`、`ui/ide.ts` 等处的图标按钮不必各自复制一份路径。
+ */
 import type { AppState, Store } from '../app/store';
 import { scoreOf } from '../levels/grader';
 import { isSandbox } from '../levels/sandbox';
 import { THEME } from './theme';
 
 export interface ShellOptions {
-  /** Leave the board and show the chapter map. */
+  /** 离开画板，显示章节地图。 */
   onOpenMap(): void;
-  /** Show the level's briefing again. Absent leaves the button out. */
+  /** 再次显示本关简报。不提供时按钮不画。 */
   onShowBrief?(): void;
-  /** Leave developer mode. Absent leaves the DEV light out entirely. */
+  /** 退出开发者模式。不提供时整个 DEV 指示灯都不出现。 */
   onExitDev?(): void;
 }
 
 /**
- * The top bar: which level is open and the way back to the chapter map.
+ * 顶栏：当前打开的是哪一关，以及回到章节地图的入口。
  *
- * THE COST READOUT IS NOT HERE ANY MORE. It moved to the status bar along with
- * the application's own message when the chrome became a workbench of docks: the
- * bar says WHERE you are, the last row says what the thing on the board costs.
+ * 代价读数已经不在这里。界面变成停靠工作台时，它和应用的自身消息一起搬到了状态栏：
+ * 顶栏说「你在哪里」，最后一行说画板上那件东西花多少。
  *
- * It is the first flex child of the app container so the workbench below it gets
- * the remaining height. The level name is the original's rose, centred, with the
- * icon buttons left and the DEV light and hint right -- the original's own
- * arrangement, and the reason the bar is a three-column grid rather than a row:
- * a centred title in a flex row drifts as the two ends change width.
+ * 它是应用容器的第一个 flex 子元素，好让下面的工作台拿走剩余高度。
+ * 关卡名用仪器之声的青色居中，图标按钮在左，DEV 指示灯与提示在右——
+ * 这是原作自己的排布，也是这根栏用三列网格而不是一行的原因：
+ * flex 行里的居中标题会随两端宽度变化而漂移。
  *
- * THE MAP BUTTON IS FIRST IN DOM ORDER. It is the bar's only navigation control
- * and `panels.test.ts` reaches for `root.querySelector('button')` to click it;
- * adding an icon ahead of it would silently make that test drive the wrong
- * control.
+ * 地图按钮在 DOM 顺序里是第一个。它是这根栏唯一的导航控件，
+ * `panels.test.ts` 通过 `root.querySelector('button')` 找到并点击它；
+ * 在它前面加一个图标，会让那个测试静悄悄地去驱动错误的控件。
  */
 export function mountShell(
   root: HTMLElement,
@@ -53,10 +58,9 @@ export function mountShell(
 
   const title = document.createElement('h1');
   title.className = 'shell-title';
-  // The address and the name are separate nodes so they can be separate things on
-  // screen: `1-4` boxed in the operator's magenta, the name wide-tracked in the
-  // instrument's cyan. The level's address is what a player navigates by, so it
-  // is drawn as an address rather than written into a sentence.
+  // 地址与名字是分开的节点，好让它们在屏幕上各司其职：
+  // `1-4` 用操作者的洋红框起来，名字用仪器的青色拉开字距。
+  // 关卡地址是玩家用来导航的东西，所以它被画成一个地址，而不是写进一句话里。
   const index = document.createElement('span');
   index.className = 'shell-index';
   const name = document.createElement('span');
@@ -66,11 +70,10 @@ export function mountShell(
   const right = document.createElement('div');
   right.className = 'shell-right';
   const hintButton = iconButton('提示', 'bulb');
-  // THE DEV LIGHT. A mode that opens every gate has to be impossible to forget:
-  // a player who wandered into `?dev=1` would otherwise see a game with all
-  // forty-seven levels unlocked and no explanation. It sits next to the level
-  // name because that is what it is about, and it is a button, so leaving the
-  // mode is one click rather than an edit to the address bar.
+  // DEV 指示灯。一个能打开所有门的模式必须让人无法忘记：
+  // 误入 `?dev=1` 的玩家会看到所有关卡全部解锁却没有任何解释。
+  // 它紧挨着关卡名，因为它说的就是这件事；它本身是按钮，退出模式只需一次点击，
+  // 而不必去改地址栏。
   const dev = document.createElement('button');
   dev.type = 'button';
   dev.className = 'shell-dev';
@@ -95,11 +98,9 @@ export function mountShell(
   const render = (): void => {
     const { level, dev: devOn } = store.get();
     dev.hidden = !devOn;
-    // THE SANDBOX HAS NO ADDRESS. It is not a chapter and has no index, so
-    // `0-0` -- the numbers its spec carries as placeholders -- would be an
-    // address that means nothing, in the slot a player reads addresses from. It
-    // gets its own word there instead, in the same boxed style, and the name
-    // beside it stays where every screen's name is.
+    // 沙盒没有地址。它不是一个章节，也没有序号，所以它规格里占位的 `0-0`
+    // 会是玩家读地址的格子里一个毫无意义的地址。那里改放「沙盒」两个字，
+    // 沿用同样的方框样式；它旁边的名字仍然在每屏名字所在的位置。
     index.textContent = isSandbox(level) ? '沙盒' : `${level.chapter}-${level.index}`;
     name.textContent = level.name.zh;
     if (!hint.hidden) hint.textContent = level.hint.zh;
@@ -110,14 +111,11 @@ export function mountShell(
 }
 
 /**
- * The status bar: cost and verdict along the bottom, and the application's own
- * message beside them.
+ * 状态栏：底部一行显示代价与判定，旁边是应用自己的消息。
  *
- * WHY IT IS NOT IN THE TOP BAR. The top bar says where you are -- the level's
- * address and name -- while this line says what the thing on the board costs.
- * A workbench puts the measured numbers where every code editor puts them: on
- * the last row, under everything, at the size a readout wants rather than the
- * size a title wants.
+ * 为什么它不在顶栏：顶栏说你「在哪里」——关卡的地址与名字——
+ * 而这一行说画板上那件东西花了多少。工作台把测量数字放在所有代码编辑器放的位置：
+ * 最后一行、所有东西之下，用读数该有的字号而不是标题的字号。
  */
 export function mountStatus(root: HTMLElement, store: Store<AppState>): { render(): void } {
   const bar = document.createElement('footer');
@@ -137,10 +135,9 @@ export function mountStatus(root: HTMLElement, store: Store<AppState>): { render
       metrics.style.color = THEME.textMuted;
       return;
     }
-    // What the circuit COSTS is measured continuously; whether it is CORRECT is
-    // only known from a test run, so the suffix stays 未测试 -- in the muted
-    // colour, since it is the absence of a verdict and not a bad one -- until
-    // the player asks for one.
+    // 电路「花费多少」是持续测量的；它「是否正确」只有靠一次测试运行才知道，
+    // 所以在玩家主动测试之前，后缀一直是「未测试」——用弱化的颜色，
+    // 因为那是判定缺席，而不是一个坏判定。
     const verdict =
       lastGrade === null ? '未测试' : lastGrade.stars > 0 ? '★'.repeat(lastGrade.stars) : '未通过';
     metrics.textContent = `门 ${measured.gate} 个 · 延迟 ${measured.delay} · 拍 ${measured.tick} · 总开销 ${scoreOf(measured)} · ${verdict}`;
@@ -153,11 +150,10 @@ export function mountStatus(root: HTMLElement, store: Store<AppState>): { render
 }
 
 /**
- * A bar button whose whole content is an icon.
+ * 内容只有一个图标的栏按钮。
  *
- * The icon is an SVG child rather than text, which keeps the button's
- * `textContent` empty: the panel tests read `textContent` as a part's name, and
- * a glyph here would leak into that reading.
+ * 图标作为 SVG 子节点而不是文本，这让按钮的 `textContent` 保持为空：
+ * 面板测试把 `textContent` 读成元件名，这里的字形会漏进那次读取。
  */
 function iconButton(label: string, icon: IconName): HTMLButtonElement {
   const button = document.createElement('button');
@@ -185,19 +181,18 @@ export type IconName =
   | 'test'
   | 'fit'
   /**
-   * A dashed box inside a solid one: the wrap gesture -- take what is selected
-   * and make one part of it. Dashed because the selection is still loose parts
-   * until it is committed.
+   * 一个实心框里的虚线框：封装手势——把选中的东西变成一个元件。
+   * 用虚线，因为提交之前选区仍然只是一堆松散的元件。
    */
   | 'wrap'
   | 'download'
   | 'upload'
-  /** The docks: the assistant, a program, and the settings gear. */
+  /** 各个停靠面板：助手、程序，以及设置齿轮。 */
   | 'agent'
   | 'terminal'
   | 'settings';
 
-/** Stroke-only 24x24 glyphs, so a button's colour drives the whole icon. */
+/** 只描边的 24×24 字形，颜色由按钮的 color 驱动整个图标。 */
 const ICON_PATHS: Record<IconName, string> = {
   menu: 'M4 6h16M4 12h16M4 18h16',
   info: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 8h.01M11 12h1v5h1',
@@ -211,7 +206,7 @@ const ICON_PATHS: Record<IconName, string> = {
   stop: 'M6 6h12v12H6z',
   grid: 'M4 8h16M4 16h16M8 4v16M16 4v16',
   trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
-  // A clipboard with a tick on it: the level's cases, run one at a time.
+  // 一块带勾的剪贴板：本关的用例，逐个播放。
   test: 'M9 4h6v3H9zM7 5H5v15h14V5h-2M9 13l2 2 4-4',
   fit: 'M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5',
   wrap: 'M4 4h16v16H4zM8 9h8v6H8z',

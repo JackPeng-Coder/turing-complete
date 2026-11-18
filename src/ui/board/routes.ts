@@ -1,61 +1,44 @@
 /**
- * Where every wire on the board actually runs.
+ * 画板上每一根导线实际怎么走。
  *
- * `routing.ts` answers "what is the shortest orthogonal path between these two
- * pins", which is all a wire needs when it is the only thing on the board. It is
- * not enough for a board with parts and other wires on it, and the two ways it
- * falls short are both visible:
+ * `routing.ts` 只回答“两个引脚之间最短的正交路径是什么”，当画板上只有一根线时这就够了。
+ * 但画板上还有元件和别的导线，它就不够用，而且两种失败都肉眼可见：
  *
- *   * A wire whose target is to the LEFT of its source took the router's
- *     backwards path -- out to the right of both pins, then a long straight run
- *     back left -- and that run went straight THROUGH whatever parts stood in the
- *     way. The player saw a wire disappear into a gate's body and reappear on the
- *     other side, with no way to tell it was the same wire.
- *   * Two wires between neighbouring rows both took the midpoint turn and landed
- *     five pixels apart on the same grid line. At eight pixels wide plus a halo,
- *     two wires that close are one thick wire, and a board where two nets look
- *     like one net is a board that reads as shorted.
+ *   * 目标在源左边的导线会走布线器的“向后绕行”——先向右伸到两个引脚之外，再长距离笔直向左——
+ *     这段直路会直接穿过挡在中间的元件。玩家看到导线钻进一个门的身体、又从另一侧冒出来，
+ *     而且没法判断那是同一根线。
+ *   * 相邻两行之间的两根导线都选了中点转弯，结果落在同一条网格线上、相距五像素。
+ *     8 像素宽的芯再加光晕，这么近的两根线看起来就是一根粗线；一块画板里的两个网络看起来像一个，
+ *     就会读成短路。
  *
- * So routing is a CHOICE, and this module makes it: a handful of orthogonal
- * candidates per wire, scored against every part and every wire already placed,
- * cheapest wins. The weights are the whole policy --
+ * 所以布线是一个“选择”，本模块负责做这个选择：每根导线生成若干正交候选，
+ * 对每个元件和每根已放好的导线评分，最便宜者胜。权重就是全部策略——
  *
- *   * crossing a part body is priced to be avoided at any detour,
- *   * running alongside another wire within `WIRE_CLEARANCE` is priced next,
- *   * length and corners are the tie-breakers, so a wire still goes roughly where
- *     a player would have drawn it.
+ *   * 穿过元件本体的代价高到任何绕路都更便宜；
+ *   * 与另一根导线并行且间距小于 `WIRE_CLEARANCE` 的代价次之；
+ *   * 长度与拐角是平局决胜项，让导线仍然大致落在玩家会画的位置。
  *
- * CROSSINGS ARE NOT PRICED, deliberately. Two wires meeting at right angles are
- * two wires, and every schematic is full of them; charging for it buys nothing
- * and the router cannot afford to look everywhere it would have to look to count
- * them (see the lane index below).
+ * 交叉（十字相交）故意不计价。两根导线直角相交仍然是两根线，任何原理图都充满交叉；
+ * 为它定价没有收益，而布线器也负担不起把所有交叉都找出来统计的开销（见下面的车道索引）。
  *
- * ONE SIGNAL, ONE LINE -- THE EXPERIMENT OF 2026-10-21. On a board built from
- * hundreds of gates, the reported defect was not one wrong wire but a picture:
- * long wires wandered across the board through gate bodies, and fan-out trunks
- * from the same pin were scattered into dozens of parallel lines. Two changes
- * address it, and both are stated in the weights below:
+ * 一个信号一根线——2026-10-21 的实验。在一块由数百个门搭成的画板上，
+ * 被报告的缺陷不是某根线接错，而是一幅画面：长导线穿过门体满板乱走，
+ * 同一个引脚引出的扇出干线被散成几十条平行线。两个改动解决了它，都写在下面的权重里：
  *
- *   * A run of a net counts ONCE against a new route, not once per wire: a fan-out
- *     trunk is one drawn line, and pricing it as fifty lines pushed the next wire
- *     through a gate rather than beside it (`LaneIndex` merges per net as it
- *     adds).
- *   * A run of the SAME net costs nothing to follow and counts as nothing to
- *     cross, because two wires out of one pin are one signal. That is what turns
- *     a fan-out into a trunk instead of a fan.
+ *   * 一个网络的一段走线只计一次，而不是每根导线计一次：扇出干线是一条画出来的线，
+ *     若按五十条线计价，下一根导线宁可穿过门体也不肯贴着它走
+ *     （`LaneIndex` 在加入时就按网络合并）。
+ *   * 沿着“同一个网络”的走线走不要钱，也不算它被穿过：同一个引脚出来的两根线是同一个信号。
+ *     正是这一点把扇出变成一条干线，而不是一把扇子。
  *
- * The measured effect on a synthetic 900-gate board is in the phase record
- * (`.superpowers/sdd/2026-10-21-routing/`): routes through part bodies went from
- * hundreds of wires to none, and different-net wires drawn on top of each other
- * almost disappeared.
+ * 在合成 900 门画板上的实测效果记在阶段记录里（`.superpowers/sdd/2026-10-21-routing/`）：
+ * 穿过元件本体的走线从数百根降到零，不同网络互相叠画的导线几乎消失。
  *
- * IT IS THE SAME POLYLINE THE HIT TEST USES. `view.ts` calls this, `render.ts`
- * calls this, and the memo is keyed on the graph, so the wire you click is the
- * wire you can see even after it has been routed around a gate.
+ * 命中测试用的就是同一条折线：`view.ts` 调用这里，`render.ts` 也调用这里，
+ * 而且备忘缓存以电路图为键，所以你点中的导线就是你看到的那根——即使它已经绕过了一个门。
  *
- * Order matters and is not incidental: wires are planned in the order the player
- * made them, so an existing wire keeps the lane it has and a new one goes around
- * it. Drawing a new wire never moves the ones already on the board.
+ * 顺序有意义，不是无关紧要：导线按玩家创建的先后规划，于是已有的导线保住自己的车道，
+ * 新导线绕开它。画一根新导线永远不会挪动画板上已有的导线。
  */
 import type { Graph } from '../../core/graph';
 import type { Registry } from '../../core/registry';
@@ -64,74 +47,64 @@ import { partRects, pinPosition, snap, type Rect } from './geometry';
 import { WIRE_STUB, type Point } from './routing';
 
 /**
- * How far apart two parallel wires have to be to read as two wires.
+ * 两条平行导线至少相隔多远，才会被玩家看成“两根线”。
  *
- * A 1-bit wire is 8 world pixels wide and is drawn over a wider translucent
- * stroke; 16 is the first grid multiple at which neither the cores nor their
- * halos touch. Closer than that, two runs are priced as one.
+ * 1 位导线芯宽 8 世界像素，外面还有一圈更宽的半透明光晕；
+ * 16 是网格的整数倍中，第一个能让两根线的“芯”和“光晕”都不相碰的距离。
+ * 比这更近时，两段走线会被评分当作同一根粗线。
  */
 export const WIRE_CLEARANCE = 16;
 
-/** What the router is willing to pay, in world pixels, and for what. */
+/** 布线器愿意付出什么代价（单位：世界像素），以及分别为什么付。 */
 export const ROUTE_COST = {
-  /** One more corner, worth this much detour. */
+  /** 多一个拐角，等价于多绕这么远。 */
   bend: 26,
   /**
-   * Per pixel of a run that crosses a part body.
+   * 走线每穿过元件本体一个像素的代价。
    *
-   * Four hundred is deliberately high: on a dense board a route that cuts through
-   * one gate saves at most a couple of hundred pixels, so any lane that is merely
-   * crowded is still cheaper than a hole in the schematic.
+   * 400 是刻意定高的：在密集画板上，一条穿门而过的路径最多省下两三百像素，
+   * 所以哪怕某个车道很挤，也仍然比在原理图上开个洞便宜。
    */
   part: 400,
   /**
-   * Per pixel of a run that lies within `WIRE_CLEARANCE` of a parallel run of a
-   * DIFFERENT net.
+   * 与“另一个网络”的平行走线相距小于 `WIRE_CLEARANCE` 时，每像素的代价。
    *
-   * A run of the SAME net is free: wires out of one pin are one signal, and a
-   * fan-out is many wires that should run together -- two of them lying on top of
-   * each other is correct drawing rather than a short (`costOf`).
+   * 同一网络的走线免费：同一个引脚出来的线是同一个信号，扇出本来就应该并在一起走——
+   * 其中两根叠在一起是正确的画法，不是短路（见 `costOf`）。
    *
-   * TWENTY-FOUR, DOWN FROM A HUNDRED AND TWENTY. The old price made a crowded lane
-   * cost more than cutting through a gate body, so on a board where every useful
-   * lane is crowded the router chose the hole. With nets counted once
-   * (`LaneIndex`) the price can be low enough to make "run beside it" the answer
-   * without letting two nets sit close enough to read as one thick wire.
+   * 从 120 降到 24。旧价格让拥挤车道比穿过元件本体还贵，
+   * 于是当画板上每条有用车道都拥挤时，布线器宁可选择“打个洞”。
+   * 现在网络按一次计数（`LaneIndex`），价格就可以低到让“贴着它走”成为答案，
+   * 同时又不至于让两个网络近到看起来像一根粗线。
    */
   parallel: 24,
   /**
-   * How far outside a body edge a lane candidate is offered, and how far the
-   * body is grown before a run counts as crossing it.
+   * 车道候选在元件本体边缘外多远处提供；以及本体先向外膨胀多少，走线才算穿过它。
    *
-   * Both are about the HALO, not the wire: a run is eight pixels of core under
-   * sixteen of glow, so a lane that clears the body by four pixels still looks
-   * like it is touching it. Twelve out and eight grown leaves the glow clear.
+   * 两个数字都是为光晕定的，不是为线芯：一段走线的芯是 8 像素，外面还有更宽的光晕，
+   * 所以离本体四像素的车道看起来仍像贴着它。向外让 12、本体膨胀 8，正好把光晕让开。
    */
   lane: 12,
   body: 8,
 } as const;
 
 /**
- * How many lanes one direction may offer before scoring.
+ * 一个方向最多提供多少条车道参与评分。
  *
- * Fourteen, because the lanes that matter are often NOT the ones nearest the
- * midpoint: a wire that has to get past a part standing in its corridor needs
- * the lane just outside that part, and that lane can be a hundred pixels from
- * the middle. Cap this too low and the router never sees the way around and
- * settles for ploughing through -- which is the defect this module exists to fix.
+ * 取 14：真正重要的车道常常不是最靠近中点的那些。一根导线要绕过挡在走廊里的元件时，
+ * 需要的恰恰是紧贴该元件外侧的那条车道，而它可能离中点一百像素。
+ * 这个上限太低，布线器就永远看不到绕法，只能选择硬穿——那正是本模块要修的缺陷。
  *
- * The cap is also the router's performance knob: candidates are scored against
- * every nearby part, so the cost is linear in this number, and it shows up
- * directly in how a part drag feels on the biggest boards (see the budget test).
- * Fourteen was the knee on the reported board: sixteen bought almost nothing and
- * ten lost lanes the router needed.
+ * 这个上限同时也是布线器的性能旋钮：候选要对附近每个元件评分，
+ * 所以开销与本数值成线性，并直接体现为“拖拽元件时大画板手感如何”（见预算测试）。
+ * 14 是在被报告的那块画板上的拐点：16 几乎买不到额外收益，10 则会丢掉布线器需要的车道。
  */
 const MAX_LANES = 14;
 
-/** How far outside the pins' own box a part can still matter to a route. */
+/** 元件距“两引脚连线构成的盒子”超过多远后，就不再影响这条走线。 */
 const NEARBY = 128 + WIRE_STUB;
 
-/** Interior points of one candidate path, as offsets between the two stubs. */
+/** 拼接一条候选路径：`a`、若干内部点、`b`，并去掉连续重复的点。 */
 function path(a: Point, b: Point, middle: readonly Point[]): Point[] {
   const out: Point[] = [];
   for (const p of [a, ...middle, b]) {
@@ -142,21 +115,19 @@ function path(a: Point, b: Point, middle: readonly Point[]): Point[] {
   return out;
 }
 
-/** True when `[lo, hi]` overlaps `[rLo, rHi]`. */
+/** 区间 `[lo, hi]` 与 `[rLo, rHi]` 是否重叠（端点顺序不限）。 */
 function spans(lo: number, hi: number, rLo: number, rHi: number): boolean {
   return Math.max(lo, hi) >= rLo && Math.min(lo, hi) <= rHi;
 }
 
 /**
- * The lanes worth trying in one direction, nearest the midpoint first.
+ * 一个方向上值得尝试的车道，按距中点的远近排序。
  *
- * The candidates the old router would have produced anyway (both stub
- * coordinates, the midpoint and the quarters) plus, for every part standing in
- * the corridor, the two lanes just outside it. That last group is what lets a
- * wire thread a gap between two gates instead of ploughing through one.
+ * 既有旧布线器本来就会产生的候选（两个引导段坐标、中点、两个四分点），
+ * 也有“每个挡在走廊里的元件”外侧的两条车道。后一组正是让导线能从两个门之间的缝隙穿过去、
+ * 而不是硬穿一个门的原因。
  *
- * Sorted by distance from the midpoint before the cap, so the shapes a player
- * would draw survive the cut and the exotic ones do not.
+ * 先按距中点的远近排序再截断：这样玩家会画的形状能活过截断，古怪形状则不会。
  */
 function lanes(values: readonly number[], centre: number): number[] {
   const unique = [...new Set(values.map((v) => snap(v)))];
@@ -165,29 +136,28 @@ function lanes(values: readonly number[], centre: number): number[] {
 }
 
 /**
- * Every orthogonal route between two pins that is worth scoring, stubs
- * included, first point at `from` and last at `to`.
+ * 两个引脚之间所有值得评分的正交路线，包含引导段；第一个点是 `from`，最后是 `to`。
  *
- * Two families, because which one is right depends on what is in the way: a run
- * that turns on a vertical lane (`x`), and one that turns on a horizontal lane
- * (`y`). The plain L-shapes fall out of both for free -- a lane drawn at the far
- * stub's own coordinate collapses one of the two bends.
+ * 分两族，因为哪一族正确取决于中间挡了什么：在竖直车道上转弯的路线（按 `x` 取车道），
+ * 以及在水平车道上转弯的路线（按 `y` 取车道）。
+ * 普通的 L 形从这两族里免费得到——当车道取在对面引导段自己的坐标上时，两次转弯会合并成一次。
  *
- * TRACKS, NOT LANES. A gap between two bodies is 2 x `lane` wide on a compact
- * board, which is exactly one `WIRE_CLEARANCE`, so each part edge offers TWO
- * candidates a clearance apart: the lane just outside the body and the track
- * beside it. Without the second, two nets whose natural lanes coincide have no
- * legal side-by-side position and the cheaper answer is one drawn on top of the
- * other -- which reads as a short.
+ * 是“轨道”，不是“车道”。在紧凑画板上两个本体之间的缝隙宽度是 2 * `lane`，
+ * 恰好等于一个 `WIRE_CLEARANCE`，所以每个元件边缘提供两个相距一个 clearance 的候选：
+ * 紧贴本体外侧的车道，以及它旁边的轨道。没有第二条轨道时，
+ * 两个自然车道重合的网络就没有合法的并排位置，更便宜的答案就是叠在一起画——读起来像短路。
  *
- * The vertical family has two more shapes for the same reason: its vertical
- * column used to be the source stub's own x, a single line every wire from that
- * pin column wanted. One variant moves the trunk beside it
- * (`start.x + WIRE_CLEARANCE`), which keeps two stacked input connectors apart;
- * the other moves the DESCENT, the last vertical into the target pin, one track
- * left (`end.x - WIRE_CLEARANCE`), which keeps two wires that arrive at the same
- * gate column from sharing the last run into their pins. Each costs a couple of
- * pixels of length and nothing else.
+ * 竖直族还多两种形状，原因相同：它的竖直列过去是源引导段自己的 x，
+ * 也就是同一列引脚上每根导线都想要的那一条线。一个变体把干线挪到它旁边
+ * （`start.x + WIRE_CLEARANCE`），让上下叠放的两个输入连接器不共用一条竖线；
+ * 另一个变体把“下降段”（最后进入目标引脚的那段竖线）向左挪一条轨道
+ * （`end.x - WIRE_CLEARANCE`），让到达同一门列的两根导线不共用最后一小段。
+ * 每种变体只多花几个像素的长度，别的什么都没有。
+ *
+ * @param from 输出引脚圆心
+ * @param to 输入引脚圆心
+ * @param parts 附近元件的矩形，用于在走廊里开出绕行车道
+ * @returns 候选折线列表，每条都从 `from` 到 `to`
  */
 export function candidateRoutes(from: Point, to: Point, parts: readonly Rect[]): Point[][] {
   const start = { x: from.x + WIRE_STUB, y: from.y };
@@ -195,10 +165,9 @@ export function candidateRoutes(from: Point, to: Point, parts: readonly Rect[]):
   const midX = (start.x + end.x) / 2;
   const midY = (start.y + end.y) / 2;
   const lane = ROUTE_COST.lane;
-  // Two tracks per gap, one WIRE_CLEARANCE apart: a candidate that has one other
-  // net on the near track can move to the far one and still be a separate line
-  // rather than a thicker one (`near` counts nets, not wires, so the two tracks
-  // are what spatial separation comes from).
+  // 每条缝隙两条轨道，相距一个 WIRE_CLEARANCE：
+  // 近轨道上已有别的网络时，候选可以换到远轨道，仍是两条分开的线而非一根更粗的线
+  // （`near` 按网络计数而不是按导线计数，所以空间上的分离靠这两条轨道提供）。
   const track = lane + WIRE_CLEARANCE;
 
   const xs = lanes(
@@ -240,12 +209,10 @@ export function candidateRoutes(from: Point, to: Point, parts: readonly Rect[]):
 
   return [
     ...xs.map((x) => path(from, to, [start, { x, y: start.y }, { x, y: end.y }, end])),
-    // The vertical family's two columns are tracks too, not fixed lines: two
-    // nets whose sources share a pin column (a row of connectors, a gate row) both
-    // want the vertical just right of that column, and without a track beside it
-    // the second wire is drawn exactly on top of the first -- one visible line
-    // carrying two signals. The horizontal room is unchanged; only the vertical
-    // column moves, so the cost is two extra pixels of length and nothing else.
+    // 竖直族的两列也是“轨道”而不是固定线：两个网络的源在同一列引脚上时
+    // （一排连接器、一行门），都想要那一列右侧的竖线；若没有旁边的轨道，
+    // 第二根导线就会正好叠在第一根上——一条看得见的线承载两个信号。
+    // 水平方向的余量不变，只有竖直列移动，所以代价只是长度多两个像素。
     ...ys.flatMap((y) => [
       path(from, to, [start, { x: start.x, y }, { x: end.x, y }, end]),
       path(from, to, [
@@ -267,13 +234,11 @@ export function candidateRoutes(from: Point, to: Point, parts: readonly Rect[]):
 }
 
 /**
- * How much of an axis-aligned segment lies inside a rectangle.
+ * 一段轴对齐线段有多少落在矩形内部。
  *
- * The rectangle is grown by `ROUTE_COST.body` first. A wire genuinely has to
- * touch the body of the part it is wired to -- its last sixteen pixels run from
- * the stub to the pin on the body's edge -- and charging for that would charge
- * every candidate equally. Charging for running ALONG an edge, or for squeezing
- * past one with the halo overlapping it, is the point.
+ * 先把矩形按 `ROUTE_COST.body` 向外膨胀。导线确实必须碰到它所连接元件的本体——
+ * 最后十六像素就是从引导段走到本体边缘上的引脚——为这段收费会让所有候选付同样的钱。
+ * 收费要收的是“沿着边缘走”或“带着重叠的光晕硬挤过去”。
  */
 function insideRect(a: Point, b: Point, r: Rect): number {
   const inflate = ROUTE_COST.body;
@@ -292,31 +257,27 @@ function insideRect(a: Point, b: Point, r: Rect): number {
   return 0;
 }
 
-/** One placed run of wire: what a later candidate is scored against. */
+/** 一段已经放好的走线：后续候选要对它评分。 */
 interface Placed {
   readonly coord: number;
   readonly lo: number;
   readonly hi: number;
   readonly horizontal: boolean;
-  /** The output pin this run carries, so fan-out wires can share a trunk. */
+  /** 这段走线承载的输出引脚，让扇出的导线可以共用一条干线。 */
   readonly net: string;
 }
 
 /**
- * Placed runs indexed by the lane they occupy, so scoring stays local.
+ * 按所占车道建立索引的已放走线，让评分保持局部。
  *
- * A candidate segment can only conflict with a parallel run whose perpendicular
- * coordinate is within `WIRE_CLEARANCE`, so bucketing by that coordinate -- one
- * grid step per bucket, three buckets either way -- turns a whole-board scan into
- * a handful of lookups. It has to be local: the late-game boards carry thousands
- * of segments, and this runs once per wire per edit.
+ * 一段候选线只可能和“垂直坐标相差 `WIRE_CLEARANCE` 以内”的平行走线冲突，
+ * 所以按该坐标分桶——每个网格一步一个桶，左右各看三个——就把全画板扫描变成几次查表。
+ * 必须局部：后期画板上有数千段走线，而这里每编辑一次、每根导线都要跑一遍。
  *
- * ONE ENTRY PER NET PER BUCKET, merged as it is added -- not one per wire. A
- * fan-out trunk is hundreds of wires on the same lane and the same net, drawn as
- * ONE line; storing them wire by wire makes every later candidate scan the whole
- * trunk and would price a lane as hundreds of lines deep, which is the defect
- * this tap exists to fix. Merging on the way in also keeps the index small, which
- * is what lets the scoring afford more candidate lanes.
+ * 每个桶里每个网络只有一条记录，加入时合并——不是每根导线一条。
+ * 一条扇出干线是数百根同车道、同网络的导线，但画出来只是一条线；
+ * 若逐根存储，后面每个候选都要扫完整条干线，把一条车道计价成数百条线的深度，
+ * 那正是这个合并要修的缺陷。加入时就合并也让索引保持小，这是评分能负担更多候选车道的原因。
  */
 export class LaneIndex {
   private readonly buckets = new Map<string, Map<string, Run>>();
@@ -340,10 +301,10 @@ export class LaneIndex {
   }
 
   /**
-   * The parallel runs close enough to merge with a segment on this lane.
+   * 同一车道上、近到足以与这段走线合并的平行走线。
    *
-   * One reading per net and span: `costOf` asks "how many distinct lines would
-   * this run sit beside", which is what the player sees.
+   * 每个网络每个区间只读一次：`costOf` 问的是“这段走线旁边会挨着几条不同的线”，
+   * 也就是玩家实际看到的条数。
    */
   near(horizontal: boolean, coord: number, lo: number, hi: number): Placed[] {
     const bucket = bucketOf(coord);
@@ -372,20 +333,24 @@ export class LaneIndex {
   }
 }
 
+/** 一个网络在某个桶里合并后的一段走线区间。 */
 interface Run {
   coord: number;
   lo: number;
   hi: number;
 }
 
+/** 把垂直坐标换算成桶编号（每 8 个世界像素一个桶）。 */
 function bucketOf(coord: number): number {
   return Math.round(coord / GRID);
 }
 
+/** 桶键：`h`/`v` 区分水平与竖直走线，后接桶编号。 */
 function bucketKey(horizontal: boolean, bucket: number): string {
   return `${horizontal ? 'h' : 'v'}${bucket}`;
 }
 
+/** 把一条折线拆成可参与评分的水平/竖直线段，并标注它属于哪个网络。 */
 function segmentsOf(points: readonly Point[], net: string): Placed[] {
   const out: Placed[] = [];
   for (let i = 1; i < points.length; i += 1) {
@@ -404,7 +369,7 @@ function segmentsOf(points: readonly Point[], net: string): Placed[] {
   return out;
 }
 
-/** True corners: direction changes, not raw point count (a collinear point is not a bend). */
+/** 真正的拐角数：数方向变化，而不是数顶点（共线的点不算转弯）。 */
 function cornersOf(points: readonly Point[]): number {
   let corners = 0;
   for (let i = 1; i < points.length - 1; i += 1) {
@@ -418,7 +383,7 @@ function cornersOf(points: readonly Point[]): number {
   return corners;
 }
 
-/** What a candidate costs: its length, its corners, and everything it hits. */
+/** 一条候选的代价：长度、拐角，以及它撞上的一切。 */
 function costOf(
   points: readonly Point[],
   parts: readonly Rect[],
@@ -435,7 +400,7 @@ function costOf(
     const coord = horizontal ? a.y : a.x;
     cost += hi - lo;
 
-    // Cheap rejects first: a segment can only touch what its own box reaches.
+    // 先做便宜的排除：一段线只可能碰到它自己包围盒够得着的东西。
     const x0 = Math.min(a.x, b.x);
     const x1 = Math.max(a.x, b.x);
     const y0 = Math.min(a.y, b.y);
@@ -446,9 +411,8 @@ function costOf(
     }
 
     for (const p of lanes.near(horizontal, coord, lo, hi)) {
-      // ONE SIGNAL, ONE LINE. A fan-out wire beside a run of its own net is
-      // drawing the signal it already is -- one line, correctly -- so it costs
-      // nothing. Any other net at that distance is the two-thick-wires defect.
+      // 一个信号一根线。扇出导线挨着同网络的走线，画的就是它本来就有的信号——
+      // 一条线，画法正确——所以代价为零。那个距离上的其他任何网络，才是“两根粗线”缺陷。
       if (p.net === net) continue;
       cost += ROUTE_COST.parallel * (Math.min(hi, p.hi) - Math.max(lo, p.lo));
     }
@@ -456,7 +420,7 @@ function costOf(
   return cost;
 }
 
-/** The cheapest of a wire's candidates. */
+/** 一根导线所有候选里最便宜的那条。 */
 export function chooseRoute(
   from: Point,
   to: Point,
@@ -472,21 +436,20 @@ export function chooseRoute(
     best = points;
     bestCost = cost;
   }
-  // `candidateRoutes` always offers at least the two stub coordinates, so there
-  // is a candidate; the fallback is for the type, not for the case.
+  // `candidateRoutes` 至少会给出两个引导段坐标，所以候选必然存在；
+  // 末尾的兜底是为了类型完整，不是为了应付这种情况。
   return best ?? [from, to];
 }
 
-/** Every wire's polyline, keyed by wire id. */
+/** 每根导线的折线，按导线 id 索引。 */
 export type RoutePlan = ReadonlyMap<string, readonly Point[]>;
 
 /**
- * The plan for one board.
+ * 一整块画板的布线方案。
  *
- * Memoised on a hash of everything routing depends on -- every part's id,
- * definition and position, and every wire's endpoints -- because this is called
- * both by the painter, which runs on every store change including each frame of a
- * pan, and by the hit test. A pan must not re-route the board.
+ * 以“布线所依赖的一切”的哈希做备忘：每个元件的 id、定义和位置，以及每根导线的两个端点。
+ * 因为它既被画笔调用（每次 store 变化都会跑，包括平移的每一帧），也被命中测试调用：
+ * 平移不应该让整块画板重新布线。
  */
 let cache: { registry: Registry; key: number; plan: RoutePlan } | null = null;
 
@@ -498,11 +461,12 @@ export function planRoutes(graph: Graph, registry: Registry): RoutePlan {
   return plan;
 }
 
-/** Drops the memo. For tests that want to watch the router think. */
+/** 丢弃备忘缓存；给想观察布线器思考过程的测试用。 */
 export function forgetRoutes(): void {
   cache = null;
 }
 
+/** 真正计算布线方案：按玩家创建顺序逐根规划，并把已放好的走线加入车道索引。 */
 function compute(graph: Graph, registry: Registry): RoutePlan {
   const all = partRects(graph, registry);
   const byId = new Map(graph.instances.map((i) => [i.id, i]));
@@ -536,22 +500,20 @@ function compute(graph: Graph, registry: Registry): RoutePlan {
 }
 
 /**
- * The net a wire carries: the output pin it comes from.
+ * 一根导线承载的网络：它来自哪个输出引脚。
  *
- * Two wires out of one pin are the SAME SIGNAL, so they are allowed -- and
- * encouraged -- to share a trunk (`ROUTE_COST.reuse`). Any other pair of wires is
- * two signals, and has to stay apart.
+ * 同一个引脚出来的两根导线是同一个信号，因此允许、甚至鼓励共用一条干线
+ * （见 `ROUTE_COST.parallel` 的说明：同网络免费）。其他任意两根导线都是两个信号，必须分开。
  */
 function netOf(wire: Graph['wires'][number]): string {
   return `${wire.from.inst}.${wire.from.port}`;
 }
 
 /**
- * A hash of everything that decides a route.
+ * 决定布线的全部输入的哈希。
  *
- * A hash rather than the key string it stands for: this runs on every paint, and
- * building a few kilobytes of text per frame to throw it away is work the board
- * does not need. A collision would only ever put a wire in the wrong lane.
+ * 用哈希而不是它代表的那串键：这段代码每次重绘都跑，每帧拼几 KB 文本再扔掉，
+ * 是画板不需要的工作。哈希碰撞最多只会把一根导线放进错误的车道。
  */
 function fingerprint(graph: Graph): number {
   let hash = 0x811c9dc5;

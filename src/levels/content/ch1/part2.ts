@@ -2,29 +2,23 @@ import { truthTable } from '../../tables';
 import type { LevelSpec } from '../../spec';
 
 /**
- * Chapter 1, levels 7-13.
+ * 第 1 章第 7~13 关。
  *
- * Level 7 is the only level in this half that hands out a memory part: level 8's
- * puzzle cannot be built without `delay_line`, and a level may only offer parts an
- * earlier level has already rewarded, so the unlock has to happen here. The
- * chapter's LAST level is where the other memory part changes hands, for the same
- * rule one chapter later: `mem1` is what chapter 2's latch level is built from, so
- * it has to be in the player's hands before chapter 2 opens.
+ * 第 7 关是这半边唯一发放存储元件的关卡：第 8 关的谜题离不开 `delay_line`，
+ * 而一关只能提供「更早关卡已经奖励过」的元件，所以解锁必须在这里发生。
+ * 本章最后一关发放另一个存储元件，理由在下一章同样成立：`mem1` 是第 2 章锁存器关卡的
+ * 基础，必须在第 2 章开始前就交到玩家手里。
  *
- * THE TWO CAPSTONE LEVELS ARE NEW IN THE 2.x SHAPE, and both close a hole rather
- * than add a puzzle. `ch1-12-xnor-gate` is where `xnor` is handed out; the reward
- * used to sit on `ch1-10-bigger-or-gate`, a three-input OR level that never asked
- * the player to build an XNOR at all. `ch1-13-logic-exam` carries `mem1`, which
- * used to be the first chapter-2 level's reward -- one chapter too late for the
- * level that consumes it.
+ * 两个收尾关卡是 2.x 结构新增的，两者都在补漏洞，而不是增加谜题：
+ * `ch1-12-xnor-gate` 是发放 `xnor` 的地方；这个奖励原本挂在 `ch1-10-bigger-or-gate`
+ *（三输入或门）上，可那一关根本没让玩家搭同或门。`ch1-13-logic-exam` 携带 `mem1`，
+ * 它原本是第 2 章第一关的奖励——对于消费它的关卡来说晚了一整章。
  *
- * `and3` MADE THE SAME MOVE, for the same reason. It used to be level 8's reward,
- * which put the 3-Pin AND in the palette three levels before
- * `ch1-11-bigger-and-gate` -- the level whose whole lesson is building one from
- * two 2-input ANDs. The part is level 11's reward now, where it follows the
- * construction instead of answering it, and levels 9-11 no longer offer it.
+ * `and3` 做了同样的调整，理由相同：它原本是第 8 关的奖励，于是三输入与门在
+ * `ch1-11-bigger-and-gate`（整关就是用两个二输入与门搭出它）之前三关就进了托盘。
+ * 现在它是第 11 关的奖励，跟在「搭建」之后而不是提前给出答案，第 9~11 关也不再提供它。
  *
- * All text is original.
+ * 所有文案均为本项目原创。
  */
 const IO_CONST = { inputs: [], outputs: [{ id: 'out', width: 1 }] };
 const IO_AB = {
@@ -42,6 +36,7 @@ const IO_ABC = {
   ],
   outputs: [{ id: 'out', width: 1 }],
 };
+/** 第 1 章第 7~13 关的关卡数据，按 `index` 顺序排列。 */
 export const CH1_PART2: readonly LevelSpec[] = [
   {
     id: 'ch1-07-always-on',
@@ -57,9 +52,8 @@ export const CH1_PART2: readonly LevelSpec[] = [
     io: IO_CONST,
     checks: [truthTable(IO_CONST, { out: () => 1 })],
     threeStar: { gate: 0, delay: 0, tick: 0 },
-    // `delay_line` is level 8's whole lesson and this is level 8's only
-    // predecessor, so the unlock has to be handed out here -- a level may not
-    // offer a part that no earlier level rewarded.
+    // `delay_line` 是第 8 关的全部内容，而本关是第 8 关唯一的前置关卡，
+    // 所以解锁必须在这里发放——一关不能提供没有任何更早关卡奖励过的元件。
     rewards: { components: ['delay_line', 'xor'] },
   },
   {
@@ -88,19 +82,16 @@ export const CH1_PART2: readonly LevelSpec[] = [
         ],
       },
     ],
-    // `tick` is the highest tick the check drives, not the circuit's latency:
-    // the last step asserts the output is still high at tick 3, so every graded
-    // circuit reports tick 3. What pins the two-tick latency is the check
-    // itself -- a single delay line is still low at tick 2 and fails it (see the
-    // wrong-circuit test) -- so the target has to be 3 to stay earnable.
+    // `tick` 是检查所驱动到的最高节拍，不是电路的延迟：
+    // 最后一步断言第 3 拍输出仍为高，所以每个通过检查的电路都会报 tick 3。
+    // 真正钉住「两拍延迟」的是检查本身——单条延迟线在第 2 拍仍为低、会失败
+    //（见错误电路测试）——因此目标必须写 3 才仍然可达成。
     threeStar: { gate: 0, delay: 0, tick: 3 },
-    // NO REWARD: `and3` used to be handed out here, and that is the defect this
-    // comment records instead of repeating. This level's lesson is two delay
-    // lines; the 3-Pin AND arrived in the palette three levels before
-    // `ch1-11-bigger-and-gate`, which asks the player to build exactly that gate.
-    // The part is level 11's reward now, so the acquisition follows the
-    // construction; levels 9 and 10 stopped offering a part their puzzles never
-    // needed, and level 11 withholds it because it IS that level's answer.
+    // 不发放奖励：`and3` 原本在这里发放，那正是这条注释要记录（而不是重复）的缺陷。
+    // 本关的内容是两条延迟线；三输入与门在 `ch1-11-bigger-and-gate` 之前三关就进了
+    // 托盘，而那一关正是要求玩家亲手搭出这个门。
+    // 现在它是第 11 关的奖励，所以「获得」发生在「搭建」之后；第 9、10 关不再提供
+    // 它们的谜题根本用不到的元件，第 11 关则故意不提供它，因为它就是那一关的答案。
   },
   {
     id: 'ch1-09-xor-gate',
@@ -126,10 +117,9 @@ export const CH1_PART2: readonly LevelSpec[] = [
       'level_output',
     ],
     io: IO_AB,
-    // "High when the inputs differ", spelled as the level's own brief puts it.
-    // (The plan wrote this as `a ^ b`, which does not typecheck here: with
-    // `noUncheckedIndexedAccess` an input record lookup is `number | undefined`
-    // and bitwise operators reject it.)
+    // 「两个输入不同时输出高」，按本关 brief 的说法写。
+    //（计划里曾写作 `a ^ b`，在这里无法通过类型检查：开启 `noUncheckedIndexedAccess`
+    // 时，输入记录的下标访问类型是 `number | undefined`，位运算会拒绝它。）
     checks: [truthTable(IO_AB, { out: ({ a, b }) => (a === b ? 0 : 1) })],
     threeStar: { gate: 4, delay: 3, tick: 0 },
     rewards: { components: ['or3'] },
@@ -160,14 +150,13 @@ export const CH1_PART2: readonly LevelSpec[] = [
     ],
     io: IO_ABC,
     checks: [truthTable(IO_ABC, { out: ({ a, b, c }) => (a || b || c ? 1 : 0) })],
-    // Three-star target = the reference solution's own metrics; the reference scores exactly it.
-    // Gate = 6, not 2: the reference cascades two ORs, 3 NAND equivalents each.
+    // 三星目标 = 参考解自身的指标；参考解恰好得到这个分数。
+    // 门数 = 6 而不是 2：参考解把两个 OR 级联，每个 OR 折合 3 个 NAND 等价门。
     threeStar: { gate: 6, delay: 2, tick: 0 },
-    // `xnor` USED TO BE HANDED OUT HERE, and that is the defect this comment now
-    // records instead of repeating: a three-input OR level has no use for an XNOR,
-    // so the part arrived in the player's palette without their having built one.
-    // The 2.x shape gives the gate its own level (`ch1-12-xnor-gate`), which is
-    // where it is handed out now, and this level rewards nothing.
+    // `xnor` 以前在这里发放，那正是这条注释要记录（而不是重复）的缺陷：
+    // 三输入或门关卡用不到同或门，玩家根本没有搭过它，元件就进了托盘。
+    // 2.x 结构给这个门单独设了一关（`ch1-12-xnor-gate`），现在在那里发放，
+    // 本关不再发放任何奖励。
   },
   {
     id: 'ch1-11-bigger-and-gate',
@@ -193,45 +182,38 @@ export const CH1_PART2: readonly LevelSpec[] = [
     ],
     io: IO_ABC,
     checks: [truthTable(IO_ABC, { out: ({ a, b, c }) => (a && b && c ? 1 : 0) })],
-    // Three-star target = the reference solution's own metrics; the reference scores exactly it.
-    // Gate = 4, not 2: the reference cascades two ANDs, 2 NAND equivalents each.
+    // 三星目标 = 参考解自身的指标；参考解恰好得到这个分数。
+    // 门数 = 4 而不是 2：参考解把两个 AND 级联，每个 AND 折合 2 个 NAND 等价门。
     threeStar: { gate: 4, delay: 2, tick: 0 },
-    // `and3` IS THIS LEVEL'S REWARD AND ITS PALETTE WITHHOLDS IT, which is the
-    // same rule `ch1-10-bigger-or-gate` follows for `or3` and `ch1-12-xnor-gate`
-    // states outright: one part that is the whole answer makes the lesson vacuous.
-    // Here the stake is visible in the metrics -- a dropped-in `and3` is 4 NAND
-    // equivalents on ONE node, so it passes the truth table at gate 4 / delay 1
-    // and scores three stars, beating the two-AND cascade's delay. `grade()` cannot
-    // separate them (any valid graph is scored), so the palette is the only thing
-    // keeping the part off the board; `test/levels/ch1-part2.test.ts` pins both
-    // halves -- the palette omits it, and the drop-in really does score 3.
+    // `and3` 是本关的奖励，而本关的托盘故意不提供它；这条规则与
+    // `ch1-10-bigger-or-gate` 对 `or3` 的处理、以及 `ch1-12-xnor-gate` 的明文说明一致：
+    // 一个「就是全部答案」的元件会让这一课变得毫无意义。
+    // 本关的代价在指标上看得见——直接放一个 `and3` 相当于 4 个 NAND 等价门挂在同一
+    // 节点上，于是它以 4 门 / 1 层延迟通过真值表并拿到三星，在延迟上压过两个 AND 级联。
+    // `grade()` 无法区分两者（任何合法电路都会被评分），所以托盘是唯一能把这个元件挡在
+    // 画板外的东西；`test/levels/ch1-part2.test.ts` 同时钉住两件事：托盘不含它，
+    // 且直接放进去确实拿三星。
     rewards: { components: ['and3'] },
   },
 
   /**
-   * ch1-12-xnor-gate -- XNOR Gate / 同或门
+   * ch1-12-xnor-gate —— 同或门 / XNOR Gate
    *
-   * SOURCED: the name in both languages and its position (the 12th level, the
-   * chapter's penultimate one). The dossier's §5 table gives this level no concept
-   * line at all, so nothing below is a translation of one.
+   * 有出处：两种语言的名称、位置（第 12 关，本章倒数第二关）。资料 §5 的表格完全没有
+   * 给这一关概念行，所以下面的内容不是对它的翻译。
    *
-   * AUTHORED: the `a b -> out` shape; the four-row truth table; the palette; the
-   * measured three-star target; and the `xnor` reward, which the 2.x realignment
-   * moved here from `ch1-10-bigger-or-gate` -- that level's own lesson is a
-   * three-input OR, so the reward arrived without the player ever building the
-   * gate it named.
+   * 自创：`a b -> out` 的形状；四行真值表；托盘；实测的三星目标；以及 `xnor` 奖励——
+   * 2.x 改版把它从 `ch1-10-bigger-or-gate` 挪到这里，原来那一关的内容是三输入或门，
+   * 奖励会在玩家从未搭出所命名的门时送达。
    *
-   * THE PUZZLE IS THE XOR LEVEL'S COMPLEMENT, and the palette says so: it is
-   * `ch1-09-xor-gate`'s list plus `and3` (level 11's reward), `xor` and `nor`, and
-   * nothing else. Two spellings are legitimate and both pass: an XNOR built from
-   * the NAND/AND/OR/NOT family the player already holds, or `xor` followed by a
-   * NOT -- the construction the hint
-   * names first and the one the target was measured from. They are not equally
-   * cheap on depth, and the measurement below says which is which. `xnor` itself is
-   * NOT offered: a level's own reward is what `paletteDefsFor` adds back before the
-   * level is passed, and a one-drop answer to the level that teaches the gate would
-   * make the lesson vacuous. `ch1-10`'s old reward comment is where that rule is
-   * recorded for this chapter.
+   * 本关谜题是异或门关卡的补集，托盘也说明了这一点：它等于 `ch1-09-xor-gate` 的清单
+   * 加上 `and3`（第 11 关奖励）、`xor` 和 `nor`，再无其他。
+   * 两种写法都合法且都能通过：用玩家已有的 NAND/AND/OR/NOT 家族搭出同或门，
+   * 或者先 `xor` 再取反——提示里先写的是后者，目标也是按后者实测的。
+   * 两者在深度上并不等价，下面的实测说明谁是谁。
+   * `xnor` 本身不提供：关卡通过前，`paletteDefsFor` 会把关卡自己的奖励加回托盘，
+   * 而「教这个门的关卡里直接放这个门」会让这一课变得毫无意义。
+   * 本章这条规则的记录位置是 `ch1-10` 原来的奖励注释。
    */
   {
     id: 'ch1-12-xnor-gate',
@@ -260,55 +242,45 @@ export const CH1_PART2: readonly LevelSpec[] = [
       'level_output',
     ],
     io: IO_AB,
-    // "High when the inputs agree, low when they differ", spelled the way the
-    // sibling XOR level spells its own row (see the note there on `?? 0` and
-    // `noUncheckedIndexedAccess`): one comparison, not a bitwise operator.
+    // 「两个输入相同时输出高、不同时输出低」，按兄弟关卡 XOR 的写法写
+    //（见那一关关于 `?? 0` 和 `noUncheckedIndexedAccess` 的说明）：
+    // 用一次比较，而不是位运算符。
     checks: [truthTable(IO_AB, { out: ({ a, b }) => (a === b ? 1 : 0) })],
-    // Measured: `xor` (the classic four-NAND cell, 4 NAND equivalents) into one
-    // `not` (1) -- 5 gates on a path two components deep. The NAND-only spelling
-    // measures the same 5 gates four components deep (NAND(a,b); the two NANDs that
-    // fold it back into a and b; their NAND; the final inverter), so it is a correct
-    // circuit that scores one star -- both are five NAND equivalents, and what the
-    // target separates is depth: the cell the chapter handed the player against the
-    // cell they rebuild from NANDs by hand.
+    // 实测：`xor`（经典四与非单元，折合 4 个 NAND 等价门）接一个 `not`（1 门）
+    // ——5 门、路径两个元件深。只用与非门的写法实测同样是 5 门，但四个元件深
+    //（NAND(a,b)；把它折回 a 和 b 的两个 NAND；这两个结果的 NAND；最后的反相器），
+    // 所以它是「正确但只拿一星」的电路——两者都是 5 个 NAND 等价门，
+    // 而目标区分的是深度：本章交给玩家的单元，对比玩家用与非门手工重建的单元。
     threeStar: { gate: 5, delay: 2, tick: 0 },
     rewards: { components: ['xnor'] },
   },
 
   /**
-   * ch1-13-logic-exam -- Logic Exam / 逻辑试炼
+   * ch1-13-logic-exam —— 逻辑试炼 / Logic Exam
    *
-   * SOURCED: the name in both languages, its position (the 13th and last level of
-   * chapter 1), and the dossier's one-line concept -- 综合测验, a comprehensive
-   * quiz over the chapter. That is the whole of what the source fixes; it names no
-   * function, no ports and no reward.
+   * 有出处：两种语言的名称、位置（第 13 关，第 1 章最后一关），以及资料里的一句话概念——
+   * 综合测验，覆盖整章。这就是源资料固定的全部内容：没有指定函数、端口和奖励。
    *
-   * AUTHORED: the function the exam asks for (the three-input MAJORITY: high when
-   * at least two of `a`, `b`, `c` are high), the `a b c -> out` shape, the
-   * eight-row truth table, the palette, the measured three-star target, and the
-   * `mem1` reward that the 2.x realignment moved here from `ch2-14-binary-racer`.
-   * The source's "quiz" is a shape, not a function: what makes this level a quiz
-   * rather than another gate is that no single part in the palette is the answer.
-   * AND, OR, NAND, NOR, XOR, XNOR, AND3 and OR3 each fail at least one of the
-   * eight rows, so the player has to compose; the majority function is the classic
-   * composition a chapter of gate-building ends on.
+   * 自创：测验要求的函数（三输入多数表决：`a`、`b`、`c` 中至少两个为高时输出高）、
+   * `a b c -> out` 的形状、八行真值表、托盘、实测三星目标，以及 2.x 改版从
+   * `ch2-14-binary-racer` 挪来的 `mem1` 奖励。
+   * 源资料的「测验」只是一种形式，不是函数：这一关之所以是测验而不是又一个门，
+   * 是因为托盘里没有任何单个元件能给出答案。AND、OR、NAND、NOR、XOR、XNOR、AND3、OR3
+   * 每一个都至少不满足八行中的一行，所以玩家必须组合；而多数表决函数正是
+   * 「一整章门电路搭建」收尾用的经典组合。
    *
-   * THE PALETTE IS THE WHOLE CHAPTER, minus the parts that would answer it and
-   * minus the part it hands out. That is deliberate and it is what makes this the
-   * capstone: by level 13 the player holds every chapter-1 part, and restricting
-   * the list would turn a quiz into a hint. `mem1` is left out rather than merely
-   * unneeded -- chapter 1's own rule is that a level never lists its own reward
-   * (`test/levels/level-buildability.test.ts` walks that), and nothing else about
-   * the part would help here: no check in this level ticks a clock.
+   * 托盘就是整章，减去「会直接给出答案的元件」，再减去「本关要发放的元件」。
+   * 这是刻意的，也正是它成为收尾关的原因：到第 13 关时玩家已经拥有第 1 章的全部元件，
+   * 限制清单反而会把测验变成提示。`mem1` 被排除不只是因为它用不上——
+   * 第 1 章自己的规则是「关卡不列出自己的奖励」
+   *（`test/levels/level-buildability.test.ts` 会遍历检查），而且这关没有任何检查推进
+   * 时钟，这个元件在这里也确实帮不上忙。
    *
-   * THE TARGET IS THE SHARED-TERM CONSTRUCTION, not the smallest gate count: the
-   * three pairwise ANDs feed one `or3`, which is 3 x 2 + 6 = 12 NAND equivalents on
-   * a path two components deep, and the two-OR cascade of the same three terms is
-   * 12 gates on a path three deep, so the shared OR3 is what the measured target
-   * separates. The 10-gate/(a AND b) OR (c AND (a OR b)) spelling is smaller and
-   * three deep, and scores one star: it is the documented alternative rather than a
-   * hole in the target, and the target is the reference's own measurement either
-   * way.
+   * 目标取「共享项」的搭法，而不是最小门数：三个两两相与各接一个 `or3`，
+   * 即 3 x 2 + 6 = 12 个 NAND 等价门、路径两层深；同样三个项用两个 OR 级联也是 12 门，
+   * 但路径三层深，所以实测目标区分的是共享 OR3 这种搭法。
+   * 10 门、三层的 ((a AND b) OR (c AND (a OR b))) 写法门数更小，却只拿一星：
+   * 它是记录在案的替代写法，不是目标的漏洞；而目标本身就是参考解的实测值。
    */
   {
     id: 'ch1-13-logic-exam',
@@ -340,23 +312,20 @@ export const CH1_PART2: readonly LevelSpec[] = [
       'level_output',
     ],
     io: IO_ABC,
-    // The majority function, written as what it is rather than as a bit trick: at
-    // least two of the three inputs high. Every row is enumerated -- 2^3 rows, so
-    // nothing is sampled and the two rows that separate majority from OR (exactly
-    // one input high) and from AND (exactly two) are both in the table.
+    // 多数表决函数，按它的定义写，而不是写成位技巧：三个输入里至少两个为高。
+    // 所有行都被枚举（2^3 行，没有抽样），所以把「多数」与「或」区分开的那一行
+    //（恰好一个输入为高）和与「与」区分开的那一行（恰好两个）都在表里。
     checks: [
       truthTable(IO_ABC, { out: ({ a, b, c }) => ((a ?? 0) + (b ?? 0) + (c ?? 0) >= 2 ? 1 : 0) }),
     ],
-    // Measured: the three pairwise ANDs (2 each) feeding one `or3` (6) = 12 NAND
-    // equivalents on a path two components deep. The two-OR cascade of the same
-    // terms measures 12 and 3, so the target separates the two compositions the
-    // palette invites; the three-gate/deeper alternative named above is 10 and 3.
+    // 实测：三个两两相与（各 2 门）接一个 `or3`（6 门）= 12 个 NAND 等价门，
+    // 路径两层深。同样三项用两个 OR 级联实测 12 门、3 层，所以目标区分了托盘邀请的
+    // 两种搭法；上面提到的「三元件但更深」的替代写法是 10 门、3 层。
     threeStar: { gate: 12, delay: 2, tick: 0 },
-    // `mem1` is chapter 1's last hand-out because chapter 2's latch level is the
-    // first circuit that needs it, and a level may only offer parts an earlier
-    // level has already rewarded. Before the 2.x realignment this reward sat on
-    // `ch2-14-binary-racer`, which is the FIRST level of chapter 2 -- so the part
-    // reached the palette one level after the level that builds from it.
+    // `mem1` 是第 1 章最后一次发放，因为第 2 章的锁存器关卡是第一个需要它的电路，
+    // 而一关只能提供更早关卡已经奖励过的元件。
+    // 在 2.x 改版之前，这个奖励挂在 `ch2-14-binary-racer` 上——那是第 2 章第一关，
+    // 于是元件在「需要它的关卡」之后一关才进入托盘。
     rewards: { components: ['mem1'] },
   },
 ];

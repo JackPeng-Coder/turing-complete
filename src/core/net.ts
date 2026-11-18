@@ -10,134 +10,137 @@ import {
 import { assertWidth, createSignalTable, type PortValue, type SignalTable } from './signal';
 import type { ComponentDef, PinDef, Registry } from './registry';
 
-/** Iteration cap for the settle loop. A combinational loop exhausts it. */
+/**
+ * 网表层：把可编辑的电路文档编译成可运行的网表，并驱动仿真。
+ *
+ * 职责链：compile() 先用 graph.ts 的 validateGraph 拒绝非法文档，再把自定义
+ * 元件展开成叶子、为每个引脚分配信号槽、把导线预先解析成"槽到槽"的 drive
+ * 映射，最后产出 Netlist；Simulation 持有这份网表，用 settle() 求组合逻辑的
+ * 不动点，用 tick() 施加时钟沿。gateCostOf()/delayOf() 复用同一套展开逻辑，
+ * 保证编译器与评分器看到的是同一批元件。
+ *
+ * 关键不变量：位宽一律走 effectiveWidth（实例 params.width 优先于定义），
+ * 分配、读取、写回全用同一组解析值；结算采用并行（Jacobi）扫描，因此结果与
+ * 实例顺序无关，真正的振荡器也无法伪装成稳定。
+ *
+ * 依赖：errors.ts、graph.ts、signal.ts、registry.ts（均为下层）；使用者是
+ * levels/（关卡检查与判定）、ui/（画板与调试面板）与 flash/（导出器）。
+ */
+
+/** 结算循环的迭代次数上限；组合逻辑环会耗尽它并抛 UnstableCircuitError。 */
 export const SETTLE_LIMIT = 512;
 
-/** Smallest table `compile` will ask for; tiny circuits still get a real buffer. */
+/** compile 会申请的最小信号表容量；再小的电路也有一个真实的缓冲区。 */
 const MIN_CAPACITY = 64;
 
 /**
- * A flattened, evaluated circuit: one slot per bit of every pin, plus the
- * mapping from pins to slots, plus a read region for the pins that need one.
+ * 一张被展平、可求值的电路：每个引脚的每一位占一个信号槽，外加"引脚到槽"的
+ * 映射，以及为需要连续读取的输入引脚准备的读取区。
  *
- * The netlist is a value object owned by `Simulation` (the two are tied together
- * by a private `WeakMap`); callers address slots, never names, so a hot loop
- * resolves `"i3.a"` once instead of per evaluation.
+ * 网表是 Simulation 持有的值对象（两者通过一个私有 WeakMap 关联）；调用方只和
+ * 槽下标打交道、不再用名字，所以热循环里 "i3.a" 只解析一次，而不是每次求值都
+ * 解析。
  */
 export interface Netlist {
   /**
-   * Leaves compiled, which is what actually runs.
+   * 真正参与运行的叶子元件数量。
    *
-   * NOT `graph.instances.length` once a document uses a custom component: the
-   * component is a name for a circuit, so `compile` emits the circuit's parts, one
-   * set per instance of it. `expandedCount` repeats it for the plan's original
-   * spelling.
+   * 文档用了自定义元件之后，它不再等于 graph.instances.length：元件是一个电路
+   * 的名字，compile 会把该电路里的元件逐个展开，每实例化一次发一套。
+   * expandedCount 重复这个数字，保留计划文档里原来的叫法。
    */
   readonly instanceCount: number;
   readonly expandedCount: number;
-  /** Bits allocated: one slot per bit of every pin, plus every read region. */
+  /** 分配的位数：每个引脚的每一位一个槽，加上每个读取区。 */
   readonly slotCount: number;
   /**
-   * `drive[slot]` is the slot `slot` reads its value from: the identity for
-   * every slot except a wired input pin bit, which reads the output pin bit
-   * driving it. Resolving wires up front keeps the settle loop branch-free.
+   * drive[slot] 是 slot 读取值的来源槽：除被导线驱动的输入引脚位之外都是
+   * 恒等（自己读自己）；被导线驱动的输入位读的是驱动它的输出引脚位。
+   * 提前把导线解析成槽下标，能让结算循环里没有任何分支判断。
    *
-   * It covers the pin slots only. A bit no wire claimed keeps its own slot, so
-   * such a bit reads 0 unless a caller writes that slot -- which is how an
-   * unwired input is driven directly. A materialised read region is not
-   * addressed through `drive`.
+   * 它只覆盖引脚槽。没有被任何导线认领的位保留自己的槽，因此只要没人写这个槽
+   * 它就始终读 0——未接线的输入正是靠这一点被直接驱动的。物化出来的读取区不
+   * 经过 drive 寻址。
    */
   readonly drive: Int32Array;
   /**
-   * Compiled path -> origin instance id in the document.
+   * 编译路径 -> 文档里的原始实例 id。
    *
-   * The origin is the OUTERMOST instance the leaf belongs to, so every leaf inside
-   * one custom component reports the same id -- the one the player can see on the
-   * board and delete.
+   * "原始实例"指叶子所属的最外层实例，所以同一个自定义元件内部的每个叶子都
+   * 报告同一个 id——玩家在画板上看得见、也删得掉的那一个。
    */
   readonly refs: Map<string, string>;
   /**
-   * Slot base of a **contiguous** read region for the input pin
-   * `"<instId>.<pinId>"`, so `read(inputBase(key), inputWidth(key))` is
-   * coherent.
+   * 输入引脚 "<实例id>.<引脚id>" 的**连续**读取区起始槽，使
+   * read(inputBase(key), inputWidth(key)) 读到的是这个引脚的值。
    *
-   * Usually that is the driver's own base: an unwired pin reads its own slots
-   * (which is why a level can still drive one directly), and a driver as wide as
-   * the pin is one contiguous run of slots. A driver *narrower* than the pin is
-   * neither, so `compile` materialises a region of the pin's own width and this
-   * returns that instead. Returning the driver's base in that case would make
-   * the caller read the slots that physically follow the driver -- other pins'
-   * signals, silently.
+   * 通常它就是驱动者自己的起始槽：未接线的引脚读自己的槽（这样关卡仍能直接
+   * 驱动它），而与引脚同宽的驱动者本身就是一段连续槽。比引脚窄的驱动者两者
+   * 都不是，于是 compile 会按引脚自身的位宽物化一段读取区，并让这里返回它。
+   * 那种情况下若返回驱动者的起始槽，调用方就会读到驱动者后面紧挨着的槽——
+   * 其它引脚的信号，而且悄无声息。
    *
-   * A region is republished from the settled table at the end of every `settle`,
-   * so a caller reads it after settling without asking for anything extra. It is
-   * a read alias only: writing into a region does not drive the pin. To drive a
-   * level input, write the `level_input` output slot (`outputBase`), as before.
+   * 每次 settle 结束时，读取区都会从已结算的信号表重新发布，所以调用方在结算
+   * 之后直接读即可，不需要额外请求。它只是一个读取别名：往读取区里写并不会
+   * 驱动该引脚。要驱动关卡输入，仍然写 level_input 的输出槽（outputBase）。
    */
   inputBase(key: string): number;
-  /** Slot of the output pin `"<instId>.<pinId>"`. */
+  /** 输出引脚 "<实例id>.<引脚id>" 的槽下标。 */
   outputBase(key: string): number;
   /**
-   * Slot base of the input pin's OWN storage: the indices `drive` is keyed from.
+   * 输入引脚自己那份存储的起始槽：也就是 drive 数组使用的下标基准。
    *
-   * `inputBase` answers a caller reading a RANGE and may hand back a
-   * materialised read region instead of the pin's own slots (a driver narrower
-   * than the pin is the case that needs one). A consumer that walks the netlist
-   * bit by bit needs the pin's own base instead, so that
-   * `drive[inputSlot(key) + bit]` names the single slot that bit reads: `drive`
-   * is built over the pin slots alone and a read region is allocated after it,
-   * so indexing `drive` with a region base reads past the array.
+   * inputBase 面向"按范围读取"的调用方，可能返回物化的读取区而不是引脚自己的
+   * 槽（驱动者比引脚窄时才需要读取区）。而逐位遍历网表的消费者需要引脚自己的
+   * 起始槽，这样 drive[inputSlot(key) + bit] 才指向那一位真正读取的槽：drive
+   * 只建在引脚槽上，读取区是在它之后分配的，用读取区的起始槽去索引 drive 会
+   * 越界读到数组之外。
    *
-   * This is the Arduino exporter's accessor. Every range reader keeps using
-   * `inputBase`; the two differ only for the narrow-driver case described above.
+   * 这是给 Arduino 导出器用的访问器。所有按范围读的调用方继续使用 inputBase；
+   * 两者只在上面说的"窄驱动者"情形下不同。
    */
   inputSlot(key: string): number;
   /**
-   * Width of the input pin `"<instId>.<pinId>"`, in bits, as compiled.
+   * 输入引脚 "<实例id>.<引脚id>" 的位宽（按编译结果，单位 bit）。
    *
-   * This is the width the pin's slots were allocated at and the width its read
-   * region holds, which is `params.width` when the instance sets one and the
-   * def's declared width otherwise -- see `effectiveWidth`. A caller that reads
-   * a pin as a *range* has to use this rather than the def's width, or it reads
-   * past a region that was sized from the instance.
+   * 这是该引脚槽位分配时使用的位宽，也是它读取区的位宽：实例设置过
+   * params.width 时取它，否则取定义声明的位宽——见 effectiveWidth。按范围读取
+   * 引脚的调用方必须用它而不是定义里的位宽，否则会读到按实例尺寸建好的读取区
+   * 之外。
    */
   inputWidth(key: string): number;
-  /** Width of the output pin `"<instId>.<pinId>"`, in bits, as compiled. */
+  /** 输出引脚 "<实例id>.<引脚id>" 的位宽（按编译结果，单位 bit）。 */
   outputWidth(key: string): number;
   /**
-   * Compiled paths inside one outer instance, itself first.
+   * 某一个外层实例内部的所有编译路径，自身排在最前。
    *
-   * Empty for an id this netlist does not contain. One entry for an ordinary part
-   * (the path IS the id), several for a custom component -- which is what a
-   * caller needs to walk a board instance's signals, since a component's own pins
-   * are aliases for pins inside it.
+   * 网表里没有这个 id 时返回空数组。普通元件只有一项（路径就是 id 本身），
+   * 自定义元件有多项——调用方要遍历画板上一个实例的信号时需要它，因为元件自己
+   * 的引脚只是它内部引脚的别名。
    */
   pathsOf(instanceId: string): readonly string[];
-  /** Compiled instance ids, in evaluation order -- paths, not document ids. */
+  /** 按求值顺序排列的编译实例 id（是路径，不是文档 id）。 */
   instanceIds(): readonly string[];
-  /** Def ids of the expanded instances, in evaluation order. */
+  /** 展开后各实例的元件定义 id，按求值顺序排列。 */
   instanceDefs(): readonly string[];
-  /** `"<instId>.<pinId>"` keys of every output pin. */
+  /** 每个输出引脚的 "<实例id>.<引脚id>" 键。 */
   outputKeys(): readonly string[];
 }
 
 /**
- * Width of `pin` on `inst`: the instance's own override, else what the def says.
+ * inst 上 pin 的位宽：实例自己的覆盖值优先，否则再用定义声明值。
  *
- * `ComponentDef` declares exactly one width per `PinDef`, so a single
- * `params.width` covers every pin of that instance -- the wide output of a
- * `level_input`, both pins of a `level_output`, every input and output of a
- * gate. There is deliberately no per-pin-name syntax: nothing needs one yet, and
- * inventing one here would put a second, unenforced source of width in the
- * document.
+ * ComponentDef 给每个 PinDef 只声明一个位宽，所以一个 params.width 会覆盖该
+ * 实例的所有引脚——level_input 的宽输出、level_output 的两个引脚、一个门的所有
+ * 输入输出都是如此。这里刻意没有"按引脚名分别设置"的语法：目前没有需要，而且
+ * 在这里发明一种会让文档出现第二个、又无人强制的位宽来源。
  *
- * `validateGraph` has already rejected a `params.width` that is not a positive
- * integer, so `alloc`'s own width guard can never fire from a width resolved
- * here.
+ * validateGraph 已经拒绝了不是正整数的 params.width，所以这里解析出的位宽
+ * 不可能触发 alloc 自己的位宽守卫。
  *
- * Exported for `ui/board/render.ts`, which sizes a part from the same rule and
- * used to keep its own copy of it: a renderer that disagreed with the compiler
- * would draw a wire as one bit wide and route a byte through it.
+ * 导出给 ui/board/render.ts 使用：它也按同一规则计算元件尺寸，过去还自己留了
+ * 一份副本——如果渲染器与编译器对位宽的理解不一致，就会把一根导线画成 1 位宽、
+ * 却让一个字节从中穿过。
  */
 export function effectiveWidth(inst: Instance, pin: PinDef): number {
   return inst.params.width ?? pin.width;
@@ -147,15 +150,15 @@ interface CompiledInstance {
   readonly key: string;
   readonly origin: string;
   readonly def: ComponentDef;
-  /** Slot base of each input pin, in `def.inputs` order. */
+  /** 每个输入引脚的起始槽，按 def.inputs 的顺序排列。 */
   readonly inputs: readonly number[];
-  /** Width of each input pin, resolved per instance; parallel to `inputs`. */
+  /** 每个输入引脚按实例解析出的位宽，与 inputs 一一对应。 */
   readonly inputWidths: readonly number[];
-  /** Slot base of each output pin, in `def.outputs` order. */
+  /** 每个输出引脚的起始槽，按 def.outputs 的顺序排列。 */
   readonly outputs: readonly number[];
-  /** Width of each output pin, resolved per instance; parallel to `outputs`. */
+  /** 每个输出引脚按实例解析出的位宽，与 outputs 一一对应。 */
   readonly outputWidths: readonly number[];
-  /** Index of each output pin in the netlist-wide output pin list. */
+  /** 每个输出引脚在整个网表输出引脚列表中的下标。 */
   readonly outPin: readonly number[];
 }
 
@@ -164,12 +167,12 @@ interface OutputPin {
   readonly width: number;
 }
 
-/** A contiguous slot range that `inputBase` can hand to a range-reading caller. */
+/** 一段连续槽区间，inputBase 可以把它的起始槽交给按范围读取的调用方。 */
 interface ReadRegion {
-  /** Base of the region: what `inputBase` reports for the pin. */
+  /** 该区间的起始槽：即 inputBase 为该引脚报告的下标。 */
   readonly base: number;
   readonly width: number;
-  /** Slot base of the input pin whose bits the region mirrors. */
+  /** 被该区间镜像的输入引脚的起始槽。 */
   readonly src: number;
 }
 
@@ -178,27 +181,26 @@ interface NetInternals {
   readonly instances: readonly CompiledInstance[];
   readonly outputPins: readonly OutputPin[];
   readonly readRegions: readonly ReadRegion[];
-  /** Compiled path -> leaf, for resolving a document id that a component shadows. */
+  /** 编译路径 -> 叶子，用于解析被自定义元件遮蔽的文档 id。 */
   readonly byKey: ReadonlyMap<string, CompiledInstance>;
-  /** Compiled path -> the outer instance it belongs to. */
+  /** 编译路径 -> 它所属的外层实例。 */
   readonly origins: ReadonlyMap<string, string>;
-  /** Outer instance id -> the leaf that carries its pins. */
+  /** 外层实例 id -> 携带其引脚的那个叶子。 */
   readonly roots: ReadonlyMap<string, CompiledInstance>;
 }
 
-/** Ties a netlist to the storage `compile` built for it, without a public field. */
+/** 把网表与 compile 为它建好的存储关联起来，不暴露公开字段。 */
 const INTERNALS = new WeakMap<Netlist, NetInternals>();
 
 /**
- * The single driver base every bit of `[base, base + width)` reads from, or -1
- * when those bits do not form one contiguous run.
+ * 区间 [base, base + width) 的每一位都从同一个起始槽连续读取时，返回那个起始
+ * 槽；否则返回 -1。
  *
- * The identity answer (`base` itself) counts as a run on purpose: an unwired pin
- * reads its own slots, which is what lets a caller write an unwired input
- * directly. A run starting anywhere else is a driver covering the whole pin, so
- * reading `width` slots from there is exactly the pin's value. A narrower driver
- * leaves its tail pointing at the pin's own slots (see the identity default in
- * `compile`), which no single base can describe -- that pin needs a region.
+ * 恒等结果（返回 base 本身）也算连续，这是刻意的：未接线的引脚读自己的槽，
+ * 正是这一点让调用方可以直接往未接线的输入里写值。从别处开始的连续段意味着有
+ * 一个覆盖整个引脚的驱动者，那么从那里读 width 个槽正好是这个引脚的值。而比
+ * 引脚窄的驱动者会让尾部继续指向引脚自己的槽（见 compile 里 drive 的恒等初始化），
+ * 这种情形无法用单一起始槽描述——该引脚需要一段读取区。
  */
 function contiguousRun(drive: Int32Array, base: number, width: number): number {
   const first = drive[base]!;
@@ -209,41 +211,36 @@ function contiguousRun(drive: Int32Array, base: number, width: number): number {
 }
 
 /**
- * Capacity for a flattened document, derived from the circuit instead of the
- * table default.
+ * 为展平后的文档估算容量，依据电路本身而不是信号表的默认值。
  *
- * `createSignalTable`'s 65,536-slot default cannot hold the spec's
- * 20,000-instance budget: 20,000 two-input gates occupy 60,000 slots and a
- * single three-input gate overruns it. The estimate is exact plus a quarter of
- * headroom, plus the most a read region could ever need (one per driven input
- * pin wider than 1 bit, which is the only kind that can require one), so the
- * requirement is not a knife edge; `alloc` still throws a named `RangeError`
- * rather than growing the buffer if it were ever wrong.
+ * createSignalTable 默认的 65,536 个槽装不下规格给的 20,000 实例预算：20,000 个
+ * 二输入门就要占 60,000 个槽，再多一个三输入门就会溢出。这里的估算等于精确
+ * 需求加上四分之一的余量，再加上读取区最多可能需要的量（每个"被驱动且宽于
+ * 1 位"的输入引脚最多一个读取区，只有这种引脚可能需要读取区），所以容量不是
+ * 卡着刀刃给的；万一估算还是错了，alloc 会抛出带名字的 RangeError，而不是让
+ * 缓冲区扩容。
  *
- * Every width here is the *resolved* one (`effectiveWidth`), the same values
- * `compile` allocates from. Sizing this from the def widths would reserve less
- * than the allocation loop and the regions actually take, and the table would
- * overrun on a circuit that is perfectly legal.
+ * 这里每个位宽都是**解析后**的位宽（effectiveWidth），与 compile 分配时用的
+ * 完全一致。若按定义声明的位宽来算，预留量会小于分配循环和读取区实际占用的
+ * 量，于是一个完全合法的电路也会把表撑爆。
  *
- * IT COUNTS LEAVES, NOT INSTANCES. A custom component occupies no slots of its
- * own -- `compile` emits its body instead -- so reserving for the component would
- * over-reserve by everything it contains, and would not cover a body that
- * contains another component at all.
+ * 它统计的是叶子数量，不是实例数量。自定义元件自身不占槽——compile 展开的是
+ * 它的内部电路——所以为元件本身预留会把它内部的一切重复预留一遍，而且完全
+ * 覆盖不到"内部电路里还含有另一个元件"的情形。
  */
 function capacityFor(ops: readonly FlatOp[], registry: Registry): number {
   let slots = 0;
   let regions = 0;
   for (const op of ops) {
-    // `validateGraph` has already rejected unknown def ids, so `get` cannot throw.
+    // validateGraph 已经拒绝过未知的元件 id，所以 get 不会抛错。
     const def = registry.get(op.inst.def);
     for (const pin of def.inputs) {
       const width = effectiveWidth(op.inst, pin);
       slots += width;
-      // EVERY wide input pin is reserved for a possible region, not only the
-      // driven ones. A pin narrower than its driver needs no region and one the
-      // caller drives directly needs none either, but the reservation has to
-      // cover the worst case -- `alloc` throws rather than growing, so an
-      // under-reservation is a circuit that cannot compile at all.
+      // 每个宽输入引脚都要预留一段可能的读取区，而不只是被驱动的那些。比
+      // 驱动者宽的引脚不需要读取区，由调用方直接驱动的引脚也不需要，但预留
+      // 必须覆盖最坏情况——alloc 会抛错而不是扩容，预留不足等于电路根本编译
+      // 不了。
       if (width > 1) regions += width;
     }
     for (const pin of def.outputs) slots += effectiveWidth(op.inst, pin);
@@ -251,28 +248,26 @@ function capacityFor(ops: readonly FlatOp[], registry: Registry): number {
   return Math.max(MIN_CAPACITY, Math.ceil(slots * 1.25) + regions + 16);
 }
 
-/** One leaf of a flattened document: an instance, and the graph it came from. */
+/** 展平后文档中的一个叶子：一个实例，以及它来自哪张图。 */
 interface FlatOp {
-  /** Compiled path: the instance id, prefixed by the components that contain it. */
+  /** 编译路径：实例 id 前面拼上包含它的各级元件。 */
   readonly path: string;
-  /** The outermost instance this leaf belongs to; equal to `path` at the root. */
+  /** 这个叶子所属的最外层实例；根部的叶子等于 path。 */
   readonly origin: string;
   readonly inst: Instance;
-  /** The graph `inst` lives in, so its wires are found without a second walk. */
+  /** inst 所在的那张图，这样找它的导线时不必再遍历一遍。 */
   readonly graph: Graph;
 }
 
 /**
- * A component's definition, from the document or from the registry.
+ * 取一个元件的定义：来自文档，或来自注册表。
  *
- * A DOCUMENT MAY INSTANCE A COMPONENT IT DOES NOT CARRY, which is the ordinary
- * case in this app: the definitions live in the player's library
- * (`Progress.blueprints`) and the document references them by id, exactly as it
- * references `nand`. The registry a document compiles against is composed from
- * that library (`levels/blueprints.ts`), so `ComponentDef.body` is where the
- * definition is at run time; `graph.customComponents` is the copy a circuit FILE
- * carries so an exported file stands on its own. Both are read, the document's
- * copy winning, so neither route can be the only one that works.
+ * 文档可以实例化一个它自己并不携带的元件，这在本应用里是常态：定义放在玩家的
+ * 元件库里（Progress.blueprints），文档按 id 引用它们，就像引用 nand 一样。
+ * 文档编译时使用的注册表就是从这个库组装出来的（levels/blueprints.ts），所以
+ * 运行时的定义在 ComponentDef.body 里；而 graph.customComponents 是电路文件
+ * 为了能独立导入导出而自带的那份副本。两条来源都会被读取，以文档里的副本为
+ * 优先，这样任何一条路径都不会是唯一能走通的路。
  */
 function componentDefs(graph: Graph, registry: Registry): Map<string, CustomComponentDef> {
   const defs = new Map<string, CustomComponentDef>();
@@ -284,27 +279,23 @@ function componentDefs(graph: Graph, registry: Registry): Map<string, CustomComp
 }
 
 /**
- * Walks a document into the flat list of instances that will actually run.
+ * 把一份文档展开成"真正会运行"的实例平铺列表。
  *
- * A CUSTOM COMPONENT IS A NAME, NOT A BOX: `compile` never emits one. It emits
- * what its body contains, once per instance of the component, and that is what
- * makes two instances of one component independent -- the leaves are distinct, so
- * `Simulation` allocates state per leaf (`#state` is indexed like `instances`),
- * and each instance's registers are its own without a single line of code that
- * knows what a component is.
+ * 自定义元件是一个名字，不是一个盒子：compile 从不输出它。compile 输出的是它
+ * 内部电路里的元件，每实例化一次输出一套——这正是同一个元件的两个实例彼此独立
+ * 的原因：叶子是分开的，所以 Simulation 按叶子分配状态（#state 与 instances
+ * 同下标），每个实例的寄存器天然是它自己的，而代码里没有一行需要知道"什么是
+ * 元件"。
  *
- * The walk follows the INSTANCES, not the document's `customComponents` array: a
- * component's body may instance another component, and the definitions are looked
- * up as the walk reaches them (`componentDefs`).
+ * 展开沿着实例走，而不是沿着文档的 customComponents 数组走：一个元件的内部
+ * 电路还可能实例化另一个元件，而定义是在展开到它时才查的（componentDefs）。
  *
- * Paths are the identity, so the walk refuses what cannot be addressed: a cycle
- * would not terminate (`validateGraph` refuses it first, and this throws rather
- * than trusting that), and an instance id containing the separator would collide
- * with an instance inside a component.
+ * 路径就是身份，所以展开会拒绝无法寻址的东西：环会让展开永不终止
+ * （validateGraph 会先拒绝它，这里再抛一次而不是选择相信），而含有分隔符的
+ * 实例 id 会与元件内部的实例撞车。
  *
- * The cycle guard is the CHAIN, not a global visited set: the same component used
- * by two different components is a legal diamond, while a component that contains
- * itself -- however long the way round -- is not.
+ * 环的守卫是"当前链"，而不是全局 visited 集合：同一个元件被两个不同元件使用
+ * 是合法的菱形引用，而一个包含自己的元件——无论绕多远——都不合法。
  */
 function flattenForCompile(graph: Graph, registry: Registry): FlatOp[] {
   const components = componentDefs(graph, registry);
@@ -340,18 +331,15 @@ function flattenForCompile(graph: Graph, registry: Registry): FlatOp[] {
 }
 
 /**
- * Flattens a document into a netlist.
+ * 把一份文档展平成网表。
  *
- * Error-severity issues are fatal (the circuit is meaningless); warnings are
- * accepted, because an unwired input legally reads 0 and only the simulator can
- * tell whether a feedback loop settles.
+ * error 级问题是致命的（电路没有意义）；warning 级问题被接受，因为未接线的
+ * 输入按规则读 0，而反馈环能否稳定只有仿真器知道。
  *
- * A pin's width is `inst.params.width` when the instance sets one, otherwise the
- * width the def declares -- see `effectiveWidth`. Every width-dependent step
- * below (slot allocation, `drive`, the read regions, the per-bit reads, the
- * write-back and the capacity reservation) goes through those resolved values,
- * because a pin allocated at one width and read at another is exactly the silent
- * corruption this kernel exists to keep out.
+ * 引脚的位宽：实例设置过 params.width 就用它，否则用定义声明的位宽——见
+ * effectiveWidth。下面每一步依赖位宽的处理（槽位分配、drive、读取区、逐位
+ * 读取、写回、容量预留）都走这组解析后的值，因为"按一个位宽分配、按另一个
+ * 位宽读取"正是这个内核要挡在门外的静默数据损坏。
  */
 export function compile(graph: Graph, registry: Registry): Netlist {
   const errors: GraphIssue[] = validateGraph(graph, registry).filter(
@@ -363,56 +351,50 @@ export function compile(graph: Graph, registry: Registry): Netlist {
   const table = createSignalTable(capacityFor(ops, registry));
   const instances: CompiledInstance[] = [];
   /**
-   * Compiled path -> its leaf, so a wire can be resolved in one lookup.
+   * 编译路径 -> 它对应的叶子，这样解析一根导线只需一次查表。
    *
-   * THE KEY IS THE PATH, and a path is what makes two instances of one component
-   * differ. Two `bp1` instances both have an inner `i1`; only `i3/i1` and `i7/i1`
-   * tell them apart, and the storage each owns is allocated per PATH (see
-   * `Simulation`'s state array), which is the whole of what "each instance of a
-   * component has its own state" means.
+   * 键是路径，而路径正是同一个元件两个实例的区别所在：两个 bp1 实例内部都有
+   * i1，只有 i3/i1 和 i7/i1 能区分它们，而每个实例拥有的存储也是按路径分配的
+   * （见 Simulation 的状态数组）——"元件的每个实例都有自己的状态"这句话的全部
+   * 含义就在这里。
    */
   const byKey = new Map<string, CompiledInstance>();
   /**
-   * Outer instance id -> the compiled instance that carries its pins.
+   * 外层实例 id -> 携带它引脚的那个已编译实例。
    *
-   * For a leaf that is the leaf itself; for a custom component it is the FIRST
-   * instance of its body, because a component has no pins of its own -- its
-   * surface is an alias for pins inside it.
+   * 对叶子来说就是它自己；对自定义元件来说则是它内部电路的第一个实例，因为
+   * 元件自己没有引脚——它的表面只是内部引脚的别名。
    */
   const roots = new Map<string, CompiledInstance>();
-  /** Compiled path -> the outer instance it belongs to. */
+  /** 编译路径 -> 它所属的外层实例。 */
   const origins = new Map<string, string>();
   const refs = new Map<string, string>();
-  /** Outer instance id -> every path compiled inside it, itself first. */
+  /** 外层实例 id -> 它内部编译出的所有路径，自身排在最前。 */
   const pathsOfRoot = new Map<string, string[]>();
   const outputBases = new Map<string, number>();
   const outputPins: OutputPin[] = [];
   const inputBases = new Map<string, number>();
   const inputWidths = new Map<string, number>();
   const outputWidths = new Map<string, number>();
-  /** Compiled path -> real pin key, for a custom component's declared pins. */
+  /** 编译路径 -> 真实引脚键，用于自定义元件声明的引脚。 */
   const aliases = new Map<string, string>();
 
   for (const op of ops) {
     const def = registry.get(op.inst.def);
-    // A storage element publishes what it holds through its own `evaluate` (see
-    // `Simulation.#publishState`), so one without it could never put its state on
-    // a pin. That is a defect in the DEF rather than in the circuit, and this is
-    // the only place a graph and a catalog meet -- so it is refused here, loudly,
-    // instead of holding zero in silence.
+    // 存储元件通过自己的 evaluate 发布它保存的值（见 Simulation.#publishState），
+    // 所以没有 evaluate 的存储元件永远无法把状态放到引脚上。这是 DEF 的缺陷，
+    // 而不是电路的缺陷；而这里是"图"与"元件目录"唯一的交汇点，因此在这里直接、
+    // 显眼地拒绝，而不是让它悄悄保持 0。
     //
-    // Refused as a `CircuitValidationError` rather than a plain `Error`, because
-    // the level checker re-throws anything that is neither that nor
-    // `UnstableCircuitError` (`levels/checks.ts`): a bare `Error` from here would
-    // escape the check pipeline instead of becoming a failed `'invalid'` check.
-    // The issue taxonomy has no "the def itself is broken" code and the code list
-    // lives in `graph.ts`, so the closest existing code is used -- and the ISSUE
-    // names the def, so the diagnosis is in the error's own `issues`:
-    // `CircuitValidationError`'s message is only the list of codes. That detail
-    // survives wherever the throw is caught directly; the level checker collapses
-    // it -- `createSim` maps it to a bare `{ error: 'invalid' }` and `runChecks`
-    // pushes a failure with no issue attached (`levels/checks.ts`) -- so nothing
-    // in that path names the def.
+    // 之所以用 CircuitValidationError 而不是普通 Error：关卡检查器会重新抛出
+    // "既不是它、也不是 UnstableCircuitError"的任何异常（levels/checks.ts）——
+    // 从这里抛出的裸 Error 会逃出检查流水线，而不是变成一次失败的 'invalid'
+    // 检查。问题分类表里没有"定义本身坏了"这种 code，而 code 列表在 graph.ts
+    // 里，所以这里用了最接近的已有 code——并且 ISSUE 里点名了该 def，诊断信息
+    // 就在错误对象自己的 issues 里：CircuitValidationError 的 message 只是 code
+    // 列表。这个细节在直接捕获该异常的地方会保留；关卡检查器会把它压平——
+    // createSim 把它映射成裸的 { error: 'invalid' }，runChecks 推入一条不带
+    // issue 的失败（levels/checks.ts）——所以那条路径上没有任何地方点名这个 def。
     if (def.sequential && def.stateBytes > 0 && !def.evaluate) {
       throw new CircuitValidationError([
         {
@@ -453,9 +435,8 @@ export function compile(graph: Graph, registry: Registry): Netlist {
       outputWidths: outWidths,
       outPin,
     };
-    // The FIRST leaf of an outer instance owns its pins. A custom component
-    // contributes several leaves but only one root, and that is the one whose
-    // pins the component's surface aliases.
+    // 外层实例的第一个叶子携带它的引脚。一个自定义元件会贡献多个叶子，但只有
+    // 一个根，元件的表面别名指向的正是这个根叶子的引脚。
     if (!roots.has(op.origin)) roots.set(op.origin, compiled);
     byKey.set(op.path, compiled);
     origins.set(op.path, op.origin);
@@ -466,16 +447,16 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     instances.push(compiled);
   }
 
-  /** The compiled key a wire's endpoint names, following a component's surface. */
+  /** 一根导线的端点所命名的实际编译键，会跟随自定义元件的表面别名。 */
   const realKey = (instanceId: string, port: string): string =>
     aliases.get(`${instanceId}.${port}`) ?? `${instanceId}.${port}`;
 
   /**
-   * The base and width of one pin, as compiled.
+   * 一个引脚按编译结果对应的起始槽与位宽。
    *
-   * `left` picks the side: an output for a driver, an input for a destination.
-   * `null` for a pin that does not exist -- an endpoint `validateGraph` has
-   * already refused, so the wire is skipped rather than crashing the compile.
+   * left 选择方向：驱动方用输出侧，被驱动方用输入侧。引脚不存在时返回 null
+   * ——那是 validateGraph 已经拒绝过的端点，所以跳过这根导线，而不是让编译
+   * 崩溃。
    */
   const pinAt = (
     instanceId: string,
@@ -490,20 +471,17 @@ export function compile(graph: Graph, registry: Registry): Netlist {
   };
 
   /**
-   * A CUSTOM COMPONENT'S BOUNDARY, declared before the wires are resolved.
+   * 自定义元件的边界，必须在解析导线之前声明好。
    *
-   * A component's declared pin IS a body pin: an input stands for the body pin it
-   * drives, an output for the body pin it reads. Aliasing the two is what makes
-   * the surface work with no new concept in the kernel -- a wire to `i3.a` drives
-   * the same slots a wire to `i3/i1.a` would, and a reader of `i3.out` reads the
-   * body's own output slots -- and it has to happen BEFORE the wires, because the
-   * wire loop resolves both ends through `realKey`.
+   * 元件声明的引脚就是内部电路的一个引脚：输入代表它去驱动的那个内部引脚，
+   * 输出代表它去读取的那个内部引脚。把两者别名起来，是让"表面"在内核里不需要
+   * 任何新概念就能工作的原因——接到 i3.a 的导线驱动的是与 i3/i1.a 完全相同的
+   * 槽，读 i3.out 的调用方读到的也是内部电路自己的输出槽——而且它必须在导线
+   * 之前完成，因为导线循环会通过 realKey 解析两端。
    *
-   * An input's slots are shared with the body pin too, rather than copied: the
-   * body pin's `drive` entries already point at whatever drives it from inside the
-   * body, and the outer wire overwrites them for the bits it covers. An input the
-   * body does not drive and the outer circuit does not wire therefore reads 0 --
-   * the same answer an unwired pin has everywhere else.
+   * 输入引脚的槽也与内部引脚共享，而不是复制：内部引脚的 drive 项已经指向从
+   * 内部驱动它的地方，外层导线会覆盖它覆盖到的那些位。因此内部没驱动、外层也
+   * 没接线的输入读 0——和其它地方未接线引脚的答案一样。
    */
   for (const inst of graph.instances) {
     const def = registry.has(inst.def) ? registry.get(inst.def) : null;
@@ -532,25 +510,20 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     });
   }
 
-  // Start from the identity so an unwired input reads its own (zero) slot, then
-  // point every wired input bit at the output pin bit that drives it. Giving each
-  // unwired pin its own slot rather than sharing one zero slot is what lets a
-  // caller write an unwired input directly -- and it is also what makes the bits
-  // a narrow driver does not cover read 0: they keep pointing at their own slots,
-  // which the kernel never writes.
+  // 先置为恒等，让未接线的输入读自己的（零）槽，再把每个被接线的输入位指向
+  // 驱动它的输出引脚位。给每个未接线引脚分配自己的槽而不是共享一个零槽，正是
+  // 允许调用方直接写未接线输入的原因——它也让"窄驱动者覆盖不到的位"读 0：
+  // 那些位继续指向自己的槽，而内核从不写它们。
   const drive = new Int32Array(table.size);
   for (let slot = 0; slot < drive.length; slot += 1) drive[slot] = slot;
-  // ONE PASS PER GRAPH, because a component's body has wires of its own and they
-  // are just as real as the ones the player drew on the board. Both passes do the
-  // same thing; they differ only in how an endpoint is addressed -- an outer wire
-  // names an outer instance (through its surface alias for a component), a body
-  // wire names a leaf by its compiled path.
+  // 每张图单独一遍，因为自定义元件的内部电路有自己的导线，它们和玩家在画板上
+  // 画的导线一样真实。两遍做的事相同，区别只在端点如何寻址——外层导线点名外层
+  // 实例（自定义元件经过它的表面别名），内部导线则用编译路径点名叶子。
   //
-  // THE GRAPHS COME FROM THE LEAVES, not from `graph.customComponents`: a body can
-  // belong to a component that lives only in the library, and enumerating the
-  // document's own array would then miss every wire inside it.
+  // 这些图来自叶子，而不是来自 graph.customComponents：一个内部电路可能属于只
+  // 存在于元件库里的元件，那时枚举文档自带的数组会漏掉它内部的每一根导线。
   const graphs = new Set<Graph>(ops.map((op) => op.graph));
-  /** `graph` + instance id -> the leaf that instance compiled to, in that graph. */
+  /** 某张图 + 实例 id -> 该实例在这张图里编译成的叶子路径。 */
   const leafPath = new Map<Graph, Map<string, string>>();
   for (const op of ops) {
     const within = op.path.slice(op.path.lastIndexOf(PATH_SEPARATOR) + 1);
@@ -559,12 +532,11 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     leafPath.set(op.graph, paths);
   }
   /**
-   * One pin of one instance of a BODY graph, addressed by its compiled path.
+   * 内部电路图里某个实例的某个引脚，按它的编译路径寻址。
    *
-   * The body's own wires name the body's instances, so the path is
-   * `<component instance>/<instance>.<pin>` -- which is exactly what the
-   * allocation loop keyed its maps by. `null` for anything the walk did not emit,
-   * which `validateGraph` has already reported.
+   * 内部导线点名的是内部实例，所以路径是 <元件实例>/<实例>.<引脚>——这正是
+   * 分配循环给各张映射表建键的方式。展开时没有输出的东西返回 null，
+   * validateGraph 已经报告过它们。
    */
   const bodyPin = (
     g: Graph,
@@ -590,28 +562,24 @@ export function compile(graph: Graph, registry: Registry): Netlist {
         ? pinAt(wire.to.inst, wire.to.port, false)
         : bodyPin(g, wire.to.inst, wire.to.port, false);
       if (!from || !to) continue;
-      // Both sides resolved per instance: a driver and a pin may each be wider (or
-      // narrower) than their def declares.
+      // 两侧都按实例解析过：驱动者和引脚各自的位宽都可能比定义声明的更宽
+      //（或更窄）。
       const width = Math.min(from.width, to.width);
       for (let bit = 0; bit < width; bit += 1) drive[to.base + bit] = from.base + bit;
     }
   }
 
-  // A component's input pin shares the body pin's slots AND its base (see the
-  // boundary pass above), so its `drive` entries ARE the body pin's -- written by
-  // the wire loop, which resolved both. Nothing has to be copied for the unwired
-  // case either: an unwired pin's `drive` entry is the identity, so it reads the
-  // slot nothing writes, which is the same 0 a leaf's unwired input reads.
+  // 元件的输入引脚与内部引脚共享槽位和起始槽（见上面的边界处理），所以它的
+  // drive 项就是内部引脚的 drive 项——由导线循环写入，两端都解析过了。对未接线
+  // 的情形也不需要复制任何东西：未接线引脚的 drive 项是恒等，于是它读到的是
+  // 没人写过的槽，与叶子的未接线输入读到的是同一个 0。
 
-  // `drive` answers "which single slot drives this bit", which is all a per-bit
-  // read needs. A caller reads a *range* instead (`read(inputBase(key), width)`),
-  // and there the driver is the wrong answer whenever it is narrower than the
-  // pin: the read would run off the end of the driver into the slots that
-  // physically follow it -- other pins' live signals -- rather than the pin's own
-  // zero bits. So for every input pin whose bits are not already one contiguous
-  // run of slots, materialise a region of that pin's width and report that. The
-  // common cases (an unwired pin, a driver as wide as the pin) alias their slots
-  // directly and allocate nothing.
+  // drive 回答的是"这一位由哪一个槽驱动"，这正是一次逐位读取需要的全部信息。
+  // 但调用方读的是**范围**（read(inputBase(key), width)），而驱动者比引脚窄时，
+  // 这个答案就是错的：读取会从驱动者末尾跑进它后面物理相邻的槽——其它引脚正在
+  // 使用的信号——而不是该引脚自己的零位。所以凡是"各位不构成一段连续槽"的输入
+  // 引脚，都按该引脚位宽物化一段读取区并报告它。常见情形（未接线引脚、与引脚
+  // 同宽的驱动者）直接别名自己的槽，不分配任何东西。
   const readRegions: ReadRegion[] = [];
   const readBases = new Map<string, number>();
   for (const inst of instances) {
@@ -630,12 +598,11 @@ export function compile(graph: Graph, registry: Registry): Netlist {
     }
   }
 
-  // A COMPONENT'S INPUT PIN ALIASES THE BODY PIN'S READ REGION, and that is the
-  // one place the alias has to be written twice: `readBases` is the map
-  // `inputBase` hands a range-reading caller, and the body pin's entry in it may
-  // be a materialised region rather than its own slots. Without this the
-  // component's pin would read its own slots -- which nothing drives -- and a
-  // level that read it as a range would see zeros where the body sees a value.
+  // 元件的输入引脚别名到内部引脚的读取区，这是唯一需要写两遍的别名：
+  // readBases 是 inputBase 交给按范围读取的调用方的那张表，而内部引脚在其中的
+  // 条目可能是一段物化的读取区，而不是它自己的槽。不这样做的话，元件引脚会读
+  // 自己的槽——那是没人驱动的槽——关卡按范围读取时就会在内部看得见值的地方读到
+  // 全零。
   for (const [scope, key] of aliases) {
     if (!inputBases.has(key)) continue;
     const base = readBases.get(key) ?? inputBases.get(key)!;
@@ -676,30 +643,34 @@ export function compile(graph: Graph, registry: Registry): Netlist {
   return net;
 }
 
+/**
+ * 一次结算的结果：iterations 是实际跑了几轮扫描（至少 1），stable 为 true 时
+ * 表示某一轮之后没有任何输出引脚的值发生变化；若跑满上限仍未稳定，settle 会抛
+ * UnstableCircuitError 而不是返回 stable: false。
+ */
 export interface SettleReport {
   readonly iterations: number;
   readonly stable: boolean;
 }
 
 /**
- * Runs a compiled circuit, one clock edge at a time.
+ * 运行一张已编译的电路，一次一个时钟沿。
  *
- * Between edges the circuit is a combinatorial function of the level inputs and
- * the storage elements' held state; `settle` runs it to that fixed point and
- * `tick` applies one edge and settles again.
+ * 时钟沿之间，电路是"关卡输入 + 存储元件当前状态"的组合函数；settle 把它跑到
+ * 那个不动点，tick 施加一个时钟沿之后再结算一次。
  */
 export class Simulation {
   readonly net: Netlist;
-  /** The catalog this netlist was compiled against, for callers that need defs. */
+  /** 编译这张网表时使用的元件目录，供需要定义的调用方使用。 */
   readonly registry: Registry;
   readonly #table: SignalTable;
   readonly #drive: Int32Array;
   readonly #instances: readonly CompiledInstance[];
   readonly #outputPins: readonly OutputPin[];
   readonly #readRegions: readonly ReadRegion[];
-  /** Private state of every instance, indexed like `#instances`. */
+  /** 每个实例的私有状态，下标与 #instances 一一对应。 */
   readonly #state: Uint8Array[];
-  /** Output values staged by the current settle sweep, indexed like `#outputPins`. */
+  /** 本轮结算暂存的输出值，下标与 #outputPins 一一对应。 */
   readonly #staged: Array<PortValue | undefined>;
   #tickCount = 0;
 
@@ -721,7 +692,7 @@ export class Simulation {
     return this.#tickCount;
   }
 
-  /** Clears every signal and every storage element, then settles from scratch. */
+  /** 清空所有信号与所有存储元件，然后从头结算一次。 */
   reset(): void {
     this.#table.clear();
     for (const state of this.#state) state.fill(0);
@@ -731,32 +702,27 @@ export class Simulation {
   }
 
   /**
-   * Publishes storage outputs from their private state: one pass, before the
-   * settle that follows every `reset()` and `tick()`.
+   * 把存储元件的输出从它们的私有状态中发布出来：一次遍历，发生在每次 reset()
+   * 与 tick() 之后的结算之前。
    *
-   * THIS KERNEL KNOWS NO STATE LAYOUT OF ITS OWN. It used to: the previous
-   * version wrote `state[p]` onto output pin `p`, one bit per pin, which is only
-   * correct while each state byte is a 1-bit value. An 8-bit register keeping its
-   * byte in one state byte got `0b00000001` written onto its pin -- invisible
-   * only because the settle that follows republished through `evaluate`, and
-   * fatal for the one case the pass was there to serve: a storage def with no
-   * `evaluate`, which had nothing to correct it. Now the DEF publishes, through
-   * the same `evaluate` the settle sweep calls, so the two paths cannot hold two
-   * opinions about how a byte becomes a pin: `delay_line` and `mem1` publish the
-   * bit they always did, `reg8` publishes all eight of its bits, and `ram8`
-   * publishes the byte its `addr` selects, because selecting it is what its
-   * `evaluate` reads `addr` for.
+   * 这个内核并不认识任何状态布局。它曾经认识：旧版本把 state[p] 写到第 p 个
+   * 输出引脚，每个引脚一位，这只有在每个状态字节都是 1 位值时才是对的。一个
+   * 把字节存在单个状态字节里的 8 位寄存器会被写成 0b00000001 输出到引脚上
+   * ——之所以看不出来，只是因为紧随其后的结算会通过 evaluate 重新发布；而对
+   * 这个遍历本要服务的唯一情形（没有 evaluate 的存储元件）来说则是致命的，因为
+   * 没有东西能纠正它。现在由 DEF 通过结算扫描所用的同一个 evaluate 来发布，
+   * 于是两条路径不可能对"一个字节如何变成引脚"有两种意见：delay_line 和 mem1
+   * 发布它们一向发布的那一位，reg8 发布它的全部八位，ram8 发布 addr 选中的
+   * 那个字节，因为选择哪个字节正是它的 evaluate 读取 addr 的原因。
    *
-   * The pass still earns its keep: it writes the table directly, so the first
-   * sweep of the settle that follows already reads the held value rather than
-   * the pre-edge one, and a caller reading right after `reset`/`tick` sees the
-   * held value without waiting on the sweep. Running a def's `evaluate` a second
-   * time per edge (here and in `settle`) is safe because `evaluate` must be pure
-   * -- the registry says so, and the second call reaches the same value from the
-   * same state.
+   * 这次遍历仍然值得保留：它直接写信号表，所以紧随其后的结算第一次扫描读到的
+   * 就是保持值，而不是时钟沿之前的值；调用方在 reset/tick 之后立刻读取，也能
+   * 看到保持值，而不必等一次扫描。每个时钟沿把 def 的 evaluate 跑第二遍（这里
+   * 和 settle 各一次）是安全的，因为 evaluate 必须是纯函数——注册表这样规定，
+   * 第二次调用从同一状态出发会得到同一个值。
    *
-   * A storage def with no `evaluate` cannot be published at all, so `compile`
-   * refuses one instead of letting it hold zero in silence.
+   * 没有 evaluate 的存储元件根本无法发布，所以 compile 会拒绝它，而不是让它
+   * 悄悄保持 0。
    */
   #publishState(): void {
     const inputs: PortValue[] = [];
@@ -777,16 +743,15 @@ export class Simulation {
   }
 
   /**
-   * Assembles a pin's value one bit at a time, following `drive` per bit.
+   * 按位沿 drive 逐位拼出一个引脚的值。
    *
-   * Deliberately NOT `getPort(drive[base], width)`: that reads `width`
-   * *consecutive* slots from wherever the driver happens to sit, so a driver
-   * narrower than the pin pulls in the slots allocated after it -- other pins'
-   * signals. Here a bit with no driver of its own falls back (through `drive`)
-   * to the pin's own slot, which the kernel never writes, and so reads 0.
+   * 刻意不写成 getPort(drive[base], width)：那样会从驱动者所在位置连读 width 个
+   * 连续槽，于是比引脚窄的驱动者会把其后分配的槽——其它引脚的信号——一起卷进
+   * 来。这里没有自己驱动者的位会（通过 drive）退回引脚自己的槽，而内核从不写
+   * 那个槽，所以读到 0。
    *
-   * The number/bytes split mirrors `SignalTable.getPort`, so a def sees the same
-   * value form at every width.
+   * number 与字节数组的分支与 SignalTable.getPort 完全对应，这样 def 在任意
+   * 位宽下看到的都是同一种值形态。
    */
   #gather(base: number, width: number): PortValue {
     const slots = this.#table.slots;
@@ -804,23 +769,22 @@ export class Simulation {
     return bytes;
   }
 
-  /** Reads each input pin bit by bit through its pre-resolved driver slots. */
+  /** 通过预先解析好的驱动槽，逐位读出每个输入引脚的值。 */
   #readInputs(inst: CompiledInstance, scratch: PortValue[]): void {
     for (let p = 0; p < inst.inputs.length; p += 1) {
       scratch[p] = this.#gather(inst.inputs[p]!, inst.inputWidths[p]!);
     }
-    // Keep the scratch exactly as long as this instance's pin list, so a shorter
-    // instance never sees values left behind by a longer one.
+    // 把临时数组截到与本实例引脚数一样长，这样较短的实例不会看到较长实例留下
+    // 的值。
     scratch.length = inst.inputs.length;
   }
 
   /**
-   * Republishes every materialised read region from the values just settled.
+   * 用刚结算出的值重新发布每个物化的读取区。
    *
-   * `inputBase` hands out a slot range and the caller then reads it whenever it
-   * likes, with nothing to tell it a fresh gather is needed -- so a region has to
-   * be current by the time `settle` returns. One pass over the regions (not over
-   * the instances) keeps this off the sweep's critical path.
+   * inputBase 交出的是槽区间，调用方随后想什么时候读就什么时候读，没有任何东西
+   * 会告诉它"需要重新收集一次"——所以 settle 返回时读取区必须已经是当前值。这里
+   * 只遍历读取区（而不是遍历实例），让这项开销离开扫描的主路径。
    */
   #refreshReadRegions(): void {
     for (const region of this.#readRegions) {
@@ -829,14 +793,12 @@ export class Simulation {
   }
 
   /**
-   * True when the table already holds `value` at this pin.
+   * 当信号表在这个引脚上已经持有 value 时返回 true。
    *
-   * Compared bit by bit rather than as `PortValue`s on purpose: `valuesEqual`
-   * cannot equate a number with the byte-array form of the same value (a 12-bit
-   * pin reads back as `Uint8Array`), so a value-form comparison would report a
-   * change on every sweep and misdiagnose a healthy circuit as unstable.
-   * `assertWidth` still runs, so a malformed staged value throws loudly instead
-   * of being silently truncated to the bits the comparison looks at.
+   * 刻意逐位比较，而不是比较 PortValue：valuesEqual 无法把 number 和同一数值的
+   * 字节数组形式判为相等（12 位引脚读回来是 Uint8Array），用值形态比较会让每一
+   * 轮扫描都报告"有变化"，从而把健康电路误诊成不稳定。assertWidth 仍然会执行，
+   * 所以畸形的暂存值会大声抛错，而不是被悄悄截断成比较所看的那几位。
    */
   #holds(base: number, width: number, value: PortValue): boolean {
     assertWidth(value, width);
@@ -853,33 +815,27 @@ export class Simulation {
   }
 
   /**
-   * Runs the circuit to a fixed point and reports how many sweeps that took.
+   * 把电路跑到不动点，并报告跑了几轮扫描。
    *
-   * Every def with an `evaluate` runs, storage elements included: they publish
-   * the value they hold (`state`) and never their inputs, which is what makes a
-   * delay line hold for a full tick. (`ram8` reads its `addr` input as well, to
-   * select which held byte it publishes -- the one storage def for which that is
-   * correct, argued at the def.) A def that produced no value for a pin
-   * leaves that pin alone, so `level_input` -- driven from outside through its
-   * output slot -- survives the sweep.
+   * 每个带 evaluate 的 def 都会运行，包括存储元件：它们发布自己保持的值
+   * （state），从不发布输入，这正是延迟线能保持整整一个节拍的原因。（ram8 还
+   * 会读 addr 输入，以选择发布哪个已保存的字节——这是唯一对此正确的存储元件，
+   * 理由写在它的定义处。）某个 def 没有为某个引脚产生值时，该引脚保持原样，所以
+   * 由外部通过输出槽驱动的 level_input 能在扫描中存活。
    *
-   * The sweep is parallel (Jacobi): all instances are evaluated against the
-   * values committed by the previous sweep, staged, and committed together.
-   * Two properties follow, and the game needs both. The outcome cannot depend on
-   * the order instances happen to sit in the document, and a genuine oscillator
-   * cannot fake a fixed point -- with in-place (Gauss-Seidel) evaluation a ring
-   * of two inverters "converges" to a self-consistent-looking 1/0 pair, which
-   * would be reported as stable.
+   * 扫描是并行的（Jacobi 式）：所有实例都针对上一轮提交的值求值，暂存起来，再
+   * 一起提交。由此得到两条性质，游戏两者都需要：结果不可能依赖实例在文档里的
+   * 先后；真正的振荡器无法伪造出不动点——若是原地（Gauss-Seidel）求值，两个
+   * 非门构成的环会"收敛"到一对自洽的 1/0，从而被报告为稳定。
    *
-   * On success the materialised read regions are refreshed last, so a caller that
-   * reads through `inputBase` right after `settle` sees the settled values
-   * without having to ask for anything extra.
+   * 成功时最后刷新物化的读取区，所以 settle 之后立刻通过 inputBase 读取的调用方
+   * 看到的就是结算后的值，不需要额外请求什么。
    */
   settle(): SettleReport {
     const inputs: PortValue[] = [];
     const outputs: PortValue[] = [];
-    // Start from a clean stage: a def that produced nothing for a pin (`level_input`)
-    // must not inherit a value staged by an earlier, failed sweep.
+    // 从一个干净的暂存区开始：某个 def 没有为某个引脚产生值（level_input）时，
+    // 不能继承之前某个失败轮次暂存下来的值。
     this.#staged.fill(undefined);
     for (let iteration = 0; iteration < SETTLE_LIMIT; iteration += 1) {
       for (let i = 0; i < this.#instances.length; i += 1) {
@@ -920,35 +876,27 @@ export class Simulation {
   }
 
   /**
-   * Applies one clock edge: every storage element samples, then the circuit
-   * settles.
+   * 施加一个时钟沿：所有存储元件先采样，然后电路结算。
    *
-   * Inputs are snapshotted for all storage elements before any of them updates,
-   * so two of them in series shift a value along by one stage per tick rather
-   * than racing through both in a single tick.
+   * 所有存储元件的输入在任何一个更新之前就被统一快照，所以两个串联的存储元件
+   * 每个节拍只把值推进一级，而不会在一个节拍里竞速穿过两级。
    *
-   * THE CALLER SETTLES BEFORE TICKING. The storage elements are read out of the
-   * signal TABLE, which holds the values from the last completed sweep, so an edge
-   * samples the control lines as they stood at the END of that sweep -- a caller
-   * that writes an input and ticks without settling clocks the PREVIOUS input
-   * vector. Both callers in `levels/checks.ts` do settle first (`driveSteps` calls
-   * `io.sim.settle()` between writing a step's inputs and advancing the clock, and
-   * `runRow` does the same after `writeInput`), and `ch2/batch4.ts` documents the
-   * same contract from the level-data side, so the ordering is the established one
-   * rather than an accident of either caller.
+   * 调用方要先结算、再打节拍。存储元件是从信号表（上一轮完整扫描后的值）里读
+   * 数据，所以一个时钟沿采样到的是上一轮扫描**结束时**的控制线——写了输入却不
+   * 结算就直接 tick 的调用方，等于用上一个输入向量打拍。levels/checks.ts 里的
+   * 两个调用方都是先结算（driveSteps 在写完一步的输入之后、推进时钟之前调用
+   * io.sim.settle()，runRow 在 writeInput 之后也一样），ch2/batch4.ts 也从关卡
+   * 数据一侧记录了同样的约定，所以这个顺序是既定约定，而不是某个调用方的偶然
+   * 行为。
    *
-   * SETTLING INSIDE `tick()` WAS TRIED AND REVERTED. It would make the method
-   * self-sufficient, and it is not wrong about the values -- the settle at the end
-   * republishes through `evaluate` either way, so the settled result is identical.
-   * What it changes is the NUMBER of sweeps, and two tests in `test/core/net.test.ts`
-   * observe the first sweep directly: `#publishState` is a pre-seed that carries the
-   * held byte into the table before the sweep begins, so the first sweep after an
-   * edge already reads the post-edge value, and both
-   * `pre-seeds the held byte into the table before the settle that follows a tick`
-   * (which asserts `report.iterations` is exactly 2) and
-   * `pre-seeds a storage output whose zeroed state publishes a 1, before reset()
-   * settles` pin that ordering. An extra sweep ahead of the edge moves the pre-seed
-   * behind one, and both fail. The ordering belongs to the caller.
+   * 在 tick() 内部结算曾经尝试过又被撤回。那样方法会自给自足，而且从数值上并
+   * 没有错——末尾的结算无论如何都会通过 evaluate 重新发布，结算结果完全相同。
+   * 它改变的是扫描的轮数，而 test/core/net.test.ts 里有两个测试直接观察第一轮
+   * 扫描：#publishState 是先写入的一步，在扫描开始前把保持字节带进信号表，于是
+   * 一个时钟沿之后的第一轮扫描读到的已经是沿后的值；这两个测试（断言
+   * report.iterations 恰好为 2 的那个，以及断言 reset() 之前零状态发布出 1 的
+   * 那个）把这个顺序钉死了。在沿之前多一轮扫描会把先写入的那一步挤到后面，两个
+   * 测试都会失败。这个顺序属于调用方。
    */
   tick(): SettleReport {
     this.#tickCount += 1;
@@ -979,32 +927,26 @@ export class Simulation {
   }
 
   /**
-   * A COPY of an instance's storage bytes, or `null` when no such instance is in
-   * this netlist.
+   * 一个实例的存储字节的副本；网表里没有这个实例时返回 null。
    *
-   * THE ONE READER THE KERNEL DID NOT HAVE. Everything else a caller can read out
-   * of a simulation comes through a PIN, which is a value the circuit itself
-   * publishes; what a storage element is HOLDING is private state with no pin of
-   * its own -- a program image has no output that shows all 256 bytes, and the six
-   * registers behind `regfile6`'s two read ports are not addressable from
-   * outside. A debugger needs exactly that: `readState('RF')` is the six bytes
-   * REG0..REG5, `readState('PC')` the one address, `readState('RAM')` the program
-   * as it stands.
+   * 这是内核原本没有的那个读取器。调用方能从仿真里读出来的其它一切都要经过
+   * 引脚，而引脚是电路自己发布的值；存储元件当前**持有什么**是没有引脚的私有
+   * 状态——程序镜像没有能把 256 个字节全都显示出来的输出，regfile6 两个读端口
+   * 背后的六个寄存器也无法从外部寻址。调试器需要的正是这个：readState('RF')
+   * 是 REG0..REG5 六个字节，readState('PC') 是那一个地址，readState('RAM') 是
+   * 当前的程序内容。
    *
-   * The layout is the DEF's (`ComponentDef.stateBytes`, allocated by the
-   * `Simulation` constructor and filled by `reset` / `clockEdge` / `loadImage`),
-   * so this method knows no layout of its own -- the same rule `#publishState`
-   * states for the publish path. A part with no state returns an empty array,
-   * which is the honest answer to "what does this hold".
+   * 布局由 DEF 决定（ComponentDef.stateBytes，由 Simulation 构造函数分配，由
+   * reset / clockEdge / loadImage 填写），所以这个方法自己不认识任何布局——和
+   * publishState 为发布路径声明的规则相同。没有状态的元件返回空数组，这是对
+   * "它持有什么"最诚实的回答。
    *
-   * A COPY, ALWAYS. The array is the simulation's own storage: a panel that wrote
-   * into what it was handed would edit the machine it is showing, and the write
-   * would be invisible to every other reader. `null` rather than a throw for an
-   * unknown id, because a debugger asks on every board edit and a board
-   * mid-build is not an error.
+   * 永远返回副本。数组是仿真自己的存储：面板若写入拿到的数组，就会改动它正在
+   * 展示的机器，而且这次写入对其它读者不可见。未知 id 返回 null 而不是抛错，
+   * 因为调试器会在每次画板编辑时询问，而搭到一半的画板不是错误。
    *
-   * `instanceId` is the DOCUMENT id, resolved the way `loadImage` resolves it
-   * (`CompiledInstance.key`, which `compile` sets from `instance.id`).
+   * instanceId 是文档 id，按 loadImage 的解析方式解析（CompiledInstance.key，
+   * compile 用 instance.id 设置它）。
    */
   readState(instanceId: string): Uint8Array | null {
     const index = this.#instances.findIndex((inst) => inst.key === instanceId);
@@ -1013,31 +955,25 @@ export class Simulation {
   }
 
   /**
-   * Loads a byte image into an instance's private state, out of band.
+   * 把一个字节镜像带外装载进某个实例的私有状态。
    *
-   * The path a program takes into a circuit. `ram_prog` has no write pin, so its
-   * bytes cannot arrive through a clock edge the way `ram8`'s do; the level
-   * checker assembles the source and calls this instead. It must be called
-   * AFTER `reset()`: `reset` fills every state byte with zero, and `runChecks`
-   * compiles once per check, before any check branch runs, so an image written
-   * at compile time would be erased before the first step could read it. The
-   * method does not publish anything itself -- the caller settles, and the def's
-   * own `evaluate` publishes the new bytes through the same sweep every settled
-   * value goes through.
+   * 这是程序进入电路的路径。ram_prog 没有写引脚，所以它的字节无法像 ram8 那样
+   * 通过时钟沿到达；关卡检查器改为汇编源码后调用这个方法。它必须在 reset()
+   * 之后调用：reset 会把每个状态字节清零，而 runChecks 对每个检查用例编译一次、
+   * 且编译发生在任何检查分支运行之前，所以在编译期写进去的镜像会在第一步读取
+   * 之前就被清掉。这个方法自己不发布任何东西——调用方负责结算，由 def 自己的
+   * evaluate 通过每个结算值都走的同一条扫描发布新的字节。
    *
-   * `instanceId` is the DOCUMENT id, which is what `CompiledInstance.key` holds
-   * (`compile` sets both `key` and `origin` from `instance.id` today), so a
-   * checker can resolve an instance from `graph.instances` and pass its id
-   * straight through.
+   * instanceId 是文档 id，也就是 CompiledInstance.key 里保存的值（compile 目前
+   * 用 instance.id 同时设置 key 和 origin），所以检查器可以从 graph.instances
+   * 解析出一个实例，直接把它的 id 传进来。
    *
-   * The whole state is zeroed before the copy, not just the bytes being
-   * written, so a shorter image after a longer one cannot leave a tail behind
-   * and a second call is not order-dependent.
+   * 拷贝之前整个状态会先清零，而不只是要写入的那些字节，这样短镜像写在长镜像
+   * 之后不会留下尾巴，第二次调用也不依赖先后顺序。
    *
-   * Throws `RangeError` -- not a bare `Error` -- for an id this netlist does not
-   * contain and for an image longer than the instance's state. `runChecks`
-   * absorbs `RangeError` as an `invalid` failure, while anything else escapes
-   * the check loop out of `grade()`, which runs on every board edit.
+   * 对网表中不存在的 id、以及比实例状态更长的镜像，抛 RangeError 而不是裸的
+   * Error。runChecks 会把 RangeError 吸收成一次 'invalid' 失败，而别的异常会从
+   * grade() 的检查循环里逃出去，而 grade() 在每次画板编辑时都会运行。
    */
   loadImage(instanceId: string, bytes: Uint8Array | readonly number[]): void {
     const index = this.#instances.findIndex((inst) => inst.key === instanceId);
@@ -1054,22 +990,20 @@ export class Simulation {
 }
 
 /**
- * Total NAND-equivalent gates of a document, with every custom component expanded.
+ * 一份文档中所有自定义元件展开后的 NAND 等价门总数。
  *
- * THE GATE METRIC (spec §5.4: "电路 + 自定义组件 + 宽位组件全部展开后，NAND 等价门
- * 的总数"). It lives here rather than in `levels/grader.ts` because it walks the
- * same flattening `compile` and `delayOf` walk: one definition of "the parts a
- * document contains", so a component cannot cost one thing to the compiler and
- * another to the score.
+ * 这是门数指标（规格 §5.4："电路 + 自定义组件 + 宽位组件全部展开后，NAND 等价
+ * 门的总数"）。它放在这里而不是 levels/grader.ts，因为它走的是 compile 与
+ * delayOf 走的同一套展平逻辑：对"一份文档包含哪些元件"只有一个定义，这样一个
+ * 元件就不会对编译器是一种代价、对评分是另一种代价。
  *
- * `gateCost` is read per LEAF. A custom component's own def states 0 and its body
- * is counted instead -- charging the component as well would charge the same
- * gates twice, and pricing the component as one NAND would let a player hide a
- * circuit inside it for free.
+ * gateCost 按叶子读取。一个自定义元件自身的定义写 0，改为统计它的内部电路——
+ * 若同时再给元件本身计费就等于把同样的门算两遍；而把元件按一个与非门计价，又
+ * 会让玩家能免费把整个电路藏进元件里。
  *
- * A def that states no `gateCost` falls back to `cost`, which is a real case
- * rather than a legacy default: a rail, a level connector, a wire-like packer and
- * the storage elements are zero on both metrics (see `ComponentDef.gateCost`).
+ * 没有声明 gateCost 的 def 回退到 cost，这是真实情形而不是遗留默认值：电源轨、
+ * 关卡连接器、导线性质的打包器以及存储元件在两个指标上都是 0（见
+ * ComponentDef.gateCost）。
  */
 export function gateCostOf(graph: Graph, registry: Registry): number {
   let total = 0;
@@ -1082,44 +1016,40 @@ export function gateCostOf(graph: Graph, registry: Registry): number {
 }
 
 /**
- * Longest combinational path, counted in base-gate delays.
+ * 最长的组合路径长度，按基础门延迟计数。
  *
- * Linear-time DAG longest path: Kahn's algorithm for a topological order, then a
- * single relaxation pass. Walking paths instead would be exponential on diamond
- * shaped circuits (2^n paths), and real CPU circuits are full of them.
+ * 线性时间的 DAG 最长路：先用 Kahn 算法求拓扑序，再单遍松弛。若沿着路径逐条走，
+ * 在菱形结构的电路上会是指数级的（2^n 条路径），而真实的 CPU 电路里到处都是
+ * 菱形。
  *
- * Only combinational edges are considered. A storage element's input is sampled
- * rather than read (nothing propagates into it) and its output is a fresh source
- * (nothing propagates through it), so storage contributes no delay: its cost
- * shows up in the tick metric instead.
+ * 只考虑组合边。存储元件的输入是被采样而不是被读取（没有东西传播进去），输出是
+ * 新的源头（没有东西穿过它），所以存储不贡献延迟：它的代价体现在节拍指标里。
  */
 export function delayOf(graph: Graph, registry: Registry): number {
-  // THE LEAVES ARE THE NODES, for the same reason they are in `compile`: a custom
-  // component is a name for a circuit, so the path through it is a path through
-  // the parts inside it. Measuring the component as one node of cost 0 would
-  // report a delay that ignores everything the player put in it -- a wrapper that
-  // made a circuit cheaper by hiding it, which is the opposite of the spec's rule
-  // that flattening a component cannot change what it costs.
+  // 叶子就是节点，理由与 compile 中相同：自定义元件是一个电路的名字，穿过它的
+  // 路径就是穿过它内部元件的路径。把元件当成一个代价为 0 的节点来测，会报出一个
+  // 忽略了玩家放进去的一切的延迟——一个靠把电路藏起来就变快的封装，正好与规格
+  //"展开元件不能改变它的代价"的规则相反。
   const ops = flattenForCompile(graph, registry);
   const count = ops.length;
   if (count === 0) return 0;
 
   const cost = new Int32Array(count);
   const sequential = new Uint8Array(count);
-  /** Component id -> its definition, for reading a boundary's binding table. */
+  /** 元件 id -> 它的定义，用于读取某个边界的绑定表。 */
   const byId = new Map(graph.customComponents.map((entry) => [entry.id, entry]));
-  /** Compiled path -> node index. */
+  /** 编译路径 -> 节点下标。 */
   const at = new Map<string, number>();
-  /** Outer instance id -> the node that carries its pins (its first leaf). */
+  /** 外层实例 id -> 携带它引脚的那个节点（它的第一个叶子）。 */
   const rootOf = new Map<string, number>();
-  /** Compiled path -> the DEF of the body instance it came from. */
+  /** 编译路径 -> 它来自的那个内部实例的定义。 */
   const defOf = new Map<string, ComponentDef>();
   for (let i = 0; i < count; i += 1) {
     const op = ops[i]!;
     at.set(op.path, i);
     if (!rootOf.has(op.origin)) rootOf.set(op.origin, i);
-    // Unknown defs cannot reach here on a validated graph; skipping them keeps a
-    // half-built document from throwing out of a metrics function.
+    // 未知元件到不了这里（图已经通过校验）；跳过它们是为了让一份搭到一半的
+    // 文档不会从指标函数里抛出去。
     const def = registry.has(op.inst.def) ? registry.get(op.inst.def) : null;
     if (def) defOf.set(op.path, def);
     cost[i] = def?.cost ?? 0;
@@ -1127,13 +1057,12 @@ export function delayOf(graph: Graph, registry: Registry): number {
   }
 
   /**
-   * Where each custom component's declared OUTPUT pin lands, by leaf path.
+   * 每个自定义元件声明的输出引脚最终落在哪个叶子路径上。
    *
-   * A wire drawn to `bp.out` reads the body pin `bp`'s surface binds to `out`,
-   * which is not usually the component's first leaf -- so an edge drawn to the
-   * root would start from the wrong place, and on a deep body it could hide the
-   * longest path entirely. Input pins need no equivalent map: their slots ARE the
-   * root leaf's input slots, so the root is where a wire to one lands.
+   * 画到 bp.out 的导线读取的是 body 里 out 绑定的那个引脚，而它通常不是元件的
+   * 第一个叶子——所以若把边画到根上就会从错误的位置出发，在很深的内部电路上甚至
+   * 可能完全掩盖最长路径。输入引脚不需要对应的映射：它们的槽就是根叶子的输入
+   * 槽，所以指向输入引脚的导线落在根上。
    */
   const boundOutput = new Map<string, number>();
   for (const op of ops) {
@@ -1159,21 +1088,19 @@ export function delayOf(graph: Graph, registry: Registry): number {
   };
 
   for (const graphOfOps of new Set(ops.map((op) => op.graph))) {
-    /** Instance id -> the node it is compiled to, within THIS graph. */
+    /** 实例 id -> 它在这张图里编译成的节点。 */
     const node = new Map<string, number>();
     for (let i = 0; i < count; i += 1) {
       const op = ops[i]!;
       if (op.graph === graphOfOps) node.set(op.path.slice(op.path.lastIndexOf(PATH_SEPARATOR) + 1), i);
     }
-    // A wire is drawn between OUTER instances of one graph, so each end is the
-    // node that carries that instance's pins: the instance itself for a leaf, and
-    // for a custom component the body leaf its surface reaches -- the bound body
-    // pin for an output, the component's own node (which the boundary shares its
-    // input slots with) for an input.
+    // 导线画在同一张图的外层实例之间，所以每一端都是"携带该实例引脚"的节点：
+    // 叶子就是实例自己；自定义元件则是它的表面所抵达的那个内部叶子——输出走绑定
+    // 的内部引脚，输入走元件自己的节点（边界的输入槽与它共享）。
     const source = (id: string): number | undefined =>
       boundOutput.get(pathOf(id)) ?? node.get(id);
     const sink = (id: string): number | undefined => node.get(id) ?? boundOutput.get(pathOf(id));
-    /** The compiled path of an outer instance of this graph. */
+    /** 这张图里某个外层实例的编译路径。 */
     function pathOf(id: string): string {
       const index = node.get(id);
       return index === undefined ? '' : ops[index]!.path;
@@ -1183,10 +1110,8 @@ export function delayOf(graph: Graph, registry: Registry): number {
     }
   }
 
-  // `delay[i]` is the longest combinational delay arriving at instance i's
-  // output. A source has no predecessors, so it is worth its own cost (a gate
-  // with unwired inputs still takes one gate delay; a source or a storage
-  // element costs nothing).
+  // delay[i] 是到达实例 i 输出端的最长组合延迟。源头没有前驱，所以它的值就是
+  // 自己的 cost（输入未接线的门仍然要花一个门延迟；电源或存储元件的 cost 为 0）。
   const delay = new Int32Array(count);
   const queue: number[] = [];
   for (let i = 0; i < count; i += 1) {
@@ -1207,9 +1132,8 @@ export function delayOf(graph: Graph, registry: Registry): number {
     }
   }
 
-  // Instances inside a combinational loop are never queued (their in-degree
-  // never reaches 0), so a loop contributes no depth and the walk still
-  // terminates. `validateGraph` reports the loop as a warning; whether it
-  // settles is the simulator's question, not this metric's.
+  // 组合环里的实例永远不会入队（入度永远降不到 0），所以环不贡献深度，遍历也
+  // 仍然会终止。validateGraph 会把环作为 warning 报告；它能不能稳定，是仿真器
+  // 的问题，不是这个指标的问题。
   return longest;
 }

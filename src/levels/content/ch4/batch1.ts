@@ -1,88 +1,72 @@
+// 第 4 章第 1 批：全局第 50-52 关，让"玩家亲手搭的机器"变成"玩家来编程的机器"。
+// 依赖下层 `boards/overture`（第 3 章那台机器的共享构造器）与 `spec`/`tables` 的关卡类型；
+// 本文件只被 `content/ch4/index.ts` 拼接。程序来自玩家缓冲区（不留参考源），
+// 关键不变量：每关两段步进、两个不同输入向量，任何忽略输入、硬编码答案的程序都无法同时通过。
+
 import { overtureBoard } from '../../boards/overture';
 import type { LevelSpec, ProgramStep } from '../../spec';
-// `LevelIo` -- the pin shape -- is `tables.ts`'s; `checks.ts` exports an
-// unrelated runtime interface of the same name (the bound simulation).
+// 这里的 `LevelIo` 是"引脚形状"，来自 `tables.ts`；`checks.ts` 也导出了一个同名但无关的
+// 运行时接口（绑定后的仿真环境），两者不要混用。
 import type { LevelIo } from '../../tables';
 
 /**
- * Chapter 4, levels 50-52: the machine the player BUILT becomes the machine the
- * player PROGRAMS.
+ * 第 4 章第 50-52 关：玩家"搭出来"的机器成为玩家"编程"的机器。
  *
- * THE CPU IS THE ONE FROM CHAPTER 3, AND THE BOARD IS THE IMPORT CHANNEL
- * (ruling 1). Each level ships `board: overtureBoard({ inputId })` -- the same
- * builder `test/fixtures/ch3-references.ts` grades chapter 3's machine against,
- * so there is exactly one circuit behind both chapters and no copy to drift
- * (see `boards/overture.ts`). It is a STARTING POINT, not a built-in CPU: the
- * player can still edit every part and wire of it. `inputId` is the one knob
- * these levels turn, because every one of them reads the level's input pin.
+ * CPU 就是第 3 章那台，画板是导入它的通道（裁决 1）。每一关都带
+ * `board: overtureBoard({ inputId })`——与 `test/fixtures/ch3-references.ts` 给第 3 章机器评分
+ * 所用的是同一个构造器，所以两章背后只有一套电路，没有会漂移的副本（见 `boards/overture.ts`）。
+ * 它是一个"起点"而不是内置 CPU：玩家仍然可以编辑它的每个元件与每根导线。
+ * `inputId` 是这些关卡唯一拧动的旋钮，因为它们每一关都读关卡的输入引脚。
  *
- * THE PROGRAM IS THE PLAYER'S (ruling 2). `runChecks(graph, registry, spec,
- * player?)` reads the buffer its fourth argument carries when the check says
- * `from: 'player'`, and that is the only channel these levels have: the level
- * data carries NO `source`, because the reference programs belong to
- * `test/fixtures/ch4-references.ts` and the player buffer must never be graded
- * against text the level ships. What the check DOES carry is the walk -- the
- * ticks and the bytes that must be on `out`.
+ * 程序是玩家的（裁决 2）。`runChecks(graph, registry, spec, player?)` 在检查写着
+ * `from: 'player'` 时会读取它第四个参数携带的缓冲区，而这就是这些关卡唯一的通道：
+ * 关卡数据不带 `source`，因为参考程序属于 `test/fixtures/ch4-references.ts`，
+ * 玩家缓冲区绝不能去和关卡自带的文本比对。检查真正携带的是"步进"——节拍与必须出现在 `out` 上的字节。
  *
- * THE TICK ARITHMETIC IS CHAPTER 3'S, ONE SIDE FACING OUT. The program RAM is
- * combinational from the counter, so while the machine is looking at
- * `move|sX|out` the answer is ALREADY on `out`; that is the program's Nth
- * instruction (index N-1) and therefore tick N-1 after N-1 edges. The `halt`
- * line -- the default, and the reason these are all straight-line levels --
- * freezes the counter on that instruction and the byte stays put. So each walk
- * asserts 0 before that tick, the answer on it, and the same answer several
- * edges later, where a machine (or a program) that does not hold its answer
- * fails.
+ * 节拍算术是第 3 章那一套，朝向玩家敞开了一面。程序 RAM 对计数器是组合的，
+ * 所以当机器正看着 `move|sX|out` 时，答案"已经"在 `out` 上了；
+ * 那是程序的第 N 条指令（下标 N-1），也就是 N-1 个沿之后的节拍 N-1。
+ * `halt` 线（默认值，也是这些关卡全是直线关的原因）把计数器冻在该指令上，字节便留在那里。
+ * 于是每段步进都在那个节拍之前断言 0、在节拍上断言答案、在若干沿之后再次断言同一答案——
+ * 不保持答案的机器（或程序）会在这里失败。
  *
- * EVERY STEP REPEATS ITS INPUTS, and that is a driver rule rather than a style
- * one: `driveSteps` writes EVERY input pin at every step and defaults the pins a
- * step omits to 0, so a step that forgot `inputs` would clear the very byte the
- * program is supposed to read. `test/levels/ch4-batch1.test.ts` holds every
- * step to it.
+ * 每一步都重复写输入，这是驱动器的规则而不是风格：`driveSteps` 在每一步写"每一根"输入引脚，
+ * 并把步骤省略的引脚默认为 0，所以省略 `inputs` 的步骤会清掉程序本该读取的那个字节。
+ * `test/levels/ch4-batch1.test.ts` 让每一步都接受这条规则。
  *
- * TWO WALKS PER LEVEL, ON TWO DIFFERENT VECTORS (controller ruling R9). A
- * `program` check executes the player's text once, so one walk pins one
- * (input, answer) pair -- and a program that ignores the input could hard-code
- * exactly that pair, publish it on the reveal tick, and pass. Every level here
- * therefore carries TWO `program` checks: two walks of the same shape on
- * different inputs. `runChecks` builds a fresh Simulation per check and merges
- * `ticksUsed` as `Math.max`, so this is one data entry per vector and nothing
- * else -- but a constant answers both walks the same way and the walks demand
- * different bytes, so no input-ignoring program can answer both. The batch
- * test's constant spoofs are the proof: each one reproduces its own walk
- * perfectly and is rejected by the sibling walk.
+ * 每关两段步进、两个不同向量（控制器裁决 R9）。一个 `program` 检查只执行一次玩家文本，
+ * 所以一段步进只钉住一个（输入，答案）对——一个忽略输入的程序可以把那一对硬编码，
+ * 在揭晓节拍发布它并通过。因此这里每一关都带两个 `program` 检查：同一形状的两段步进、不同输入。
+ * `runChecks` 为每个检查新建一份 Simulation，并用 `Math.max` 合并 `ticksUsed`，
+ * 所以这只是一份向量一条数据，别无其他——但常数程序对两段步进的回答相同，
+ * 而两段步进要求不同字节，所以任何忽略输入的程序都答不了两段。批次测试里的常数冒充就是证明：
+ * 每个冒充者都能完美复现它自己那段步进，却被另一段步进拒绝。
  *
- * CHAPTER 4 HANDS OUT NO NEW PARTS (spec §3.3: "无新元件；解锁汇编 IDE 与调试器"),
- * so every level's `rewards` is absent and the palette is not "everything
- * earned" (chapter 3's shape) but the exact parts the SHIPPED BOARD is built
- * from -- the machine is the level, and the parts are the ones it is made of.
+ * 第 4 章不发放新元件（设计规格 §3.3："无新元件；解锁汇编 IDE 与调试器"），
+ * 所以每关的 `rewards` 都缺席，而托盘不是"已挣到的一切"（第 3 章的形状），
+ * 而是随游戏发布的那块画板"由哪些元件构成"——机器就是关卡，元件就是它身上的那些。
  */
 
 /**
- * Every part the shipped board is made of: `overtureBoard({ inputId })`'s
- * parts, connectors included, and nothing else.
+ * 随游戏发布的画板由哪些元件构成：`overtureBoard({ inputId })` 的全部元件，含连接器，别无其他。
  *
- * Read against `boards/overture.ts`'s `placedParts`: the level's own pins, the
- * fetch stage (rails, program RAM, counter, decoder), the mode and field glue
- * (splitters, the four mode gates and the one-hot decoders), the register file
- * with its ALU and write path (muxes and switches), and the jump glue plus the
- * halt line. `test/levels/ch4-batch1.test.ts` holds this list to the board in
- * BOTH directions -- every part the board uses is listed, and the list names
- * nothing the board does not use.
+ * 对照 `boards/overture.ts` 的 `placedParts` 阅读：关卡自己的引脚、取指级
+ * （常量轨、程序 RAM、计数器、译码器）、模式与字段胶水（拆分器、四个模式门与独热译码器）、
+ * 寄存器堆及其 ALU 与写路径（多路选择器与开关），以及跳转胶水与停机线。
+ * `test/levels/ch4-batch1.test.ts` 让这份清单与画板"双向"对上——
+ * 画板用到的每个元件都在清单里，清单里点名的每个元件画板都真的用到。
  */
 const BOARD_PARTS = [
-  // The level's own pins: two inputs (the clock the driver ticks on, and the
-  // data pin this level reads) and the answer.
+  // 关卡自己的引脚：两个输入（驱动器走节拍用的时钟，以及本关读取的数据引脚）与答案。
   'level_input',
   'level_output',
-  // Fetch and the constant rails.
+  // 取指与常量轨。
   'const_on',
   'const_off',
   'ram_prog',
   'pc8',
   'instr_decoder',
-  // Mode and fields: splitters, the mode gates, the one-hot decoders, and the
-  // REG1/REG2/REG3 constants the read addresses are made from.
+  // 模式与字段：拆分器、模式门、独热译码器，以及拼读地址用的 REG1/REG2/REG3 常量。
   'splitter',
   'not',
   'nor',
@@ -90,52 +74,45 @@ const BOARD_PARTS = [
   'nand',
   'decoder3',
   'maker',
-  // The register file, the ALU and the write path (source, calc/loadi selects,
-  // and the write-address rules).
+  // 寄存器堆、ALU 与写路径（源选择、calc/loadi 选择、写地址规则）。
   'mux8',
   'switch8',
   'regfile6',
   'alu8',
-  // The jump glue and the halt line that holds the answer on `out`.
+  // 跳转胶水，以及把答案留在 `out` 上的停机线。
   'equal8',
   'or3',
   'or',
   'halt',
 ] as const;
 
-/** The two arithmetic levels: one 8-bit input, one 8-bit answer. */
+/** 两个算术关：一个 8 位输入，一个 8 位答案。 */
 const IO_IN: LevelIo = {
   inputs: [{ id: 'in', width: 8 }],
   outputs: [{ id: 'out', width: 8 }],
 };
 
-/** Level 52's pin shape: the same one byte in, one byte out, named `r`. */
+/** 第 52 关的引脚形状：同样是一字节进、一字节出，只是入口叫 `r`。 */
 const IO_R: LevelIo = {
   inputs: [{ id: 'r', width: 8 }],
   outputs: [{ id: 'out', width: 8 }],
 };
 
 /**
- * Level 50's walks: `in` driven at 100 for 105, and at 42 for 47 -- the two
- * (input, answer) pairs this level grades (ruling R9: two vectors, two checks).
+ * 第 50 关的步进：`in` 驱动 100 时求 105，驱动 42 时求 47——本关评分的两个
+ * （输入，答案）对（裁决 R9：两个向量、两个检查）。
  *
- * TICK 4 IS WHERE THE ANSWER APPEARS, and the number is the program's own
- * shape: `out` publishes while the counter looks at `move|s3|out`, the fifth
- * instruction (index 4), so the byte is there after four edges. Tick 3 demands
- * 0 one edge earlier and tick 10 demands the byte again -- the halt has to have
- * frozen the counter, or the byte would have fallen back to 0. The second walk
- * repeats the shape on its own input: same ticks, different bytes.
+ * 节拍 4 是答案出现的地方，这个数字来自程序自身的形状：`out` 在计数器看向
+ * `move|s3|out` 时发布，那是第五条指令（下标 4），所以四个沿之后字节就在那里。
+ * 节拍 3 在早一个沿要求 0，节拍 10 再次要求该字节——停机必须已经冻住计数器，
+ * 否则字节会回落到 0。第二段步进在自己的输入上重复同样的形状：同样的节拍，不同的字节。
  *
- * WHY 100 AND 42. The vectors are chosen to be spoof-proof TOGETHER rather
- * than alone. At tick 4 an input-ignoring program has executed four setup
- * instructions, and the values that can be sitting in a register by then are a
- * bare immediate (0-63), its complement (192-255), twice an immediate, or the
- * few constants the ops make from zero -- so 105 cannot be hard-coded at this
- * tick at all, while 47 can (`loadi|47`, three filler moves, `move|s0|out`).
- * One walk alone would accept that constant; the sibling walk demands 105 and
- * rejects it. That is exactly the invariant ruling R9 protects: every level
- * rejects at least one program that produces the right answer at the right
- * tick while ignoring its input.
+ * 为什么是 100 和 42。两个向量是"合起来"防冒充的，而不是各自单独防。
+ * 在节拍 4，忽略输入的程序已经执行了四条准备指令，此时可能停在寄存器里的值
+ * 只可能是裸立即数（0-63）、它的补码（192-255）、立即数的两倍，或运算从零做出的少数常数——
+ * 所以 105 在这个节拍根本硬编码不出来，而 47 可以（`loadi|47`、三条填充移动、`move|s0|out`）。
+ * 单看一段步进会接受那个常数；另一段要求 105，就会拒绝它。
+ * 这正是裁决 R9 保护的不变量：每关至少拒绝一个"在正确节拍产生正确答案、却忽略输入"的程序。
  */
 const STEPS_50_AT_100: readonly ProgramStep[] = [
   { tick: 0, inputs: { in: 100 }, expect: { out: 0 } },
@@ -152,15 +129,12 @@ const STEPS_50_AT_42: readonly ProgramStep[] = [
 ];
 
 /**
- * Level 51's walks: the same two-vector shape against `in + 3` -- driven at
- * 100 for 103, and at 200 for 203.
+ * 第 51 关的步进：同样的两向量形状，对着 `in + 3`——驱动 100 求 103，驱动 200 求 203。
  *
- * Same tick arithmetic as level 50's (the program is the same five
- * instructions with the constant changed) and the same two-vector rule. 103
- * cannot be hard-coded at tick 4 (odd, outside the immediate and its
- * complement), while 203 can: it is 52's complement, `loadi|52` into both
- * addends followed by `nor`. So the constant that reproduces the second walk
- * is caught by the first, whichever walk a spoofer aims at.
+ * 与第 50 关相同的节拍算术（程序就是同样五条指令、只换了常数）与同样的两向量规则。
+ * 103 在节拍 4 无法硬编码（奇数，既不在立即数范围内、也不是立即数的补码），
+ * 而 203 可以：它是 52 的补码，`loadi|52` 进两个加数再 `nor`。所以能复现第二段步进的常数，
+ * 会被第一段抓住，无论冒充者瞄准哪一段。
  */
 const STEPS_51_AT_100: readonly ProgramStep[] = [
   { tick: 0, inputs: { in: 100 }, expect: { out: 0 } },
@@ -177,22 +151,18 @@ const STEPS_51_AT_200: readonly ProgramStep[] = [
 ];
 
 /**
- * Level 52's walks: `r` driven at 200, where 6r = 1200 wraps to 176, and at 9,
- * where 6r = 54 -- the wrap case and the plain one, the exact pair
- * `reference-programs.md` verifies on the real board (r = 1/9/42/200 give
- * 6/54/252/176).
+ * 第 52 关的步进：`r` 驱动 200 时 6r = 1200 回绕成 176，驱动 9 时 6r = 54——
+ * 回绕的情形与平常的情形，正好是 `reference-programs.md` 在真实画板上验证过的那一对
+ * （r = 1/9/42/200 分别得 6/54/252/176）。
  *
- * THE WRAP IS THE LEVEL'S OWN TEACHING POINT -- `out = (6 * r) & 0xff` and the
- * mod 256 is real -- and 200 is the value the reference-program verification
- * measured (r = 200 -> 176). The answer appears at tick 8, the index of this
- * program's `move|s3|out`, and tick 7 demands 0 one edge earlier.
+ * 回绕是本关自己的教学点——`out = (6 * r) & 0xff`，模 256 是真实存在的——
+ * 而 200 是参考程序验证时测过的值（r = 200 -> 176）。答案出现在节拍 8，
+ * 也就是本程序 `move|s3|out` 的下标；节拍 7 在早一个沿要求 0。
  *
- * WHY TWO WALKS HERE, ABOVE ALL. At eight setup instructions even 176 can be
- * built from constants alone -- `loadi|63, move|s0|d1, loadi|50, move|s0|d2,
- * add, move|s3|d2, move|s0|d4, add, move|s3|out` is 63 + (63 + 50), revealed
- * on tick 8 exactly like the reference -- so a single walk was spoofable
- * whatever vector it chose. The second walk is what closes it: that constant
- * answers 176 to r = 9 as well, where the answer has to be 54.
+ * 为什么这里"尤其"需要两段步进。在八条准备指令之后，连 176 都能用纯常数搭出来——
+ * `loadi|63, move|s0|d1, loadi|50, move|s0|d2, add, move|s3|d2, move|s0|d4, add, move|s3|out`
+ * 就是 63 + (63 + 50)，和参考程序一样正好在节拍 8 揭晓——所以单段步进无论选什么向量都可能被冒充。
+ * 第二段步进堵住了它：那个常数对 r = 9 也回答 176，而正确答案必须是 54。
  */
 const STEPS_52_AT_200: readonly ProgramStep[] = [
   { tick: 0, inputs: { r: 200 }, expect: { out: 0 } },
@@ -210,32 +180,23 @@ const STEPS_52_AT_9: readonly ProgramStep[] = [
 
 export const CH4_BATCH1: readonly LevelSpec[] = [
   /**
-   * ch4-50-punchcard-programming -- Punchcard Programming / 打孔编程
+   * ch4-50-punchcard-programming —— 打孔编程 / Punchcard Programming
    *
-   * SOURCED: the name in both languages and its position from the 2.x dossier's
-   * chapter-4 table -- its first level, global 50 -- plus its one-line concept,
-   * hand-written binary encoding, and its 1.x ancestor's name ("Add 5").
-   * Chapter 4's teaching goal is sourced with it: first hand-write machine
-   * code, then unlock the assembler, and solve programming puzzles with your
-   * own CPU.
+   * SOURCED：双语名字与位置来自 2.x 档案的第 4 章表格——本章第一关、全局第 50 关——
+   * 外加它的一句话概念"手写二进制编码"，以及它 1.x 前身的名字（"Add 5"）。
+   * 第 4 章的教学目标也一并来自资料：先手写机器码，再解锁汇编器，用你自己的 CPU 解编程谜题。
    *
-   * AUTHORED (this replica's design): everything a player sees or a test
-   * measures. The `in:8 -> out:8` pin shape; the semantics `out = (in + 5) &
-   * 0xff`; the board (the chapter-3 machine, `overtureBoard({ inputId: 'in' })`
-   * with the default halt -- see the module note); the `program` check that
-   * reads the PLAYER's buffer as one-byte-per-line machine code
-   * (`from: 'player'`, `format: 'bytes'`); the two four-step walks and their
-   * inputs 100 and 42 (two vectors on two checks, ruling R9 -- see the module
-   * note); the palette (the board's own parts) and the absent reward; and the
-   * measured three-star target.
+   * AUTHORED（本复刻的设计）：玩家能看到、测试能测到的一切。`in:8 -> out:8` 引脚形状；
+   * 语义 `out = (in + 5) & 0xff`；画板（第 3 章机器，`overtureBoard({ inputId: 'in' })`，
+   * 默认停机——见模块说明）；读"玩家"缓冲区、按每行一字节机器码解析的 `program` 检查
+   * （`from: 'player'`、`format: 'bytes'`）；两段四步步进及其输入 100 与 42
+   * （两个检查、两个向量，裁决 R9——见模块说明）；托盘（画板自己的元件）与缺席的奖励；
+   * 以及实测的三星目标。
    *
-   * THIS IS THE LEVEL THAT HAND-ENCODES. No mnemonics and no assembler: the
-   * player writes the opcode bits themselves, which is the whole concept, so
-   * the check's reader is `parseImage` (`asm/image.ts`) -- eight binary digits
-   * per line, comments allowed -- rather than the assembler the next level
-   * unlocks. The reference program in the fixture is those five bytes, and the
-   * batch test re-derives them from the ISA table so the two readers cannot
-   * drift apart.
+   * 这一关是"手写编码"的关卡。没有助记符、没有汇编器：玩家自己写操作码位，
+   * 这就是全部概念，所以检查的读取器是 `parseImage`（`asm/image.ts`）——每行八个二进制位、
+   * 允许注释——而不是下一关才解锁的汇编器。fixture 里的参考程序就是那五个字节，
+   * 批次测试会从 ISA 表重新推导它们，好让两个读取器不能漂移。
    */
   {
     id: 'ch4-50-punchcard-programming',
@@ -252,9 +213,8 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
     },
     allowedComponents: [...BOARD_PARTS],
     io: IO_IN,
-    // The player's program text, read as one byte per line, on two walks with
-    // two different vectors (ruling R9). No `source`: the reference lives in
-    // the fixture (ruling 2).
+    // 玩家写的程序文本，按每行一字节读取，两段步进、两个不同向量（裁决 R9）。
+    // 没有 `source`：参考程序在 fixture 里（裁决 2）。
     checks: [
       {
         kind: 'program',
@@ -270,36 +230,28 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
       },
     ],
     board: overtureBoard({ inputId: 'in' }),
-    // Measured: 675 gates and 6 deep (the shipped board -- see the module note
-    // and `boards/overture.ts`), and the tick is the walks' last assertion
-    // (both share the shape, so `Math.max` is 10).
+    // 实测：675 门、6 级深（随游戏发布的画板——见模块说明与 `boards/overture.ts`），
+    // 节拍取两段步进的最后一条断言（形状相同，所以 `Math.max` 是 10）。
     threeStar: { gate: 675, delay: 6, tick: 10 },
   },
 
   /**
-   * ch4-51-assembly-programming -- Assembly Programming / 汇编程序
+   * ch4-51-assembly-programming —— 汇编程序 / Assembly Programming
    *
-   * SOURCED: the name in both languages and its position (the second level of
-   * chapter 4, global 51) from the 2.x dossier's table, and its one-line
-   * concept: assembly syntax, imm/mov/add. The chapter's sequence is sourced
-   * too -- this is the level where the assembler is unlocked, one level after
-   * the hand encoding.
+   * SOURCED：双语名字与位置（第 4 章第二关，全局第 51 关）来自 2.x 档案的表格，
+   * 以及它的一句话概念：汇编语法、imm/mov/add。本章的顺序也来自资料——
+   * 这一关就是解锁汇编器的那一关，紧接在手写编码之后。
    *
-   * AUTHORED (this replica's design): the `in:8 -> out:8` pin shape; the
-   * semantics `out = (in + 3) & 0xff`; the board (the same chapter-3 machine,
-   * `overtureBoard({ inputId: 'in' })`); the `program` checks that read the
-   * PLAYER's buffer as assembly (`from: 'player'`, `format: 'asm'`); the two
-   * walks, which are level 50's shape against `in + 3`, on the two vectors
-   * ruling R9 demands; the palette and the absent reward; and the measured
-   * three-star target.
+   * AUTHORED（本复刻的设计）：`in:8 -> out:8` 引脚形状；语义 `out = (in + 3) & 0xff`；
+   * 画板（同一台第 3 章机器，`overtureBoard({ inputId: 'in' })`）；读"玩家"缓冲区、
+   * 按汇编解析的 `program` 检查（`from: 'player'`、`format: 'asm'`）；
+   * 两段步进——第 50 关的形状对着 `in + 3`，用裁决 R9 要求的两个向量；
+   * 托盘与缺席的奖励；以及实测的三星目标。
    *
-   * THE PROGRAM IS LEVEL 50'S PROGRAM SPELLED DIFFERENTLY, which is the
-   * level's own claim rather than a coincidence: the same five instructions,
-   * the same bytes except the immediate, and the batch test pins both spellings
-   * against one ISA table. What the player learns here is that the assembler
-   * does not compute anything new -- it names the bits the previous level wrote
-   * by hand -- so the answer still has to be built out of registers, and `add`
-   * still reads r1 and r2 into r3.
+   * 程序就是第 50 关的程序换一种拼写，这是关卡自己的主张而不是巧合：
+   * 同样五条指令、除立即数外同样字节，批次测试把两种拼写钉在同一张 ISA 表上。
+   * 玩家在这里学到的是：汇编器不计算任何新东西——它给上一关手写的那串位起了名字——
+   * 所以答案仍然必须由寄存器搭出来，`add` 仍然把 r1、r2 读成 r3。
    */
   {
     id: 'ch4-51-assembly-programming',
@@ -331,39 +283,29 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
       },
     ],
     board: overtureBoard({ inputId: 'in' }),
-    // Measured: the same board as level 50, so the same gate and delay; the
-    // tick is the walks' last assertion (both share the shape, so `Math.max`
-    // is 10).
+    // 实测：与第 50 关同一块画板，所以门与延迟相同；节拍取两段步进的最后一条断言
+    // （形状相同，所以 `Math.max` 是 10）。
     threeStar: { gate: 675, delay: 6, tick: 10 },
   },
 
   /**
-   * ch4-52-circumference -- Circumference / 三番两次
+   * ch4-52-circumference —— 三番两次 / Circumference
    *
-   * SOURCED: the name in both languages and its position (the third level of
-   * chapter 4, global 52) from the 2.x dossier's table -- including the odd
-   * pairing the source makes: the Chinese name 三番两次 is the idiom for "over
-   * and over", and the English one is Circumference (the level's 1.x ancestor
-   * was "Calibrating Laser Cannons"). The one-line concept is sourced with
-   * them: compute 6r. The joke is the arithmetic itself -- a circumference is
-   * about 6r, and 三番两次 reads as "three, twice", which is exactly how the
-   * reference program computes it.
+   * SOURCED：双语名字与位置（第 4 章第三关，全局第 52 关）来自 2.x 档案的表格——
+   * 包括资料自己那对古怪的搭配：中文名"三番两次"是"一遍又一遍"的成语，
+   * 英文名却是 Circumference（本关的 1.x 前身是 "Calibrating Laser Cannons"）。
+   * 一句话概念也一并来自资料：计算 6r。笑点就在算术本身——圆周长约等于 6r，
+   * 而"三番两次"读作"三，两次"，正是参考程序算法的方式。
    *
-   * AUTHORED (this replica's design): the `r:8 -> out:8` pin shape (the radius
-   * is the chapter's one renamed input); the semantics `out = (6 * r) & 0xff`,
-   * wrap and all; the board (`overtureBoard({ inputId: 'r' })`); the `program`
-   * check reading the PLAYER's assembly; the two walks -- r = 200, where 6r
-   * wraps to 176, and r = 9, where it is 54 -- on the two vectors ruling R9
-   * demands (this level above all: see the walk note); the palette and the
-   * absent reward; and the measured three-star target.
+   * AUTHORED（本复刻的设计）：`r:8 -> out:8` 引脚形状（半径是本章唯一改过名字的输入）；
+   * 语义 `out = (6 * r) & 0xff`，连回绕一起；画板（`overtureBoard({ inputId: 'r' })`）；
+   * 读"玩家"汇编的 `program` 检查；两段步进——r = 200 时 6r 回绕成 176，r = 9 时是 54——
+   * 用裁决 R9 要求的两个向量（本关尤其如此：见步进注释）；托盘与缺席的奖励；以及实测的三星目标。
    *
-   * WHY THIS LEVEL EXISTS BETWEEN THE ASSEMBLER AND THE LOOPS: the ISA has no
-   * multiply, so 6r is addition used again and again -- and `add` reads r1 and
-   * r2 into r3 and NOWHERE else, so every intermediate result has to be moved
-   * back into place before the next sum. The program's seventh instruction is
-   * that lesson: without `move|s3|d1` the two addends are 2r and 3r and the
-   * answer is 5r -- the exact mistake the reference-program notes record, and
-   * the sabotage case the batch test runs.
+   * 这一关为什么放在"汇编器"与"循环"之间：ISA 没有乘法，所以 6r 就是加法一遍又一遍地用——
+   * 而 `add` 只把 r1、r2 读成 r3，"只"能这样，所以每个中间结果都得先搬回去才能参加下一步。
+   * 程序的第七条指令就是这堂课：没有 `move|s3|d1`，两个加数就是 2r 和 3r，答案是 5r——
+   * 参考程序的笔记记录过这个错误，批次测试也把它当作破坏用例跑。
    */
   {
     id: 'ch4-52-circumference',
@@ -395,9 +337,8 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
       },
     ],
     board: overtureBoard({ inputId: 'r' }),
-    // Measured: the same board as levels 50 and 51 (only the input pin's name
-    // changes), so the same gate and delay; the tick is the walks' last
-    // assertion (both share the shape, so `Math.max` is 14).
+    // 实测：与第 50、51 关同一块画板（只有输入引脚的名字变了），所以门与延迟相同；
+    // 节拍取两段步进的最后一条断言（形状相同，所以 `Math.max` 是 14）。
     threeStar: { gate: 675, delay: 6, tick: 14 },
   },
 ];

@@ -1,58 +1,67 @@
 /**
- * The workbench's own measurements: how wide each sidebar is, how tall the
- * bottom panel is, and which of the three docks are collapsed.
+ * 工作台自己的尺寸记录：每个侧边栏有多宽、底部面板有多高、三个停靠区各自
+ * 是否折叠。
  *
- * A SEPARATE KEY FROM EVERYTHING ELSE. `tc.progress.v1` is the campaign,
- * `tc.sandbox.v1` is one circuit and `tc.agent.v1` is where the assistant lives;
- * a layout is none of those -- it is a preference about the instrument, not a fact
- * about the work -- and folding it into any of them would make every migration of
- * one carry the other.
+ * 与别的一切分键保存。`tc.progress.v1` 是战役进度，`tc.sandbox.v1` 是一个
+ * 电路，`tc.agent.v1` 是助手住的地方；布局都不属于它们——它是关于"仪器"的
+ * 偏好，不是关于"作品"的事实——把它塞进任何一个键，都会让该键的每次迁移
+ * 顺带背上布局。
  *
- * NOTHING HERE THROWS. `localStorage` is missing in the unit tests and can refuse
- * writes in a private window; a layout that failed to load has an obvious answer
- * (the defaults), so the failure mode is "the docks are back where they started",
- * never a broken screen. Values are clamped on the way in as well as on the way
- * out, because a number from storage is untrusted input: a `primaryW` of 4000
- * would leave the board with no width at all.
+ * 这里不会抛出任何异常。单元测试里没有 localStorage，隐私窗口也可能拒绝
+ * 写入；布局读失败有一个显然的答案（默认值），所以失败模式是"停靠区回到
+ * 初始位置"，而不是画面坏掉。数值在读出时会夹紧到合法区间，写入侧则由拖拽
+ * 按 `LAYOUT_LIMITS` 限幅（见 `main.ts`）：来自存储的数字是不可信输入，
+ * `primaryW` 为 4000 会让画板一点宽度都不剩。
  */
 export const LAYOUT_KEY = 'tc.layout.v1';
 
 export interface Layout {
-  /** Width of the primary sidebar, in CSS pixels. */
+  /** 主侧边栏的宽度，单位是 CSS 像素。 */
   readonly primaryW: number;
-  /** Width of the secondary sidebar, in CSS pixels. */
+  /** 次侧边栏的宽度，单位是 CSS 像素。 */
   readonly secondaryW: number;
-  /** Height of the bottom panel's view area, in CSS pixels. */
+  /** 底部面板中视图区域的高度，单位是 CSS 像素。 */
   readonly panelH: number;
+  /** 主侧边栏（元件托盘那一侧）是否折叠。 */
   readonly primaryCollapsed: boolean;
+  /** 次侧边栏（助手那一侧）是否折叠。 */
   readonly secondaryCollapsed: boolean;
+  /** 底部面板（编程或测量面板）是否折叠。 */
   readonly panelCollapsed: boolean;
 }
 
-/** Where a fresh launch puts the docks, and what a corrupt payload falls back to. */
+/** 全新启动时停靠区的位置，也是损坏载荷回退到的值。 */
 export const LAYOUT_DEFAULT: Layout = {
   primaryW: 252,
   secondaryW: 348,
   panelH: 300,
   primaryCollapsed: false,
-  // The assistant starts closed: the board is the document, and a first visit
-  // should not pay for a feature that has not been set up.
+  // 助手默认收起：画板才是文档，第一次到访的人不该为一个还没配置过的
+  // 功能付出空间代价。
   secondaryCollapsed: true,
   panelCollapsed: false,
 };
 
-/** What a drag is allowed to ask for, in CSS pixels. */
+/** 一次拖拽允许请求的尺寸范围，单位是 CSS 像素。 */
 export const LAYOUT_LIMITS = {
   primaryW: { min: 180, max: 420 },
   secondaryW: { min: 260, max: 620 },
   panelH: { min: 140, max: 600 },
 } as const;
 
+/** 先四舍五入再夹到 [min, max]：拖拽给出的是小数，而布局要的是整数像素。 */
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
-/** Reads an untrusted payload back into a layout, filling in what is missing. */
+/**
+ * 把不可信的载荷读回成 `Layout`，缺失的字段用默认值补齐。
+ *
+ * 版本号不是 1 时整体回退到默认值，而不是逐字段猜：版本号存在的意义就是让
+ * 旧格式、新格式可以被识别，猜出来的混合布局比干净的默认布局更不可预期。
+ * 数值字段还要求有限（`Number.isFinite`），因为 `NaN` 能通过 `typeof` 检查，
+ * 却会让 `Math.min` / `Math.max` 一路把 `NaN` 传下去，最终布局静默失效。
+ */
 export function normalizeLayout(raw: unknown): Layout {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return LAYOUT_DEFAULT;
   const record = raw as Record<string, unknown>;
@@ -76,7 +85,7 @@ export function normalizeLayout(raw: unknown): Layout {
   };
 }
 
-/** Best-effort load; absent, corrupt or unreadable all read as the defaults. */
+/** 尽力加载；存储缺失、内容损坏、读取失败都读成默认布局。 */
 export function loadLayout(): Layout {
   try {
     const raw = globalThis.localStorage?.getItem(LAYOUT_KEY);
@@ -87,11 +96,16 @@ export function loadLayout(): Layout {
   }
 }
 
-/** Best-effort save; without a store the layout lives for this session only. */
+/**
+ * 尽力保存；没有存储时布局只在本次会话内有效。
+ *
+ * 写入的是带 `version: 1` 的对象：读出时靠它区分"本格式"与"别的什么"，
+ * 版本字段不单独存一份、也不省略，避免布局对象与版本号两处各说各话。
+ */
 export function saveLayout(layout: Layout): void {
   try {
     globalThis.localStorage?.setItem(LAYOUT_KEY, JSON.stringify({ version: 1, ...layout }));
   } catch {
-    /* storage unavailable (private mode, tests): the layout stays in memory */
+    /* 存储不可用（隐私模式、测试）：布局只保留在内存里 */
   }
 }

@@ -1,47 +1,57 @@
+/**
+ * 可撤销的编辑：命令栈，以及"命令 + 与它一起移动的元件库"这一对概念。
+ *
+ * 本模块只依赖 `core` 的图类型与 `levels` 的元件库类型，不碰 DOM、不碰 store：
+ * 撤销栈是纯数据结构，重放与历史由调用方（`main.ts` 与面板层）驱动。
+ *
+ * 关键不变量：栈本身不保存图的副本。每次调用都把当前的图传进来，命令只记录
+ * "怎么改"，因此同一份历史可以对着活文档重放，命令对图而言保持纯粹。
+ */
 import { cloneGraph, type CustomComponentDef, type Graph } from '../core/graph';
 import type { BlueprintLibrary } from '../levels/blueprints';
 
 /**
- * One reversible edit to a graph.
+ * 对图的一次可逆编辑。
  *
- * `do` must be repeatable: it runs once when the command is pushed and again on
- * every redo, so it has to establish the edit from whatever state the graph is
- * in rather than assume it starts empty (ids are allocated by the caller, not
- * generated inside `do`).
+ * `do` 必须可重复执行：命令入栈时它运行一次，之后每次重做都会再运行一次，
+ * 所以它必须"从图当前所处的状态出发建立这次编辑"，而不能假设图是空的
+ * （id 由调用方分配，不在 `do` 内部生成）。
  */
 export interface Command {
   readonly label: string;
   do(graph: Graph): void;
   undo(graph: Graph): void;
   /**
-   * The component library this command leaves behind, or `undefined` for a
-   * command that only moves the circuit.
+   * 本命令执行后留下的元件库；只改变电路的命令为 `undefined`。
    *
-   * WHY A COMMAND MAY CARRY IT. Wrapping a selection into a component is ONE
-   * action that changes two things (the circuit loses the selection and gains an
-   * instance of the component; the library gains the definition), and an undo
-   * that put the circuit back while leaving the component behind would be a
-   * half-undone state the player cannot name. The library travels with the
-   * command so both halves move together -- see `CommandStack.push`.
+   * 为什么命令可以携带元件库：把选中区域封装成自定义元件是"一个动作改两处"
+   * （电路失去选中区域、获得该元件的一个实例；元件库获得定义），如果只撤销
+   * 电路、把元件留在库里，玩家会得到一个叫不出名字的"撤销了一半"的状态。
+   * 于是元件库跟着命令一起移动——见 `CommandStack.push`。
    *
-   * A whole library rather than a delta: a library holds graphs, so `cloneGraph`
-   * is what makes it a snapshot, and a delta would need its own inverse. Wrapping
-   * is a deliberate, occasional action; the clone is not on any hot path.
+   * 携带整份库而不是增量：库里装着图，`cloneGraph` 才是让它成为快照的关键；
+   * 若用增量，还得为它写一份逆操作。封装是玩家偶发、有意的动作，克隆不在
+   * 任何热路径上，多复制一份可以接受。
    */
   readonly blueprints?: BlueprintLibrary;
   /**
-   * The library to restore on UNDO, when the command carries one.
+   * 撤销时要恢复的元件库；仅当命令携带了库时才存在。
    *
-   * Read only by the stack, never by `do`: a command states the library it
-   * leaves behind, and separately the library it replaced -- which the stack
-   * needs so that undo returns the document to exactly where it was rather than
-   * to "the previous command's library", a value that no longer exists after a
-   * redo has overwritten the branch.
+   * 只有栈会读它，`do` 永远不读：命令声明的是"我留下哪份库"，另外单独声明
+   * "我替换掉的是哪份库"——栈需要后者，才能让撤销把文档恢复到与执行前完全
+   * 一致的位置，而不是恢复到"上一条命令的库"（重做覆盖了分支后，那个值已经
+   * 不存在了）。
    */
   readonly blueprintsBefore?: BlueprintLibrary;
 }
 
-/** A library copied deeply enough that mutating one side cannot touch the other. */
+/**
+ * 把元件库深拷贝到"改一侧不会影响另一侧"的程度。
+ *
+ * 需要拷贝的层级是被数据形状决定的：元件名、定义本身与其名字、输入/输出引脚
+ * 数组、绑定表里的每个端点对象，以及元件体内的图。少拷哪一层，撤销后对旧库
+ * 的原地修改就会穿透到新库，两段历史共享同一批对象。
+ */
 export function cloneLibrary(library: BlueprintLibrary): BlueprintLibrary {
   const copy: Record<string, { name: { zh: string; en: string }; def: CustomComponentDef }> = {};
   for (const [id, entry] of Object.entries(library)) {
@@ -63,6 +73,7 @@ export function cloneLibrary(library: BlueprintLibrary): BlueprintLibrary {
   return copy;
 }
 
+/** 逐个引脚复制一张端点表；端点本身是对象，必须新建而不是共享引用。 */
 function copyEnds(
   ends: Readonly<Record<string, { inst: string; port: string }>>,
 ): Record<string, { inst: string; port: string }> {
@@ -72,31 +83,29 @@ function copyEnds(
 }
 
 /**
- * Undo/redo history for one graph, and for the component library beside it.
+ * 一张图的撤销 / 重做历史，以及它旁边那份元件库的历史。
  *
- * The stack owns no copy of the graph: `graph` is passed in on every call, so
- * the same history can be replayed against the live document and the commands
- * stay pure with respect to it. (`core/graph.ts` mixes push-in and
- * reassign-the-array mutations, so nothing here may key off array identity.)
+ * 栈不持有图的任何副本：每次调用都传入 `graph`，因此同一份历史既能对活文档
+ * 重放，命令对它也保持纯粹。（`core/graph.ts` 混用了"原地 push"与"重新赋值
+ * 数组"两种改法，所以这里任何逻辑都不能把数组引用当成身份。）
  *
- * THE LIBRARY IS DIFFERENT: a command that carries one REPLACES it, because a
- * component is a value (its body is a graph) rather than a mutation of the shared
- * document. `current()` is what the app subscribes to -- it is the library the
- * last command left, which `main.ts` copies into the store and into the save.
+ * 元件库则不同：携带库的命令会整体替换它，因为元件是一个值（它的体是一张图），
+ * 而不是对共享文档的一次改动。`current()` 是应用订阅的东西——它是最后一条命令
+ * 留下的库，`main.ts` 把它复制进 store 和存档。
  */
 export class CommandStack {
   readonly #limit: number;
   #undo: Command[] = [];
   #redo: Command[] = [];
-  /** The library as the history leaves it, or `undefined` if none has set one. */
+  /** 历史把元件库留在了什么状态；还没有任何命令设置过时为 `undefined`。 */
   #blueprints: BlueprintLibrary | undefined;
 
-  /** `limit` is the number of undoable steps; the oldest is dropped beyond it. */
+  /** `limit` 是可撤销步数；超出后丢弃最旧的一步（而不是整段历史）。 */
   constructor(limit = 200) {
     this.#limit = limit;
   }
 
-  /** Undoable steps currently held. */
+  /** 当前持有的可撤销步数。 */
   get depth(): number {
     return this.#undo.length;
   }
@@ -109,22 +118,20 @@ export class CommandStack {
     return this.#redo.length > 0;
   }
 
-  /** The library this history leaves in place, or `undefined` for "unchanged". */
+  /** 历史留下的元件库；没有历史改过它时为 `undefined`，表示"未改变"。 */
   current(): BlueprintLibrary | undefined {
     return this.#blueprints;
   }
 
   /**
-   * Applies `command` and records it: pushing is the edit.
+   * 应用 `command` 并记录它：入栈就是这次编辑。
    *
-   * A new command invalidates the redo branch -- the history is a line, not a
-   * tree, so the abandoned future is dropped rather than kept for a branch
-   * picker that does not exist. If `do` throws, nothing is recorded and the
-   * redo branch survives, because the graph was not changed by a command we
-   * could reverse.
+   * 新命令会让重做分支失效——历史是一条线，不是一棵树，所以被放弃的"未来"
+   * 直接丢掉，而不是留给一个并不存在的分支选择器。若 `do` 抛出异常，则不记录
+   * 任何东西、重做分支也保留：图没有被一条我们能够撤销的命令改动过。
    *
-   * A command that carries a library installs it as part of the same step, so
-   * `current()` answers what the document holds after this push.
+   * 携带元件库的命令会把库的安装算作同一步，因此 `current()` 给出的就是这次
+   * push 之后文档所持有的库。
    */
   push(command: Command, graph: Graph): void {
     command.do(graph);
@@ -134,21 +141,20 @@ export class CommandStack {
     this.#redo = [];
   }
 
-  /** Reverses the newest command; false when there is nothing to undo. */
+  /** 撤销最新的命令；没有可撤销的命令时返回 false。 */
   undo(graph: Graph): boolean {
     const command = this.#undo.pop();
     if (!command) return false;
     command.undo(graph);
     if (command.blueprints !== undefined) {
-      // Going back means going back to what the command REPLACED, which is why
-      // the inverse edit carries its own "before" library.
+      // 往回走就是要回到命令"替换掉"的那份库，所以逆操作自己也带着 "before" 库。
       this.#blueprints = command.blueprintsBefore ?? this.#blueprints;
     }
     this.#redo.push(command);
     return true;
   }
 
-  /** Re-applies the newest undone command; false when there is nothing to redo. */
+  /** 重做最近撤销的命令；没有可重做的命令时返回 false。 */
   redo(graph: Graph): boolean {
     const command = this.#redo.pop();
     if (!command) return false;
@@ -158,7 +164,12 @@ export class CommandStack {
     return true;
   }
 
-  /** Forgets both branches, e.g. when the editor loads a different level. */
+  /**
+   * 丢弃两个分支（撤销与重做），例如编辑器载入另一关时。
+   *
+   * 只清历史，不动当前的元件库：库是"文档现在是什么"的一部分，不是历史的一
+   * 部分；它由调用方在需要时整体替换，而不是随着历史一起被清空。
+   */
   clear(): void {
     this.#undo = [];
     this.#redo = [];

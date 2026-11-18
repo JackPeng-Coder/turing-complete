@@ -1,19 +1,17 @@
 /**
- * The 1.x level ids, and what each of them is called now.
+ * 1.x 版关卡 id 与它们现在的新名字之间的对照表。
  *
- * The 2026-10-04 realignment moved every level in chapters 1-3 to its 2.x
- * position (see `src/levels/campaign.ts`), which changed the id of 44 of them:
- * the id carries the level's global index, so renumbering one level renumbers
- * everything after it.
+ * 2026-10-04 的版本对齐把第 1~3 章的每一关都移到了它在 2.x 中的位置
+ * （见 `src/levels/campaign.ts`），这改掉了其中 44 关的 id：id 里带着
+ * 关卡的全局序号，所以给一关重新编号，就会连带改掉它后面所有关卡的编号。
  *
- * A saved game is keyed by those ids (`persist/storage.ts`), so `migrate` reads
- * this table to carry a player's stars across the change. It is a translation
- * table, not a level list: an id that is already current -- or one this table
- * has never heard of -- passes through untouched, which is what makes the
- * migration idempotent.
+ * 存档是按这些 id 记录的（`persist/storage.ts`），因此 `migrate` 会读这张
+ * 表，把玩家的通关星星带过这次改名。它是一张翻译表，不是关卡列表：已经
+ * 是新 id 的、或者这张表从没听说过的 id，都会原样通过——这正是迁移可以
+ * 反复执行（幂等）的原因。
  *
- * The three ids in `RETIRED_LEVEL_IDS` are the other half of the same story:
- * 2.x has no level for them, so a save that mentions one loses that record.
+ * `RETIRED_LEVEL_IDS` 里的三个 id 是同一个故事的另一半：2.x 里没有对应的
+ * 关卡，所以提到它们的旧存档会丢掉那一条记录。
  */
 export const LEGACY_LEVEL_IDS: Readonly<Record<string, string>> = {
   'ch1-01-crude-awakening': 'ch1-01-humble-beginnings',
@@ -56,12 +54,12 @@ export const LEGACY_LEVEL_IDS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Levels that no level exists for any more.
+ * 已经没有关卡与之对应的旧 id。
  *
- * Chapter 2 lost three of its 1.x levels to the 2.x realignment: `Byte OR` (2.x
- * has `Byte NAND` in the neighbourhood instead), `Logic Engine` (removed by 2.x)
- * and the popcount level that was misnamed `Binary Racer` (it duplicated
- * `Counting Signals`; 2.x has one Binary Racer and it is the four-bit reader).
+ * 第 2 章在向 2.x 对齐时少了三个 1.x 关卡：`Byte OR`（2.x 在这一带换成
+ * 了 `Byte NAND`）、`Logic Engine`（2.x 把它删了），以及那个被误命名为
+ * `Binary Racer` 的计数关（它和 `Counting Signals` 重复；2.x 只留一个
+ * Binary Racer，指的是四位数读取的那一关）。
  */
 export const RETIRED_LEVEL_IDS: readonly string[] = [
   'ch2-15-binary-racer',
@@ -69,7 +67,12 @@ export const RETIRED_LEVEL_IDS: readonly string[] = [
   'ch2-27-logic-engine',
 ];
 
-/** The current id for a stored one, or null if no level answers to it any more. */
+/**
+ * 把存档里的旧 id 翻译成当前 id；若已经没有关卡使用它，返回 null。
+ *
+ * 迁移是幂等的：新 id 与未知 id 都原样返回，所以对同一份存档连续迁移
+ * 两次，结果和一次相同。
+ */
 export function currentIdOf(id: string): string | null {
   const mapped = LEGACY_LEVEL_IDS[id];
   if (mapped !== undefined) return mapped;

@@ -1,3 +1,16 @@
+/**
+ * 单块电路上的“一次程序运行”：把程序镜像装进电路，再由人手一拍一拍地
+ * 推进，并读出机器内部状态。
+ *
+ * 它服务调试器与汇编 IDE：检查器一次跑完整串步骤只给结论，而写程序的人
+ * 需要装镜像、只走一个时钟沿、再看两个沿之间机器里是什么。因此本模块复用
+ * 内核与 `checks.ts` 的既有部件（`loadProgramImage`、`programTargets`、
+ * `bindLevelIo`、`Simulation.readState`），只额外提供“人手”才有的东西：
+ * 步骤之间的时间。无 DOM、无真实时间、无随机数；驱动 `step` 的定时器在
+ * `main.ts` 里。本模块从不抛错——解析失败、编译失败、结算不收敛都变成
+ * `errors` 里的一句话。
+ */
+
 import { CircuitValidationError, UnstableCircuitError } from '../core/errors';
 import type { Graph } from '../core/graph';
 import type { Netlist } from '../core/net';
@@ -8,117 +21,105 @@ import { bindLevelIo, loadProgramImage, programImageOf, programTargets, type Lev
 import type { LevelSpec } from './spec';
 
 /**
- * One program on one board, stepped by hand.
+ * 一块电路上的一个程序，按节拍手动推进。
  *
- * WHY THIS EXISTS, GIVEN THE CHECKERS. A `program` check drives its whole step
- * list in one call and reports a verdict; a player writing a program needs the
- * opposite: load the image, clock ONE edge, and read what the machine holds
- * between edges. The debugger and the IDE are that, and they must not re-derive
- * the parts that decide meaning -- which `ram_prog` instances hold a program, how
- * a text becomes an image, whether the circuit has to be reset before an image
- * lands. So this surface is composed out of the kernel's own pieces
- * (`loadProgramImage`, `programTargets`, `bindLevelIo`, `Simulation.readState`)
- * and adds only the thing a human has that a checker does not: time between
- * steps.
+ * 既然已有检查器，为什么还要它：`program` 检查一次驱动整串步骤并给出
+ * 结论，而正在写程序的玩家需要相反的东西——装好镜像、只走一个时钟沿、
+ * 并读取两个沿之间机器的状态。调试器和 IDE 要的正是这个，而且它们不应
+ * 重新推导决定语义的部分（哪些 `ram_prog` 装程序、文本如何变成镜像、
+ * 装载镜像前要不要先复位）。于是这一层由内核自己的部件组合而成
+ * （`loadProgramImage`、`programTargets`、`bindLevelIo` 与
+ * `Simulation.readState` 等部件），只补上人比检查器多出来的东西：
+ * 步骤之间的时间。
+ * 时间。
  *
- * NO DOM, NO TIME, NO RANDOMNESS. The timer that drives `step` repeatedly lives
- * in `main.ts`, where the buttons are; this module would be identical in a test
- * harness, which is what makes the two-instruction program in
- * `test/levels/run.test.ts` able to pin the real board's behaviour.
+ * 无 DOM、无时间、无随机。反复驱动 `step` 的定时器在 `main.ts` 里（按钮
+ * 所在处）；本模块放进测试夹具也完全一样，因此 `test/levels/run.test.ts`
+ * 里那个两行的小程序能钉住真实画板的行为。
  *
- * NOTHING HERE THROWS. `createProgramRun` is called from the IDE's edit path and
- * `step` from a repeating timer, so the same rule the check pipeline follows one
- * level up applies here: a refusal is data. A parse error, a circuit that will
- * not compile, a settle that does not converge -- each becomes a sentence in
- * `errors`, and a run with errors does nothing.
+ * 这里什么都不抛。`createProgramRun` 被 IDE 的编辑路径调用，`step` 被
+ * 重复定时器调用，所以上层检查流水线遵循的同一条规则在此适用：拒绝是
+ * 数据。解析错误、电路编译不过、结算不收敛——每一条都变成 `errors` 里的
+ * 一句话，而带错误的运行什么都不做。
  */
 export interface ProgramRun {
   /**
-   * What the panel shows instead of a run.
+   * 面板用来代替“运行结果”显示的内容。
    *
-   * The first entries are the text's own refusals, line-numbered, as the readers
-   * word them; empty when the text is a program. A CIRCUIT-LEVEL sentence may
-   * follow -- "the circuit does not compile", "there is no `ram_prog` to load
-   * into", "the circuit does not settle" -- because there is no other channel a
-   * panel could show it on and a control that looks live and does nothing is
-   * worse than a sentence.
+   * 最前面是文本自身的拒绝，带行号、用读取器的措辞；文本是合法程序时为
+   * 空。其后可能跟一句“电路层面”的话——“电路编译不过”“没有 `ram_prog`
+   * 可以装载”“电路结算不收敛”——因为面板没有别的渠道显示它，而一个
+   * 看上去能按、按了却没反应的控制，比一句说明更糟。
    *
-   * NON-EMPTY MEANS THE RUN IS INERT AND NOTHING WAS EVER LOADED. Every reader
-   * answers as if the machine had not been started -- `step` and `setInput` are
-   * no-ops that leave `ticks` alone, `bytes` is empty, and the state readers
-   * (`readRam`, `readRegisters`, `readPc`, `readHalt`) answer `null` rather than
-   * the zeros the constructor's tables hold -- so a panel facing a refusal prints
-   * dashes instead of describing a machine that was never settled. `checks.ts`'s
-   * `loadProgramImage` is where that holds for a program the READER refuses; the
-   * other four sentences arise before or instead of a load, and the load is
-   * skipped whenever one of them is already standing, which is what keeps a
-   * circuit-level refusal from resetting the machine under the player's feet.
+   * 非空表示这次运行是惰性的，而且什么都没装载过：所有读取器都像机器从未
+   * 启动一样回答——`step` 与 `setInput` 什么都做、`ticks` 保持不动，
+   * `bytes` 为空，状态读取器（`readRam`、`readRegisters`、`readPc`、
+   * `readHalt`）回答 `null` 而不是构造函数表格里的 0——于是面对拒绝的面板
+   * 会打印破折号，而不是描述一台从未结算过的机器。读取器拒绝一段程序时，
+   * 这条约束由 `checks.ts` 的 `loadProgramImage` 保证；另外四句话出现在
+   * 装载之前或代替装载，只要其中任何一句已经存在就跳过装载——这正是电路
+   * 层面的拒绝不会在玩家脚下重置机器的原因。
    */
   readonly errors: readonly string[];
   /**
-   * The assembled image, or `[]` when the text is not a program.
+   * 汇编出的镜像；文本不是程序时为 `[]`。
    *
-   * The same rule as `errors`: `[]` means nothing was loaded, and every non-empty
-   * `bytes` is in `ram_prog` -- so a caller that shows the byte view exactly when
-   * this is non-empty cannot print the image of a program that never landed.
+   * 与 `errors` 同一条规则：`[]` 表示什么都没装载，而每一份非空 `bytes`
+   * 都已经在 `ram_prog` 里——因此调用方只要在它非空时才显示字节视图，就
+   * 绝不会打印一个从未装载成功的程序的镜像。
    */
   readonly bytes: readonly number[];
   /**
-   * The circuit this run drives, or `null` when there is nothing to paint.
+   * 本次运行驱动的电路；没有东西可画时为 `null`。
    *
-   * THE DISPLAY PAINTS THIS, so what a player sees on the board is the machine
-   * the program is running on rather than a second compilation of the same graph
-   * -- the io panel's clock, its `out` row and the debugger's counter all read
-   * one simulation, which is what stops the board and the run from disagreeing.
-   * `null` exactly when the run is inert (see `errors`: no circuit, or a refusal
-   * before anything was loaded). The `net` is immutable once compiled; the `sim`
-   * is live and belongs to this run.
+   * 显示层画的正是它，所以玩家在画板上看到的就是程序正在运行的机器，而
+   * 不是同一张图第二次编译的结果——io 面板的时钟、`out` 行和调试器的
+   * 计数器都读同一个仿真，这才让画板与运行不会各说各话。运行惰性时恰好是
+   * `null`（见 `errors`：没有电路，或装载前就被拒绝）。`net` 编译后不可
+   * 变；`sim` 是活的，属于本次运行。
    */
   readonly machine: ProgramMachine | null;
-  /** Edges clocked since the last `reset`. */
+  /** 自上次 `reset` 起走过的时钟沿数。 */
   readonly ticks: number;
-  /** Reset, load the image, settle: the run starts over. */
+  /** 复位、装载镜像、结算：运行重新开始。 */
   reset(): void;
-  /** Settle, apply one clock edge, settle again. */
+  /** 结算、施加一个时钟沿、再结算。 */
   step(): void;
-  /** Drives one level input pin; the board settles, so the next edge samples it. */
+  /** 驱动一个关卡输入引脚；画板会结算，因此下一个时钟沿采样到它。 */
   setInput(name: string, value: number): void;
-  /** Every pin of `spec.io.outputs`, as the level reads them. */
+  /** `spec.io.outputs` 的每个引脚，按关卡读取的方式取值。 */
   readOutputs(): Readonly<Record<string, number>>;
-  /** REG0..REG5 of the circuit's `regfile6`, or `null` when it has none. */
+  /** 电路里 `regfile6` 的 REG0..REG5；没有寄存器文件时为 `null`。 */
   readRegisters(): readonly number[] | null;
-  /** The `pc8` state -- the address being executed -- or `null` with no counter. */
+  /** `pc8` 的状态——正在执行的地址；没有计数器时为 `null`。 */
   readPc(): number | null;
   /**
-   * The circuit's `halt` line, or `null` when this board has no `halt` part.
+   * 电路的 `halt` 线；这块画板上没有 `halt` 元件时为 `null`。
    *
-   * THE ONE THING THE DEBUGGER CANNOT INFER. Chapter 3's machine freezes the
-   * counter while `halt` is high, so a program that has finished and a program
-   * that jumped to its own address both stand still -- and "the counter stopped
-   * moving" would report the second as the first. This reads the machine's own
-   * signal instead: `halt` is a part with an output pin, and its value is the
-   * same one the counter's load logic sees.
+   * 这是调试器唯一无法自行推断的东西。第 3 章的机器在 `halt` 为高时冻结
+   * 计数器，于是“程序跑完了”和“程序跳到了自己的地址”都会让机器停住——
+   * 只看“计数器不动”会把后者报成前者。这里读机器自己的信号：`halt` 是
+   * 一个带输出引脚的元件，它的值与计数器装载逻辑看到的是同一个。
    */
   readHalt(): boolean | null;
-  /** The 256-byte program image as it stands, or `null` with no `ram_prog`. */
+  /** 当前的 256 字节程序镜像；没有 `ram_prog` 时为 `null`。 */
   readRam(): readonly number[] | null;
 }
 
 /**
- * One compiled circuit with its storage: the thing a run steps and the board
- * paints.
+ * 一块编译好的电路连同它的存储：运行时逐步推进、画板负责绘制的东西。
  *
- * A NAMED TYPE RATHER THAN AN INLINE SHAPE, because two layers hand it to each
- * other -- `levels/run.ts` builds it and `ui/board/signals.ts` paints it -- and
- * `core`'s own `Netlist`/`Simulation` pair is what both sides need to see whole.
- * Nothing here is a copy: the same objects are shared deliberately.
+ * 之所以给一个有名字的类型而不是内联形状，是因为两层要互相传递它：
+ * `levels/run.ts` 构建它，`ui/board/signals.ts` 绘制它，而两边都需要
+ * 完整看到 `core` 自己的 `Netlist`/`Simulation` 组合。这里没有任何
+ * 拷贝：共享的是同一批对象，这是刻意的。
  */
 export interface ProgramMachine {
   readonly net: Netlist;
   readonly sim: Simulation;
 }
 
-/** A circuit the run can drive: a compiled simulation with the level's pins bound. */
+/** 一次运行能驱动的电路：编译好的仿真，加上已绑定关卡引脚。 */
 interface Ready {
   readonly net: Netlist;
   readonly sim: Simulation;
@@ -126,12 +127,11 @@ interface Ready {
 }
 
 /**
- * Builds a run of `text` on `graph` and takes it to its starting state: reset,
- * image loaded, settled, at tick 0.
+ * 在 `graph` 上为 `text` 建立一次运行，并推进到起始状态：复位、装载
+ * 镜像、结算完毕、节拍为 0。
  *
- * `format` is the check's own choice (`'asm'` or the hand-written image format),
- * and the text is always the PLAYER's, which is what the zero-byte sentence says
- * when it fires.
+ * `format` 由检查决定（`'asm'` 或手写镜像格式），文本永远是玩家的——
+ * 零字节那句话触发时说的正是这一点。
  */
 export function createProgramRun(
   graph: Graph,
@@ -140,14 +140,14 @@ export function createProgramRun(
   text: string,
   format: 'asm' | 'bytes',
 ): ProgramRun {
-  /** Parse refusals first, then whatever the circuit has to say; see `errors`. */
+  /** 先收集解析拒绝，再收集电路要说的话；见 `errors`。 */
   const errors: string[] = [];
   let bytes: readonly number[] = [];
-  /** True once a settle has failed: nothing is driven after that. */
+  /** 一旦结算失败就为 true：此后不再驱动任何东西。 */
   let stopped = false;
-  /** The compiled circuit, or `null` when `compile` refused the graph. */
+  /** 编译好的电路；`compile` 拒绝这张图时为 `null`。 */
   let ready: Ready | null = null;
-  /** A sentence about the CIRCUIT, held back so the text's own refusals lead. */
+  /** 一句“电路层面”的说明，先压着，让文本自身的拒绝排在前面。 */
   let circuitIssue: string | null = null;
 
   const issue = (error: unknown): string => {
@@ -168,7 +168,7 @@ export function createProgramRun(
     errors.push(issue(error));
   };
 
-  /** True when there is nothing to drive: no circuit, a refusal, or a failed settle. */
+  /** 没有东西可驱动时为 true：没有电路、已被拒绝，或结算失败过。 */
   const idle = (): boolean => ready === null || stopped || errors.length > 0;
 
   try {
@@ -176,37 +176,32 @@ export function createProgramRun(
     const sim = new Simulation(net, registry);
     const io = bindLevelIo(sim, net, spec);
     ready = { net, sim, io };
-    // A level pin that is present at the wrong width binds nothing, so every
-    // value the run would show or drive crosses that pin wrongly. The checkers
-    // refuse such a circuit as `missing-io`; here it is a sentence, because a
-    // board mid-edit is the ordinary state of the editor rather than a defect.
+    // 引脚存在但位宽不对时，一个字节都绑不上，于是运行要显示或驱动的每个
+    // 值都会从这个引脚错误地穿过。检查器把这种电路判为 `missing-io`；
+    // 这里只写成一句话，因为“编辑到一半的画板”是编辑器的正常状态，而不是
+    // 缺陷。
     if (io.mismatch !== undefined) circuitIssue = io.mismatch;
   } catch (error) {
     circuitIssue = issue(error);
   }
 
   if (ready === null) {
-    // No circuit, so the text is read on its own: the panel's first job is to
-    // tell the player about their program, and a typo is not the board's fault
-    // -- and the circuit's own refusal follows, because a panel that could only
-    // say "line 3" would leave a board with a part the registry does not know
-    // looking like a typo.
+    // 没有电路，于是先单独读文本：面板的第一职责是把程序的问题告诉玩家，
+    // 而笔误不是画板的错——随后再补上电路自己的拒绝，因为一个只能说
+    // “第 3 行”的面板，会让“板上有个注册表不认识的元件”看起来也像笔误。
     errors.push(...programImageOf(text, format, 'player').errors);
     if (circuitIssue !== null) errors.push(circuitIssue);
   } else {
-    // A CIRCUIT REFUSAL IS RECORDED BEFORE THE LOAD, NOT AFTER IT. The load
-    // resets the machine and writes the image into `ram_prog`, so appending the
-    // sentence afterwards would leave an image in RAM under a non-empty `errors`
-    // -- the one combination `errors` and `bytes` both promise cannot happen, and
-    // the one that made the IDE hide the byte view of a program that had loaded.
-    // Standing here it also keeps a refusal from resetting the machine under the
-    // player's feet on every keystroke, which is what a board mid-edit needs.
+    // 电路层面的拒绝要记录在装载之前，而不是之后。装载会复位机器并把镜像
+    // 写进 `ram_prog`，所以后补这句话会把镜像留在 RAM 里、而 `errors`
+    // 却非空——这正是 `errors` 与 `bytes` 都承诺不会发生的组合，也正是
+    // 它让 IDE 隐藏了已经装载成功的程序的字节视图。放在这里还能避免每次
+    // 按键都因拒绝而在玩家脚下重置机器，这正是“编辑到一半的画板”需要的。
     if (circuitIssue !== null) errors.push(circuitIssue);
     else {
       try {
-        // THE ONE WAY AN IMAGE LANDS: `loadProgramImage` resets, loads every
-        // `ram_prog` and settles, in that order -- see its own comment for why the
-        // reset has to come first.
+        // 镜像落地的唯一路径：`loadProgramImage` 依次复位、装载每一块
+        // `ram_prog`、结算——复位为什么必须在前，见它自己的注释。
         const image = loadProgramImage(ready.io, text, format, 'player');
         if (image.errors.length > 0) errors.push(...image.errors);
         else bytes = image.bytes;
@@ -227,10 +222,9 @@ export function createProgramRun(
   };
 
   const stateOf = (id: string | null): readonly number[] | null => {
-    // A RUN THAT IS INERT HAS NOTHING TO REPORT. A refused program never reached
-    // the machine, so the state tables still hold the zeros the constructor left
-    // there -- and reading them out would print a counter at 0x00 and six empty
-    // registers, which is a machine nobody started. See `errors`.
+    // 惰性的运行没有东西可报告。被拒绝的程序从未到达机器，所以状态表里还是
+    // 构造函数留下的 0——读出来会打印一个 0x00 的计数器和六个空寄存器，
+    // 那是一台没人启动过的机器。见 `errors`。
     if (ready === null || idle() || id === null) return null;
     const state = ready.sim.readState(id);
     return state === null ? null : Array.from(state);
@@ -240,10 +234,8 @@ export function createProgramRun(
     errors,
     bytes,
     get machine(): ProgramMachine | null {
-      // The same gate as every other reader: a circuit that refused the program is
-      // not handed out to be painted, because a board showing the zero program
-      // under a panel saying the program did not load is the disagreement this
-      // field exists to prevent. See `errors`.
+      // 与其他读取器同一道闸门：拒绝过程序的电路不交出去绘制，因为画板显示
+      // 全零程序、面板却说程序没装载，正是这个字段要防止的矛盾。见 `errors`。
       return ready === null || idle() ? null : { net: ready.net, sim: ready.sim };
     },
     get ticks(): number {
@@ -253,8 +245,8 @@ export function createProgramRun(
     reset(): void {
       if (idle() || ready === null) return;
       try {
-        // The same call the constructor made, so "reset" and "open" cannot drift
-        // apart: reset the circuit, load the image into it, settle.
+        // 与构造函数做的是同一个调用，于是“复位”与“打开”不会各走各的：
+        // 复位电路、把镜像装进去、结算。
         loadProgramImage(ready.io, text, format, 'player');
       } catch (error) {
         stop(error);
@@ -264,14 +256,12 @@ export function createProgramRun(
     step(): void {
       if (idle() || ready === null) return;
       try {
-        // SETTLE, EDGE, SETTLE. `tick` samples the signal TABLE, so the sweep
-        // before the edge is what makes the values on screen the values the edge
-        // clocks -- write an input and tick without it and the machine samples
-        // the previous vector, which is a circuit the player cannot see on the
-        // board. `tick` ends in a settle of its own (it publishes the new state),
-        // so the trailing call is a sweep over an already-settled table; it is
-        // kept because the ordering is this surface's documented contract rather
-        // than an implementation detail of `tick`.
+        // 结算、时钟沿、再结算。`tick` 采样的是信号表，所以沿之前的那次
+        // 结算，才让屏幕上的值就是这个沿要锁存的值——只写输入、不结算就
+        // tick，机器采样到的是上一组输入，那是一张玩家在画板上看不到的电路。
+        // `tick` 自己以一次结算收尾（它要发布新状态），所以末尾这次是对一张
+        // 已结算过的表再扫一遍；保留它，是因为这个次序是本层写明的契约，
+        // 而不是 `tick` 的实现细节。
         ready.sim.settle();
         ready.sim.tick();
         ready.sim.settle();
@@ -284,11 +274,10 @@ export function createProgramRun(
       if (idle() || ready === null) return;
       try {
         ready.io.writeInput(name, value);
-        // Settled here rather than left to the next `step`, so a value poked into
-        // a pin shows up on everything combinational at once -- that is what a
-        // debugger's write is for -- and the edge that follows still samples it,
-        // because `step` settles again. `writeInput` ignores a name the level does
-        // not declare, and a value that does not fit the pin.
+        // 在这里结算，而不是留给下一次 `step`，这样被写进引脚的值会立刻
+        // 出现在所有组合逻辑上——调试器的“写入”正是为此——而随后的时钟沿
+        // 仍能采样到它，因为 `step` 会再结算一次。`writeInput` 会忽略关卡
+        // 没有声明的名字，以及放不进该引脚的值。
         ready.sim.settle();
       } catch (error) {
         stop(error);
@@ -312,28 +301,27 @@ export function createProgramRun(
     },
 
     readHalt(): boolean | null {
-      // Same gate as `stateOf`: before anything was settled the pin is a
-      // constructor zero, and "运行" is not a reading a machine that never ran is
-      // entitled to. See `errors`.
+      // 与 `stateOf` 同一道闸门：在发生任何结算之前，这个引脚只是构造函数
+      // 里的 0，而“运行”不是一台从未运行过的机器有资格给出的读数。见
+      // `errors`。
       if (idle() || ready === null) return null;
       const id = instanceOfDef('halt');
       if (id === null) return null;
-      // A pin, not state: `halt` publishes `out = in` (see `defs/cpu.ts`), so the
-      // value here is the same signal the counter's load logic reads. `null` when
-      // the board has no such part, because a board that never built the line has
-      // not told the panel the counter is free.
+      // 读引脚而不是读状态：`halt` 发布的是 `out = in`（见 `defs/cpu.ts`），
+      // 所以这里得到的信号与计数器装载逻辑读到的是同一个。画板没有这个元件
+      // 时返回 `null`，因为从未接出这条线的画板，没有告诉面板计数器是
+      // 自由的。
       const line = ready.sim.read(ready.sim.net.outputBase(`${id}.out`), 1);
       return portValueToNumber(line) === 1;
     },
 
     readRam(): readonly number[] | null {
-      // Inert means the zeros that were already in the table, which is not a
-      // memory anything was loaded into. See `stateOf` and `errors`.
+      // 惰性意味着表里还是原有的 0，那不是装载过任何东西的存储器。见
+      // `stateOf` 与 `errors`。
       if (idle() || ready === null) return null;
-      // WHICH RAM: the same rule the checker loads by (`programTargets`), so the
-      // window cannot show a different memory from the one the image went into. A
-      // circuit with several program RAMs gets the first of them here; every one
-      // of them holds the same image, because the load writes them all.
+      // 哪一块 RAM：与检查器装载时用同一条规则（`programTargets`），于是
+      // 窗口不会显示与镜像所进不同的存储器。电路里有好几块程序 RAM 时这里
+      // 取第一块；它们都持有同一份镜像，因为装载会写全部。
       const targets = programTargets(undefined, ready.sim.net);
       if ('detail' in targets) return null;
       return stateOf(targets.ids[0] ?? null);

@@ -1,40 +1,36 @@
+// 第 3 章关卡的拼装入口：把三个批次文件按顺序接成一份关卡表。
+// 依赖下层 `spec`（关卡数据类型）与同级的 batch1~batch3；本文件不包含任何关卡数据，
+// 只负责"排列顺序"这一件事。`content/index.ts` 引用本文件的 `CH3_LEVELS`，
+// 因此这里的数组顺序就是玩家看到的关卡顺序，且必须与战役表（campaign.ts）一致。
+
 import type { LevelSpec } from '../../spec';
 import { CH3_BATCH1 } from './batch1';
 import { CH3_BATCH2 } from './batch2';
 import { CH3_BATCH3 } from './batch3';
 
 /**
- * Chapter 3, assembled from its batches.
+ * 第 3 章全部关卡，由三个批次拼接而成。
  *
- * The chapter was written in three batches (levels 39-41, 42-44, 45-47) so each
- * author owned a self-contained file; this is the one place they are joined, and
- * nothing else should import a batch directly -- except a batch's own test, which
- * grades that batch against its own file.
+ * 写作时本章分成三批完成（39-41、42-44、45-47），每位作者各自拥有一个自包含文件；
+ * 这里是它们唯一的汇合点，除此之外任何模块都不应直接 import 某个批次——
+ * 例外只有批次自己的测试文件，因为它只拿该批次与自己的数据对账。
  *
- * The order below IS the chapter's order: `content/index.ts` appends this array
- * to chapters 1 and 2, so the three batches land in the game as levels 39..47
- * with nothing between them. `test/levels/unlock-chain.test.ts` is what holds
- * that to a number: 9 levels, indices 39-47, contiguous and unique.
+ * 下面的顺序就是本章的顺序：`content/index.ts` 把这个数组追加在第 1、2 章之后，
+ * 于是三个批次正好落在全局第 39..47 关，中间没有别的关卡。
+ * 这一事实由 `test/levels/unlock-chain.test.ts` 用数字钉住：9 关、下标 39-47、连续且不重复。
  *
- * THIS JOIN WAS THE LAST THING MISSING, AND ITS ABSENCE WAS INVISIBLE. All three
- * batches existed, compiled and passed their own tests while no player could
- * reach any of them: `content/index.ts` is the only join between chapters, and
- * until it named this array every level here was written but unreachable -- the
- * same failure chapter 2 had before its own assembly, recorded there. The batch
- * tests cannot catch it, because a batch test imports its batch by path and
- * therefore passes whether or not the chapter is ever appended; only
- * `unlock-chain.test.ts` (which walks `ALL_LEVELS`) can, which is why it asserts
- * the chapter boundary by index rather than merely the level count.
+ * 提醒后来者：这次"拼接"曾经是整章缺失的最后一环，而它的缺失是隐形的。
+ * 三个批次都已存在、能编译、能通过各自的测试，玩家却一关也到不了——
+ * `content/index.ts` 是章节之间唯一的连接点，在它写下这个数组之前，
+ * 这里的每一关都是"写好了但不可达"。批次测试抓不到这个问题：批次测试按路径 import 自己的批次，
+ * 无论本章是否被追加进总表都会通过；只有遍历 `ALL_LEVELS` 的
+ * `unlock-chain.test.ts` 才抓得到，所以它断言的是章节边界的下标，而不只是关卡数量。
  *
- * THE PROGRAM CONSTANTS ARE NOT RE-EXPORTED. `batch2.ts` and `batch3.ts` each
- * export the assembler source their `program` check runs (`PROGRAM_43`,
- * `PROGRAM_45`-`PROGRAM_47`) so those bytes are readable from outside the
- * module. No test reads them today, which is a gap rather than a design:
- * asserting them is why they are exported, and it is the obvious next thing to
- * write. They stay next to the levels that use them: a chapter index is a
- * placement list, and re-exporting them here would invite a second import path
- * to the same string, which is how one of them ends up edited in only one
- * place.
+ * 程序常量不从本文件再导出：`batch2.ts` 与 `batch3.ts` 各自导出其 `program` 检查所运行的
+ * 汇编源代码（`PROGRAM_43`、`PROGRAM_45`-`PROGRAM_47`），这些字节在模块外可读。
+ * 今天没有测试读取它们，这是一个待补的缺口而不是设计意图——导出它们正是为了以后断言它们。
+ * 让它们留在使用它们的关卡旁边：本章索引只是一张"摆放顺序表"，
+ * 在这里再导出会给同一段字符串制造第二条 import 路径，而两条路径正是"只改了一处"这类 bug 的来源。
  */
 export const CH3_LEVELS: readonly LevelSpec[] = [
   ...CH3_BATCH1,

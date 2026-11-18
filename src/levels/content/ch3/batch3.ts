@@ -1,70 +1,60 @@
+// 第 3 章第 3 批：全局第 45-47 关——机器本身：程序 RAM、程序计数器、译码器、寄存器、ALU，
+// 以及让整台机器从"计算器"变成"计算机"的条件跳转。
+// 依赖下层 `spec`（关卡与程序步类型）与 `tables`（引脚形状）；本文件只被 `content/ch3/index.ts` 拼接。
+// 导出的 PROGRAM_45/46/47 是三个 `program` 检查运行的汇编源。
+// 关键不变量：三关共用同一台参考机器，只有程序不同；程序字节与答案都按节拍语义推导。
+
 import type { LevelSpec, ProgramStep } from '../../spec';
-// `LevelIo` -- the pin shape -- is `tables.ts`'s; `checks.ts` exports an
-// unrelated runtime interface of the same name (the bound simulation).
+// 这里的 `LevelIo` 是"引脚形状"，来自 `tables.ts`；`checks.ts` 也导出了一个同名但无关的
+// 运行时接口（绑定后的仿真环境），两者不要混用。
 import type { LevelIo } from '../../tables';
 
 /**
- * Chapter 3, levels 45-47: the machine itself -- the program RAM, the program
- * counter, the decoder, the registers, the ALU, and the conditional jump that
- * makes the whole thing a computer rather than a calculator.
+ * 第 3 章第 45-47 关：机器本体——程序 RAM、程序计数器、译码器、寄存器、ALU，
+ * 以及让整台机器从"计算器"变成"计算机"的条件跳转。
  *
- * WHAT THE SOURCE FIXES, AND WHAT IT DOES NOT. The compendium gives each level
- * its name (English and Chinese), its place in the chapter, and one line of
- * teaching concept: 45 is "store the program in RAM with the counter as PC", 46
- * is "support values encoded directly in the instruction", 47 is "integrate the
- * conditional jump and become Turing complete". It gives no ports, no widths, no
- * pass conditions, no targets and no rewards. Everything a player sees or a test
- * measures below is this replica's design; each level carries a `SOURCED` /
- * `AUTHORED` comment, as every earlier batch does.
+ * 资料固定了什么、没固定什么。攻略资料对每一关给出双语名字、在章节里的位置，
+ * 以及一句话的教学概念：45 关是"把程序存进 RAM，用计数器当 PC"，46 关是"支持直接编码在指令里的值"，
+ * 47 关是"整合条件跳转，成为图灵完备"。它没有给端口、位宽、通过条件、目标值和奖励。
+ * 下面玩家看到、测试测到的一切都是本复刻的设计；每关带一条 `SOURCED` / `AUTHORED` 注释，
+ * 与前面每个批次一样。
  *
- * ONE MACHINE, THREE PROGRAMS. All three levels use the same reference circuit
- * (`overtureMachine` in `test/fixtures/ch3-references.ts`), and that is the
- * levels' own claim rather than a shortcut: 45 is a straight line, 46 is the same
- * straight line built around the immediate field, and 47 adds a loop -- the
- * circuit does not change, the program does. So the batch test grades all three
- * against one graph and measures one set of metrics, and the only thing that
- * separates 47 from 45 is whether the machine can jump.
+ * 一台机器、三段程序。三关使用同一套参考电路（`test/fixtures/ch3-references.ts` 的
+ * `overtureMachine`），这是关卡自己的主张而不是走捷径：45 关是一条直线，46 关是同一条直线
+ * 围绕立即数字段来写，47 关加上循环——电路不变，变的是程序。所以批次测试用一张图给三关评分、
+ * 只测一组指标，而 47 关与 45 关的唯一区别就是机器能不能跳转。
  *
- * WHY THESE ARE `program` CHECKS AND WHAT THAT DECIDES. `levels/checks.ts`
- * assembles each level's `source` and loads the bytes into the circuit's
- * `ram_prog` before the first step, then drives the steps exactly as `script`
- * does. The consequence a level author has to respect is the tick arithmetic:
+ * 为什么这些是 `program` 检查，以及它决定了什么。`levels/checks.ts` 会汇编每关的 `source`，
+ * 在第一步之前把字节装进电路的 `ram_prog`，然后像 `script` 一样驱动各步。
+ * 关卡作者必须尊重的后果是节拍算术：
  *
- *  * the RAM is combinational from `PC`, so the machine is looking at `ram[PC]`
- *    when a step's inputs are settled;
- *  * the edge into a step's tick executes THAT instruction -- the register file
- *    writes, the counter advances or jumps -- and the comparison after the edge
- *    reads the new state;
- *  * so after `T` edges, instructions 0..T-1 have executed, and a program of `N`
- *    instructions has put its answer on `out` by tick `N` (the halt freezes the
- *    counter there, or a player's own output register holds the byte).
+ *  * RAM 对 `PC` 是组合的，所以当一步的输入稳定时，机器看到的就是 `ram[PC]`；
+ *  * 进入某步节拍的那个沿执行"那条"指令——寄存器堆写入、计数器前进或跳转——
+ *    沿之后的比较读取新状态；
+ *  * 因此经过 `T` 个沿之后，第 0..T-1 条指令已经执行；一个 `N` 条指令的程序会在节拍 `N`
+ *    把答案放到 `out` 上（停机把计数器冻在那里，或者玩家自己的输出寄存器保持那个字节）。
  *
- * THE ANSWER MUST STAY ON `out`, AND THE BRIEF SAYS SO. The reference publishes
- * `out` combinationally from the `move|sX|out` instruction while the halt line
- * holds the counter on that instruction's address, so the byte is stable
- * forever; a player who registers the `out` byte needs no halt at all. Both pass
- * every assertion here -- what the levels grade is the value on `out` at the
- * ticks they name, never the spelling that produced it.
+ * 答案必须留在 `out` 上，brief 也是这么说的。参考电路从 `move|sX|out` 指令组合地发布 `out`，
+ * 同时停机线把计数器冻在该指令的地址上，所以那个字节永远稳定；而把 `out` 字节
+ * 用寄存器锁住的玩家根本不需要停机。两种写法都通过这里的所有断言——
+ * 关卡评的是"在它点名的节拍上 `out` 的值"，从不是产生它的写法。
  *
- * THE PALETTE IS EVERYTHING EARNED THROUGH LEVEL 44. By this point the player
- * holds all of chapters 1 and 2 plus the six CPU parts (39's `alu8`, 40's
- * `regfile6`, 41's `instr_decoder`, 42's `pc8`, 43's `ram_prog`, 44's `halt`),
- * so the three levels offer that whole kit and no part they have not earned --
- * the rule `test/levels/level-buildability.test.ts` walks. `decoder2` is
- * deliberately absent: it is registered for a later chapter and rewarded by no
- * level, so no level may offer it.
+ * 托盘是"到第 44 关为止挣到的一切"。到这里玩家已拥有第 1、2 章的全部内容
+ * 加上六个 CPU 元件（39 的 `alu8`、40 的 `regfile6`、41 的 `instr_decoder`、
+ * 42 的 `pc8`、43 的 `ram_prog`、44 的 `halt`），所以三关提供整套装备，
+ * 不提供任何尚未挣到的元件——这条规则由 `test/levels/level-buildability.test.ts` 遍历。
+ * `decoder2` 刻意不在其中：它为后续章节注册、没有任何关卡奖励它，所以没有关卡可以提供它。
  */
 
-/** The two connectors every level offers and no level rewards. */
+/** 每一关都提供、但任何关卡都不作为奖励发放的两个连接器。 */
 const LEVEL_IO = ['level_input', 'level_output'] as const;
 
 /**
- * Every part the game has handed the player by the time level 45 opens, in the
- * order the chapters hand them out: chapter 1's gates and memories, chapter 2's
- * wide operators, storage and decoders, then chapter 3's CPU parts.
+ * 第 45 关开始时游戏已经交给玩家的全部元件，按章节发放顺序排列：
+ * 第 1 章的门与存储、第 2 章的多位运算/存储/译码器，然后是第 3 章的 CPU 元件。
  */
 const UNLOCKED_BY_45 = [
-  // Chapter 1.
+  // 第 1 章。
   'const_on',
   'const_off',
   'nand',
@@ -78,7 +68,7 @@ const UNLOCKED_BY_45 = [
   'or3',
   'delay_line',
   'mem1',
-  // Chapter 2's wide family.
+  // 第 2 章的多位元件家族。
   'splitter',
   'maker',
   'const8',
@@ -111,7 +101,7 @@ const UNLOCKED_BY_45 = [
   'ram8',
   'decoder1',
   'decoder3',
-  // Chapter 3's CPU parts.
+  // 第 3 章的 CPU 元件。
   'alu8',
   'regfile6',
   'instr_decoder',
@@ -122,11 +112,10 @@ const UNLOCKED_BY_45 = [
 ] as const;
 
 /**
- * The three levels' pin shape: one clock pin in, one answer byte out.
+ * 三关共用的引脚形状：一根时钟进，一个答案字节出。
  *
- * `clk` is the level's tick, as it is on every storage level since chapter 2 --
- * the driver advances the simulation, and the pin exists so the level declares
- * the tick it runs on.
+ * `clk` 就是关卡的节拍，和第 2 章以来每个存储关卡一样——驱动器推进仿真，
+ * 这根引脚存在是为了让关卡声明它按哪个节拍运行。
  */
 const IO_PROGRAM: LevelIo = {
   inputs: [{ id: 'clk', width: 1 }],
@@ -134,33 +123,28 @@ const IO_PROGRAM: LevelIo = {
 };
 
 /**
- * Level 45's program: a straight line with no jumps at all.
+ * 第 45 关的程序：一条完全没有跳转的直线。
  *
- * Six instructions: two constants moved into REG1 and REG2, one addition into
- * REG3, and the output instruction. Every value that reaches the ALU arrives
- * through a register, which is what makes this the "the machine runs a program"
- * level rather than a calculation level: the bytes come out of the program RAM
- * one per tick and nothing about them is chosen by the harness.
+ * 六条指令：两个常数分别搬进 REG1 和 REG2，一次加法进 REG3，然后输出指令。
+ * 到达 ALU 的每个值都经过寄存器，这正是让本关成为"机器在运行程序"而不是计算关的原因：
+ * 字节从程序 RAM 中每拍出来一个，其中没有任何一个由测试框架挑选。
  */
 export const PROGRAM_45 = [
   '# six instructions, no jumps: the machine walks the image in order',
-  'loadi|6', // 0: REG0 = 6
-  'move|s0|d1', // 1: REG1 = 6
-  'loadi|7', // 2: REG0 = 7
-  'move|s0|d2', // 3: REG2 = 7
-  'add', // 4: REG3 = 13
-  'move|s3|out', // 5: out = 13
+  'loadi|6', // 0：REG0 = 6
+  'move|s0|d1', // 1：REG1 = 6
+  'loadi|7', // 2：REG0 = 7
+  'move|s0|d2', // 3：REG2 = 7
+  'add', // 4：REG3 = 13
+  'move|s3|out', // 5：out = 13
 ].join('\n');
 
 /**
- * Level 45's walk: the answer is 0 until the output instruction has executed,
- * and 13 from then on.
+ * 第 45 关的遍历：在输出指令执行之前答案是 0，之后是 13。
  *
- * Tick 6 is the edge that executes instruction 5, so the assertion there holds
- * for both spellings of "the answer stays on out" -- a halt that freezes the
- * counter on that instruction, and an output register that keeps the byte. Tick
- * 10 then asserts the byte is still there several edges later, which is where a
- * machine that neither halts nor holds the byte fails.
+ * 节拍 6 是执行第 5 条指令的那个沿，所以这里的断言对"答案留在 out 上"的两种写法都成立——
+ * 把计数器冻在该指令上的停机，以及保持字节的输出寄存器。节拍 10 再断言若干沿之后字节仍在，
+ * 一个既不停机也不保持字节的机器会在这里失败。
  */
 const STEPS_45: readonly ProgramStep[] = [
   { tick: 0, inputs: { clk: 1 }, expect: { out: 0 } },
@@ -170,32 +154,29 @@ const STEPS_45: readonly ProgramStep[] = [
 ];
 
 /**
- * Level 46's program: the immediate field on both of its paths.
+ * 第 46 关的程序：立即数字段的两条通路。
  *
- * `loadi|63` is the largest value the six-bit field can carry, so a circuit that
- * wired only five of the bits into the register file, or sign-extended bit 5,
- * disagrees here. `loadi|finish` carries a LABEL rather than a number: the
- * assembler resolves it to the index of the next instruction, which for a
- * six-instruction program is 6, and the subtraction leaves 57 on `out`. Both
- * operands therefore come out of the instruction word itself.
+ * `loadi|63` 是六位字段能携带的最大值，所以只把其中五位接进寄存器堆的电路、
+ * 或对第 5 位做符号扩展的电路，会在这里出现分歧。`loadi|finish` 携带的是"标签"而不是数字：
+ * 汇编器把它解析成下一条指令的序号，对一个六指令程序来说就是 6，减法之后 `out` 上是 57。
+ * 因此两个操作数都来自指令字本身。
  */
 export const PROGRAM_46 = [
   '# the six-bit immediate, at the top of its range and through a label',
-  'loadi|63', // 0: REG0 = 63 (the field's maximum)
-  'move|s0|d1', // 1: REG1 = 63
-  'loadi|finish', // 2: REG0 = the index of `finish`, which is 6
-  'move|s0|d2', // 3: REG2 = 6
-  'sub', // 4: REG3 = 63 - 6 = 57
-  'move|s3|out', // 5: out = 57
+  'loadi|63', // 0：REG0 = 63（字段的最大值）
+  'move|s0|d1', // 1：REG1 = 63
+  'loadi|finish', // 2：REG0 = `finish` 的序号，也就是 6
+  'move|s0|d2', // 3：REG2 = 6
+  'sub', // 4：REG3 = 63 - 6 = 57
+  'move|s3|out', // 5：out = 57
   'label finish',
 ].join('\n');
 
 /**
- * Level 46's walk: the same shape as level 45's, against the other program.
+ * 第 46 关的遍历：与第 45 关同样的形状，对着另一段程序。
  *
- * A five-bit immediate path publishes 25 here (31 - 6), and a path that ignored
- * `loadi` publishes 250 (0 - 6): both are named in the batch test, which builds
- * them from the machine's own options.
+ * 只接了五位的立即数通路会在这里发布 25（31 - 6），而忽略 `loadi` 的通路会发布 250（0 - 6）：
+ * 两者都在批次测试里被点名，并由机器自己的选项搭出来。
  */
 const STEPS_46: readonly ProgramStep[] = [
   { tick: 0, inputs: { clk: 1 }, expect: { out: 0 } },
@@ -205,66 +186,57 @@ const STEPS_46: readonly ProgramStep[] = [
 ];
 
 /**
- * Level 47's program: the compendium's do-while countdown, made to accumulate.
+ * 第 47 关的程序：把攻略资料 §10.3 的 do-while 倒数改成累加版本。
  *
- * The source's §10.3 shows the shape -- `label loop`, a body, `loadi|loop`, a
- * conditional jump back -- and this program keeps it: the loop counts a register
- * down from 6 and adds each value to a running total, so the number it leaves on
- * `out` says how many times the loop ran as well as what it computed. The exit
- * is a `jz` on the decremented counter (instruction 10's subtraction leaves the
- * test value in REG3), and BOTH jump targets are load-bearing and different:
- * `done` (16) leaves the loop, `loop` (2) is the back edge of the unconditional
- * `j` at instruction 15.
+ * 资料的 §10.3 展示了这个形状——`label loop`、循环体、`loadi|loop`、条件跳回——
+ * 本程序保留了它：循环让一个寄存器从 6 开始递减，每步把当前值加进累计总和，
+ * 所以它留在 `out` 上的数字既说明循环跑了多少次，也说明它算出了什么。
+ * 出口是对递减后的计数器做 `jz`（第 10 条指令的减法把测试值留在 REG3），
+ * 而且"两个跳转目标"都承重且互不相同：`done`（16）离开循环，`loop`（2）是第 15 条
+ * 无条件 `j` 的回边。
  *
- * WHY IT COUNTS DOWN AND ACCUMULATES RATHER THAN COUNTING UP TO OVERFLOW, as
- * §10.3's literal example does: that example's exit value is REG3 = 0, which is
- * also what an empty `out` pin publishes, so a circuit that hard-wired `out` to
- * zero would pass a walk that only asserted the final byte. This program's
- * answer is 21 -- 6 + 5 + 4 + 3 + 2 + 1 -- which no constant produces, and the
- * walk asserts both that `out` is 0 while the loop is running and that it is 21
- * once the loop has exited, so neither constant passes either. The batch test
- * checks that arithmetic: the straight-line machine stops the loop after one
- * pass and publishes 6.
+ * 为什么它选择倒计数并累加，而不是像 §10.3 的字面例子那样数到溢出：
+ * 那个例子的退出值是 REG3 = 0，而空的 `out` 引脚发布的也是 0，
+ * 所以一个把 `out` 硬接成零的电路，会通过"只断言最终字节"的遍历。
+ * 本程序的答案是 21——6 + 5 + 4 + 3 + 2 + 1——没有任何常数能产生它；
+ * 遍历同时断言循环运行期间 `out` 是 0、退出之后是 21，所以两个常数都通不过。
+ * 批次测试会验证这套算术：直线机器循环一遍就停下，发布 6。
  *
- * THE LOOP RUNS SIX TIMES AND 14 INSTRUCTIONS WIDE, and the last pass is one
- * instruction shorter: the exit `jz` is the loop body's twelfth instruction, so
- * the final pass never reaches the back edge. The output instruction is therefore
- * the 85th edge -- 2 setup instructions, five full passes of 14 (70), the last
- * pass's 12, and one more -- and the steps below name ticks 83 and 85 around that
- * boundary.
+ * 循环跑六次、宽 14 条指令，最后一趟少一条：退出的 `jz` 是循环体的第 12 条指令，
+ * 所以最后一趟永远走不到回边。输出指令因此是第 85 个沿——2 条准备指令、
+ * 五整趟 14 条（70）、最后一趟的 12 条，再加 1 条——下面的步骤在这个边界两侧点名了节拍 83 和 85。
  */
 export const PROGRAM_47 = [
   '# do-while: count down from 6, accumulating, until the counter hits zero',
-  'loadi|6', // 0: REG0 = 6
-  'move|s0|d1', // 1: REG1 = 6, the counter
+  'loadi|6', // 0：REG0 = 6
+  'move|s0|d1', // 1：REG1 = 6，计数器
   'label loop', // -> 2
-  'move|s1|d5', // 2: REG5 = the counter
-  'move|s4|d1', // 3: REG1 = the running total
-  'move|s5|d2', // 4: REG2 = the counter
-  'add', // 5: REG3 = total + counter
-  'move|s3|d4', // 6: REG4 = the new total
-  'move|s5|d1', // 7: REG1 = the counter again
-  'loadi|1', // 8: REG0 = 1
-  'move|s0|d2', // 9: REG2 = 1
-  'sub', // 10: REG3 = counter - 1
-  'move|s3|d1', // 11: REG1 = counter - 1, the next counter
-  'loadi|done', // 12: REG0 = 16, where the loop leaves to
-  'jz', // 13: counter reached zero -> jump to REG0
-  'loadi|loop', // 14: REG0 = 2, the loop's own address
-  'j', // 15: back to the top
+  'move|s1|d5', // 2：REG5 = 计数器
+  'move|s4|d1', // 3：REG1 = 累计总和
+  'move|s5|d2', // 4：REG2 = 计数器
+  'add', // 5：REG3 = 总和 + 计数器
+  'move|s3|d4', // 6：REG4 = 新的总和
+  'move|s5|d1', // 7：REG1 = 计数器（再次）
+  'loadi|1', // 8：REG0 = 1
+  'move|s0|d2', // 9：REG2 = 1
+  'sub', // 10：REG3 = 计数器 - 1
+  'move|s3|d1', // 11：REG1 = 计数器 - 1，即下一轮的计数器
+  'loadi|done', // 12：REG0 = 16，循环的出口地址
+  'jz', // 13：计数器到零 -> 跳到 REG0
+  'loadi|loop', // 14：REG0 = 2，循环自身的地址
+  'j', // 15：回到循环头
   'label done', // -> 16
-  'move|s4|out', // 16: out = the total
+  'move|s4|out', // 16：out = 总和
 ].join('\n');
 
 /**
- * Level 47's walk, and the one the whole phase is graded on.
+ * 第 47 关的遍历，也是整个阶段验收所依据的那一段。
  *
- * Ticks 0, 40 and 83 are inside the loop or its setup, and all three demand 0:
- * the answer is not on `out` yet, whatever the loop is computing. Tick 85 is the
- * edge that executes instruction 16, and 21 is the total; tick 95 asserts it is
- * still there. A machine without the conditional jump leaves the loop after one
- * pass and publishes 6 (or, with a jump that is always taken, leaves it just as
- * early); a circuit that hard-wires `out` fails one end of the walk or the other.
+ * 节拍 0、40、83 在循环内部或准备阶段，三处都要求 0：答案还没上 `out`，
+ * 无论循环正在算什么。节拍 85 是执行第 16 条指令的沿，答案是 21；
+ * 节拍 95 断言它仍然在。没有条件跳转的机器跑一趟就离开循环，发布 6
+ * （如果跳转永远成立，也会同样过早离开）；把 `out` 硬接成常数的电路，
+ * 会在遍历的某一端失败。
  */
 const STEPS_47: readonly ProgramStep[] = [
   { tick: 0, inputs: { clk: 1 }, expect: { out: 0 } },
@@ -276,28 +248,21 @@ const STEPS_47: readonly ProgramStep[] = [
 
 export const CH3_BATCH3: readonly LevelSpec[] = [
   /**
-   * ch3-47-immediate-values -- Immediate Values / 立即数
+   * ch3-47-immediate-values —— 立即数 / Immediate Values
    *
-   * SOURCED: the name in both languages, its position (46th), the source's
-   * one-line concept -- support values encoded directly in the instruction -- and
-   * §6.3's field: immediate mode is `00` followed by a six-bit value, so the
-   * range is 0-63 and §6.5 lists "cannot encode a value above 63" as one of
-   * OVERTURE's stated limits. §6.6's label rule ("a label is the index of the
-   * instruction after it") is what `loadi|finish` uses.
+   * SOURCED：双语名字、位置（第 46 关）、资料的一句话概念——支持直接编码在指令里的值，
+   * 以及 §6.3 的字段：立即数模式是 `00` 后跟六位值，所以范围是 0-63，
+   * 而 §6.5 把"无法编码大于 63 的值"列为 OVERTURE 的已知限制之一。
+   * `loadi|finish` 用的是 §6.6 的标签规则（"标签是它后面那条指令的序号"）。
    *
-   * AUTHORED: the pin shape; the six-instruction program; the four-step walk;
-   * the palette; and the measured target, which is the same machine as level
-   * 45's and therefore the same numbers. No new reward.
+   * AUTHORED：引脚形状；六指令程序；四步遍历；托盘；以及实测目标，
+   * 它与第 45 关是同一台机器，因此数字相同。没有新奖励。
    *
-   * THE PROGRAM IS BUILT TO FAIL THE TWO NEAR-MISSES, and the batch test builds
-   * both from the machine's options. `loadi|63` sits at the top of the six-bit
-   * field, so a machine whose immediate reaches the register file through five
-   * bits publishes 25 (31 - 6) rather than 57; `loadi|finish` is a label, so a
-   * machine that somehow passed the opcode through instead of the field would
-   * have to answer with the wrong address. And a machine whose `loadi` write path
-   * is not wired at all publishes 250 (0 - 6), which is why the walk's value is a
-   * subtraction rather than another sum: the two failures land on different
-   * bytes.
+   * 程序被构造来让两种"差一点就对"的机器失败，批次测试会从机器的选项中把两者都搭出来。
+   * `loadi|63` 坐在六位字段的顶端，所以一个立即数只经五位到达寄存器堆的机器会发布 25（31 - 6）
+   * 而不是 57；`loadi|finish` 是一个标签，所以一个不知怎么把操作码而不是字段传过去的机器，
+   * 只能回答错误地址。而一个 `loadi` 写路径根本没接的机器发布 250（0 - 6），
+   * 这就是为什么遍历的值是一次减法而不是又一个和：两种失败落在不同的字节上。
    */
   {
     id: 'ch3-47-immediate-values',
@@ -315,40 +280,31 @@ export const CH3_BATCH3: readonly LevelSpec[] = [
     allowedComponents: [...UNLOCKED_BY_45],
     io: IO_PROGRAM,
     checks: [{ kind: 'program', source: PROGRAM_46, steps: STEPS_46 }],
-    // Measured: the same machine as level 45, so the same pair; the tick is this
-    // walk's last step.
+    // 实测：与第 45 关同一台机器，所以是同一对数字；节拍取本遍历的最后一步。
     threeStar: { gate: 643, delay: 6, tick: 9 },
   },
 
   /**
-   * ch3-48-program -- Program / 程序
+   * ch3-48-program —— 程序 / Program
    *
-   * SOURCED: the name in both languages, its position (45th), and the source's
-   * one-line concept -- store the program in RAM and use the counter as the
-   * program counter. The one-byte instruction and its two-bit mode come from
-   * §6.1/§6.3; the register roles the program relies on (REG0 for `loadi`, REG1
-   * and REG2 into REG3 for a calculation, `out` for the output port) are §6.2's.
+   * SOURCED：双语名字、位置（第 45 关）、资料的一句话概念——把程序存进 RAM，
+   * 并用计数器作为程序计数器。一字节指令及其两位模式来自 §6.1/§6.3；
+   * 程序依赖的寄存器角色（`loadi` 用 REG0，计算用 REG1 和 REG2 进 REG3，
+   * 输出用 `out`）来自 §6.2。
    *
-   * AUTHORED: the pin shape (`clk` in, `out` out -- the plan's table for this
-   * batch); the six-instruction program; the four-step walk; the palette; and
-   * the measured target. There is no new reward: chapters 1-3 have handed the
-   * player every part this level needs, which is why it is the level where they
-   * are used together rather than the level where another one arrives.
+   * AUTHORED：引脚形状（`clk` 进、`out` 出——阶段计划为本批次准备的表格）、
+   * 六指令程序、四步遍历、托盘，以及实测目标。没有新奖励：
+   * 第 1-3 章已经交给玩家本关需要的每个元件，这就是为什么这一关是"把它们一起用起来"的关卡，
+   * 而不是"又到一个新元件"的关卡。
    *
-   * THE MACHINE IS THE LEVEL, AND THE PROGRAM IS THE ONLY THING THAT CHANGES
-   * between 45, 46 and 47. This level's program has no jumps: a straight line of
-   * six instructions whose values all arrive through the decoder and the
-   * registers, so the player's decoder, register file, ALU, RAM and counter all
-   * have to work for the walk to reach tick 6. What it does NOT exercise is the
-   * conditional jump, which is why level 47 is the acceptance level and this one
-   * is not.
+   * 机器就是关卡，而 45、46、47 三关之间唯一改变的是程序。本关的程序没有跳转：
+   * 六条指令的直线，所有值都经译码器与寄存器到达，所以玩家的译码器、寄存器堆、ALU、
+   * RAM 与计数器都必须正常工作，遍历才能走到节拍 6。它"没有"练到的是条件跳转，
+   * 所以验收关是第 47 关而不是这一关。
    *
-   * THE WALK ASSERTS THE ANSWER TWICE, four ticks apart. That is the property
-   * the level's brief asks for in both languages: the byte must still be on `out`
-   * after the program has stopped executing, so a machine that publishes `out`
-   * combinationally from the current instruction either has to halt or has to
-   * hold the byte in a register. Both spellings pass; neither is named in the
-   * check.
+   * 遍历把答案断言了两次，相隔四个节拍。这正是本关 brief 用两种语言要求的那条性质：
+   * 程序停止执行之后字节必须仍在 `out` 上，所以一个从当前指令组合地发布 `out` 的机器，
+   * 要么停机、要么把字节保持在寄存器里。两种写法都通过；检查里没有点名任何一种。
    */
   {
     id: 'ch3-48-program',
@@ -366,43 +322,34 @@ export const CH3_BATCH3: readonly LevelSpec[] = [
     allowedComponents: [...UNLOCKED_BY_45],
     io: IO_PROGRAM,
     checks: [{ kind: 'program', source: PROGRAM_45, steps: STEPS_45 }],
-    // Measured: the machine in `test/fixtures/ch3-references.ts`, graded against
-    // this level's program. All three levels of the batch share the graph, so
-    // they share the gate and delay numbers; the tick is this walk's last step.
+    // 实测：`test/fixtures/ch3-references.ts` 里的机器，对着本关的程序评分。
+    // 批次三关共用同一张图，所以共享门与延迟数字；节拍取本遍历的最后一步。
     threeStar: { gate: 643, delay: 6, tick: 10 },
   },
 
   /**
-   * ch3-49-turing-complete -- Turing Complete / 图灵完备
+   * ch3-49-turing-complete —— 图灵完备 / Turing Complete
    *
-   * SOURCED: the name in both languages, its position (47th, and the last level
-   * of the chapter), the source's one-line concept -- integrate the conditional
-   * jump and become Turing complete -- and §6.4's jump table: `j` is taken, `jz`
-   * is taken when the compared value is zero, `jnz` when it is not, with the
-   * target in REG0 and the compared value in REG3. §10.3 is where the source
-   * shows the loop these instructions are for, and this level's program is that
-   * do-while shape.
+   * SOURCED：双语名字、位置（第 47 关，也是本章最后一关）、资料的一句话概念——
+   * 整合条件跳转并成为图灵完备——以及 §6.4 的跳转表：`j` 总成立，`jz` 在被比较值为零时成立，
+   * `jnz` 在不为零时成立，目标在 REG0、被比较的值在 REG3。§10.3 是资料展示
+   * 这些指令所服务的那种循环的地方，而本关的程序正是那个 do-while 形状。
    *
-   * AUTHORED: the pin shape; the machine's conditional-jump glue (the three
-   * conditions decoded from bits [5:3] and the counter's load/in pair); the
-   * program; the five-step walk; the palette; and the measured target. No new
-   * reward: this is where the chapter's six parts are used together, which is
-   * the acceptance criterion the phase plan names for the whole phase.
+   * AUTHORED：引脚形状；机器的条件跳转胶水（从 [5:3] 译出的三种条件，
+   * 以及计数器的 load/in 对）；程序；五步遍历；托盘；以及实测目标。
+   * 没有新奖励：这里是本章六个元件一起使用的地方，也正是阶段计划为整个阶段
+   * 点名的验收标准。
    *
-   * THIS IS THE PHASE'S ACCEPTANCE LEVEL, AND ITS TEST HAS TO SHOW THAT. A walk
-   * that a straight-line machine can pass would not be testing the thing the
-   * level is named after, so the batch test grades the SAME machine with the
-   * conditional jump short-circuited -- never taken, and always taken -- and
-   * asserts both fail this level's walk. It also grades a machine with the halt
-   * line tied low, which publishes the right byte for one edge and loses it as
-   * soon as the counter moves on.
+   * 这是本阶段的验收关，而它的测试必须证明这一点。一条直线机器也能通过的遍历，
+   * 测不出这个关卡名字所指的东西，所以批次测试会用"条件跳转被短路"的同一台机器评分——
+   * 永不成立、永远成立——并断言两者都失败在本关的遍历上。
+   * 它还会给一台 halt 线接低的机器评分：那种机器只在某一个沿发布正确字节，
+   * 计数器一走就把字节丢了。
    *
-   * THE PROGRAM'S ARITHMETIC IS THE ANSWER'S EVIDENCE. The loop counts a
-   * register down from 6 and accumulates as it goes, so `out` ends at 21 = 6 + 5
-   * + 4 + 3 + 2 + 1: a machine that runs the loop once publishes 6, one that
-   * never exits publishes 0, and the walk asserts 0 at three ticks inside the
-   * loop before it asserts 21 after the exit. Whichever way the jump is broken,
-   * one of those five assertions catches it.
+   * 程序的算术就是答案的证据。循环让一个寄存器从 6 开始递减，边走边累加，
+   * 所以 `out` 最终是 21 = 6 + 5 + 4 + 3 + 2 + 1：只跑一趟循环的机器发布 6，
+   * 永远不退出循环的机器发布 0；遍历先在循环内部的三处断言 0，再在退出后断言 21。
+   * 无论跳转以哪种方式坏掉，五条断言里总有一条抓得住它。
    */
   {
     id: 'ch3-49-turing-complete',
@@ -420,9 +367,8 @@ export const CH3_BATCH3: readonly LevelSpec[] = [
     allowedComponents: [...UNLOCKED_BY_45],
     io: IO_PROGRAM,
     checks: [{ kind: 'program', source: PROGRAM_47, steps: STEPS_47 }],
-    // Measured: the machine in `test/fixtures/ch3-references.ts` graded against
-    // this level's loop. The gate and delay are the shared machine's; the tick is
-    // the last step of the walk, one edge past the loop's exit.
+    // 实测：`test/fixtures/ch3-references.ts` 里的机器，对着本关的循环评分。
+    // 门与延迟来自共享机器；节拍取遍历最后一步，即循环出口再过一个沿。
     threeStar: { gate: 643, delay: 6, tick: 95 },
   },
 ];

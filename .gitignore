@@ -33,3 +33,13 @@ test-results/
 # record; `digest.md` is a 1 MB derived view of it, regenerated on demand by the
 # reader in `tools/`, so a derived copy never becomes a second source of truth.
 docs/session-archive/digest.md
+
+# A raw session transcript dumped at the root. It is working material, not a
+# record: `record.md` carried live API keys and GitHub's push protection blocked
+# the push. Keep it local; an archived transcript belongs under
+# `docs/session-archive/` only after the credentials in it are redacted.
+/record.md
+
+# A raw session export (`dsh-session-*.zip`) is working material for the same
+# reason, and at 10 MB it has no place in the history.
+/dsh-session-*.zip

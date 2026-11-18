@@ -1,3 +1,9 @@
+/**
+ * 关卡的叙事文本：每关开始前与通过后各一段，中英双语。
+ *
+ * 数据是只读的，供 `ui/result.ts` 的通过对话框与 `main.ts` 的简报遮罩取用；
+ * 还没有撰写文本的关卡由 `narrativeFor` 回退到通用文本，因此界面永远有话说。
+ */
 import type { LocalizedText } from '../levels/spec';
 
 export interface Narrative {
@@ -6,13 +12,11 @@ export interface Narrative {
 }
 
 /**
- * Original narrative shell. The source material describes an alien abduction
- * framing; this replica keeps the framing but writes its own character and
- * lines, and draws no characters at all.
+ * 叙事外壳的原创文本。参考材料用的是一套「外星人绑架」的框架；
+ * 本复刻保留这个框架，但角色与台词都是自写的，而且不绘制任何角色形象。
  *
- * The voice belongs to 考核者 / The Assessor: the name is ours, like the lines,
- * because the original game's named characters are not reused (§1.4 of the
- * design spec).
+ * 声音属于「考核者 / The Assessor」：名字与台词一样是我们自己的，
+ * 因为原作中有名字的角色不再复用（设计规格 §1.4）。
  */
 export const NARRATIVE: Readonly<Record<string, Narrative>> = {
   'ch1-01-humble-beginnings': {
@@ -97,11 +101,10 @@ export const NARRATIVE: Readonly<Record<string, Narrative>> = {
 };
 
 /**
- * The briefing shown before a level and the epilogue shown after it is passed.
+ * 关卡开始前显示的简报，以及通过后显示的尾声。
  *
- * A level with no authored text yet -- every chapter after this one, for now --
- * gets generic text instead of an empty overlay, so the shell degrades to
- * "nothing to say" rather than to a blank screen the player cannot dismiss.
+ * 还没有撰写文本的关卡——目前是第一章之外的所有关卡——会得到通用文本而不是空遮罩，
+ * 让外壳退化为「无话可说」，而不是一块玩家关不掉的空白屏幕。
  */
 export function narrativeFor(levelId: string): Narrative {
   return (

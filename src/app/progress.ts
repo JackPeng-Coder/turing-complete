@@ -15,49 +15,42 @@ export interface Progress {
   readonly version: 1;
   readonly levels: Record<string, LevelRecord>;
   /**
-   * The player's program text, keyed by level id.
+   * 玩家写的程序文本，以关卡 id 为键。
    *
-   * SAVED WITH THE STARS because on a programming level the text IS the work:
-   * the board is handed to the player already built (`LevelSpec.board`), so a
-   * refresh that dropped the program would drop the level. Keys are level ids and
-   * go through the same translation as `levels` (`persist/storage.ts`), so a
-   * program cannot outlive the level it was written for.
+   * 和星星一起保存，因为在编程关卡里文本就是作品：画板是预先为玩家搭好再交给
+   * 他的（`LevelSpec.board`），所以一次刷新若丢掉程序，就等于丢掉了这一关。
+   * 键是关卡 id，并经过与 `levels` 相同的 id 翻译（`persist/storage.ts`），
+   * 因此程序不会比它所属的关卡活得更久。
    *
-   * Not every level has an entry: the map is sparse, and a level that has never
-   * been typed into simply has no key. `AppState.programs` is the reader's view
-   * of it, with `''` for the missing case.
+   * 不是每个关卡都有条目：这张表是稀疏的，从未输入过的关卡根本没有键。
+   * `AppState.programs` 是读取方看到的视图，缺失的情况用空字符串表示。
    */
   readonly programs: Record<string, string>;
   /**
-   * The player's own components, keyed by component id.
+   * 玩家自造的元件，以元件 id 为键。
    *
-   * SAVED WITH THE STARS, like the programs, and for the same reason: a component
-   * is work, and it is work that outlives the circuit it was built in. This is
-   * the LIBRARY -- the durable half -- and a circuit references an entry by id
-   * (`Instance.def`), so the two can never disagree about what a part contains.
+   * 与程序一样和星星一起保存，理由也相同：元件是作品，而且它会比搭建它的那个
+   * 电路活得更久。这里是"库"——持久的那一半——电路通过 id 引用条目
+   * （`Instance.def`），所以两者在"这个元件里是什么"上永远不会互相矛盾。
    *
-   * ONE HOME, NOT TWO. A `Graph` also has a `customComponents` field, and this is
-   * where its entries live: the graph is the DOCUMENT (what is on the board) and
-   * the library is the RECORD (what the player has built). A circuit file carries
-   * the entries it needs inline (`persist/circuit.ts`) so an exported file is
-   * self-contained, and importing one merges them back in here; nothing else
-   * duplicates them, so there is no second copy to fall out of sync.
+   * 只有一个家，不是两个。`Graph` 也有 `customComponents` 字段，而它的来源
+   * 就在这里：图是文档（画板上有什么），库是记录（玩家造过什么）。电路文件把
+   * 需要的条目内联带走（`persist/circuit.ts`），使导出的文件自包含；导入时再
+   * 把它们合并回这里。除此之外没有别处复制它们，所以不存在会失步的第二份拷贝。
    */
   readonly blueprints: BlueprintLibrary;
 }
 
 /**
- * Always available, whatever the player has unlocked.
+ * 无论玩家解锁了什么，都始终可用。
  *
- * This is NOT just the level I/O plumbing. Level 1 offers `const_on` and its
- * reference solution IS `const_on -> level_output`, so the constants have to be
- * available from the very first level -- they cannot come from an earlier
- * reward, because there is no earlier level. Keeping them out of this set makes
- * level 1's palette empty of anything that can drive an output, which is the
- * "level 1 is unplayable" defect this derivation exists to prevent.
+ * 这并不只是关卡的 I/O 管道。第一关提供 `const_on`，而它的参考答案正是
+ * `const_on -> level_output`，所以常量必须从第一关起就可用——它们不可能来自
+ * 更早的奖励，因为没有更早的关卡。把它们排除在这个集合之外，会让第一关的托盘
+ * 里没有任何能驱动输出的东西，而这正是这套推导要防止的"第一关不可玩"缺陷。
  *
- * This is the single copy: the chapter-1 gating tests import it instead of
- * each seeding their own walk with a lookalike list.
+ * 这里是唯一的副本：第一章的门控测试 import 它，而不是各自用一张看起来一样的
+ * 清单去构造自己的遍历。
  */
 export const STARTER_COMPONENTS = [
   'level_input',
@@ -67,12 +60,11 @@ export const STARTER_COMPONENTS = [
 ] as const;
 
 /**
- * The scoring weights, re-exported rather than redeclared.
+ * 评分权重：重新导出，而不是再声明一次。
  *
- * `levels/grader.ts` owns the formula; a second copy here would let the two
- * drift, and a drifted copy silently invalidates every level's three-star
- * target. Consumers that need the weights import them from either module and
- * get the same object.
+ * `levels/grader.ts` 拥有公式；在这里再写一份会让两处漂移，而一份漂移的副本会
+ * 悄悄让每一关的三星目标失效。需要权重的使用方从任一模块 import，拿到的都是
+ * 同一个对象。
  */
 export { SCORE_WEIGHTS } from '../levels/grader';
 
@@ -81,14 +73,16 @@ export function emptyProgress(): Progress {
 }
 
 /**
- * Level unlocking is strictly linear: the first level is always reachable, and
- * every other one needs its immediate predecessor passed. `order` is the
- * authoritative level sequence (see `LEVEL_ORDER`).
+ * 关卡解锁严格线性：第一关永远可达，其余每一关都需要它的前一关已通过。
+ * `order` 是权威的关卡顺序（见 `LEVEL_ORDER`）。
  *
- * `dev` opens all of them (`app/dev.ts`). It is the last parameter rather than a
- * second function so that a caller cannot reach for "the unlocked check" and
- * silently get the gated one; `paletteDefsFor` takes the same flag, and passing
- * it to one and not the other gives a level you can open but not build.
+ * `dev` 会打开全部关卡（`app/dev.ts`）。它被放在最后的参数位置，而不是另开一个
+ * 函数，是为了让调用方无法伸手拿"解锁检查"却悄悄拿到被门控的那个；
+ * `paletteDefsFor` 接收同一个标志，只传给一处而不传另一处，就会得到"能打开但
+ * 搭不出"的关卡。
+ *
+ * 边界：`levelId` 不在 `order` 里时抛异常——那是调用方的数据错误（例如传入拼错
+ * 的 id），静默返回 false 会让"关卡不存在"伪装成"关卡未解锁"。
  */
 export function isUnlocked(
   progress: Progress,
@@ -105,13 +99,14 @@ export function isUnlocked(
 }
 
 /**
- * First reachable level that has not been passed; the last level if all are.
+ * 第一个可达且尚未通过的关卡；全部通过时返回最后一关。
  *
- * Deliberately NOT "the last unlocked level": that skips work whenever the
- * player reopens an older level, because passing level 3 unlocks level 4 while
- * levels 5+ stay locked, yet the last unlocked level is 4 -- resuming there
- * would jump over level 4 only by accident and over nothing at all once the
- * player has passed levels out of order.
+ * 刻意不是"最后一个已解锁的关卡"：那样只要玩家重开旧关卡就会跳着走——通过第
+ * 3 关会解锁第 4 关，但第 5 关及以后仍然锁着，而"最后解锁"是第 4 关；从那里
+ * 继续，在玩家按顺序游玩时恰好跳过第 4 关，在玩家乱序通过时则什么也跳不过。
+ *
+ * `order` 为空时抛异常：没有关卡序列时"从哪里继续"没有答案，返回空字符串只
+ * 会让问题在更远处爆发。
  */
 export function resumePointOf(progress: Progress, order: readonly string[]): string {
   if (order.length === 0) throw new Error('empty level order');
@@ -122,10 +117,9 @@ export function resumePointOf(progress: Progress, order: readonly string[]): str
 }
 
 /**
- * The unlocked component set is *derived*, not stored: every reward from a
- * passed level, plus the starter components. Storing it as well lets the two
- * drift apart after importing an older save, which shows up as "the level
- * requires NAND but progress has no NAND".
+ * 已解锁的元件集合是推导出来的，而不是存下来的：每个已通过关卡的奖励，加上
+ * 初始元件。如果把集合也存进存档，导入旧存档后两者会漂移，症状就是"关卡要求
+ * 与非门，但进度里没有与非门"。
  */
 export function unlockedComponents(
   progress: Progress,
@@ -140,38 +134,32 @@ export function unlockedComponents(
 }
 
 /**
- * Parts offered by this level that the player has actually unlocked.
+ * 本关提供、且玩家确实已解锁的元件。
  *
- * The level's own palette is the upper bound: a reward that this level does not
- * offer stays out of it, so the player can only build what the level allows.
+ * 关卡自己的托盘是上界：本关不提供的奖励不会进入这个列表，于是玩家只能搭出
+ * 关卡允许的东西。
  *
- * A level's OWN rewards are offered to build with, before the level is passed.
- * The parts a level hands out are the parts its puzzle was designed around, so
- * withholding them until the player has already solved it is backwards. Level 13
- * is the case that named the rule: its parity puzzle cannot be built without the
- * `splitter` it rewards -- every chapter-1 part has 1-bit pins, and a wire from
- * the 4-bit input copies bit 0 alone -- so a first-time palette that omitted it
- * could not build the level it was a palette for.
+ * 关卡自己的奖励在通过之前就可以拿来搭建。一个关卡发下去的元件，正是它谜题所
+ * 围绕设计的元件；把奖励扣到玩家解完题之后才给是本末倒置。第 13 关是命名这条
+ * 规则的案例：它的奇偶校验谜题在没有它奖励的 `splitter` 时根本搭不出来——第一
+ * 章所有元件的引脚都是 1 位，而从 4 位输入引出的导线只复制第 0 位——所以一份
+ * 漏掉它的首次托盘，无法搭出它就是其托盘的那一关。
  *
- * The asymmetry with `allowedComponents` is deliberate and load-bearing. A
- * level's own reward is offered to *build* with, but the palette still stays
- * bounded by that level's own list, so a part the level does not offer stays out
- * even once it is unlocked: level 12 rewards `mem1` without listing it, and its
- * palette is unchanged by that. The other half -- that a level may not offer a
- * part no level at or before it hands out -- is not enforced here at all, and
- * cannot be: it is a property of the level data, and
- * `test/levels/level-buildability.test.ts` walks every shipped level for it.
+ * 与 `allowedComponents` 的不对称是有意的、也是承重的。关卡自己的奖励提供给
+ * "搭建"，但托盘仍被这一关自己的清单限定，于是关卡不提供的元件即使已经解锁
+ * 也不会进来：第 12 关奖励 `mem1` 却不列出它，它的托盘因此没有变化。另一
+ * 半——一个关卡不能提供"到它为止（含它）没有任何关卡发过"的元件——这里根本
+ * 不强制，也强制不了：那属于关卡数据的性质，由
+ * `test/levels/level-buildability.test.ts` 遍历全部已发布关卡来检查。
  *
- * This is a NO-OP for chapter 1, verified rather than assumed: no chapter-1
- * level lists its own reward, and every chapter-1 reference solution draws only
- * on parts an earlier level rewards. `test/app/progress.test.ts` states the rule
- * for a synthetic level, and the buildability walk's `chapter 1 palettes are
- * unchanged` block pins both halves of that claim on the shipped data.
+ * 对第一章而言这是空操作，且是验证过而不是假设的：没有第一章关卡列出自己的
+ * 奖励，且第一章所有参考答案只使用更早关卡发放过的元件。
+ * `test/app/progress.test.ts` 用一个合成关卡陈述这条规则，而可构建性遍历的
+ * "chapter 1 palettes are unchanged" 区块把这一论断的两半都钉在已发布数据上。
  *
- * `dev` skips the unlocked half of the intersection and keeps the other: the
- * level's own list is still the upper bound, because dev mode is "open every
- * gate", not "hand out parts this level was never designed around". The same
- * flag opens the levels themselves -- see `isUnlocked`.
+ * `dev` 跳过交集里"已解锁"的那一半，保留另一半：关卡自己的清单仍是上界，因为
+ * 开发者模式是"打开所有闸门"，不是"发放这一关从未围绕其设计的元件"。同一个
+ * 标志也打开关卡本身——见 `isUnlocked`。
  */
 export function paletteDefsFor(
   progress: Progress,
@@ -188,32 +176,26 @@ export function paletteDefsFor(
 }
 
 /**
- * Every part the sandbox offers, in registry order.
+ * 沙盒提供的全部元件，按注册表顺序排列。
  *
- * THE SANDBOX IS NOT A LEVEL, so its palette is not a level's palette: there is
- * no `allowedComponents` to intersect with, because there is no puzzle to design
- * around. What it offers instead:
+ * 沙盒不是关卡，所以它的托盘不是关卡的托盘：没有 `allowedComponents` 可以求
+ * 交集，因为没有谜题要围绕设计。它改为提供：
  *
- *  * every BASE part -- the registry's own defs, less the `hidden` plumbing, so
- *    the palette cannot drift from the components that exist; a part added to the
- *    game is offered here without a second list to update. Wide components are
- *    included: they are ordinary registry defs, and "16-bit" is a phase-5
- *    question about widths, not about whether the sandbox may use `add8`.
- *  * PLUS THE TWO CONNECTORS. They are the one exception to "less the hidden
- *    plumbing", because the sandbox has no level spec to declare pins: the
- *    `level_input` / `level_output` a player places ARE the sandbox board's pins
- *    (`sandboxPins`), and without them there is no way to drive a sandbox circuit
- *    or read its answer. A level still gets them only when its own
- *    `allowedComponents` lists them.
- *  * plus everything the campaign has handed the player, which for the base parts
- *    is already true, so the union only ever ADDS a player's own components --
- *    passed in as `extra` because a component is data (`Progress.blueprints`)
- *    rather than a registry entry.
+ *  * 所有基础元件——注册表自己的定义，去掉 `hidden` 的管道件，于是托盘不可能
+ *    与真正存在的元件发生漂移；游戏里新增一个元件，这里不需要第二张清单就会
+ *    提供它。宽元件也包含在内：它们是普通的注册表定义，"16 位"是第五阶段关于
+ *    位宽的问题，不是"沙盒能否用 `add8`"的问题。
+ *  * 再加上两个连接器。它们是"去掉 hidden 管道件"的唯一例外，因为沙盒没有关卡
+ *    规格来声明引脚：玩家放置的 `level_input` / `level_output` 就是沙盒画板的
+ *    引脚（`sandboxPins`），没有它们就无法驱动沙盒电路、也读不到它的输出。而
+ *    关卡只有在自己的 `allowedComponents` 列出它们时才会得到它们。
+ *  * 再加上战役已经发给玩家的一切；对基础元件来说这本来就已成立，所以并集实际
+ *    只会"增加"玩家自己的元件——它们作为 `extra` 传入，因为元件是数据
+ *    （`Progress.blueprints`），而不是注册表条目。
  *
- * `dev` widens nothing here (the base set is already complete) and is accepted so
- * the two palettes take the same arguments: a caller that passes the flag to
- * `paletteDefsFor` and forgets it here would otherwise be a silent difference
- * between two screens that are meant to be parallel.
+ * `dev` 在这里不额外放宽（基础集合本来就已经完整），但仍然接受该参数，好让两个
+ * 托盘的参数一致：调用方若把标志传给 `paletteDefsFor` 而忘了这里，两个本该平行
+ * 的界面就会产生一个静默的差异。
  */
 export function sandboxPaletteDefs(
   registry: Registry,
@@ -237,21 +219,18 @@ export function sandboxPaletteDefs(
 }
 
 /**
- * The parts a board offers, whichever board it is.
+ * 一块画板提供哪些元件，无论是哪种画板。
  *
- * ONE RULE, THREE CALLERS. The parts tray draws this list, the agent's
- * `list_parts` reports it, and `place_part` refuses anything outside it. Two
- * copies of "what is on offer" is exactly how the tray and the assistant drift
- * apart -- so all three call this, and a change here is a change everywhere.
+ * 一条规则，三处调用。元件托盘绘制这份清单，助手的 `list_parts` 报告它，
+ * `place_part` 拒绝清单之外的一切。两份"提供什么"的副本，正是托盘和助手漂移
+ * 的方式——所以三处都调用这里，改这里就是到处都改。
  *
- * DEVELOPER MODE ONLY RELAXES THE UNLOCK FILTER; IT ADDS NO PARTS. A level's
- * `allowedComponents` IS the puzzle, and `?dev=1` merely stops hiding the listed
- * parts the campaign has not handed out yet (`paletteDefsFor`'s `dev` parameter).
- * A level's own connectors are on that list, so a four-bit level under `?dev=1`
- * still offers `level_input`/`level_output`; an 8-bit adder on level 1 is not
- * offered, to the player or to the assistant. The sandbox is the exception,
- * because it is not a puzzle: there is no list to intersect with, so it offers
- * every base part (see `sandboxPaletteDefs`).
+ * 开发者模式只放宽"解锁"过滤，不增加元件。关卡的 `allowedComponents` 就是那个
+ * 谜题，`?dev=1` 只是不再隐藏"清单里列出、但战役还没发下去"的元件（即
+ * `paletteDefsFor` 的 `dev` 参数）。关卡自己的连接器就在那张清单上，所以一个
+ * 四位关卡在 `?dev=1` 下仍然提供 `level_input`/`level_output`；而第 1 关不会
+ * 提供 8 位加法器，对玩家和对助手都不会。沙盒是例外，因为它不是谜题：没有清单
+ * 可以求交集，所以它提供全部基础元件（见 `sandboxPaletteDefs`）。
  */
 export function offeredDefsFor(
   progress: Progress,
@@ -266,19 +245,20 @@ export function offeredDefsFor(
 }
 
 /**
- * Records a pass: keeps the best score and the best star rating. Pure.
+ * 记录一次通过：保留最好成绩与最高星级。纯函数。
  *
- * `grade()` scores ANY valid-graph circuit, including one that fails its
- * checks, so a failed attempt is rejected before anything is written. The
- * comparison is against the grader's own `scoreOf`, not a local re-derivation:
- * one formula, one place to change it.
+ * `grade()` 会给任何合法图电路打分，包括没能通过检查的电路，所以未通过的尝试
+ * 在写入任何东西之前就被拒绝了。比较用的是判定器自己的 `scoreOf`，而不是本地
+ * 另算一遍：一条公式，一处修改的地方。
  *
- * `programs` IS CARRIED THROUGH, with the same reference. This function returns a
- * fresh record holding only the fields it knows about, so a field it forgets is
- * deleted rather than left stale -- and the moment a level is passed is the worst
- * moment to lose the player's program, because the run that proves it works is
- * the run that would erase it. Nothing here edits a program, so the map is shared
- * rather than copied.
+ * `programs` 会原样带过去，且是同一个引用。本函数返回一个只含它所知字段的新
+ * 记录，于是它忘记的字段会被删除而不是留下陈旧值——而"关卡通过的那一刻"恰恰
+ * 是最不能丢玩家程序的时刻，因为证明程序能跑的那一次运行，正是会抹掉它的那
+ * 一次。这里不编辑程序，所以共享映射而不是复制。
+ *
+ * 两个比较方向都容易看反：`scoreOf` 是成本，越小越好，所以只有新成绩的分数
+ * 小于旧的最好成绩时才替换；星级取两者较大值，避免重玩时发挥失常把已经拿到的
+ * 星降下去。
  */
 export function applyGrade(
   progress: Progress,

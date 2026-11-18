@@ -2,12 +2,12 @@ import { truthTable } from '../../tables';
 import type { LevelSpec } from '../../spec';
 
 /**
- * Chapter 1, levels 1-6.
+ * 第 1 章第 1~6 关。
  *
- * Ordering note: the source material lists NOR (5) before OR (6), but NOR's
- * standard solutions need OR, or they need NOT+NAND which arrives even later.
- * To keep the "a level only uses already-unlocked parts" rule absolute, OR and
- * NOR are swapped here. All text is original.
+ * 顺序说明：原始资料把「或非门」(NOR) 排在第 5 关、「或门」(OR) 排在第 6 关；
+ * 但 NOR 的标准解法要么需要 OR，要么需要「非门 + 与非门」，而后者出现得更晚。
+ * 为了让「一关只能使用已经解锁的元件」这条规则绝对成立，这里把 OR 和 NOR 对调。
+ * 所有文案均为本项目原创。
  */
 const IO_1 = { inputs: [], outputs: [{ id: 'out', width: 1 }] };
 const IO_2 = {
@@ -19,6 +19,7 @@ const IO_2 = {
 };
 const IO_1IN = { inputs: [{ id: 'a', width: 1 }], outputs: [{ id: 'out', width: 1 }] };
 
+/** 第 1 章第 1~6 关的关卡数据，按 `index` 顺序排列。 */
 export const CH1_PART1: readonly LevelSpec[] = [
   {
     id: 'ch1-01-humble-beginnings',
@@ -109,13 +110,12 @@ export const CH1_PART1: readonly LevelSpec[] = [
     allowedComponents: ['nand', 'not', 'and', 'level_input', 'level_output'],
     io: IO_2,
     checks: [truthTable(IO_2, { out: ({ a, b }) => (a || b ? 0 : 1) })],
-    // Three-star target = the reference solution's own metrics; the reference scores exactly it.
-    // Gate = 4, not 2: the reference is NOT(a) AND NOT(b), two NOTs (1 each) and an
-    // AND (2) against the NAND basis in `core/defs/index.ts`. Its hint used to read
-    // "put a NOT after the OR" -- the spelling that belonged to this level while it
-    // was chapter 1's sixth; the 2.x realignment put it back at the source's fifth,
-    // where `or` has not been introduced yet and the level is the chapter's De
-    // Morgan lesson. Both spellings measure 4 gates / 2 delay.
+    // 三星目标 = 参考解自身的指标；参考解恰好得到这个分数。
+    // 门数 = 4 而不是 2：参考解是 NOT(a) AND NOT(b)，两个 NOT（各 1 门）加一个 AND（2 门），
+    // 按 `core/defs/index.ts` 里的 NAND 基准折算。
+    // 本关提示曾经写作「在 OR 后面加一个 NOT」——那是它还排在第 6 关时的写法；
+    // 2.x 改版把它放回原资料的第 5 关，此时 `or` 尚未引入，本关就是本章的德摩根定律课。
+    // 两种写法实测都是 4 门 / 2 层延迟。
     threeStar: { gate: 4, delay: 2, tick: 0 },
     rewards: { components: ['const_on', 'const_off'] },
   },

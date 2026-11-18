@@ -41,32 +41,39 @@ import { mountIde } from './ui/ide';
 import { mountDebug } from './ui/debug';
 import { mountFlashPanel, type FlashPanel } from './ui/flashPanel';
 import type { LevelSpec } from './levels/spec';
+/**
+ * 组合根：把状态、界面、智能体与持久化装配成一个应用。
+ *
+ * 应用里几乎所有的“接线”都发生在这个文件：创建 store 与撤销栈、搭建工作台的
+ * 五块停靠区、挂载各块面板，并把关卡、画板、运行实例、元件库、导入导出与智能体
+ * 接到同一个 onChange 路径上。它依赖 ui、agent、persist、levels 等下层模块，
+ * 而没有任何下层模块反过来依赖它。关键不变量：所有修改电路的路径最终都经过
+ * store.set 与 onChange，因此“手改”和“智能体改”在测量、重绘、撤销与存档上完全同路。
+ */
 
 const registry = createRegistry(BASE_DEFS);
 let progress: Progress = loadProgress();
 const level: LevelSpec = getLevel(resumePointOf(progress, LEVEL_ORDER));
 
 /**
- * The registry a document compiles against: the base catalog plus the player's
- * components.
+ * 文档编译时使用的注册表：基础元件目录 + 玩家自定义元件。
  *
- * THE BASE REGISTRY STAYS THE BASE REGISTRY. `registry` above answers "what parts
- * does the game ship" and is what `defs/index.ts`'s tests pin; this one is what the
- * board, the checks and the palette actually resolve ids through, and it is
- * rebuilt whenever the library changes rather than mutated in place -- see
- * `composeRegistry` for why a player's part never enters the singleton.
+ * 基础注册表始终是基础注册表。上面的 registry 回答“游戏自带哪些元件”，
+ * 也是 defs/index.ts 的测试所钉住的对象；这里的 composed 才是画板、检查器
+ * 与元件托盘真正用于解析元件 id 的地方，且元件库一变就整体重建，而不是原地修改。
+ * 详见 composeRegistry：玩家的元件永远不会进入那个单例注册表。
  */
 let composed = composeRegistry(registry, progress.blueprints);
 
-/** `?dev=1`: every level reachable and every listed part on offer. See `dev.ts`. */
+/** ?dev=1 开发模式：全部关卡可达、清单里的元件全部开放。见 dev.ts。 */
 let dev = devModeFrom(globalThis.location.search);
 
 const store: Store<AppState> = createStore<AppState>({
   level,
-  // A level that ships a starting circuit opens on it; every other level opens on
-  // an empty board. Either way what the player gets is an ordinary editable
-  // `Graph` -- a starting circuit is a head start, not a fixture nobody can
-  // touch, which is what keeps it a board rather than a built-in CPU.
+  // 自带起始电路的关卡从该电路开始，其余关卡从空画板开始。
+  // 两种情况下玩家拿到的都是一张普通的、可编辑的 Graph：
+  // 起始电路只是“提前搭好的一段”，不是谁都不能碰的固定装置；
+  // 这正是它仍是一张画板、而不是内置 CPU 的原因。
   graph: level.board ? graphFromBoard(level.id, level.board) : emptyGraph(level.id),
   registry: composed,
   progress,
@@ -75,10 +82,9 @@ const store: Store<AppState> = createStore<AppState>({
   dragging: null,
   armed: null,
   dev,
-  // The programs come out of the loaded save, so reopening the app restores the
-  // text the player left on each level. The IDE writes them back as they are
-  // typed (`onProgramEdit`), through `progress.programs` and `saveProgress`, so
-  // the editor, the checks and the save all read the same text.
+  // 程序文本来自加载的存档，因此重新打开应用时会恢复玩家在各关卡留下的文本。
+  // IDE 在每次输入时（onProgramEdit）通过 progress.programs 与 saveProgress 写回，
+  // 于是编辑器、检查器与存档读到的是同一份文本。
   programs: progress.programs,
   blueprints: progress.blueprints,
   editing: null,
@@ -91,28 +97,25 @@ const stack = new CommandStack();
 const app = document.querySelector<HTMLDivElement>('#app');
 
 /**
- * The signature of the sandbox circuit as it was last written to storage.
+ * 沙盒电路上一次写入存储时的签名。
  *
- * Module-level because the sandbox outlives any one screen: the board screen is
- * hidden rather than unmounted when the player reads the map, so a closure-local
- * copy would be the one thing `openLevel` had to remember to carry. The empty
- * string means "not in the sandbox", which is also what keeps a level edit from
- * writing anything.
+ * 放在模块级，是因为沙盒的生命周期长于任何一屏：玩家去看关卡地图时，
+ * 画板屏幕只是被隐藏而不是卸载；若签名放在闭包里，openLevel 就得记着把它一起带走。
+ * 空字符串表示“当前不在沙盒”，它同时也保证关卡里的编辑不会写进沙盒存档。
  */
 let sandboxSignature = '';
 
-/** A filename-safe stamp, so two exports of one circuit do not overwrite. */
+/** 文件名安全的时间戳：同一电路导出两次不会互相覆盖。 */
 function dateStamp(): string {
   return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
 }
 
 /**
- * How long the test run holds each case before moving to the next, by speed.
+ * 演示用例时每个用例停留多久，按速度档位给出。
  *
- * The run is a demonstration, so the pace is the player's: a fifteen-row truth
- * table takes seven seconds at `2×` and a fuzz level's sixty-four rounds take
- * half a minute, which is either a lesson or a waste of time depending on what
- * the circuit is doing. Fastest last.
+ * 因为测试跑的是演示，节奏归玩家：十五行真值表在 2× 下约七秒，
+ * 而模糊测试关卡的六十四轮约半分钟——对理解有帮助还是纯浪费时间，
+ * 取决于电路在做什么。数组按从慢到快排列。
  */
 const TEST_RATES = [
   { label: '1×', ms: 900 },
@@ -122,16 +125,15 @@ const TEST_RATES = [
 ] as const;
 
 /**
- * The pace a run starts at, as an index into `TEST_RATES`: `8×`.
+ * 演示开始时的默认档位，作为 TEST_RATES 的下标：即 8×。
  *
- * Fast by default, because the cases are a DEMONSTRATION and a demonstration is
- * usually watched once -- a player who wants to read a particular case presses
- * 停止 and then steps the pace down, which is one click, where waiting out a slow
- * run is thirty seconds nobody gets back.
+ * 默认快，因为用例只是演示，通常也只看一遍；想细读某个用例的玩家
+ * 会按停止再逐档调慢，那只要一次点击；而干等一轮慢速演示所花掉的三十秒，
+ * 是再也拿不回来的。
  */
 const DEFAULT_TEST_RATE = 3;
 
-/** What to say when a level's cases cannot be played one at a time. */const NO_CASES_NOTE = {
+/** 无法逐个演示用例时给出的提示文案：按原因分为 program、custom、empty、sandbox 四种。 */const NO_CASES_NOTE = {
   program: {
     zh: '本关的用例是一次程序运行，无法逐个演示：已直接判定',
     en: 'This level’s cases are one program run, so they cannot be played one at a time: graded directly',
@@ -145,12 +147,11 @@ const DEFAULT_TEST_RATE = 3;
     en: 'This level declares no cases to play: graded directly',
   },
   /**
-   * The sandbox, which has no cases BY DESIGN.
+   * 沙盒专用的提示：它按设计就没有测试用例。
    *
-   * Its own note rather than the `empty` one: a level with no cases is a level
-   * something went wrong with, and the sandbox is the screen where nothing is
-   * supposed to happen. Handing the player "graded directly" there would be the
-   * app describing a verdict it is not going to give.
+   * 为什么不用 empty 那一条：没有用例的关卡意味着某处出了问题，
+   * 而沙盒是“本就不该发生任何判定”的屏幕。在这里对玩家说“已直接判定”，
+   * 等于让应用描述一个它根本不会给出的结论。
    */
   sandbox: {
     zh: '沙盒没有测试用例：电路一直在跑，门数与延迟就是你的读数',
@@ -158,7 +159,7 @@ const DEFAULT_TEST_RATE = 3;
   },
 } as const;
 
-/** Clock rates the player can cycle through, fastest last. */
+/** 玩家可循环切换的时钟频率，按从慢到快排列。 */
 const RATES = [
   { label: '1Hz', ms: 1000 },
   { label: '10Hz', ms: 100 },
@@ -166,29 +167,27 @@ const RATES = [
 ] as const;
 
 /**
- * The widths a sandbox connector cycles through.
+ * 沙盒连接器循环切换的位宽序列。
  *
- * THE COMMON CASE FIRST, then the rest. A sandbox circuit is byte-wide about as
- * often as it is one bit, so the ladder opens 1 -> 8 and only then walks the
- * shipped pins' other widths: the wide family is 8 everywhere, the decoder select
- * pins are 1/2/3, the instruction fields are 2/3/6, and 16/32 are where the
- * stepped families would land (`createWideDefs`). A level's pins never use this
- * -- their widths are the level's contract -- see `IoPanelOptions.onCycleWidth`.
+ * 常用位宽排在前面：沙盒电路是字节宽（8 位）的次数与 1 位差不多，
+ * 所以阶梯从 1 → 8 开始，之后才轮到自己发行引脚的其他位宽：
+ * 宽总线家族都是 8 位，译码器的选择引脚是 1/2/3 位，指令字段是 2/3/6 位，
+ * 16/32 位则是将来分级位宽家族（createWideDefs）会落到的位置。
+ * 关卡引脚从不使用这个序列——它们的位宽是关卡契约，见 IoPanelOptions.onCycleWidth。
  */
 const PIN_WIDTHS: readonly number[] = [1, 8, 16, 32, 2, 3, 4, 6];
 
 if (app) {
   /**
-   * THE WORKBENCH. Five docks, the shape a code editor uses: an activity bar at
-   * the far left, the primary sidebar beside it, the editor in the middle, a
-   * secondary sidebar on the right, and a bottom panel under the editor. The
-   * board is the document; every panel is a tool beside it rather than a
-   * translucent layer over it, so no panel can cover a wire a player is drawing.
+   * 工作台。五块停靠区，形状照搬代码编辑器：最左是活动栏，
+   * 旁边是主侧边栏，中间是编辑区，右侧是次侧边栏，编辑区下方是底部面板。
+   * 画板就是“文档”，每块面板都是它旁边的工具，而不是盖在它上面的半透明浮层，
+   * 所以没有任何面板会挡住玩家正在画的导线。
    */
   const workspace = document.createElement('div');
   workspace.className = 'workspace';
 
-  /** A rail button: an icon, with the name carried by the accessible label. */
+  /** 活动栏按钮：只画图标，名称由无障碍标签与 tooltip 承载。 */
   const dockButton = (label: string, icon: IconName): HTMLButtonElement => {
     const el = document.createElement('button');
     el.type = 'button';
@@ -205,8 +204,8 @@ if (app) {
   const componentsButton = dockButton('组件', 'wrap');
   const casesButton = dockButton('用例', 'test');
   const programButton = dockButton('程序', 'terminal');
-  // The assistant's own rail button is created by the panel (it has the
-  // configured state to draw); the slot keeps it in the rail's order.
+  // 智能体自己的活动栏按钮由面板创建（只有它持有配置状态可供绘制）；
+  // 这里先留一个槽位，用来保持活动栏的顺序。
   const agentSlot = document.createElement('div');
   agentSlot.className = 'activity-slot';
   const settingsButton = dockButton('设置', 'settings');
@@ -241,9 +240,9 @@ if (app) {
   componentsSection.className = 'sidebar-section sidebar-components';
   componentsSection.dataset.view = 'components';
   componentsSection.hidden = true;
-  // The I/O readout is not a tab: driving a level's input bits is part of
-  // wiring, so it stays in view while the palette does. It sits under the parts
-  // tray, the way an outline sits under a file tree.
+  // I/O 读数区不是标签页：驱动关卡的输入位属于接线的一部分，
+  // 因此它和元件托盘一起常驻显示。它放在元件托盘下方，
+  // 就像代码编辑器把大纲放在文件树下方一样。
   const ioSection = document.createElement('div');
   ioSection.className = 'sidebar-section sidebar-io';
   primary.append(primaryTabs, partsSection, componentsSection, ioSection);
@@ -260,8 +259,7 @@ if (app) {
   screens.append(boardScreen, mapScreen);
   editor.append(screens);
 
-  // The editor's action strip: the board's own controls, in flow above the
-  // canvas, so they never cover a wire.
+  // 编辑区的操作条：画板自己的控件参与布局、排在画布上方，因此永远不会盖住导线。
   const editorActions = document.createElement('div');
   editorActions.className = 'editor-actions';
 
@@ -291,9 +289,8 @@ if (app) {
   const casesTab = panelTab('用例', 'cases');
   const programTab = panelTab('程序', 'program');
   const debugTab = panelTab('调试', 'debug');
-  // The Arduino panel is a sandbox tool: a level's pins are the puzzle, and
-  // `buildImage` refuses a level board for the same reason. Hidden until the
-  // sandbox is open, exactly as the bench tabs are hidden outside a program level.
+  // 开发板面板是沙盒工具：关卡的引脚本身就是谜题，buildImage 也出于同样的理由
+  // 拒绝关卡画板。它只在沙盒打开时显示，正如程序类标签页只在需要写程序的关卡显示。
   const boardTab = panelTab('开发板', 'board');
   programTab.hidden = true;
   debugTab.hidden = true;
@@ -324,38 +321,33 @@ if (app) {
   const panelTabs = [casesTab, programTab, debugTab, boardTab];
   const panelViews = [viewCases, viewProgram, viewDebug, viewBoard];
 
-  // ---------------------------------------------------------------- layout --
-  // The docks' measurements live in `tc.layout.v1`: a player who widened the
-  // parts tray wants it wide on the next launch, and one who collapsed the
-  // assistant wants it collapsed. `applyLayout` is the ONLY writer of the CSS
-  // variables the grid is built from, so the splitters, the collapse buttons and
-  // a saved payload cannot disagree about where an edge is.
+  // ---------------------------------------------------------------- 布局 --
+  // 各停靠区的尺寸保存在 tc.layout.v1：玩家把元件托盘拉宽，希望下次启动时仍然宽；
+  // 把智能体侧边栏收起，也希望它保持收起。applyLayout 是唯一写网格 CSS 变量的地方，
+  // 因此拖拽条、折叠按钮和一份存档三者不可能对“某条边在哪里”给出互相矛盾的说法。
   let layout = loadLayout();
 
   /**
-   * Called after the grid's measurements change.
+   * 网格尺寸变化后调用。
    *
-   * THE CANVAS IS THE ONE THING THE GRID DOES NOT SIZE FOR US. Its backing store
-   * is a bitmap sized in `renderBoard` from `clientWidth`/`clientHeight`, so a
-   * dock drag that only moves the CSS tracks leaves the bitmap at its old size
-   * and the browser stretches it to the new box -- every square on the grid
-   * becomes a rectangle until something else happens to repaint. Window resizes
-   * already paint; layout changes now paint through here. It starts as a no-op
-   * because `paint` is defined further down and this is first applied during
-   * boot, before the board exists.
+   * 画布是网格唯一不替我们定尺寸的东西：它的后备位图在 renderBoard 里按
+   * clientWidth/clientHeight 分配，所以一次只移动 CSS 轨道的拖拽会让位图停在旧尺寸，
+   * 再由浏览器拉伸到新盒子里——网格上每个方格都变成矩形，直到别的事情触发重绘。
+   * 窗口缩放本来就会重绘；布局变化现在通过这里重绘。
+   * 它初始是空函数，因为 paint 定义在更下面，而本函数在启动阶段就先被应用了一次，
+   * 那时画板还不存在。
    */
   let onLayoutResize: () => void = () => {};
 
   /**
-   * The Arduino panel, once it is mounted.
+   * 挂载之后的 Arduino 面板。
    *
-   * The layout code is what knows whether its tab is showing, but the panel is
-   * mounted far below that code; a mutable handle is the seam (the same shape
-   * `onLayoutResize` uses for the board).
+   * 布局代码知道它的标签页是否显示，但面板在布局代码下面很远的地方才挂载；
+   * 一个可变的句柄就是衔接点（与 onLayoutResize 留给画板的是同一种做法）。
    */
   let flashPanel: FlashPanel | null = null;
 
-  /** The rail's icons show which view is showing, and whether its dock is open. */
+  /** 活动栏图标既指示当前显示哪个视图，也指示对应的停靠区是否展开。 */
   const syncRail = (): void => {
     partsButton.setAttribute('aria-pressed', String(!layout.primaryCollapsed && !partsSection.hidden));
     componentsButton.setAttribute('aria-pressed', String(!layout.primaryCollapsed && !componentsSection.hidden));
@@ -377,8 +369,7 @@ if (app) {
     collapse.textContent = layout.panelCollapsed ? '⌃' : '⌄';
     collapse.setAttribute('aria-label', layout.panelCollapsed ? '展开下方面板' : '收起下方面板');
     syncRail();
-    // A hidden panel does no work: the board panel only reacts to the store and
-    // only redraws while its tab is the showing one.
+    // 隐藏的面板不做任何工作：画板面板只响应 store，且只在它那一页显示时重绘。
     flashPanel?.setVisible(!layout.panelCollapsed && !viewBoard.hidden);
     onLayoutResize();
   };
@@ -397,8 +388,8 @@ if (app) {
     for (const el of panelViews) el.hidden = el.dataset.view !== name;
     for (const el of panelTabs) el.setAttribute('aria-pressed', String(el.dataset.view === name));
     applyLayout();
-    // Opening the tab builds a report for the circuit as it is now, rather than
-    // showing numbers from before the last edit. A hidden panel never builds.
+    // 打开该标签页时，会按“此刻”的电路生成报告，而不是显示上次编辑之前的数字。
+    // 隐藏的面板则从不生成报告。
     if (name === 'board') flashPanel?.reveal();
   };
 
@@ -418,8 +409,7 @@ if (app) {
   boardTab.addEventListener('click', () => showPanel('board'));
   partsTab.addEventListener('click', () => showSidebar('parts'));
   componentsTab.addEventListener('click', () => showSidebar('components'));
-  // Clicking the rail button of the view that is already showing folds the
-  // sidebar away -- the shortcut a code editor trains into you.
+  // 点击“已经是当前视图”的活动栏按钮，会把侧边栏折叠起来——这是代码编辑器养成的快捷习惯。
   partsButton.addEventListener('click', () => {
     if (!layout.primaryCollapsed && !partsSection.hidden) setLayout({ primaryCollapsed: true });
     else showSidebar('parts');
@@ -428,10 +418,9 @@ if (app) {
     if (!layout.primaryCollapsed && !componentsSection.hidden) setLayout({ primaryCollapsed: true });
     else showSidebar('components');
   });
-  // Clicking a rail button for the view that is already showing folds that dock
-  // away -- the shortcut a code editor trains into you. For the bottom panel the
-  // "already showing" view is the tab it is on: 用例 folds it from the cases tab,
-  // 程序 from the program tab, and either one re-opens it on its own view.
+  // 点击“已经是当前视图”的活动栏按钮，会把那个停靠区折叠起来——代码编辑器养成的快捷习惯。
+  // 对底部面板来说，“已经是当前视图”指的是它当前所在的标签页：用例页折叠它、程序页折叠它，
+  // 而两者再次点击时都会把面板重新打开到自己那一页。
   casesButton.addEventListener('click', () => {
     if (!layout.panelCollapsed && !viewCases.hidden) setLayout({ panelCollapsed: true });
     else showPanel('cases');
@@ -445,15 +434,14 @@ if (app) {
   collapseSidebar.addEventListener('click', () => setLayout({ primaryCollapsed: true }));
   collapse.addEventListener('click', () => setLayout({ panelCollapsed: !layout.panelCollapsed }));
 
-  // The drag handles: the grid's 4px tracks ARE the edges, so the element and
-  // the gap it sits in are the same thing.
+  // 拖拽把手：网格里 4px 宽的轨道就是那条边，所以拖拽元素与它所在的间隙是同一个东西。
   const addSplitter = (classes: string, options: SplitterOptions): void => {
     const el = document.createElement('div');
     el.className = `splitter ${classes}`;
     workspace.append(el);
     mountSplitter(el, options);
   };
-  /** How wide a sidebar may become before the board gets too narrow to work in. */
+  /** 侧边栏最宽能到多少：再宽画板就窄得没法工作了。 */
   const maxSidebar = (): number => Math.max(LAYOUT_LIMITS.primaryW.min, globalThis.innerWidth - 48 - 8 - 360);
   addSplitter('p-split', {
     axis: 'x',
@@ -492,8 +480,7 @@ if (app) {
     onCommit: () => saveLayout(layout),
   });
 
-  // The first view is laid out WITHOUT expanding: a saved layout may have
-  // collapsed either dock, and booting is not a click that opens them.
+  // 首次布局“不展开”：存档可能把某个停靠区收起了，而启动并不等于一次打开它的点击。
   showPanel('cases', false);
   showSidebar('parts', false);
   applyLayout();
@@ -502,79 +489,72 @@ if (app) {
   app.append(workspace);
 
   /**
-   * What the board paints beyond the store: the live pin values and the view
-   * flags. Rebuilt by `sample()` on every change to the circuit or the clock.
+   * 画板在 store 之外还要额外绘制的信息：实时引脚值与视图开关。
+   * 每当电路或时钟变化，sample() 就重建它。
    */
   let view: BoardView = { outputs: new Map(), stable: false, grid: true, ghost: null };
   /**
-   * Where the pointer is, in world units, or `null` when it is off the board.
+   * 指针在世界坐标中的位置；指针不在画板上时为 null。
    *
-   * View state, not store state: it changes on every mouse move, and the only
-   * thing that reads it is the ghost of the part armed in the palette. Reported
-   * by the board only while something IS armed, so an unarmed hover costs
-   * nothing at all.
+   * 这是视图状态而不是 store 状态：它每次鼠标移动都变，而唯一读取它的
+   * 是托盘中“手持”元件的幽灵预览。只有确实有元件被手持时画板才会上报它，
+   * 因此空手悬停完全不产生开销。
    */
   let ghost: Point | null = null;
-  /** The running display, or `null` while the circuit cannot be compiled. */
+  /** 正在运行的显示器（编译后的电路加上它的存储）；电路无法编译时为 null。 */
   let display: DisplaySimulation | null = null;
-  /** What the level's input pins are driven with while the player builds. */
+  /** 玩家搭建期间，关卡输入引脚被驱动的电平向量：引脚 id → 值。 */
   let vector: Readonly<Record<string, number>> = {};
   let gridOn = true;
   let running = false;
   let rateIndex = 1;
   let timer: ReturnType<typeof setInterval> | null = null;
-  /** The last settle's values, shared by everything that reads them. */
+  /** 最近一次结算得到的引脚值，供所有读取者共享。 */
   let snapshot: SignalSnapshot | null = null;
-  /** The cases the run is playing, and where in them it has got to. */
+  /** 本轮演示要播放的用例，以及已经播到第几个。 */
   let plan: TestPlan | null = null;
   let testStep = 0;
   let testRate = DEFAULT_TEST_RATE;
-  /** The case the board is currently driven with, or `null` when none is. */
+  /** 画板当前被哪个用例驱动，没有则为 null。 */
   let activeCase: number | null = null;
   let testing = false;
   let testTimer: ReturnType<typeof setTimeout> | null = null;
   /**
-   * What each case read off the board, so the columns keep their numbers after
-   * the run has moved on. The grade cannot supply them: it records the cases
-   * that FAILED, and a table that goes blank wherever the circuit was right
-   * tells a player nothing about the ones they got wrong.
+   * 每个用例从画板上读到的输出，好让演示继续往后跑时，已经播过的列仍保留数字。
+   * 判定结果无法提供这些数字：它只记录“失败”的用例，
+   * 而一个在电路算对的位置就空白的表格，无法告诉玩家哪里做错了。
    */
   let testResults: (Readonly<Record<string, number>> | null)[] = [];
   /**
-   * The program run the editor's step controls and the debugger drive, or `null`
-   * on a level that grades no program the player wrote.
+   * 编辑器单步控件与调试器共同驱动的程序运行实例；在判定玩家程序的关卡上为 null。
    *
-   * A RUN IS A COMPILED CIRCUIT PLUS ITS STORAGE, so it cannot survive an edit --
-   * exactly like `display`, and for the same reason. It is dropped (not rebuilt)
-   * whenever the text or the graph changes, and rebuilt on the next control that
-   * needs one, so a panel never shows state from a circuit that is no longer on
-   * the board.
+   * 一次运行 = 编译好的电路 + 它的存储，因此无法跨越一次编辑存活——与 display 同理。
+   * 文本或图一变就丢弃（而不是重建），等下一个需要它的控件再按需重建，
+   * 这样面板永远不会显示已经不在画板上的电路的状态。
    */
   let playerRun: ProgramRun | null = null;
-  /** What `playerRun` was built from; a different value means it must be rebuilt. */
+  /** playerRun 是依据什么建出来的；值不同就说明必须重建。 */
   let playerRunKey = '';
-  /** Bumped by every board edit: the run is compiled from a live graph, not a copy. */
+  /** 每次画板编辑都自增：运行实例编译自“活的”图，而不是某份拷贝。 */
   let graphRevision = 0;
   let ide: { render(): void } | null = null;
   let debug: { render(): void } | null = null;
-  /** True while the program is being stepped on a timer. */
+  /** 程序正被定时器自动单步执行时为 true。 */
   let programRunning = false;
   let programTimer: ReturnType<typeof setInterval> | null = null;
   /**
-   * The pace the program steps at, as an index into `TEST_RATES`.
+   * 程序单步的节奏，作为 TEST_RATES 的下标。
    *
-   * The same vocabulary the test run's speed button uses, and its own index rather
-   * than the shared one: watching a program execute and watching the level's cases
-   * play are two different things to want at two different speeds.
+   * 与测试演示的速度按钮共用同一套档位名，但使用独立的下标：
+   * 观看程序执行和观看关卡用例演示是两件不同的事，想要的速度也可能不同。
    */
   let programRate = DEFAULT_TEST_RATE;
 
   const paint = (): void => {
     if (!boardScreen.hidden) renderBoard(canvas, store, store.get().camera, view);
   };
-  // The dock measurements are CSS variables; the canvas is a bitmap. Every drag
-  // that moves the grid repaints through here, so the backing store is re-sized
-  // to the box instead of being stretched into it (see `onLayoutResize`).
+  // 停靠区尺寸是 CSS 变量，而画布是位图。每次会移动网格的拖拽都经由这里重绘，
+  // 于是后备位图按盒子重新分配尺寸，而不是被拉伸进盒子（见 onLayoutResize）。
   onLayoutResize = paint;
 
   const paintTools = (): void => {
@@ -588,7 +568,7 @@ if (app) {
     });
   };
 
-  /** Re-reads the display into `view`. Paints nothing: callers decide when. */
+  /** 把显示器的读数刷新到 view。本函数不绘制，由调用方决定何时绘制。 */
   const sample = (): void => {
     snapshot = display?.read() ?? null;
     view = {
@@ -600,32 +580,30 @@ if (app) {
   };
 
   /**
-   * The level's output pins as they stand right now, or `null` when nothing is
-   * running. Read from the cached snapshot rather than by calling `read()` again:
-   * the panel and the readout both ask, and each call builds two maps.
+   * 关卡输出引脚“此刻”的值；没有任何东西正在运行时为 null。
+   * 这里从缓存的 snapshot 读取，而不是再调一次 read()：
+   * 面板和读数区都会来问，而每调一次都要新建两张 Map。
    */
   const levelOutputs = (): Readonly<Record<string, number>> | null =>
     snapshot?.stable ? Object.fromEntries(snapshot.levelOutputs) : null;
 
   /**
-   * Drives one input vector onto the board and re-reads it, painting nothing.
+   * 把一个输入向量驱动到画板上并重新读数，但不绘制。
    *
-   * The run's fast phase drives hundreds of vectors back to back, and repainting
-   * the canvas and two panels per vector is what would make it slow rather than
-   * the simulation.
+   * 演示的快速阶段会连续驱动成百上千个向量；若每个向量都重绘画布和两块面板，
+   * 拖慢速度的将是绘制，而不是仿真。
    */
   const driveQuiet = (values: Readonly<Record<string, number>>): void => {
     vector = { ...values };
     display?.drive(vector);
     sample();
-    // The readout panel is the game's only input control, so the same vector goes
-    // to the program run: a program that reads `inp` must see the byte the player
-    // clicked, not a zero, and it is cheap here because a level with no program
-    // run syncs nothing.
+    // 读数面板是游戏唯一的输入控件，因此同一个向量也要送给程序运行实例：
+    // 读取 inp 的程序必须看到玩家点下的那个字节，而不是 0。
+    // 这一步开销很小，因为不判定程序的关卡根本不会同步任何东西。
     syncPlayerInputs();
   };
 
-  /** Drives one input vector onto the board and repaints everything that shows it. */
+  /** 把一个输入向量驱动到画板上，并重绘所有显示它的地方。 */
   const driveTo = (values: Readonly<Record<string, number>>): void => {
     driveQuiet(values);
     paint();
@@ -639,12 +617,11 @@ if (app) {
   };
 
   /**
-   * The end of a run, and the only place a level is passed.
+   * 一次演示的终点，也是唯一判定关卡通过的地方。
    *
-   * The verdict is the END of a demonstration the player asked for, not a
-   * background process: a level that graded itself after every wire spent the
-   * whole build telling a player they were wrong. The run's own `grade()` is the
-   * one that counts, so nothing here is computed twice.
+   * 判定是玩家主动请求的演示的“结尾”，不是后台进程：若每接一根线就自动判定，
+   * 整个搭建过程都会在对玩家说“你错了”。真正算数的是本轮演示自己调用的
+   * grade()，所以这里不会把同一件事再算一遍。
    */
   const finishTest = (): void => {
     stopTestTimer();
@@ -653,14 +630,12 @@ if (app) {
     plan = null;
 
     const { graph, level: current, progress: current0, programs } = store.get();
-    // The player's program goes into the verdict: a `program` check that reads the
-    // player's buffer grades the text as it stands at the moment of the run, from
-    // the same snapshot as the circuit. A level that has never been typed into
-    // hands over an empty string, which the checker reports as `missing-program`
-    // rather than running nothing.
+    // 玩家的程序也参与判定：读取玩家缓冲区的 program 检查会在运行的那一刻
+    // 按同一份快照判定电路与“当时的文本”。从未输入过的关卡给出空字符串，
+    // 检查器会报告 missing-program，而不是什么也不跑。
     const result = grade(graph, store.get().registry, current, { text: programs[current.id] ?? '' });
-    // One state change covers all three readers: the panel takes its verdict,
-    // the bar takes the stars, and the board keeps the last case's vector.
+    // 一次状态变更同时喂饱三个读取者：结果面板拿判定结果，工具栏拿星数，
+    // 画板保留最后一个用例的输入向量。
     store.set({ lastGrade: result, metrics: result.metrics });
     paintTools();
     if (!result.passed) return;
@@ -682,15 +657,14 @@ if (app) {
   };
 
   /**
-   * One case per tick of the run: drive it, clock it, paint it, remember what it
-   * read, and light up that case's column so the reader's eye follows the board.
+   * 演示的一个节拍：驱动一个用例、打时钟、绘制、记下读数，
+   * 并点亮该用例所在的列，让读者的视线跟着画板走。
    *
-   * PAST `TEST_DEMO_LIMIT` THE RUN HURRIES, and the panel's note says so. A
-   * level may declare hundreds of cases (513 on `ch2-38-little-box`), and at the
-   * pace a fifteen-row table wants that is minutes of watching a counter count.
-   * The cases still ALL run -- only the painting stops, and only where there is
-   * nothing left to see: past the thirty-second case no column on screen changes
-   * at all, because the table shows twenty.
+   * 超过 TEST_DEMO_LIMIT 之后演示会加速，面板上的说明也会如实写出。
+   * 关卡可以声明几百个用例（ch2-38-little-box 有 513 个），
+   * 若仍按十五行真值表想要的节奏播放，那就是几分钟盯着计数器跳动。
+   * 用例仍然全部会跑——只是停止绘制，而且只停在没有东西可看的地方：
+   * 第 32 个用例之后，屏幕上没有任何一列还会变化，因为表格只显示二十列。
    */
   const runTestStep = (): void => {
     const current = plan;
@@ -703,17 +677,13 @@ if (app) {
 
     const demonstrating = testStep < TEST_DEMO_LIMIT;
     activeCase = testStep;
-    // A case's own `reset` says whether it starts from a cleared circuit: a
-    // truth table's rows each do, and only a script's FIRST step does -- step 3
-    // reads a register step 2 clocked. The checker does exactly this.
+    // 每个用例自己的 reset 说明它是否从清零的电路开始：真值表每一行都要清零，
+    // 而脚本只有第一步清零——第 3 步要读第 2 步打过时钟的寄存器。检查器就是这么做的。
     //
-    // A CASE RESET GOES THE WAY 停止并复位 DOES on a level that also grades a
-    // program, and for the same reason: the display may be painting the run's own
-    // machine, and clearing that simulation directly would empty the `ram_prog`
-    // the run loaded. Dropping the run and rebuilding clears the circuit AND
-    // loads the image back into the machine the board paints. A board with no
-    // player program is reset in place, because rebuilding it would recompile the
-    // graph for every one of a fuzz level's hundred cases.
+    // 用例复位的路径与“停止并复位”按钮一致（在同时判定程序的关卡上）：
+    // 显示器可能在绘制运行实例自己的机器，直接清空那个仿真会清掉运行载入的 ram_prog。
+    // 丢弃运行再重建，既清空电路，又把程序镜像装回画板正在绘制的那台机器。
+    // 没有玩家程序的画板就地复位，因为重建会为模糊测试关卡的每个用例重新编译整张图。
     if (item.reset) {
       if (levelExpectsProgram(store.get().level)) {
         dropPlayerRun();
@@ -724,36 +694,32 @@ if (app) {
     else driveQuiet(item.inputs);
     while ((snapshot?.tick ?? 0) < item.tick) {
       display?.tick();
-      // THE FAST PHASE STILL HAS TO SAMPLE. The loop's own condition reads
-      // `snapshot.tick`, so a fast phase that ticked without reading left the
-      // snapshot on the old tick and the loop never ended: a script with more
-      // than `TEST_DEMO_LIMIT` cases froze the tab at the first fast case
-      // (513-step `ch2-38-little-box` at case 33). Painting is what the fast
-      // phase skips, not reading -- and the case's recorded outputs need the
-      // read too.
+      // 快速阶段仍然必须采样。循环条件读的是 snapshot.tick，
+      // 若快速阶段只打时钟不读数，snapshot 会停在旧节拍上，循环永不结束：
+      // 用例数超过 TEST_DEMO_LIMIT 的脚本会在第一个快速用例处卡死标签页
+      // （513 步的 ch2-38-little-box 卡在第 33 个用例）。快速阶段跳过的是绘制而不是读数，
+      // 而且用例要记录的输出也需要这次读数。
       sample();
       if (demonstrating) paint();
     }
     testResults[testStep] = levelOutputs();
     testStep += 1;
-    // The fast phase has no column left to light up -- the table shows twenty --
-    // but the heading counts the cases, so it is repainted now and then rather
-    // than showing a total the run left behind.
+    // 快速阶段已经没有列可以点亮了（表格只显示二十列），但标题里还在计数，
+    // 所以每过一段时间重绘一次，而不是一直显示演示中途留下的旧总数。
     if (demonstrating || (testStep & 7) === 0) truth.render();
     testTimer = setTimeout(runTestStep, demonstrating ? TEST_RATES[testRate]!.ms : 0);
   };
 
   /**
-   * The test button: play the level's cases, then judge the circuit.
+   * 测试按钮：播放本关用例，然后判定电路。
    *
-   * A level whose cases the checker generates privately, and a board that will
-   * not compile at all, have nothing to play -- but pressing 测试 must always
-   * produce a verdict, so both go straight to `finishTest`.
+   * 用例由检查器私下生成、或画板根本编译不了的关卡没有可播放的内容——
+   * 但按下“测试”必须总能给出一个结论，因此这两种情况都直接进入 finishTest。
    */
   const startTest = (): void => {
     stopTestTimer();
-    // The run drives its own clock edges; a ticking clock underneath it would
-    // step the same storage twice per case and show a circuit nobody built.
+    // 本轮演示自己驱动时钟边沿；若底下还有时钟在跑，每个用例会把同一份存储
+    // 多走一步，显示出来的电路就不是任何人搭的那一张。
     running = false;
     stopClock();
 
@@ -761,10 +727,9 @@ if (app) {
     const planned = testCases(current);
     testResults = [];
     if (isSandbox(current)) {
-      // NO VERDICT IN THE SANDBOX, and no dialog: `grade()` on a spec with no
-      // checks reports `passed`, so the ordinary path would pop a 关卡完成 card
-      // for a screen that has no levels. The button is disabled there anyway
-      // (`ui/toolbar.ts`); this is the belt to that braces.
+      // 沙盒里不判定也不弹窗：对没有检查项的规格调用 grade() 会返回 passed，
+      // 于是普通路径会为一个没有关卡的屏幕弹出“关卡完成”卡片。
+      // 该按钮在沙盒里本来就是禁用的（ui/toolbar.ts）；这里是第二道保险。
       store.set({ status: NO_CASES_NOTE.sandbox });
       paintTools();
       truth.render();
@@ -787,7 +752,7 @@ if (app) {
     runTestStep();
   };
 
-  /** The stop button: abandon the run without judging anything. */
+  /** 停止按钮：放弃本轮演示，不做任何判定。 */
   const stopTest = (): void => {
     stopTestTimer();
     testing = false;
@@ -803,28 +768,22 @@ if (app) {
   };
 
   /**
-   * Rebuilds the display for the current graph.
+   * 为当前图重建显示器。
    *
-   * A display is a compiled circuit plus its storage, so it cannot survive an
-   * edit: every change to the graph gets a new one, which is also why the
-   * simulation is not held in the store -- it is a cache of the store's graph,
-   * not part of the application's state.
+   * 显示器 = 编译后的电路 + 存储，因此无法跨越编辑存活：图一变就换一个新的。
+   * 这也解释了为什么仿真不放进 store——它只是 store 中图的缓存，不是应用状态的一部分。
    *
-   * ONE MACHINE, NOT TWO. On a level that grades a program the player wrote, the
-   * program has to be loaded in the circuit the board paints -- otherwise the io
-   * panel's clock and its `out` row would be readings of a second compilation
-   * whose `ram_prog` is 256 zeros, disagreeing with the debugger beside them. So
-   * the run is built FIRST and its machine handed to the display. `machine` is
-   * `null` while the circuit does not compile or while the program is refused, and
-   * then the display is exactly what it always was: its own compilation of the
-   * board, which is what a mid-edit circuit gets.
+   * 一台机器，不是两台。在判定玩家程序的关卡上，程序必须被载入画板正在绘制的电路，
+   * 否则 I/O 面板的时钟和 out 行读的会是“第二份编译结果”（其中 ram_prog 是 256 个 0），
+   * 与旁边的调试器互相矛盾。所以先构建运行实例，再把它的 machine 交给显示器。
+   * 电路编译失败或程序被拒绝时 machine 为 null，此时显示器就是它一贯的样子：
+   * 自己对画板编译一份——正在编辑中的电路得到的正是这个。
    */
   const rebuild = (): void => {
     const { graph, registry: reg, level: current } = store.get();
-    // A SANDBOX'S PINS COME AND GO WITH ITS CONNECTORS. `vector` is keyed by pin
-    // id, and the placement recycles a freed `IN_<n>` -- so a value left behind by
-    // a deleted connector would show up on the next one that takes its name.
-    // A level's pins are fixed data, so this is a no-op there.
+    // 沙盒的引脚随连接器来去。vector 以引脚 id 为键，
+    // 而放置会复用被释放的 IN_<n>——于是被删连接器留下的值会出现在下一个接手该名字的连接器上。
+    // 关卡引脚是固定数据，因此这段在关卡里是空操作。
     const known = new Set(boardPins(current, graph, reg).inputs.map((pin) => pin.id));
     if (Object.keys(vector).some((id) => !known.has(id))) {
       vector = Object.fromEntries(Object.entries(vector).filter(([id]) => known.has(id)));
@@ -862,8 +821,7 @@ if (app) {
       return;
     }
     const zoom = Math.min(4, Math.max(0.25, camera.zoom * factor));
-    // Keep the world point under the middle of the board pinned while the scale
-    // changes, so a zoom does not throw the circuit off screen.
+    // 缩放时钉住画板中心下的世界点，避免缩放把电路甩出屏幕。
     const middle = { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 };
     const before = screenToWorld(camera, middle);
     const next = { ...camera, zoom };
@@ -873,7 +831,7 @@ if (app) {
     });
   };
 
-  /** Frames the whole circuit, or returns to the default camera on an empty board. */
+  /** 把整张电路框进视野；空画板则回到默认相机。 */
   const fitView = (): void => {
     const { graph } = store.get();
     const w = canvas.clientWidth;
@@ -917,10 +875,9 @@ if (app) {
   const showScreen = (which: 'board' | 'map'): void => {
     boardScreen.hidden = which !== 'board';
     mapScreen.hidden = which !== 'map';
-    // A hidden canvas has no box to draw into; repaint when it comes back, and
-    // rebuild the readout for the level that is now open. Stopping the clocks is
-    // NOT done here: leaving the board for the map is the one transition that has
-    // to, and it says so where it happens (`onOpenMap`).
+    // 隐藏的画布没有可绘制的盒子；切回来时重绘，并为当前打开的关卡重建读数区。
+    // 停止时钟不在这里做：离开画板去看地图是唯一必须停表的切换，
+    // 它在发生的地方明确写了（onOpenMap）。
     if (which === 'board') {
       paint();
       refreshPanels();
@@ -929,13 +886,12 @@ if (app) {
 
   const onPickPart = (defId: string | null): void => {
     if (defId === null) {
-      // The way back to holding nothing: with a part armed, dragging the board
-      // places parts, so panning needs this state.
+      // 回到“空手”的路径：手上有元件时拖动画板就是放置元件，所以平移需要这个状态。
       store.set({ armed: null, status: null });
       return;
     }
-    // The palette only offers ids the registry knows; the guard keeps the
-    // "registry.get throws" contract local rather than implied.
+    // 托盘只会给出注册表认识的 id；这个守卫把“registry.get 会抛异常”的约定收在本地，
+    // 而不是隐式依赖它。
     if (!store.get().registry.has(defId)) return;
     const def = store.get().registry.get(defId);
     store.set({
@@ -948,34 +904,29 @@ if (app) {
   };
 
   /**
-   * Loads a level into the board; the chapter map calls this. The `before` text
-   * is shown on arrival, every time -- entering a level is the narrative beat,
-   * whether or not it has been passed before.
+   * 把关卡载入画板；章节地图调用它。到达时总是显示 before 文本——
+   * 进入关卡本身就是叙事的一拍，无论此前是否已经通过。
    */
   const openLevel = (levelId: string): void => {
-    // THE SANDBOX IS NOT IN THE LEVEL TABLE, so it is not looked up: `getLevel`
-    // throws for an id no level has, and its spec is a constant (`levels/sandbox.ts`).
-    // Everything after this point is the same for both -- one board, one set of
-    // panels -- which is the whole reason the sandbox is a `LevelSpec`.
+    // 沙盒不在关卡表里，所以不走查找：getLevel 对任何关卡都没有的 id 会抛异常，
+    // 而沙盒的规格是一个常量（levels/sandbox.ts）。
+    // 从这里往后两者完全相同——同一张画板、同一组面板——这正是沙盒也被做成 LevelSpec 的原因。
     const next = levelId === SANDBOX_ID ? SANDBOX_LEVEL : getLevel(levelId);
     stack.clear();
     running = false;
     stopClock();
     stopTest();
-    // The old level's run is a circuit and a text that are no longer on screen,
-    // and it has to go BEFORE the display is rebuilt: `rebuild` hands the display
-    // whatever run exists, and a run of the previous level would paint the board
-    // the player just left.
+    // 旧关卡的运行实例由一张电路和一份文本组成，二者都已不在屏幕上，
+    // 并且必须在重建显示器之前丢掉：rebuild 会把“现存的”运行交给显示器，
+    // 若留着上一关的运行，它就会把玩家刚离开的那张画板画出来。
     dropPlayerRun();
     vector = {};
     plan = null;
     testResults = [];
     ghost = null;
-    // The display is rebuilt from the store's *new* graph, so the store has to
-    // be told about the level change first. The board, when the level ships one,
-    // is read into that new graph the same way the initial one is: reopening a
-    // level is a fresh attempt at its starting circuit, never a resume of what
-    // was on the board before.
+    // 显示器要从 store 的“新”图重建，所以要先让 store 知道换了关卡。
+    // 关卡自带起始电路时，按初始化时同样的方式把它读进新图：
+    // 重新进入关卡永远是“从起始电路重新开始一次”，而不是恢复上次画板上的内容。
     store.set({
       level: next,
       graph:
@@ -994,22 +945,20 @@ if (app) {
     sandboxSignature = isSandbox(next) ? circuitSignature(store.get().graph) : '';
     rebuild();
     showScreen('board');
-    // The bench follows the level: an editor on a level that grades no program,
-    // or a debugger still reading the previous level's machine, would both be
-    // describing something that is not on screen.
+    // 工作台跟着关卡走：在不判定程序的关卡上摆一个编辑器，或让调试器继续读上一关的机器，
+    // 二者描述的东西都不在屏幕上。
     mountBench();
-    // A level that ships a circuit opens on a machine rather than on a corner of
-    // one: the chapter-4 CPU spans a couple of thousand world units, so the
-    // default camera would show its left third and a player would have to find
-    // the fit button before they could see what they were handed.
+    // 自带电路的关卡一进来就该对准整台机器，而不是机器的一角：
+    // 第 4 章的 CPU 横跨约两千个世界单位，默认相机会只显示左边三分之一，
+    // 玩家得先找到“适应视图”按钮才能看见发到手里的东西。
     if (next.board) fitView();
-    // The sandbox has no narrative: `narrativeFor` reads level data, and its own
-    // brief is the one that says what the screen is for.
+    // 沙盒没有叙事：narrativeFor 读的是关卡数据，
+    // 而沙盒自己的说明文字才是解释这块屏幕用途的那一份。
     if (levelId !== SANDBOX_ID) showBriefing(narrativeFor(levelId).before);
     measure();
   };
 
-  /** The next level in the shipped order, or `null` on the last one. */
+  /** 发行顺序中的下一关；已经是最后一关时返回 null。 */
   const nextLevelId = (): string | null => {
     const index = LEVEL_ORDER.indexOf(store.get().level.id);
     return index >= 0 && index + 1 < LEVEL_ORDER.length ? LEVEL_ORDER[index + 1]! : null;
@@ -1020,23 +969,19 @@ if (app) {
   };
 
   /**
-   * Measures the circuit that is on the board right now.
+   * 测量“此刻”画板上的电路。
    *
-   * A MEASUREMENT, NOT A VERDICT. The gate count, the delay and the cost are
-   * what the original's own bar shows while a circuit is being drawn, and they
-   * are recomputed on every edit. Whether the circuit is CORRECT is
-   * `finishTest`'s business, and the verdict is dropped here rather than
-   * recomputed: a result reached before the last wire moved describes a circuit
-   * that is no longer on the board.
+   * 这是测量，不是判定。门数、延迟与代价是原版工具栏在画电路时也会显示的数字，
+   * 每次编辑都重新计算。电路“是否正确”是 finishTest 的事；
+   * 这里还会把旧判定丢掉而不是重算——因为最后一根线移动之前得出的结论，
+   * 描述的是已经不在画板上的电路。
    */
   const measure = (): void => {
     const { graph, level: current, programs } = store.get();
-    // The same program text `finishTest` grades with, because the TICK metric is
-    // read out of the checks: a `program` check that reads the player's buffer
-    // walks the player's program, so measuring it against a different text -- or
-    // against none -- would put a tick count on the bar that the test run could
-    // never reproduce. What is measured is still only gate, delay and tick; the
-    // verdict itself stays `finishTest`'s business.
+    // 与 finishTest 判定时用同一份程序文本，因为 TICK 指标是从检查项里读出来的：
+    // 读取玩家缓冲区的 program 检查会走玩家的程序，若用别的文本（或干脆不传）来测量，
+    // 工具栏上就会出现一个演示永远复现不了的节拍数。
+    // 这里测量的仍然只有门、延迟和节拍；判定本身依旧归 finishTest。
     const player = { text: programs[current.id] ?? '' };
     store.set({
       metrics: grade(graph, store.get().registry, current, player).metrics,
@@ -1045,23 +990,22 @@ if (app) {
   };
 
   // -------------------------------------------------------------------------
-  // the program run: the editor's step controls and the debugger
+  // 程序运行：编辑器的单步控件与调试器
   // -------------------------------------------------------------------------
 
-  /** The level's program text, as the app holds it. */
+  /** 关卡的程序文本，即应用此刻持有的那一份。 */
   const playerText = (): string => {
     const { level: current, programs } = store.get();
     return programs[current.id] ?? '';
   };
 
   /**
-   * Drives the level's input vector onto the program run.
+   * 把关卡的输入向量驱动到程序运行实例上。
    *
-   * THE READOUT PANEL IS THE INPUT CONTROL, on every level, and it drives the
-   * board's display -- so a program that reads `inp` would read zeros in the
-   * debugger while the panel beside it showed the byte the player set. The same
-   * vector therefore goes to both, and it is re-applied whenever a run is built
-   * because a fresh `Simulation` has no inputs in it.
+   * 读数面板在每个关卡上都是输入控件，而它驱动的是画板上的显示器——
+   * 于是读取 inp 的程序会在调试器里读到 0，而旁边的面板显示玩家设的字节。
+   * 因此同一个向量要送给两边；并且每次新建运行都要重新应用一次，
+   * 因为全新的 Simulation 里没有任何输入值。
    */
   const syncPlayerInputs = (): void => {
     if (playerRun === null) return;
@@ -1071,13 +1015,12 @@ if (app) {
   };
 
   /**
-   * The run for the circuit and the text that are on screen right now.
+   * 为“此刻”屏幕上的电路和文本准备一个运行实例。
    *
-   * BUILT ON DEMAND, because a `ProgramRun` owns a compiled circuit: anything
-   * that reads the machine's state -- a step, a readout, an assemble -- asks for
-   * one here, and a run whose key no longer matches the store's text or graph is
-   * rebuilt rather than reused. `null` on a level with no player program, which is
-   * the same answer the bench's own mount takes.
+   * 按需构建：ProgramRun 拥有一份编译后的电路，因此任何要读机器状态的操作
+   * （单步、读数、汇编）都在这里要一个；键与 store 里的文本或图不再匹配时
+   * 重建而不是复用。不判定玩家程序的关卡返回 null，
+   * 这与工作台自己的挂载条件给出同一个答案。
    */
   const ensurePlayerRun = (): ProgramRun | null => {
     const { graph, level: current } = store.get();
@@ -1098,26 +1041,26 @@ if (app) {
     programRunning = false;
   };
 
-  /** Starts the program clock at the current pace, replacing any timer already on. */
+  /** 以当前节奏启动程序时钟，替换掉已经在跑的定时器。 */
   const startProgramTimer = (): void => {
     stopProgramRun();
     programRunning = true;
     programTimer = setInterval(runProgramStep, TEST_RATES[programRate]!.ms);
   };
 
-  /** Throws the run away: its circuit or its text is no longer the one on screen. */
+  /** 丢弃运行实例：它的电路或文本已经不是屏幕上那一份了。 */
   const dropPlayerRun = (): void => {
     stopProgramRun();
     playerRun = null;
     playerRunKey = '';
   };
 
-  /** One tick of the program clock, and the end of it when there is nothing left to run. */
+  /** 程序时钟的一个节拍；没有可执行的东西时就此结束计时。 */
   const runProgramStep = (): void => {
     const target = ensurePlayerRun();
     if (target !== null) target.step();
-    // A run that can no longer advance -- a refused program, or a circuit that
-    // stopped settling under it -- must not leave a timer ticking at it forever.
+    // 已经无法前进的运行——程序被拒绝，或其下电路不再结算到稳定——
+    // 不能留下一个定时器永远戳它。
     if (target === null || target.errors.length > 0) stopProgramRun();
     refreshBench();
   };
@@ -1130,14 +1073,14 @@ if (app) {
     }
     const target = ensurePlayerRun();
     if (target === null || target.errors.length > 0) {
-      // Nothing to run: the status line already says why, and a timer stepping a
-      // refused program would be a control that lies about what it is doing.
+      // 没有可运行的东西：状态栏已经说明了原因，
+      // 而用定时器去单步一个被拒绝的程序，是一个对自己行为撒谎的控件。
       refreshBench();
       return;
     }
     startProgramTimer();
-    // The test run steps as soon as it starts (`startTest` calls `runTestStep`),
-    // so the first edge arrives with the click rather than a beat later.
+    // 测试演示一开始就立即走一步（startTest 直接调用 runTestStep），
+    // 因此第一个时钟边沿随点击到来，而不是慢半拍。
     runProgramStep();
   };
 
@@ -1147,40 +1090,33 @@ if (app) {
   };
 
   /**
-   * A keystroke in the editor: the text moves in both copies, and the verdict goes.
+   * 编辑器里的一次按键：文本同时更新到两处，旧判定作废。
    *
-   * ONE VALUE, THREE PLACES. `AppState.programs` is what the checks and the run
-   * read, `Progress.programs` is what survives a refresh, and `saveProgress` is
-   * written from the same object -- so the three cannot disagree, and `applyGrade`
-   * (which rebuilds `Progress` around `progress.programs`) can only ever carry the
-   * latest text, because every path that replaces `Progress` reads the one the
-   * store holds.
+   * 一个值，三个地方。AppState.programs 是检查器与运行实例读的，
+   * Progress.programs 是刷新后仍能活下来的，而 saveProgress 写的是同一个对象——
+   * 三者因此不可能互相矛盾；applyGrade（它围绕 progress.programs 重建 Progress）
+   * 也只可能带上最新文本，因为每条替换 Progress 的路径读的都是 store 持有的那一份。
    */
   const onProgramEdit = (text: string): void => {
     const { level: current, programs, progress: current0 } = store.get();
     const next = { ...programs, [current.id]: text };
     progress = { ...current0, programs: next };
     saveProgress(progress);
-    // A verdict reached before the edit describes a different program, and a run
-    // compiled from the old text describes a different circuit.
+    // 编辑之前得出的判定描述的是另一个程序；由旧文本编译出的运行实例描述的是另一张电路。
     dropPlayerRun();
     store.set({ programs: next, progress, lastGrade: null });
   };
 
   /**
-   * The editor and the debugger, mounted while the level grades a program the
-   * player wrote and removed when it does not.
+   * 编辑器与调试器：只在关卡判定玩家自己写的程序时挂载，否则移除。
    *
-   * WHY IT IS NOT ALWAYS MOUNTED, hidden: the board screen is what chapters 1 to 3
-   * were built and tested against, and a panel that appeared on level 4 would be a
-   * screen nobody designed for. `levelExpectsProgram` is the level-data question;
-   * this is where the DOM follows it.
+   * 为什么不是“一直挂载、只在需要时隐藏”：画板屏幕是第 1 到第 3 章搭建与测试的对象，
+   * 一个到第 4 关才出现的面板会变成没人设计过的屏幕。
+   * levelExpectsProgram 回答“关卡数据要不要程序”，这里让 DOM 跟上它。
    *
-   * IT DOES NOT DROP THE RUN, and must not: on a program level `rebuild` has
-   * already built the run whose machine the display is painting, and throwing it
-   * away here would leave the panel reading a second machine -- exactly the
-   * disagreement the shared machine exists to remove. `openLevel` drops the
-   * previous level's run before the rebuild that replaces it.
+   * 它不丢弃运行实例，也绝不能丢：在程序关卡上，rebuild 已经建好了显示器正在绘制的
+   * 那台机器对应的运行；在这里把它扔掉，会让面板去读第二台机器——
+   * 正是“共用一台机器”要消除的那种不一致。上一关的运行由 openLevel 在替换它的重建之前丢弃。
    */
   const mountBench = (): void => {
     viewProgram.textContent = '';
@@ -1191,8 +1127,7 @@ if (app) {
     programTab.hidden = !wants;
     debugTab.hidden = !wants;
     programButton.hidden = !wants;
-    // The board panel belongs to the sandbox and nowhere else: a level's pins are
-    // its puzzle, and `buildImage` refuses a level board on its own account too.
+    // 开发板面板只属于沙盒：关卡的引脚就是谜题，buildImage 自己也会拒绝关卡画板。
     const sandbox = isSandbox(store.get().level);
     boardTab.hidden = !sandbox;
     if (!sandbox && !viewBoard.hidden) showPanel('cases');
@@ -1200,8 +1135,7 @@ if (app) {
       if (viewProgram.hidden === false || viewDebug.hidden === false) showPanel('cases');
       return;
     }
-    // The bench is why this level is open: show its editor rather than making
-    // the player find the tab.
+    // 开放这个关卡的理由就是工作台：直接显示它的编辑器，别让玩家自己去找标签页。
     showPanel('program');
 
     ide = mountIde(viewProgram, store, {
@@ -1209,16 +1143,15 @@ if (app) {
       onEdit: onProgramEdit,
       onAssemble: () => {
         ensurePlayerRun();
-        // The tick metric is read out of the checks, and a player check walks the
-        // player's program, so the bar is re-measured when the program is read --
-        // not on every keystroke, where it would be a compile per character for a
-        // number nobody reads mid-word.
+        // TICK 指标是从检查项里读出来的，而玩家程序检查会走玩家的程序，
+        // 所以“读到程序”时才重新测量一次工具栏——不是每次按键都测，
+        // 否则会变成每个字符编译一次，只为算一个没人会在一词中间读的数字。
         measure();
         refreshBench();
       },
-      // The level's own run, the same handler the panel and the toolbar call: a
-      // program level's cases cannot be played one at a time (`testCases` says
-      // why), so this grades the circuit against the player's program.
+      // 关卡自己的那套运行，与结果面板和工具栏调用的是同一个处理函数：
+      // 程序类关卡的用例无法逐个演示（testCases 里说明了原因），
+      // 因此这里是按玩家的程序判定电路。
       onTest: () => {
         ensurePlayerRun();
         toggleTest();
@@ -1235,9 +1168,8 @@ if (app) {
       rate: () => TEST_RATES[programRate]!.label,
       onCycleRate: () => {
         programRate = (programRate + 1) % TEST_RATES.length;
-        // A running program takes the new pace at once: a speed button that only
-        // applied to the next run would be a control that did nothing while it
-        // mattered.
+        // 正在运行的程序立刻采用新节奏：一个只在“下一次运行”生效的速度按钮，
+        // 会在它真正有用的时候什么也不做。
         if (programRunning) startProgramTimer();
         refreshBench();
       },
@@ -1253,39 +1185,34 @@ if (app) {
       halt: () => playerRun?.readHalt() ?? null,
       ticks: () => playerRun?.ticks ?? 0,
     });
-    // A run exists from the moment the bench does, so the debugger opens on the
-    // machine's own state -- the counter at its first instruction, the registers
-    // empty -- rather than on a card of dashes.
+    // 工作台一出现就存在一个运行实例，于是调试器打开时看到的是机器自己的状态
+    // （计数器指向第一条指令、寄存器为空），而不是一屏破折号。
     ensurePlayerRun();
     refreshBench();
   };
 
-  /** Every board edit: the circuit changed, so the display and the measurement did too. */
+  /** 任何一次画板编辑：电路变了，显示器和测量结果也变了。 */
   const onChange = (): void => {
     if (testing) stopTest();
-    // A run is a compiled circuit: this one was compiled from the graph as it was
-    // before the edit, so it goes rather than being left to describe a circuit
-    // nobody can see. It is rebuilt by the next control that asks for one.
+    // 运行实例是编译后的电路：这一份编译自编辑前的图，所以只能丢弃，
+    // 不能留着去描述一张没人看得见的电路。下一个需要它的控件会重建它。
     graphRevision += 1;
     dropPlayerRun();
     rebuild();
-    // The columns keep their layout but lose their numbers: they were read from
-    // the circuit as it was before this edit.
+    // 各列保留布局但清空数字：它们是从本次编辑之前的电路读出来的。
     testResults = [];
     activeCase = null;
     measure();
     refreshBench();
-    // A body edit is also a library edit: the component the player is inside
-    // holds the graph they are drawing, so the two move together.
+    // 编辑元件内部也是一次库编辑：玩家正身处其中的元件持有他正在画的图，两者必须一起更新。
     if (store.get().editing !== null) syncBody();
   };
 
   /**
-   * The panel's handlers, kept in one object so the mount stays readable.
+   * 蓝图面板的处理函数，集中在一个对象里，让挂载处保持可读。
    *
-   * They are built here rather than passed one by one because they share the
-   * draft state above them: the confirm step is `commitWrap`, which needs BOTH the
-   * plan the panel is showing and the name its inputs hold.
+   * 之所以在这里统一构造而不是逐个传参：它们共享上面的草稿状态——
+   * 确认步骤是 commitWrap，它同时需要面板正在显示的 plan 和输入框里的名字。
    */
   const blueprintOptions = {
     draft: (): WrapPlan | null => wrapDraft,
@@ -1311,14 +1238,14 @@ if (app) {
   };
 
   // -------------------------------------------------------------------------
-  // the player's own components
+  // 玩家自己的元件
   // -------------------------------------------------------------------------
 
-  /** The wrap being drafted in the panel, or `null`. Nothing has moved yet. */
+  /** 正在面板里起草的封装计划；此时还没有任何东西被移动。 */
   let wrapDraft: WrapPlan | null = null;
   let draftName = { zh: '', en: '' };
 
-  /** The graph on the board right now and the library it is measured against. */
+  /** 画板上此刻的图，以及衡量它所用的元件库。 */
   const graphWithRegistry = (): {
     graph: Graph;
     blueprints: Progress['blueprints'];
@@ -1328,13 +1255,11 @@ if (app) {
   };
 
   /**
-   * Writes a wrapped document into the app in one step.
+   * 一步之内把封装好的文档写入应用。
    *
-   * ONE COMMAND FOR TWO CHANGES. A wrap moves instances off the board and adds a
-   * definition to the library, and those halves are useless apart -- an undo that
-   * restored the board but left the component behind would be a state the player
-   * cannot describe. `CommandStack` takes the library with the command for exactly
-   * this, and `main.ts` is the only place that knows both values.
+   * 两个变化共用一条命令。封装会把若干实例移出画板、并向元件库添加一个定义，
+   * 这两半分开就毫无意义——撤销只恢复画板却留下元件，会得到一个玩家无法描述的状态。
+   * CommandStack 正是为此让命令可以携带元件库，而 main.ts 是唯一同时知道这两个值的地方。
    */
   const commitWrap = (plan: WrapPlan, name: { zh: string; en: string }): void => {
     const { graph, blueprints } = graphWithRegistry();
@@ -1379,13 +1304,12 @@ if (app) {
     blueprintPanel.render();
   };
 
-  /** Opens a component's body on the board: the same board, a different graph. */
+  /** 在画板上打开某个元件的内部：同一张画板，另一张图。 */
   const enterBlueprint = (id: string): void => {
     const entry = store.get().blueprints[id];
     if (!entry) return;
-    // The body is edited as a graph of its own, so it gets its own history and the
-    // board's is dropped: a command from the board would be replayed against a
-    // document it does not describe.
+    // 元件的内部按“一张独立的图”编辑，因此它有自己的历史，画板的历史要清空：
+    // 画板上的命令若被重放到一份它并不描述的文档上，只会出错。
     stack.clear();
     graphRevision += 1;
     dropPlayerRun();
@@ -1413,10 +1337,9 @@ if (app) {
       ...blueprints,
       [editing]: { name: { ...entry.name }, def: { ...entry.def, body: graph } },
     };
-    // THE REGISTRY IS LEFT ALONE HERE. Composing it per keystroke would be work
-    // for nothing: the display on screen is the body being edited, and the
-    // composed registry is rebuilt on the way out (`leaveBlueprint`) and on every
-    // wrap, which is when a definition has to be resolvable again.
+    // 这里不重组注册表。每次按键都重组是没有意义的工作：
+    // 屏幕上显示器正在绘制的就是被编辑的内部；组合注册表会在离开时
+    // （leaveBlueprint）以及每次封装时重建——那才是定义需要重新可解析的时刻。
     store.set({ blueprints: nextLibrary });
     progress = { ...progress, blueprints: nextLibrary };
     saveProgress(progress);
@@ -1424,9 +1347,8 @@ if (app) {
 
   const leaveBlueprint = (): void => {
     syncBody();
-    // The registry is recomposed on the way out: a component edited while its own
-    // body was on the board has a new circuit, and every instance of it on the
-    // board has to resolve against the new one.
+    // 离开时重新组合注册表：元件在自己的内部被编辑期间换了电路，
+    // 画板上它的每一个实例都必须按新电路解析。
     store.set({ registry: composeRegistry(registry, store.get().blueprints) });
     stack.clear();
     graphRevision += 1;
@@ -1458,12 +1380,11 @@ if (app) {
   };
 
   /**
-   * Removes a component, refusing while the board still uses it.
+   * 删除一个元件；画板仍在使用它时拒绝删除。
    *
-   * A REFUSAL RATHER THAN A CASCADE: deleting the instances that use it would be
-   * the app deciding which parts of a circuit the player did not mean to keep. The
-   * instance ids are what makes the check possible -- a component is referenced by
-   * `inst.def`, so the answer is one scan.
+   * 选择“拒绝”而不是级联删除：删掉用到它的实例，等于由应用替玩家决定
+   * 电路的哪一部分他并不想保留。能这样检查，是因为引用关系很明确——
+   * 元件由 inst.def 引用，所以答案只需要扫一遍。
    */
   const deleteBlueprint = (id: string): boolean => {
     const { blueprints, graph } = store.get();
@@ -1479,13 +1400,13 @@ if (app) {
   };
 
   /**
-   * The circuit file: out and back in.
+   * 电路文件：导出与导入。
    *
-   * THE FILE CARRIES THE COMPONENTS IT NEEDS (`libraryClosure`), because a circuit
-   * that references `bp1` and hopes the reader has one is a file that half the time
-   * does not open. Importing merges what it brought into the library -- renaming
-   * anything that clashes, since two players both have a `bp1` and they are
-   * different circuits -- and then the board holds the imported circuit.
+   * 文件会带上它自己需要的元件（libraryClosure），因为一个引用了 bp1
+   * 却指望对方恰好也有 bp1 的文件，有一半概率打不开。
+   * 导入会把文件带来的元件合并进库——重命名所有冲突项，
+   * 因为两个玩家都可能有一个 bp1，而它们是不同的电路——
+   * 之后画板上放的才是导入进来的电路。
    */
   const exportCircuit = (): void => {
     const { graph, blueprints, level: current } = store.get();
@@ -1504,7 +1425,7 @@ if (app) {
         status: { zh: `已导出 ${current.name.zh} 的电路`, en: 'Circuit exported' },
       });
     } catch {
-      // A browser that refuses the download still gets a readable copy on screen.
+      // 浏览器拒绝下载时给出说明，让玩家知道去哪里允许下载。
       store.set({
         status: { zh: '无法下载文件：请在浏览器设置里允许下载', en: 'Download refused by the browser' },
       });
@@ -1523,7 +1444,7 @@ if (app) {
     picker.click();
   };
 
-  /** The other half of `importCircuit`, split out so it is testable without a file. */
+  /** importCircuit 的另一半，单独拆出来，以便不依赖文件也能测试。 */
   const applyImportedFile = (text: string): void => {
     const parsed = parseCircuit(text, store.get().blueprints);
     if ('error' in parsed) {
@@ -1561,12 +1482,11 @@ if (app) {
 
   mountShell(app, store, {
     onOpenMap: () => {
-      // LEAVING THE BOARD STOPS ITS CLOCKS. The board screen is hidden rather
-      // than unmounted, so both timers would otherwise keep stepping a circuit
-      // nobody can see: a program left running while the player reads the map
-      // comes back a hundred instructions further on, and only the pause button
-      // would ever have said so. The panel and the toolbar are told as well, so
-      // the play button does not come back pressed over a stopped clock.
+      // 离开画板就停掉它的时钟。画板屏幕只是被隐藏而不是卸载，
+      // 否则两个定时器都会继续给一张没人看得见的电路打节拍：
+      // 玩家看地图期间程序若继续跑，回来时就已前进上百条指令，
+      // 而只有暂停按钮会体现这件事。面板和工具栏也会被告知，
+      // 以免播放按钮带着“按下”的状态回到已经停住的时钟上。
       running = false;
       stopClock();
       stopProgramRun();
@@ -1577,9 +1497,8 @@ if (app) {
     },
     onShowBrief: () => showBriefing(narrativeFor(store.get().level.id).before),
     onExitDev: () => {
-      // Live rather than through a reload: the map and the palette read `dev`
-      // from the store, so switching it off re-renders them where they stand --
-      // and the address bar is cleaned up so a refresh does not bring it back.
+      // 就地生效，而不是刷新页面：地图和元件托盘从 store 读 dev，
+      // 所以关掉它就会原地重绘；同时清理地址栏，避免刷新后它又回来。
       dev = false;
       store.set({ dev });
       const url = new URL(globalThis.location.href);
@@ -1588,14 +1507,12 @@ if (app) {
     },
   });
   mountStatus(app, store);
-  // Every panel is docked now: the palette and the component library in the
-  // primary sidebar, the test cases and the bench in the bottom panel, the
-  // assistant in the secondary sidebar.
+  // 现在所有面板都各归其位：元件托盘与元件库在主侧边栏，
+  // 测试用例与工作台在底部面板，智能体在次侧边栏。
   mountPalette(partsSection, store, onPickPart);
   const blueprintPanel = mountBlueprintPanel(componentsSection, store, blueprintOptions);
-  // The Arduino panel is a sandbox tool; its tab is hidden everywhere else by
-  // `mountBench`. It reads the circuit and the level from the store rather than
-  // from this closure's copies, and the vector is read lazily for "sync inputs".
+  // Arduino 面板是沙盒工具；它的标签页在其他关卡由 mountBench 隐藏。
+  // 它从 store（而不是本闭包里的副本）读电路与关卡，“同步输入”时才惰性读取 vector。
   flashPanel = mountFlashPanel(viewBoard, store, { vector: () => vector });
   const truth = mountTruthTable(viewCases, store, {
     live: levelOutputs,
@@ -1610,16 +1527,13 @@ if (app) {
     },
   });
   /**
-   * Cycles one sandbox connector's pin width.
+   * 循环切换沙盒中某个连接器的引脚位宽。
    *
-   * A LEVEL'S PIN WIDTHS ARE THE LEVEL'S CONTRACT, and the panel does not draw a
-   * chip for them. In a sandbox the connector IS the pin, so its width is the
-   * player's to choose -- and it has to be chooseable at all, or a circuit built
-   * from the 8-bit family cannot be driven: a one-bit connector feeding an `add8`
-   * is the "no output" defect in another form.
+   * 关卡引脚的位宽是关卡契约，面板不为它们画位宽控件。沙盒里连接器本身就是引脚，
+   * 所以位宽由玩家决定——而且必须可调，否则用 8 位家族搭的电路就驱动不了：
+   * 一个 1 位连接器接 add8，就是另一种形式的“没有输出”故障。
    *
-   * It is an ordinary undoable edit through the player's own stack, so Ctrl+Z
-   * takes it back like any other.
+   * 它通过玩家自己的撤销栈完成，因此 Ctrl+Z 能像其他编辑一样撤回。
    */
   const cyclePinWidth = (pinId: string): void => {
     const state = store.get();
@@ -1642,7 +1556,7 @@ if (app) {
         undo: (g) => {
           const target = g.instances.find((entry) => entry.id === pinId);
           if (target === undefined) return;
-          // The declared width is the absence of an override, not a pinned value.
+          // 声明的位宽代表“没有覆盖值”，而不是被钉死的值。
           if (current === declared) delete target.params.width;
           else target.params.width = current;
         },
@@ -1653,8 +1567,8 @@ if (app) {
   };
 
   const io = mountIoPanel(ioSection, store, {
-    // The board's pins, not the level's: a sandbox's pins are the connectors the
-    // player placed, and the same helper answers the display and the assistant.
+    // 用画板的引脚而不是关卡的引脚：沙盒的引脚就是玩家放置的连接器，
+    // 同一个辅助函数也服务于显示器和智能体。
     pins: () => boardPins(store.get().level, store.get().graph, store.get().registry),
     onCycleWidth: (pinId) => cyclePinWidth(pinId),
     vector: () => vector,
@@ -1690,18 +1604,15 @@ if (app) {
     onStop: () => {
       running = false;
       stopClock();
-      // 停止并复位 CLEARS THE BOARD THE PLAYER IS LOOKING AT WITHOUT ERASING THE
-      // PROGRAM. `rebuild` is the only place a display is bound to a run, and a
-      // text edit drops the run without rebuilding -- so after any keystroke the
-      // display is still painting the previous run's machine while
-      // `ensurePlayerRun` hands back a different one. A reset sent to that run
-      // would clear a machine nobody can see and leave the board on screen
-      // exactly as it was. So the run goes and the display is rebuilt with it: a
-      // fresh run is reset and its image loaded before it is handed over
-      // (`levels/run.ts`), and a board with no run at all compiles its own
-      // cleared circuit. Nothing typed is lost -- the player's text lives in
-      // `state.programs`, and the next 汇编/单步/测试 rebuilds the same run and
-      // reloads the same image.
+      // “停止并复位”会清空玩家眼前的画板，但不擦掉程序。
+      // rebuild 是唯一把显示器绑定到运行实例的地方，而改文本会丢弃运行却不重建——
+      // 于是任何一次按键之后，显示器仍在绘制上一次运行的机器，而 ensurePlayerRun
+      // 交回来的是另一台。向那个运行发送复位，只会清空一台没人看得见的机器，
+      // 屏幕上的画板丝毫不变。所以这里丢弃运行并连同它一起重建：
+      // 全新的运行会先复位、载入镜像，然后再被交出（levels/run.ts）；
+      // 完全没有运行的画板则自行编译一份清零的电路。输入的东西不会丢——
+      // 玩家的文本存在 state.programs 里，下一次“汇编/单步/测试”会重建同一个运行、
+      // 载入同一份镜像。
       dropPlayerRun();
       rebuild();
       paint();
@@ -1716,44 +1627,40 @@ if (app) {
   });
 
   // ---------------------------------------------------------------------------
-  // the agent
+  // 智能体
   // ---------------------------------------------------------------------------
 
   /**
-   * The natural-language assistant, wired to the application it operates.
+   * 自然语言助手，接到它所操作的这个应用上。
    *
-   * EVERYTHING HERE IS A HAND'S ROUTE. `apply` pushes onto the player's own undo
-   * stack and then calls `onChange`, which is exactly what a mouse edit does --
-   * so an agent edit is measured, repainted, undoable and saved by the same code
-   * as a hand edit, and there is no second way to change a circuit that could
-   * drift from the first. `run`/`pause`/`stepOnce`/`reset` are the toolbar's
-   * buttons; `test` is 测试; `circuitText` and `loadCircuit` are 导出/导入.
+   * 这里的一切都是“一只手”的路径。apply 把命令压进玩家自己的撤销栈，
+   * 然后调用 onChange——与鼠标编辑完全一样——因此智能体的一步同样会被测量、重绘、
+   * 可撤销并保存，不存在第二条可能与第一条走偏的修改电路之路。
+   * run/pause/stepOnce/reset 是工具栏上的按钮；test 是“测试”；
+   * circuitText 与 loadCircuit 是“导出/导入”。
    *
-   * The palette it may place is the palette the PLAYER has: `offeredDefIds` calls
-   * the same two functions the parts tray does, so `?dev=1` and the sandbox open
-   * everything up and an ordinary level still hands the agent only the parts that
-   * level allows. That is what keeps "the agent can do what a person can do" from
-   * quietly becoming "the agent can do more".
+   * 它能放置的托盘就是“玩家的”托盘：offeredDefIds 调用与元件托盘相同的两个函数，
+   * 于是 ?dev=1 与沙盒会全部开放，而普通关卡仍然只把该关允许的元件交给智能体。
+   * 这就是“智能体能做人能做的事”没有悄悄变成“智能体能做更多”的原因。
    */
   let agentConfig: AgentConfig | null = loadAgentConfig();
 
   const offeredDefIds = (): string[] => {
     const { level: current, progress: prog, registry: reg, dev: devOn, blueprints } = store.get();
-    // The same function the parts tray calls, so "what the agent may place" is
-    // "what the player is being offered" by construction rather than by intent.
+    // 与元件托盘调用同一个函数，因此“智能体能放什么”在构造上就等于“玩家被提供什么”，
+    // 而不只是意图上相同。
     return offeredDefsFor(prog, LEVELS, current, devOn, reg, libraryIds(blueprints)).filter((defId) =>
       reg.has(defId),
     );
   };
 
   /**
-   * Plays the level's cases and resolves with the verdict.
+   * 播放本关用例，并带着判定结果结束这个 Promise。
    *
-   * The run is a demonstration with timers, so this waits for it instead of
-   * returning "started": an agent told only that a run began would go on to
-   * "fix" a circuit it has no verdict about. The subscription is set up BEFORE
-   * `startTest`, because a level whose cases cannot be played finishes inside
-   * that call -- after it, there would be no notification left to wait for.
+   * 演示是带定时器的过程，所以这里等它结束，而不是返回“已开始”：
+   * 若只被告知“跑起来了”，智能体会接着去“修”一张它还没有结论的电路。
+   * 订阅必须在 startTest 之前建立，因为无法逐例演示的关卡会在那次调用内部就结束——
+   * 放在之后就没有通知可等了。
    */
   const agentTest = (): Promise<TestOutcome> => {
     const current = store.get().level;
@@ -1781,10 +1688,9 @@ if (app) {
             : grade.passed
               ? `通过：门数 ${grade.metrics.gate}，延迟 ${grade.metrics.delay}，${grade.stars} 星`
               : `未通过：${grade.failures.length} 个用例不符`;
-        // WHICH CASES, AND BY HOW MUCH. The count alone is a verdict with no
-        // information in it: expected-versus-actual is what turns "wrong" into an
-        // edit. Capped, because a fuzz level can fail hundreds of cases and the
-        // first few carry the pattern.
+        // 哪些用例错、差多少。只给数量，等于一个有结论却没有信息的判定：
+        // 期望值与实际值才把“错了”变成“可以修改”。这里封顶，
+        // 因为模糊测试关卡可能错几百个用例，而前几个就足以体现规律。
         const failures = (grade?.failures ?? []).slice(0, 8).map((failure) => ({
           inputs: failure.inputs,
           expected: failure.expected,
@@ -1822,15 +1728,13 @@ if (app) {
     snapshot: (): BoardSnapshot => {
       const state = store.get();
       const open = state.level;
-      // Only the ERRORS: a half-built circuit is full of dangling-input warnings
-      // by design, and reciting them every step would bury the one thing an agent
-      // needs to know -- whether what it just did made the circuit invalid.
+      // 只取“错误”：半成品电路按设计到处是悬空输入警告，
+      // 每步都复述它们会淹没智能体唯一需要知道的事——它刚做的事是否让电路无效。
       const issues = validateGraph(state.graph, state.registry)
         .filter((issue) => issue.severity === 'error')
         .map((issue) => ({ severity: 'error' as const, message: issue.message.zh }));
-      // What the board reads and publishes: a level's declared pins, or a
-      // sandbox's placed connectors. Read through the one helper so the
-      // assistant's `read_board` names the same pins the sidebar does.
+      // 画板读取与发布的内容：关卡声明的引脚，或沙盒里放置的连接器。
+      // 走同一个辅助函数，让助手的 read_board 命名与侧边栏完全相同的引脚。
       const pins = boardPins(open, state.graph, state.registry);
       return {
         mode: isSandbox(open) ? 'sandbox' : 'level',
@@ -1880,10 +1784,8 @@ if (app) {
           width: pin.width,
           value: vector[pin.id] ?? 0,
         })),
-        // What the circuit is supposed to DRIVE, with whatever the last settle
-        // read there -- the other half of "what does this level want", and the
-        // half a session that could only see its inputs went looking for in the
-        // wrong place.
+        // 电路“应该”驱动什么，以及上一次结算在那里读到的值——
+        // 这是“本关想要什么”的另一半，也是只会看输入的会话曾去错误地方寻找的那一半。
         outputs: pins.outputs.map((pin) => {
           const live = levelOutputs();
           const value = live === null ? undefined : live[pin.id];
@@ -1893,19 +1795,17 @@ if (app) {
         expectsProgram: levelExpectsProgram(open),
       };
     },
-    // The grid is the theme's, not this module's: the agent layer may not import
-    // `ui/`, so the one number it needs is handed to it here.
+    // 网格尺寸来自主题而不是本模块：智能体层不能引入 ui/，
+    // 所以它需要的那个数字在这里传给它。
     snap: (x, y) => ({ x: Math.round(x / GRID) * GRID, y: Math.round(y / GRID) * GRID }),
-    // A level binds its pins to instances named `IN_<pin>` / `OUT`, and the rule
-    // that hands those names out lives in `ui/board/interact.ts` -- the agent gets
-    // the same answer a hand gets, or `null`.
+    // 关卡把引脚绑定到名为 IN_<pin> / OUT 的实例上，而分发这些名字的规则
+    // 住在 ui/board/interact.ts——智能体得到的答案与手操作相同，否则为 null。
     connectorFor: (defId) =>
       levelIoPlacement(store.get().level, store.get().graph, defId) ?? null,
     apply: (command, focus) => {
       stack.push(command, store.get().graph);
-      // Selecting what just changed is what makes a step WATCHABLE: the magenta
-      // ring says which part of the board the last action touched. Not an edit,
-      // so it is not on the undo stack.
+      // 选中刚变化的部分，才让每一步“看得见”：品红描边指出上一次操作碰了画板哪里。
+      // 选中不是编辑，因此不进撤销栈。
       if (focus !== undefined) store.set({ selected: [...focus] });
       onChange();
     },
@@ -1920,9 +1820,8 @@ if (app) {
       return redone;
     },
     select: (ids) => store.set({ selected: [...ids] }),
-    // The wrap is done the way the panel does it: plan first, then the one
-    // command that moves the circuit and the library together. `null` is
-    // `planWrap`'s own refusal, passed through rather than guessed at.
+    // 封装按面板的做法完成：先计划，再用同一条命令一起移动电路与元件库。
+    // null 是 planWrap 自己的拒绝，原样传出而不是猜一个结果。
     wrapSelection: (name) => {
       const { graph, registry: reg, blueprints, selected } = store.get();
       const plan = planWrap(graph, reg, blueprints, selected);
@@ -1944,8 +1843,7 @@ if (app) {
       renameBlueprint(id, { zh: name.zh, en: name.en });
       return true;
     },
-    // The refusal is `deleteBlueprint`'s: it is the same scan that keeps a hand
-    // from deleting a component the board is still using.
+    // 拒绝来自 deleteBlueprint：它用同一次扫描，防止手操作删掉画板还在使用的元件。
     deleteComponent: (id) => deleteBlueprint(id),
     setInput: (pinId, value) => {
       driveTo({ ...vector, [pinId]: value });
@@ -1983,8 +1881,7 @@ if (app) {
     loadCircuit: (text) => {
       const parsed = parseCircuit(text, store.get().blueprints);
       if ('error' in parsed) return { ok: false, error: parsed.error.zh };
-      // The same path the toolbar's 导入 uses, so an imported circuit is treated
-      // identically however it arrived.
+      // 与工具栏的“导入”走同一条路径，因此无论电路怎么来的，导入后的处理完全一致。
       applyImportedFile(text);
       return { ok: true, parts: parsed.graph.instances.length, wires: parsed.graph.wires.length };
     },
@@ -2004,29 +1901,26 @@ if (app) {
         agentConfig = null;
         agentPanel?.render();
       },
-      // The secondary sidebar is a dock, not a floating card: opening the panel
-      // claims its column, closing it gives the column back to the board -- and
-      // the choice is remembered with the other dock measurements.
+      // 次侧边栏是一个停靠区，不是浮动卡片：打开面板就占用这一列，
+      // 关闭就把这一列还给画板——这个选择与其他停靠区尺寸一起被记住。
       onVisibility: (open) => setLayout({ secondaryCollapsed: !open }),
     },
   );
-  // A saved layout may have the assistant's dock open. The panel itself starts
-  // hidden (nothing opens on a first run), so open it now rather than leaving an
-  // empty column waiting for a rail click.
+  // 存档的布局可能把助手的停靠区留成打开状态。面板自身默认隐藏
+  // （首次运行什么都不打开），所以这里直接打开它，而不是留一列空白等玩家去点活动栏。
   if (!layout.secondaryCollapsed) agentPanel.open();
 
   /**
-   * A click on an input connector nudges what it drives.
+   * 点击输入连接器会微调它驱动的值。
    *
-   * One bit toggles; a wider pin counts up and wraps, because a click is a nudge
-   * and not a way to type a byte -- exact values are the readout panel's job, and
-   * it has a cell per bit. Doing nothing for every other part is deliberate: a
-   * click on a gate means select, and always has.
+   * 1 位的翻转；更宽的引脚则递增并回绕，因为点击是“推一下”，
+   * 不是输入一个字节的方式——精确值由读数面板负责，它有每一位的单元格。
+   * 对其他元件什么都不做是刻意的：点门就是选中，一直如此。
    *
-   * THE PIN LOOKUP IS `nudgedInput`'s, not a slice of the instance id: a level's
-   * pin is `IN_<pinId>`, a sandbox connector's pin id IS the instance id, and only
-   * `boardPins` knows which board is open. Resolving the name here is what left a
-   * sandbox `IN_1` unclickable while a level's arrow worked.
+   * 引脚查找交给 nudgedInput，而不是从实例 id 里切字符串：
+   * 关卡引脚是 IN_<pinId>，沙盒连接器的引脚 id 就是实例 id，只有 boardPins
+   * 知道当前开的是哪种画板。此前在这里直接解析名字，导致沙盒的 IN_1 点不动，
+   * 而关卡里的箭头却能点。
    */
   const onPickInstance = (instId: string): void => {
     const state = store.get();
@@ -2049,23 +1943,19 @@ if (app) {
     },
   });
 
-  // Render on state change only: a continuous rAF loop would repaint a static
-  // board 60 times a second forever. Panning, zooming and dragging all go
-  // through store.set, so they still repaint every frame they change something.
-  // The bench rides along: its panels read the store (the level's text, the
-  // verdict) and are not subscribers of their own, so one edit repaints all three
-  // in the order they are laid out over the board.
+  // 只在状态变化时渲染：持续的 rAF 循环会让一张静态画板永远每秒重画 60 次。
+  // 平移、缩放和拖拽都经过 store.set，因此它们在改变东西的每一帧仍会重绘。
+  // 工作台也一起走：它的面板读 store（关卡文本、判定结果）而自己不是订阅者，
+  // 于是一次编辑就按它们在画板上的布局顺序重绘三者。
   store.subscribe(() => {
     paint();
     refreshBench();
-    // The toolbar's wrap button counts the selection, and the marquee commits it
-    // through the store -- so the count has to follow a selection change, which is
-    // not a board edit and so does not come through `onChange`.
+    // 工具栏的封装按钮会数选中数量，而框选是通过 store 提交选中的——
+    // 所以数量必须跟着选择变化走，而选择变化不是画板编辑，不会经过 onChange。
     paintTools();
-    // THE SANDBOX CIRCUIT IS SAVED AS IT IS DRAWN, and only when the CIRCUIT
-    // changed: the store notifies on every change, including each frame of a pan
-    // and every click that selects something, and neither of those is worth a
-    // `localStorage` write. The signature is what tells the two apart.
+    // 沙盒电路边画边存，而且只在电路变化时存：store 对每次变更都发通知，
+    // 包括平移的每一帧和每次点击选中，这两者都不值得写一次 localStorage。
+    // 用签名来区分两者。
     if (isSandbox(store.get().level)) {
       const graph = store.get().graph;
       const signature = circuitSignature(graph);
@@ -2077,32 +1967,29 @@ if (app) {
   });
   globalThis.addEventListener('resize', paint);
 
-  // The app opens on the resume point's level, so its briefing is the first
-  // thing the player sees.
+  // 应用打开在存档的续玩关卡，因此它的简报是玩家看到的第一件东西。
   rebuild();
   showBriefing(narrativeFor(level.id).before);
   paint();
   refreshPanels();
   mountBench();
-  // ...and the level it opened on gets the same framing `openLevel` gives it.
+  // ……并且启动所在的那个关卡，也会得到 openLevel 给它的同样取景。
   if (level.board) fitView();
 }
 
 /**
- * The briefing overlay: a level's `before` text on arrival, its `after` text
- * when a graded attempt passes. It is pure narrative -- it never grades, never
- * writes to the store and never reaches the level data, so it cannot influence
- * a result.
+ * 简报浮层：到达关卡时显示 before 文本，判定通过后显示 after 文本。
+ * 它纯粹是叙事——从不判定、从不写 store、也从不接触关卡数据，
+ * 因此不可能影响任何判定结果。
  *
- * Only one is ever on screen: a second call replaces the first rather than
- * stacking a panel the player would have to dismiss twice.
+ * 屏幕上永远只有一个：第二次调用会替换第一个，而不是叠出一个要关两次的面板。
  */
 function showBriefing(text: { zh: string; en: string }): void {
   document.querySelector('.briefing')?.remove();
   const panel = document.createElement('div');
   panel.className = 'briefing';
-  // The overlay covers the whole board, so it has to say what it is: without a
-  // label it is indistinguishable from a dialog that wants an answer.
+  // 浮层盖住整块画板，因此必须说明自己是什么：没有标签的话，
+  // 它看起来和一个“等你回答”的对话框没有区别。
   const tag = document.createElement('div');
   tag.className = 'briefing-tag';
   tag.textContent = '任务简报';

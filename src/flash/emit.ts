@@ -13,43 +13,42 @@ import {
 } from './image';
 
 /**
- * A `ProgramImage` as a self-contained Arduino sketch.
+ * 把 `ProgramImage` 变成一份自包含的 Arduino 草图。
  *
- * The sketch is a TABLE-DRIVEN interpreter, not one statement per gate. On an
- * Uno that is the difference between fitting and not: 900 unrolled NANDs compile
- * to ~62 KB against a 32 KB ceiling, while the same 900 nodes as 14-byte
- * descriptors plus a ~2 KB interpreter fit with room to spare. The cost is
- * speed, and it is paid only while the circuit is settling, not while the player
- * draws.
+ * 草图是一个**表驱动解释器**，不是每个门一条语句。在 Uno 上这就是"放得下"与
+ * "放不下"的差别：900 个展开的 NAND 编译后约 62 KB，超过 32 KB 上限；而同样
+ * 900 个节点用 14 字节描述符加约 2 KB 解释器，还能余下不少空间。代价是速度，
+ * 而且只在电路结算时付出，玩家画图时没有这个开销。
  *
- * WHAT THE SKETCH MUST GET RIGHT, and the test that pins each one:
+ * 草图必须做对的几件事，以及各自钉住它的测试：
  *
- *  - Storage is sampled for every edge before any edge commits (`tcTick`), so two
- *    memories in series shift one stage per tick instead of racing through both.
- *  - An acyclic circuit is evaluated in dependency order in place; only a circuit
- *    with a combinational cycle pays for a second buffer and Jacobi sweeps, which
- *    is the kernel's own settle rule (`orderNodes` decides which).
- *  - Connector inputs are written into the settle buffer by `tcApplySrc` rather
- *    than poked at one slot in one buffer, so a Jacobi swap cannot lose them.
- *  - `boot` and `reset` publish the storage state before the first sweep, exactly
- *    as `Simulation.reset` does.
+ *  - 存储在每个时钟沿先全部采样、再统一提交（`tcTick`），所以两个串联的存储器
+ *    每个节拍只移动一级，而不是同一拍里连穿两级。
+ *  - 无环电路按依赖顺序原地求值；只有组合环电路才付出第二块缓冲与 Jacobi 迭代的
+ *    代价，这正是内核自己的结算规则（由 `orderNodes` 决定走哪条）。
+ *  - 连接器输入由 `tcApplySrc` 写进结算缓冲，而不是往某一块缓冲的某个槽位里戳，
+ *    这样 Jacobi 的双缓冲交换不会把它们丢掉。
+ *  - `setup` 依赖全局数组的零初始化，`tcReset` 显式清零，两者都在第一轮结算前把
+ *    槽位、存储与输入置 0；于是第 0 帧显示的就是复位后的状态，与页面里
+ *    `Simulation.reset` 的语义一致。
  *
- * The line protocol is documented at `protocol.ts`; the sketch half is emitted
- * here because it must stay in step with the arrays it addresses.
+ * 串口线协议见 `protocol.ts`；草图这一半在本文件生成，因为它必须与它寻址的那些
+ * 数组保持同步。
  */
 
-/** The serial line protocol's baud rate. */
+/** 串口线协议的波特率。 */
 export const SKETCH_BAUD = 115_200;
 
-/** Longest command line the firmware buffers, including the newline. */
+/** 固件缓冲的最长命令行长度，含结尾换行。 */
 export const SKETCH_LINE_MAX = 48;
 
+/** 生成草图时的可选参数。 */
 export interface SketchOptions {
-  /** A name for the header comment and the download filename. */
+  /** 用于文件头注释与下载文件名的名称。 */
   readonly name?: string;
 }
 
-/** A C++ integer literal for a byte table, `width` per line. */
+/** 把字节表渲染成 C++ 整型字面量：每行 `perLine` 个，值先与 0xFF 相与。 */
 function bytesLiteral(values: readonly number[], indent: string, perLine = 16): string[] {
   const lines: string[] = [];
   for (let at = 0; at < values.length; at += perLine) {
@@ -59,7 +58,7 @@ function bytesLiteral(values: readonly number[], indent: string, perLine = 16): 
   return lines;
 }
 
-/** `uint16_t` and `uint8_t` array initialisers, one entry per line for diffing. */
+/** 渲染 `uint16_t`/`uint8_t` 数组初始化器：每行固定个数，便于 diff。 */
 function arrayLiteral<T>(
   values: readonly T[],
   indent: string,
@@ -74,7 +73,10 @@ function arrayLiteral<T>(
   return lines;
 }
 
-/** The four input slots of a node descriptor, zero-padded to the struct's shape. */
+/**
+ * 一个节点描述符：输出槽、四个输入槽（按结构体形状补零）、种类、输入个数、
+ * 表偏移与状态索引。`table` 传的是偏移量，不是 `tables` 的下标。
+ */
 function nodeLiteral(
   node: ImageNode,
   tableOffset: number,
@@ -87,6 +89,7 @@ function nodeLiteral(
   return `{${node.out},${a},${b},${c},${kind},${node.inputs.length},${tableOffset},${state}}`;
 }
 
+/** 一个存储元件描述符：状态索引、输入个数、三个输入槽与转移表偏移。 */
 function edgeLiteral(edge: ImageEdge, tableOffset: number): string {
   const a = edge.inputs[0] ?? 0;
   const b = edge.inputs[1] ?? 0;
@@ -94,23 +97,25 @@ function edgeLiteral(edge: ImageEdge, tableOffset: number): string {
   return `{${edge.state},${edge.inputs.length},${a},${b},${c},${tableOffset}}`;
 }
 
+/** 一个源描述符：目标槽位、连接器下标与位号。 */
 function sourceLiteral(source: ImageSource): string {
   return `{${source.out},${source.ext},${source.bit}}`;
 }
 
+/** 把连接器列表渲染成一行 `id[width]` 注释，写进草图的文件头。 */
 function connectorComment(pins: readonly ConnectorPin[]): string {
   return pins.map((pin) => `${pin.id}[${pin.width}]`).join(' ');
 }
 
 /**
- * The sketch text.
+ * 生成整份草图文本。
  *
- * Deterministic: the lines depend only on the image (node order is already
- * fixed), so two builds of one circuit are byte-identical and a test can check
- * the generator without a snapshot churn on every table tweak.
+ * 输出是确定性的：内容只取决于映像（节点顺序已经固定），因此同一电路两次构建
+ * 逐字节相同，测试可以直接比对生成结果，而不会在每次调表时发生快照抖动。
  */
 export function emitSketch(image: ProgramImage, options: SketchOptions = {}): string {
   const name = options.name ?? `tc_${image.level}`;
+  // 先把所有表首尾相接，并记下每张表的起始偏移：固件只按偏移量索引，省掉一次下标换算。
   const tableOffsets: number[] = [];
   let totalTableBytes = 0;
   for (const table of image.tables) {
@@ -119,6 +124,8 @@ export function emitSketch(image: ProgramImage, options: SketchOptions = {}): st
   }
   const tableBytes: number[] = [];
   for (const table of image.tables) tableBytes.push(...table);
+  // C++ 不允许零长数组，所以每个数组长度至少写 1，空表时补一个占位元素；
+  // 各 COUNT 宏仍用真实数量，空表的循环一次也不会执行。
   const tableLength = Math.max(1, totalTableBytes);
   const slotBytes = Math.max(1, Math.ceil(image.slots / 8));
   const stateCount = Math.max(1, image.stateCount);
@@ -190,8 +197,8 @@ export function emitSketch(image: ProgramImage, options: SketchOptions = {}): st
     '  uint8_t kind;',
     '  uint8_t nIn;',
     '  uint16_t table;',
-    // The index of the storage element, not its value (that lives one byte per
-    // state in TC_STATE): a circuit may hold more than 255 of them.
+    // 这里存的是存储元件的下标，不是它的值（值由 TC_STATE 每状态一字节保存）：
+    // 一个电路允许有超过 255 个存储元件，所以下标用 uint16_t。
     '  uint16_t state;',
     '} __attribute__((packed));',
     'enum { TC_TAB, TC_COPY, TC_PUB };',
@@ -236,7 +243,7 @@ export function emitSketch(image: ProgramImage, options: SketchOptions = {}): st
     '',
   );
 
-  // The tables, concatenated. `table` fields hold offsets, not indices.
+  // 所有表拼接成一个大数组；描述符里的 `table` 字段存的是偏移量而非下标。
   push(
     `static const uint8_t TC_TABLES[${tableLength}] PROGMEM = {`,
     ...bytesLiteral(tableBytes, '  '),
@@ -287,6 +294,7 @@ export function emitSketch(image: ProgramImage, options: SketchOptions = {}): st
     `static uint8_t TC_S[TC_SLOT_BYTES];`,
   );
 
+  // Jacobi 模式才需要第二块缓冲；DAG 模式原地求值，省下一整块槽位数组的 RAM。
   if (jacobi) push(`static uint8_t TC_S2[TC_SLOT_BYTES];`);
   push(
     `static uint8_t *tcCur = TC_S;`,
@@ -512,10 +520,9 @@ export function emitSketch(image: ProgramImage, options: SketchOptions = {}): st
     '',
     'void setup() {',
     '  Serial.begin(TC_BAUD);',
-    // The assigned pins are configured before the first settle: outputs are
-    // driven low so a mapping never leaves a pin floating, and inputs use the
-    // internal pull-up, which is what makes a button wired to GND read HIGH when
-    // released and LOW when pressed (an unconnected input reads HIGH).
+    // 在第一次结算之前配置好被分配的引脚：输出先驱动为低，映射过的引脚就不会
+    // 悬空；输入开启内部上拉，于是接在 GND 上的按键松开时读到 HIGH、按下时读到
+    // LOW（未接的输入默认也是 HIGH）。
     '  for (uint8_t k = 0; k < TC_PIN_OUT_COUNT; k++) {',
     '    TcPinOut p;',
     '    memcpy_P(&p, &TC_PIN_OUT[k], sizeof p);',

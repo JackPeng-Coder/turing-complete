@@ -1,21 +1,22 @@
 /**
- * Minimal observable state container.
+ * 极简的可观察状态容器。
  *
- * This is the app layer's whole state mechanism: no state library, no
- * immutability helper (Phase 0 ships zero runtime dependencies). The container
- * stays generic; the one concrete state this app has, `AppState`, is declared
- * below and passed in here as the type parameter:
+ * 这是应用层全部的状态机制：没有状态库，没有不可变数据工具（第一阶段零运行时
+ * 依赖）。容器保持泛型；本应用唯一的具体状态 `AppState` 在下面声明，再作为类型
+ * 参数传进来：
  *
  * ```ts
  * const store = createStore<AppState>(appState);
  * ```
  *
- * State is replaced, never edited: `set` builds a new top-level object. Nested
- * values are the caller's business -- `core/graph.ts` edits `g.instances` and
- * `g.wires` in place through `addInstance` / `connect`, and reassigns them
- * through `removeInstance` / `disconnect`, so notification is UNCONDITIONAL.
- * Suppressing it on an unchanged reference would silently swallow the re-render
- * for an in-place edit; one redundant render is the cheaper mistake.
+ * 状态是"替换"而不是"编辑"：`set` 构造一个新的顶层对象。嵌套值由调用方自己
+ * 负责——`core/graph.ts` 会通过 `addInstance` / `connect` 原地修改 `g.instances`
+ * 与 `g.wires`，又通过 `removeInstance` / `disconnect` 重新赋值数组，所以通知是
+ * "无条件"的。若在引用没变时压掉通知，就等于把一次原地编辑后的重绘悄悄吞掉；
+ * 多渲染一次是代价更小的错误。
+ *
+ * 依赖方向：本模块的 import 全是类型 import，因此不会把下层拉进运行时依赖图，
+ * 也不存在反向依赖。
  */
 import type { Graph } from '../core/graph';
 import type { Registry } from '../core/registry';
@@ -25,29 +26,27 @@ import type { LevelSpec } from '../levels/spec';
 import type { Progress } from './progress';
 import type { Camera, Point } from './viewport';
 
-/** What the pointer is currently doing on the board. */
+/** 指针此刻在画板上做什么。 */
 export type DragState =
   | { kind: 'instance'; ids: string[]; offsetX: number; offsetY: number }
   /**
-   * A wire being pulled out of an output pin.
+   * 正从某个输出引脚拉出的导线。
    *
-   * `to` is where the pointer is, in world units, or `null` before it has moved.
-   * It lives here rather than in the input module because the board PAINTS it:
-   * a wire that appears only once you let go gives no feedback about what you
-   * are about to connect, which is the whole of dragging one.
+   * `to` 是指针当前所在的世界坐标；指针还没动过时为 `null`。它放在这里而不是
+   * 输入模块里，因为画板要"画"它：一条松开鼠标才出现的导线，无法告诉玩家他
+   * 正要连到哪里，而"看到自己在连什么"正是拖出一条导线的全部意义。
    */
   | { kind: 'wire'; fromInst: string; fromPort: string; to: Point | null }
   | { kind: 'pan'; lastX: number; lastY: number }
   /**
-   * The band being dragged across the board with Ctrl held.
+   * 按住 Ctrl 在画板上拉出的框选矩形。
    *
-   * It lives here because the board PAINTS it: a selection rectangle that only
-   * appeared once you let go would give no feedback about what you are about to
-   * select, which is the whole of dragging one.
+   * 它放在这里，同样是因为画板要画它：一个松手才出现的选择框，无法告诉玩家
+   * 他正要选中什么，而"看到自己在选什么"正是框选的全部意义。
    */
   | { kind: 'marquee'; x0: number; y0: number; x1: number; y1: number };
 
-/** The application's whole observable state. */
+/** 应用全部的可观察状态。 */
 export interface AppState {
   level: LevelSpec;
   graph: Graph;
@@ -57,102 +56,98 @@ export interface AppState {
   selected: string[];
   dragging: DragState | null;
   /**
-   * Whether `?dev=1` asked for developer mode: every level reachable and every
-   * part a level lists offered by its palette. It never writes progress.
-   * `app/dev.ts` owns the rule; the two gates are in `app/progress.ts`.
+   * `?dev=1` 是否要求了开发者模式：所有关卡可达，并且关卡列出的每个元件都
+   * 出现在它的托盘里。它从不写进度。`app/dev.ts` 拥有这条规则；两个闸门在
+   * `app/progress.ts` 里。
    */
   dev: boolean;
   /**
-   * The part armed in the palette, waiting to be dropped, or `null`.
+   * 元件托盘里已拿起、等待放到画板上的元件；没有则为 `null`。
    *
-   * APPLICATION STATE, not a flag on the canvas: arming changes what a click on
-   * the board does, it lights the part's slot in the palette, and it puts a
-   * translucent copy of the part under the pointer. It used to live in
-   * `canvas.dataset.pendingDef`, which only the board could read -- so the
-   * palette had no way to show which of its buttons was live.
+   * 这是应用状态，而不是画布上的一个标志：拿起会改变"点击画板"的含义、点亮
+   * 托盘里对应的格子，并在指针下方显示元件的半透明副本。它曾放在
+   * `canvas.dataset.pendingDef` 里，而那里只有画板能读——于是托盘无法显示
+   * 自己哪个按钮处于激活状态。
    */
   armed: string | null;
   /**
-   * The player's program text, keyed by level id. `''` for a level never typed
-   * into.
+   * 玩家写的程序文本，以关卡 id 为键。从未输入过的关卡为 `''`。
    *
-   * APP STATE AND NOT A FIELD ON THE GRAPH, because a program is not part of the
-   * circuit: it is what the player is writing, it survives every board edit, and
-   * it is saved per level (`Progress.programs`) so reopening a level restores it.
-   * It is read HERE rather than passed around at the call sites because two
-   * different paths grade a circuit -- the test run (`finishTest`) and the
-   * measurement after every edit (`measure`) -- and both have to hand the program
-   * channel the same text, or a level would pass one and fail the other.
+   * 它是应用状态，而不是图上的字段，因为程序不是电路的一部分：它是玩家正在
+   * 写的东西，在每次画板编辑后都保留，并且按关卡保存（`Progress.programs`），
+   * 于是重开关卡会恢复它。之所以在这里读、而不是在每个调用点传参，是因为有
+   * 两条路径会给电路评分——测试运行（`finishTest`）与每次编辑后的测量
+   * （`measure`）——两者必须把同一段文本交给程序通道，否则同一关会出现一条
+   * 路径通过、另一条路径失败。
    *
-   * A `Record` with `''` for the untyped case rather than an optional entry: the
-   * checker already reads an empty text as `missing-program`, so "never typed
-   * here" needs no separate representation -- and one text per level id means the
-   * map cannot disagree with itself.
+   * 用 `Record` 加 `''` 表示未输入，而不是可选条目：检查器本来就把空文本读作
+   * `missing-program`，所以"从未在这里输入过"不需要另一种表示；而每个关卡 id
+   * 只对应一段文本，映射也不可能自相矛盾。
    */
   programs: Record<string, string>;
   /**
-   * The player's own components, as the palette and the kernel see them.
+   * 玩家自造的元件，按元件托盘和内核看到的样子。
    *
-   * IN THE STORE, not only in `Progress`, because the palette is a view of it and
-   * a view needs to be told when its subject changes: wrapping a selection adds an
-   * entry and a rename replaces one, and both are read from `store.get()` at
-   * render time. `Progress.blueprints` is the durable copy this mirrors (exactly
-   * as `programs` mirrors `Progress.programs`), and `main.ts` keeps the two in step
-   * in one place.
+   * 放在 store 里而不只放在 `Progress` 里，是因为托盘是它的一种"视图"，而视图
+   * 需要被通知它的对象变了：把选中区域封装会新增条目、重命名会替换条目，两者
+   * 都在渲染时从 `store.get()` 读出。`Progress.blueprints` 是它所镜像的持久
+   * 副本（与 `programs` 镜像 `Progress.programs` 完全一样），`main.ts` 在一个
+   * 地方让两者保持同步。
    */
   blueprints: BlueprintLibrary;
   /**
-   * The component whose BODY is open on the board, or `null` for the board itself.
+   * 正打开其"内部"的元件 id；正在看画板本身时为 `null`。
    *
-   * EDITING A COMPONENT IS EDITING A GRAPH, and the board already edits graphs --
-   * the camera, the marquee, the undo stack, the palette all work on whatever
-   * `graph` holds. So "open a component" is a graph swap rather than a second
-   * editor, and this field is what every panel reads to know which graph that is:
-   * the breadcrumb shows it, the toolbar wraps into it, and leaving restores the
-   * board the player came from.
+   * 编辑一个元件就是编辑一张图，而画板本来就在编辑图——相机、框选、撤销栈、
+   * 元件托盘全都作用于 `graph` 当前持有的东西。所以"打开一个元件"是一次图的
+   * 切换，而不是第二个编辑器；这个字段就是每个面板用来知道"当前是哪张图"的：
+   * 面包屑显示它，工具栏往它里面封装，离开时恢复玩家来时的画板。
    */
   editing: string | null;
   /**
-   * What the circuit on the board costs, measured as it is edited.
+   * 画板上电路的成本，随编辑实时测量。
    *
-   * A MEASUREMENT, NOT A VERDICT, and it is a separate field from `lastGrade`
-   * for exactly that reason. The top bar has always shown the gate count and the
-   * delay while a player builds -- that is the original's own readout and it is
-   * what makes a three-star target something to aim at rather than a surprise --
-   * but a level that announced "未通过" after every wire was judging a circuit
-   * that was still being drawn. Measuring is continuous; judging waits for the
-   * test run.
+   * 这是"测量"，不是"判定"，它和 `lastGrade` 分成两个字段正是因为这个缘故。
+   * 顶栏在玩家搭建时一直显示门数与延迟——那是原作自己的读数，也是让三星目标
+   * 成为"可以瞄准的靶子"、而不是"事后才揭晓的惊喜"的原因——但一个每接一根
+   * 导线就宣布"未通过"的关卡，是在对一个尚在绘制中的电路下判决。测量是连续
+   * 的；判定要等测试运行。
    */
   metrics: Metrics | null;
   /**
-   * The result of the last TEST RUN, or `null` until the player asks for one.
+   * 最近一次"测试运行"的结果；玩家还没请求过测试时为 `null`。
    *
-   * Cleared by every edit, because a verdict reached before the last wire was
-   * moved describes a circuit that is no longer on the board.
+   * 每次编辑都会清空它，因为在最后一根导线移动之前得出的判决，描述的是已经
+   * 不在画板上的电路。
    */
   lastGrade: GradeResult | null;
   status: { zh: string; en: string } | null;
 }
 
 export interface Store<S extends object> {
-  /** Current state; treat it as read-only. */
+  /** 当前状态；请把它当作只读。 */
   get(): S;
-  /** Shallow-merges `patch` and notifies. */
+  /** 浅合并 `patch` 并通知订阅者。 */
   set(patch: Partial<S>): void;
-  /** Replaces the state with `fn`'s result and notifies. */
+  /** 用 `fn` 的结果替换状态并通知订阅者。 */
   update(fn: (state: S) => S): void;
-  /** Returns an idempotent unsubscribe. */
+  /** 返回一个幂等的取消订阅函数。 */
   subscribe(listener: (state: S) => void): () => void;
 }
 
+/**
+ * 创建一个最小可观察容器。
+ *
+ * `initial` 是初始状态；容器不深拷贝、也不冻结它，只是持有引用。返回的 `Store`
+ * 不依赖任何全局状态，因此同一个页面里可以并存多个 store（测试中常见）。
+ */
 export function createStore<S extends object>(initial: S): Store<S> {
   let state = initial;
   const listeners = new Set<(state: S) => void>();
 
   /**
-   * Synchronous, in subscription order. Iterating a snapshot with a live
-   * membership check means a listener may unsubscribe itself or another
-   * listener from inside the notification without skewing the round.
+   * 同步通知，按订阅顺序。遍历的是快照，并对每个监听者检查它是否仍在集合里，
+   * 这意味着监听者可以在通知过程中取消订阅自己或别人，而不会打乱这一轮遍历。
    */
   const emit = (): void => {
     for (const listener of [...listeners]) {

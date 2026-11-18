@@ -1,53 +1,52 @@
 /**
- * The agent's own settings: where the model lives and what it is called.
+ * 智能体自身的设置：模型接口在哪里、用哪个模型名。
  *
- * STORED UNDER ITS OWN KEY, exactly like the save and the sandbox circuit are.
- * `tc.progress.v1` is the player's campaign and `tc.sandbox.v1` is one circuit;
- * an API key is neither, and folding it into the save would mean exporting a
- * save file hands someone your key. A third key keeps that from being possible.
+ * 用一个单独的 localStorage 键保存，和进度、沙盒电路分开。
+ * tc.progress.v1 是玩家的战役进度，tc.sandbox.v1 是一块电路；
+ * API key 两者都不是——如果混进存档，玩家把存档发给别人，就等于把 key 也发出去了。
+ * 因此这里用第三个键，从结构上避免这件事发生。
  *
- * THE KEY IS IN `localStorage`, IN PLAIN TEXT, AND THE SETTINGS PANEL SAYS SO.
- * There is nowhere else to put it: this app is a static bundle with no server,
- * which is the same reason there is no credential store to defer to. A key that
- * lives only in memory would be re-typed on every reload, which is not what
- * "首次启动时自定义 API 信息" asks for. The honest trade is stated on screen
- * rather than hidden here.
+ * key 以明文放在 localStorage 里，设置面板上也如实写明。
+ * 没有别的地方可放：本应用是一个纯静态包、没有自己的服务器，
+ * 也就没有可托付的凭据存储。只放内存的话每次刷新都要重新输入，
+ * 这不满足「首次启动时自定义 API 信息」的要求；
+ * 与其把权衡藏起来，不如在界面上讲清楚。
  *
- * NOTHING IN THIS FILE MAY THROW. `localStorage` is absent in the node test
- * environment and can refuse writes in a private window; an agent with no
- * settings saved is a normal state (the panel says so), not a crash.
+ * 本文件里的函数一律不抛异常。
+ * node 测试环境没有 localStorage，隐私模式也可能拒绝写入；
+ * 「还没配置」是一种正常状态（面板会提示），不是崩溃。
  */
 
-/** Where the settings live. Versioned like the other two keys. */
+/** 设置保存的位置。与另外两个键一样带版本号。 */
 export const AGENT_KEY = 'tc.agent.v1';
 
-/** What a fresh install offers: the API and the model this project is built around. */
+/** 全新安装时的默认值：本项目开发时使用的接口地址与模型。 */
 export const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 export const DEFAULT_MODEL = 'deepseek-flash';
 
 /**
- * Model calls one request may make before the run stops with 'capped'.
+ * 一次请求里最多调用几次模型；用完就以 'capped' 结束本次运行。
  *
- * A BUDGET, NOT A LIMIT ON WHAT IS POSSIBLE. A level in this game is a handful of
- * gates, so a turn that has not finished in sixteen rounds has misunderstood the
- * request; the player can continue it with one button, or raise the budget in the
- * settings. `0` means "no cap", which is offered because a sandbox that needs
- * forty parts is a legitimate thing to ask for.
+ * 这是预算，不是能力上限。本游戏一关只有几个门，
+ * 十六轮还没做完，通常说明这次请求被误解了；
+ * 玩家按一个按钮就能继续，也可以在设置里调大预算。
+ * 0 表示「不设上限」——沙盒里确实可能需要摆四十个元件，那是合理需求。
  */
 export const DEFAULT_MAX_STEPS = 16;
 
+/** 智能体的完整设置：接口地址、key、模型名与步数预算。 */
 export interface AgentConfig {
-  /** Where the API is, e.g. `https://api.deepseek.com`. */
+  /** API 地址，例如 https://api.deepseek.com。 */
   readonly baseUrl: string;
-  /** The bearer token. Plain text, in `localStorage`, on purpose -- see the header. */
+  /** Bearer token。明文存在 localStorage 里，原因见文件头。 */
   readonly apiKey: string;
-  /** The model name to ask for, e.g. `deepseek-flash`. */
+  /** 请求的模型名，例如 deepseek-flash。 */
   readonly model: string;
-  /** Model calls one request may make; `0` means no cap. See `DEFAULT_MAX_STEPS`. */
+  /** 一次请求最多调用几次模型；0 表示不设上限，见 DEFAULT_MAX_STEPS。 */
   readonly maxSteps: number;
 }
 
-/** A blank configuration, as the setup panel opens on it. */
+/** 空白配置：设置面板刚打开时看到的就是它。 */
 export function emptyConfig(): AgentConfig {
   return {
     baseUrl: DEFAULT_BASE_URL,
@@ -58,10 +57,10 @@ export function emptyConfig(): AgentConfig {
 }
 
 /**
- * Whether this configuration is complete enough to send a request.
+ * 这份配置是否完整到足以发一次请求。
  *
- * A PURE PREDICATE, so the panel and the send button ask the same question and
- * cannot disagree about what "configured" means.
+ * 写成纯谓词，是为了让设置面板和发送按钮问同一个问题，
+ * 不会出现「面板说能发、按钮说不能」的分歧。
  */
 export function isConfigured(config: AgentConfig | null): config is AgentConfig {
   return (
@@ -73,12 +72,11 @@ export function isConfigured(config: AgentConfig | null): config is AgentConfig 
 }
 
 /**
- * The endpoint a base URL means.
+ * 由一个 base URL 推出实际请求的端点。
  *
- * People paste three different things into a field like this -- the host, the
- * host with `/v1`, or the whole endpoint copied out of a curl example -- and all
- * three should work rather than one being right and the others failing at
- * request time with a 404 that says nothing useful.
+ * 用户往这种输入框里贴的东西通常有三种：主机名、主机名加 /v1、
+ * 或者从 curl 例子里整段复制的端点。三种都应该能用，
+ * 而不是只有一种「正确」、其余在请求时收到一个说不清问题的 404。
  */
 export function chatUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '');
@@ -88,11 +86,11 @@ export function chatUrl(baseUrl: string): string {
 }
 
 /**
- * Reads an untrusted payload back into a configuration, or `null` if unusable.
+ * 把不可信的存档数据读回配置；无法使用时返回 null。
  *
- * AN OLDER PAYLOAD MAY CARRY FIELDS THIS BUILD NO LONGER HAS (`stepMs`, `seen`);
- * they are ignored rather than rejected, so a browser that configured the agent
- * before a change keeps its endpoint, key and model.
+ * 旧版本的存档可能带着本版本已经删除的字段（stepMs、seen）：
+ * 这里选择忽略它们而不是整份拒绝，
+ * 这样在改版前配置过智能体的浏览器仍能保留它的地址、key 和模型。
  */
 export function normalizeConfig(raw: unknown): AgentConfig | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
@@ -109,7 +107,7 @@ export function normalizeConfig(raw: unknown): AgentConfig | null {
   return { baseUrl, apiKey, model, maxSteps };
 }
 
-/** Best-effort load; absent, corrupt or unreadable all read as "not set up yet". */
+/** 尽力读取；不存在、损坏、读不了都等同于「还没配置」。 */
 export function loadAgentConfig(): AgentConfig | null {
   try {
     const raw = globalThis.localStorage?.getItem(AGENT_KEY);
@@ -120,20 +118,20 @@ export function loadAgentConfig(): AgentConfig | null {
   }
 }
 
-/** Best-effort save; without a store the settings live for this session only. */
+/** 尽力保存；没有可用存储时，设置只活在本会话里。 */
 export function saveAgentConfig(config: AgentConfig): void {
   try {
     globalThis.localStorage?.setItem(AGENT_KEY, JSON.stringify({ version: 1, ...config }));
   } catch {
-    /* storage unavailable (private mode, tests): settings stay in memory */
+    /* 没有可用存储（隐私模式、测试环境）：设置只保留在内存里 */
   }
 }
 
-/** Forgets the stored settings, key included. */
+/** 忘掉已保存的设置，key 也一起忘掉。 */
 export function clearAgentConfig(): void {
   try {
     globalThis.localStorage?.removeItem(AGENT_KEY);
   } catch {
-    /* nothing to forget if there is no store */
+    /* 本来就没有存储，也就没什么可忘的 */
   }
 }

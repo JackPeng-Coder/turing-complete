@@ -1,3 +1,9 @@
+/**
+ * 通关对话框：关卡解锁了什么、电路代价多少，以及继续前进的入口。
+ *
+ * 它只负责渲染，是否显示由调用方决定；三星时多一枚奖杯。
+ * 尾声文本来自 `ui/narrative.ts`，颜色来自 `ui/theme.ts`。
+ */
 import type { ComponentDef, Registry } from '../core/registry';
 import type { GradeResult } from '../levels/grader';
 import type { LevelSpec } from '../levels/spec';
@@ -5,27 +11,24 @@ import { narrativeFor } from './narrative';
 import { THEME } from './theme';
 
 export interface ResultOptions {
-  /** Stay on this level and close the dialog. */
+  /** 留在本关并关闭对话框。 */
   onContinue(): void;
-  /** Open the next level. */
+  /** 打开下一关。 */
   onNext(): void;
-  /** False on the last level, where the button is left out rather than dead. */
+  /** 最后一关为 false：此时按钮直接不画，而不是画成禁用。 */
   hasNext: boolean;
 }
 
 /**
- * The pass dialog, with the original's own contents: what the level unlocked,
- * a summary of what the circuit cost, and a way onward.
+ * 通关对话框，沿用原作的内容构成：本关解锁了什么、电路代价的小结，以及继续前进的方式。
  *
- * IT IS SHOWN ONCE PER VISIT. It used to be the level's epilogue, re-shown by
- * every `regrade()` that still passed -- which is every edit after the first
- * pass, so the dialog reappeared on every click. Whether to show it is now the
- * caller's decision (`main.ts` shows it on the first pass of a visit and never
- * again), and this module only renders.
+ * 每次访问只显示一次。它曾经是关卡的尾声，每次仍然通过的 `regrade()` 都会重放——
+ * 也就是首次通关之后的每次编辑都会重放，于是对话框每点一下就重新出现。
+ * 现在是否显示由调用方决定（`main.ts` 在本次访问首次通关时显示，之后不再显示），
+ * 本模块只负责渲染。
  *
- * A trophy appears for three stars and nothing else does: a level that passed
- * with one star has already been told it can do better by the star count in the
- * status bar, and a badge for every outcome would mean a badge for nothing.
+ * 只有三星才出现奖杯，别的什么都不出现：一星通过的关卡已经由状态栏的星数告诉玩家可以更好，
+ * 而每种结果都发一枚徽章，等于给「什么都没达成」也发徽章。
  */
 export function showResult(
   level: LevelSpec,
@@ -43,7 +46,7 @@ export function showResult(
   const card = document.createElement('div');
   card.className = 'result-card';
 
-  // -- title bar -----------------------------------------------------------
+  // -- 标题栏 ---------------------------------------------------------------
   const bar = document.createElement('header');
   bar.className = 'result-bar';
   const barTitle = document.createElement('span');
@@ -56,7 +59,7 @@ export function showResult(
   close.addEventListener('click', () => options.onContinue());
   bar.append(barTitle, close);
 
-  // -- left: what was unlocked, and what it cost ---------------------------
+  // -- 左侧：解锁了什么，以及它花了多少 -------------------------------------
   const left = document.createElement('div');
   left.className = 'result-left';
 
@@ -66,8 +69,7 @@ export function showResult(
   const rewarded = (level.rewards?.components ?? []).filter((id) => registry.has(id));
   for (const id of rewarded) unlocks.append(chip(registry.get(id)));
   if (rewarded.length === 0) {
-    // A level can hand out nothing and still be worth finishing: the capstone
-    // levels are checked by running a program, not by a new part.
+    // 关卡可以什么都不发，仍然值得通关：压轴关卡靠跑程序来检查，而不是靠发新元件。
     unlocks.append(hint('本关不解锁新元件'));
   }
   if (grade.stars >= 3) unlocks.append(trophy());
@@ -81,8 +83,8 @@ export function showResult(
     ['关卡类型', levelKind(level)],
     ['门数量', String(grade.metrics.gate)],
     ['总延迟', String(grade.metrics.delay)],
-    // The one number a player competes with themselves on, and a COST: lower is
-    // better, which is why the original calls it 总开销 and not a score.
+    // 唯一一个玩家会与自己较劲的数字，而且它是代价：越低越好，
+    // 所以原作称它为「总开销」而不是分数。
     ['总开销', String(grade.score)],
     ['评级', grade.stars > 0 ? '★'.repeat(grade.stars) : '未通过'],
   ] as const) {
@@ -99,7 +101,7 @@ export function showResult(
   story.textContent = narrativeFor(level.id).after.zh;
   left.append(story);
 
-  // -- right: the medal and the ways onward --------------------------------
+  // -- 右侧：奖牌，以及继续前进的入口 ---------------------------------------
   const right = document.createElement('div');
   right.className = 'result-right';
   const medal = document.createElement('div');
@@ -132,12 +134,12 @@ export function showResult(
 }
 
 /**
- * What kind of puzzle a level is, from how it is checked.
+ * 从检查方式推导关卡类型。
  *
- * Derived rather than declared: a `kind` field on every level would be a second
- * thing to keep in step with `checks`, and the check IS the type -- it is what
- * the level will do to the player's circuit. The first check speaks for the
- * level; a level that both tables and fuzzes is a table level that also fuzzes.
+ * 用推导而不是声明：给每个关卡加一个 `kind` 字段，就是第二个需要与 `checks`
+ * 保持同步的东西；而检查本身就是类型——它就是关卡会对玩家电路做的事。
+ * 第一个检查代表整个关卡；一个既跑真值表又做随机验证的关卡，
+ * 算作「也做随机验证的真值表关卡」。
  */
 function levelKind(level: LevelSpec): string {
   switch (level.checks[0]?.kind) {
@@ -170,7 +172,7 @@ function hint(text: string): HTMLElement {
   return p;
 }
 
-/** The component a level hands out, drawn as the original's chip badge. */
+/** 关卡发放的元件，按原作芯片徽章的样子绘制。 */
 function chip(def: ComponentDef): HTMLElement {
   const box = document.createElement('span');
   box.className = 'result-chip';

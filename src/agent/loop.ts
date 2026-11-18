@@ -1,28 +1,23 @@
 /**
- * The agent loop: one player request becomes as many model turns as it takes.
+ * 智能体的运行循环：一次玩家请求，展开成任意多次模型回合。
  *
- * A TURN IS "SEND, ACT, SEND AGAIN". Each round sends the conversation plus the
- * tool list, streams the answer back, and runs whatever tools it asked for; a
- * round that asks for none is the end of the turn. There is no separate planner,
- * no retry wrapper and no queue -- the model's own next request IS the plan.
+ * 一个回合就是「发送、行动、再发送」。每一轮把对话和历史与工具清单发给模型，
+ * 流式读回答案，再执行它请求的工具；某一轮没有请求任何工具，本次运行就结束。
+ * 这里没有单独的规划器、没有重试包装、也没有队列——模型自己的下一次请求就是计划。
  *
- * THERE IS A STEP BUDGET, AND IT IS THE PLAYER'S. A coding agent can run for a
- * hundred steps because its user is asleep; here the user is watching a board
- * that is being edited a step at a time, so a model that has gone into a loop is
- * not "still working", it is visibly stuck. The budget comes from the settings
- * (`AgentConfig.maxSteps`, `0` for no cap); running out ends the run with
- * 'capped' and the panel offers 继续执行, so a long build is one click from
- * finishing rather than a retyped request.
+ * 有步数预算，而且这个预算属于玩家。编程智能体可以跑一百步，因为它的用户在睡觉；
+ * 这里的用户正盯着一块一步一步被改动的画板，
+ * 所以一个陷入循环的模型不是「还在工作」，而是肉眼可见地卡住了。
+ * 预算来自设置（AgentConfig.maxSteps，0 表示不设上限）；
+ * 用完就以 'capped' 结束，面板给出「继续执行」，
+ * 于是长任务离完成只差一次点击，而不需要重新输入请求。
  *
- * STOPPING IS IMMEDIATE AND TOTAL. One `AbortSignal` goes into `fetch` and into
- * every tool, the pause between two steps honours it, and an aborted stream is
- * reported as an abort rather than as an error -- a player who pressed 停止 must
- * never be told something went wrong.
+ * 停止是立即且彻底的。同一个 AbortSignal 进入 fetch 和每一个工具，
+ * 两步之间的停顿也尊重它；被中止的流按「中止」上报而不是按「错误」——
+ * 按过「停止」的玩家绝不应该被告知「出错了」。
  *
- * THE HISTORY IS RETURNED, NOT STORED. The caller keeps the conversation (the
- * panel owns it, and it outlives any one run); this function appends to a copy
- * and hands the whole thing back, so a stopped run still leaves behind exactly
- * what was said.
+ * 历史是返回的，不是保存的。调用方持有对话（面板拥有它，它比任何一次运行都活得久）；
+ * 本函数往副本上追加，再把整份交回去，于是一次被停止的运行也恰好留下它说过的话。
  */
 import { AgentError, streamChat, type ChatDelta, type FetchLike, type TokenUsage } from './client';
 import { DEFAULT_MAX_STEPS, type AgentConfig } from './config';
@@ -34,121 +29,130 @@ import { findTool, runTool, toolNames, toolWire, type ToolSpec } from './tools';
 import type { WireMessage } from './wire';
 
 /**
- * Model calls allowed in one player request when nothing else says otherwise.
+ * 没有别的配置时，一次玩家请求允许调用模型多少次。
  *
- * THE BUDGET IS THE PLAYER'S NOW (`AgentConfig.maxSteps`, default
- * `DEFAULT_MAX_STEPS`, and `0` for no cap); this is the value a hand-built
- * configuration falls back to, and the ceiling a fresh install starts at.
+ * 预算现在是玩家可调的（AgentConfig.maxSteps，默认取 DEFAULT_MAX_STEPS，
+ * 0 表示不设上限）；这个值既是手写配置的兜底，
+ * 也是全新安装时起步的上限。
  */
 export const MAX_STEPS = DEFAULT_MAX_STEPS;
 
 /**
- * Refused tool calls in a row before the run gives up.
+ * 连续多少次工具调用被拒绝后，本次运行放弃。
  *
- * THE FAILURE THIS PREVENTS IS EXPENSIVE AND PREDICTABLE. A real session spent
- * its entire budget asking for a part under twenty different guessed names --
- * `level_input`, `input`, `in`, `lv_in`, `level_io_in`… -- each answered by a
- * correct refusal, none of them read. Three is where "wrong" stops looking like a
- * mistake and starts looking like a misunderstanding, and the player is better
- * served by being told than by watching the same wall of text go by ten more
- * times.
+ * 要防的失败昂贵且可预料。一次真实会话把整个预算都花在
+ * 用二十个猜出来的名字索要同一个元件上——level_input、input、in、lv_in、level_io_in……
+ * 每一次都换来一句正确的拒绝，却没有一句被读进去。
+ * 三次，是「弄错了」开始看起来像「理解错了」的临界点；
+ * 此时告诉玩家，比看他再刷十遍同样的墙好。
  */
 export const MAX_REFUSALS = 3;
 
-/** What the panel draws while a run is in flight. */
+/** 一次运行进行中，面板需要画出来的事件。 */
 export type AgentEvent =
+  /** 模型正在输出的文字增量。 */
   | { readonly kind: 'text'; readonly text: string }
-  /** The model's reasoning, on the models that stream it -- folded away when done. */
+  /** 模型自己的推理，只有会流式输出推理的模型才有——结束后折起。 */
   | { readonly kind: 'thinking'; readonly text: string }
+  /** 第 index 步（从 0 计）开始了。 */
   | { readonly kind: 'step'; readonly index: number }
-  /** The run's readings so far, emitted at every step boundary so the panel can
-   * show time and tokens while the request is still going. */
+    /** 到目前为止的读数，每到一个步骤边界就发一次，
+   * 让面板在请求还没结束时就能显示时间和 token。 */
   | { readonly kind: 'progress'; readonly stats: RunStats; readonly steps: number }
-  /** The budget ran out. The panel draws this as a line with 继续执行 beside it. */
+  /** 预算用完了。面板把它画成一行，旁边放「继续执行」。 */
   | { readonly kind: 'cap'; readonly limit: number }
   | {
       readonly kind: 'tool';
+      /** start 表示开始执行，end 表示已经有结果。 */
       readonly phase: 'start' | 'end';
       readonly callId: string;
       readonly name: string;
+      /** phase 为 end 时：这一步是成功还是被拒绝。 */
       readonly ok?: boolean;
+      /** phase 为 end 时：回到模型手里的 JSON 文本。 */
       readonly text?: string;
-      /** The same result as one line of Chinese, for the panel to show. */
+            /** 同一结果的单行中文，给面板显示。 */
       readonly note?: string;
     }
+  /** 这一轮失败：message 是给玩家的一行中文，detail 是对方原话。 */
   | { readonly kind: 'error'; readonly message: string; readonly detail: string };
 
+/** 一次运行以什么方式结束。done 是正常完成，aborted 是玩家停止，error 是请求失败，capped 是预算用完，stuck 是连续被拒。 */
 export type StopReason = 'done' | 'aborted' | 'error' | 'capped' | 'stuck';
 
+/** runAgent 的输入。 */
 export interface RunOptions {
   readonly config: AgentConfig;
   readonly host: AgentHost;
-  /** The conversation so far, WITHOUT the system message, which is rebuilt here. */
+  /** 到目前为止的对话，不含 system 消息——那条在每一步重新生成。 */
   readonly messages: readonly WireMessage[];
   readonly signal: AbortSignal;
   readonly fetchImpl?: FetchLike;
   readonly onEvent?: (event: AgentEvent) => void;
-  /** Overridden by the tests, which must not wait in real time. */
+  /** 由测试覆盖：测试不能真的等时间。 */
   readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
-  /** Overridden by the tests, which supply a scripted conversation. */
+  /** 由测试覆盖：测试提供脚本化的工具清单。 */
   readonly tools?: readonly ToolSpec[];
   readonly chat?: typeof streamChat;
 }
 
 /**
- * What one run cost, in the four readings the panel draws.
+ * 一次运行花了多少，用面板要显示的四项读数表示。
  *
- * MEASURED HERE, NOT IN THE PANEL, because the run is the only place that sees
- * both ends of a request: the clock before `chat` and the clock after it, the
- * first streamed delta, and the provider's own token accounting. The panel gets
- * one object and formats it.
+ * 在这里测量，而不是在面板里，因为只有运行本身同时看得见一次请求的两端：
+ * 调用 chat 之前的钟、之后的钟、第一个流式增量，
+ * 以及服务商自己的 token 记账。面板拿到一个对象，只负责格式化。
  *
- * A PROVIDER THAT REPORTS NOTHING STILL GETS TIME. `usage` is `null` and
- * `decodeTokens` is zero rather than invented, so the panel can show `2.4s` and
- * leave the token clause out -- the same rule as the cache figure.
+ * 服务商什么都不报，也仍然有时间。usage 是 null、decodeTokens 是 0，
+ * 而不是编一个数，于是面板可以显示 2.4s、省略 token 那几项——
+ * 与缓存数字遵循同一条规则。
  */
 export interface RunStats {
-  /** Summed request wall time (step start to the end of the streamed answer). */
+  /** 各步请求耗时之和（从步骤开始到流式答案结束）。 */
   readonly llmMs: number;
-  /** Summed time to the first streamed delta, over the steps that recorded one. */
+  /** 各步「到第一个流式增量」的耗时之和，只统计记录了首 token 的步。 */
   readonly ttftMs: number;
-  /** How many steps carry a first-token sample, for the average in a tooltip. */
+  /** 有多少步带了首 token 采样，供悬浮提示里算平均值。 */
   readonly ttftSteps: number;
-  /** Summed decode window (first delta to the end of the answer). */
+  /** 各步解码窗口之和（从第一个增量到答案结束）。 */
   readonly decodeMs: number;
-  /** Summed output tokens over the steps that carry both a window and a count. */
+  /** 各步输出 token 之和，只统计同时有窗口与计数的步。 */
   readonly decodeTokens: number;
-  /** The provider's sums, or `null` when it never reported any. */
+  /** 服务商给的总计；它一次都没报过就是 null。 */
   readonly usage: TokenUsage | null;
-  /** What the provider's published prices make those tokens cost, in CNY. */
+  /** 按服务商公布的价格，这些 token 折合多少人民币。 */
   readonly costCny: number | null;
 }
 
+/** 一次运行结束后的全部结果。 */
 export interface RunResult {
-  /** The conversation including everything this run said and did. */
+  /** 包含这次运行说过、做过的全部内容的对话。 */
   readonly messages: readonly WireMessage[];
+  /** 为什么停下。 */
   readonly stopped: StopReason;
+  /** 以 error 结束时是那个错误，否则为 null。 */
   readonly error: AgentError | null;
-  /** How many model calls the run made. */
+  /** 这次运行调用了几次模型。 */
   readonly steps: number;
-  /** Time, speed and token accounting for this run. */
+  /** 本次运行的时间、速度与 token 记账。 */
   readonly stats: RunStats;
 }
 
-/** An abort, in the one shape the rest of the file checks for. */
+/** 一次中止，形状是文件其余部分唯一会检查的那一种。 */
 function abortError(): Error {
   const error = new Error('已停止');
   error.name = 'AbortError';
   return error;
 }
 
+/** 判断一个异常值是否为一次中止。 */
 function isAbort(cause: unknown): boolean {
   return (
     typeof cause === 'object' && cause !== null && (cause as { name?: string }).name === 'AbortError'
   );
 }
 
-/** A pause that a stop button can cut short. */
+/** 一次可以被「停止」按钮提前切断的等待。 */
 export function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -168,11 +172,11 @@ export function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Runs one player request to its end.
+ * 把一次玩家请求一路跑到结束。
  *
- * Resolves for every outcome -- done, stopped, capped, failed -- because all four
- * are things the panel has to draw, and a rejected promise would put the failure
- * in whichever caller forgot to catch it.
+ * 每一种结局都 resolve——完成、被停止、预算用完、失败——
+ * 因为这四种都是面板必须画出来的东西；
+ * 若用被拒绝的 Promise，失败就会落进某个忘了 catch 的调用方手里。
  */
 export async function runAgent(options: RunOptions): Promise<RunResult> {
   const { config, host, signal, onEvent } = options;
@@ -182,13 +186,13 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   const history: WireMessage[] = [...options.messages];
   let steps = 0;
   let refusals = 0;
-  /**
-   * This run's budget: the player's setting, `0` meaning "no cap", and the
-   * built-in default for a configuration that predates the setting.
+    /**
+   * 本次运行的预算：玩家设置的值（0 表示不设上限），
+   * 以及配置早于该设置出现时使用的内置默认值。
    */
   const maxSteps = config.maxSteps === 0 ? null : (config.maxSteps ?? MAX_STEPS);
 
-  /** Wall clock, on the clock the platform actually has. */
+  /** 墙钟时间，使用平台真实提供的计时源。 */
   const now = (): number => globalThis.performance?.now() ?? Date.now();
   let llmMs = 0;
   let ttftMs = 0;
@@ -224,13 +228,13 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
 
   for (let index = 0; maxSteps === null || index < maxSteps; index += 1) {
     if (signal.aborted) return stop('aborted');
-    // Rebuilt every step: the board has changed under the model since the last
-    // one, and the level's own description belongs next to the rules it explains.
+    // 每一步都重建：从上一步到现在，模型脚下的画板已经变了，
+    // 关卡自己的说明也应该紧挨着它解释的规则出现。
     const system: WireMessage = { role: 'system', content: systemPrompt(host.snapshot()) };
     steps += 1;
     onEvent?.({ kind: 'step', index });
-    // The step count updates the instant a step starts; the token clauses update
-    // again when the answer's usage frame lands (below).
+    // 步骤数在一步开始的瞬间就更新；token 那几项要等答案的 usage 帧
+    // 到达之后（见下）再更新一次。
     onEvent?.({ kind: 'progress', stats: stats(), steps });
 
     let result;
@@ -244,8 +248,8 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
         signal,
         ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
         onDelta: (delta: ChatDelta) => {
-          // The first delta of any kind is the first token: the model has started
-          // answering, and the wait before it is what TTFT measures.
+          // 任何类型的第一个增量就是「第一个 token」：模型已经开始作答，
+          // 在它之前的等待时间，正是 TTFT 要量的东西。
           if (firstAt === null) firstAt = now();
           if (delta.kind === 'text') onEvent?.({ kind: 'text', text: delta.text });
           else if (delta.kind === 'reasoning') onEvent?.({ kind: 'thinking', text: delta.text });
@@ -276,12 +280,12 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
         decodeMs += Math.max(0, endedAt - firstAt);
         decodeTokens += usage.output;
       }
-      // Priced per step, at the hour the step was paid for: peak and idle differ.
+      // 按步计价，且按这一步实际花费的那个钟点算：高峰与空闲价格不同。
       const stepCost = costOf(config.model, usage, new Date());
       if (stepCost !== null) costCny = (costCny ?? 0) + stepCost;
     }
-    // The readings just changed: tokens, speed, cache and cost are now visible
-    // while the request is still running rather than only when it ends.
+    // 读数刚刚变了：token、速度、缓存与费用现在就在请求进行中可见，
+    // 而不是等整次请求结束才出现。
     onEvent?.({ kind: 'progress', stats: stats(), steps });
 
     const calls = result.toolCalls;
@@ -299,9 +303,9 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
           }),
     });
 
-    // A round with no tool call is the model saying it is finished. That is the
-    // ONLY way a run ends well -- there is no "done" tool, because a model that
-    // must call a tool to stop cannot stop when it has nothing to say.
+    // 一轮里没有任何工具调用，就是模型在说它做完了。
+    // 这是运行正常结束的唯一方式——不存在 done 工具，
+    // 因为一个必须调用工具才能停下的模型，在没话可说时就停不下来。
     if (calls.length === 0) return stop('done');
 
     for (const call of calls) {
@@ -338,10 +342,10 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
         });
         return stop('stuck');
       }
-      // THE VISIBLE STEP. The command has already been applied and painted by the
-      // host; one macrotask is what holds the frame long enough for a person to
-      // see which part appeared (requirement A5). There is no pace setting: the
-      // step yields a frame, it does not pause.
+      // 看得见的那一步。命令此时已经由宿主执行并重绘完毕；
+      // 让出一个宏任务，就是把这一帧留够时间，让人看清出现了哪个元件（需求 A5）。
+      // 没有「节奏」设置：这一步只是让出一帧，不是暂停。
+      // 暂停由上面的 abort 检查负责；这里的等待永远只等一帧。
       try {
         await pause(0, signal);
       } catch {
@@ -350,10 +354,10 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     }
   }
 
-  // The for-loop bound is the budget: reaching here means the last allowed round
-  // asked for tools and the next one is not ours to make. The panel turns this
-  // event into a line with 继续执行 beside it, which is the one-button way to buy
-  // another budget without retyping the request.
+  // for 循环的上界就是预算：能走到这里，说明最后一个允许的轮次请求了工具，
+  // 而下一轮已经不属于我们。面板把这个事件变成一行字，旁边放「继续执行」，
+  // 这就是「不重打一遍请求、按一个按钮再买一段预算」的方式。
+  // 玩家不需要知道预算数字才明白发生了什么，所以这句话点到为止。
   onEvent?.({ kind: 'cap', limit: maxSteps ?? 0 });
   return stop('capped');
 }

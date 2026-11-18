@@ -1,20 +1,17 @@
 import { emptyGraph, type Graph } from '../core/graph';
 
 /**
- * The sandbox circuit, kept between sessions.
+ * 沙盒电路，跨会话保留。
  *
- * A SEPARATE KEY FROM THE SAVE, because it is a different kind of thing.
- * `tc.progress.v1` is the record of how the campaign went and is versioned,
- * migrated and reported on; the sandbox is one free circuit that the player
- * leaves lying around. Putting it in the save would mean every progress migration
- * has to carry it, and a corrupt scratch circuit would take the stars with it.
+ * 与存档分键保存，因为它是另一类东西。`tc.progress.v1` 是战役进行到哪的
+ * 记录，会被版本化、迁移和统计；沙盒则是玩家随手留下的一个自由电路。把它
+ * 放进存档意味着每次进度迁移都得带上它，而且一个损坏的草稿电路会连带把
+ * 星星一起弄丢。
  *
- * NOTHING HERE THROWS. `localStorage` is missing in the unit tests and can refuse
- * writes in a private window, and a sandbox that failed to load has an obvious
- * answer -- an empty board -- so the failure mode is "you start again", never a
- * broken screen. The same reasoning lets a corrupt payload read as `null` rather
- * than as an error to report: there is no migration to run on it, because there is
- * no earlier version of it.
+ * 这里不会抛出异常。单元测试没有 localStorage，隐私窗口可能拒绝写入，而读
+ * 失败的沙盒有一个显然的答案——一块空画板——所以失败模式是"重新开始"，而
+ * 不是画面坏掉。同样的理由让损坏载荷读成 `null` 而不是一条要上报的错误：
+ * 它没有可执行的迁移，因为不存在它的更早版本。
  */
 export const SANDBOX_KEY = 'tc.sandbox.v1';
 
@@ -23,7 +20,7 @@ interface SandboxPayload {
   readonly graph: Graph;
 }
 
-/** Whether a value has the shape `compile` would be asked to accept. */
+/** 这个值是否具备 `compile` 会被要求接受的形状（三个字段都是数组）。 */
 function isGraph(value: unknown): value is Graph {
   if (typeof value !== 'object' || value === null) return false;
   const g = value as Partial<Graph>;
@@ -35,12 +32,16 @@ function isGraph(value: unknown): value is Graph {
 }
 
 /**
- * The sandbox circuit as it was left, or `null` for "start empty".
+ * 取回离开时的沙盒电路；没有任何存档时返回 `null`，表示"从空画板开始"。
  *
- * The graph is returned as stored rather than repaired: `validateGraph` judges a
- * circuit and the board paints what it finds, so a half-built document is a
- * normal thing to come back to -- it is only a payload that is not a graph at all
- * that has no answer.
+ * 返回的是存储里的图，而不是"修好"的图：`validateGraph` 负责判定一个电路，
+ * 画板则照着找到的东西画，所以一份搭到一半的文档是正常的回归状态——只有
+ * 完全不是图的载荷才没有答案。
+ *
+ * 返回前把数组和这一层的对象都复制一遍：实例对象（连同 `params`）、导线的两个
+ * 端点、自定义元件条目都是新的，避免面板原地修改时改到解析出来的 JSON 对象。
+ * 这是一层"够用"的拷贝，不是通用的深拷贝——目的只是不让调用方与刚解析出的
+ * 对象共享可变子结构。
  */
 export function loadSandbox(): Graph | null {
   try {
@@ -60,24 +61,26 @@ export function loadSandbox(): Graph | null {
   }
 }
 
-/** Best-effort save; without a store the circuit simply stays in memory. */
+/** 尽力保存；没有存储时电路只留在内存里。 */
 export function saveSandbox(graph: Graph): void {
   try {
     const payload: SandboxPayload = { version: 1, graph };
     globalThis.localStorage?.setItem(SANDBOX_KEY, JSON.stringify(payload));
   } catch {
-    /* storage unavailable (private mode, tests): the circuit stays in memory */
+    /* 存储不可用（隐私模式、测试）：电路只保留在内存里 */
   }
 }
 
 /**
- * A cheap "has this circuit changed" signature, so the save is not per frame.
+ * 一个低成本的"这个电路变了吗"签名，避免每一帧都写存储。
  *
- * The store notifies on every change, including each frame of a pan and every
- * keystroke of a selection, and none of those touch the circuit. Comparing a
- * string of the instances and wires against the last written one costs a walk over
- * the document and saves a `localStorage` write per frame, which is the difference
- * between a smooth pan and a stutter on a large board.
+ * store 在每次变化时都会通知，包括平移的每一帧和选择变化的每一次按键，而
+ * 这些都不改动电路。把实例与导线拼成一个字符串、和上次写入的字符串比较，
+ * 代价是遍历一遍文档，换来的却是每帧省掉一次 localStorage 写入——在
+ * 大画板上，这正是"平移顺滑"与"卡顿"的差别。
+ *
+ * 签名只覆盖实例的 id、种类、坐标、参数以及导线的两个端点；用途是去重写入，
+ * 而不是判断两份电路是否等价，所以它刻意不去追求覆盖图上的每一个字段。
  */
 export function circuitSignature(graph: Graph): string {
   const parts = graph.instances.map(
@@ -89,7 +92,7 @@ export function circuitSignature(graph: Graph): string {
   return `${parts.join('|')}#${wires.join('|')}`;
 }
 
-/** An empty sandbox board, for a caller that has no saved circuit. */
+/** 一块空沙盒画板，给没有已存电路的调用方。 */
 export function emptySandbox(): Graph {
   return emptyGraph('sandbox');
 }

@@ -1,3 +1,17 @@
+/**
+ * 把画板上的一块选区封装成一个自定义元件（“封装”）。
+ *
+ * 封装是应用里唯一同时改动两处的一次编辑：电路失去选中的元件、多出一个
+ * 新实例；元件库则多出一个定义。所以本模块把它拆成“先算计划、再一次性
+ * 应用”，计划完全由 (graph, selection) 决定。
+ *
+ * 依赖下层 `core/graph`（实例、导线、id 生成）与同层 `blueprints.ts`
+ * （元件库与 id）；被 `main.ts`、命令栈与测试使用。
+ *
+ * 关键规则：新元件的引脚由“跨越选区边界的导线”推导——从外到内的导线
+ * 成为输入引脚，从内到外的成为输出引脚；没有接线的内侧引脚不暴露成引脚。
+ */
+
 import {
   addInstance,
   emptyGraph,
@@ -12,79 +26,74 @@ import type { Registry } from '../core/registry';
 import { nextBlueprintId, type BlueprintLibrary } from './blueprints';
 
 /**
- * A pin of the component a selection is about to become.
+ * 选区即将变成的元件的一个引脚。
  *
- * `inner` is the body endpoint the pin stands for: the selected instance's pin
- * that the wire from outside reaches. The id is the pin's name on the new
- * component, which the draft panel lets the player change before committing.
+ * `inner` 是该引脚在元件体内部对应的端点：外部导线最终要接到选区里那个
+ * 实例的引脚上。`id` 是这个引脚在新元件上的名字，提交前玩家可以在草稿
+ * 面板里修改。
  */
 export interface DraftPin {
-  /** Suggested id, unique within the draft. */
+  /** 建议的 id，在一份草稿内唯一。 */
   readonly id: string;
   readonly name: { zh: string; en: string };
   readonly inner: WireEnd;
-  /** The outside pin this one is wired to, for the panel to show. */
+  /** 与它相连的那个外部引脚，供面板显示。 */
   readonly label: string;
-  /** The inner pin's width, which the component's pin inherits. */
+  /** 内部引脚的位宽，新元件的引脚继承它。 */
   readonly width: number;
 }
 
 /**
- * A selection turned into a component, as pure data.
+ * 把选区变成元件之后的样子，以纯数据表示。
  *
- * NOTHING HERE TOUCHES THE DOCUMENT. The wrap is the one edit in the app that
- * changes two things at once -- the circuit loses the selection and gains an
- * instance, the library gains a definition -- so it is computed first and applied
- * in one step (`commands.ts`). Keeping it a function of (graph, selection)
- * also makes the interesting half testable without a board: which pins the
- * component exposes, how the wires are redrawn, and what the body is.
+ * 这里不碰文档。由于封装会同时改动两处，它被设计成“先算好、再一步
+ * 应用”（`commands.ts`）；把计划做成 (graph, selection) 的函数，也让
+ * 真正有意思的一半可以脱离画板测试：元件暴露哪些引脚、导线如何重画、
+ * 元件体是什么。
  */
 export interface WrapPlan {
-  /** Instances that move into the body, in the order they were on the board. */
+  /** 移入元件体的实例，按它们在画板上的原顺序。 */
   readonly body: Graph;
-  /** The definition the library gains. */
+  /** 元件库将新增的定义。 */
   readonly component: CustomComponentDef;
-  /** Other instances on the board, unchanged. */
+  /** 画板上其余实例，原样保留。 */
   readonly kept: readonly Instance[];
-  /** Wires that stay on the board, with the ones crossing the cut redrawn. */
+  /** 留在画板上的导线；跨越切口的那些已经改画到新实例。 */
   readonly wires: readonly Wire[];
-  /** The wires that moved into the body. */
+  /** 移入元件体的导线。 */
   readonly movedWires: readonly Wire[];
-  /** Where the new instance goes: the middle of the selection. */
+  /** 新实例放置的位置：选区的中心。 */
   readonly at: { x: number; y: number };
   readonly inputs: readonly DraftPin[];
   readonly outputs: readonly DraftPin[];
-  /** Boundary wires the player drew but did not declare a pin for. */
+  /** 玩家画了、却没有为它声明引脚的边界导线条数。 */
   readonly undeclared: number;
 }
 
-/** The selected board instances, in board order. */
+/** 选中的画板实例，按画板顺序返回（不是点击顺序）。 */
 export function selectionOf(graph: Graph, ids: readonly string[]): Instance[] {
   const wanted = new Set(ids);
   return graph.instances.filter((inst) => wanted.has(inst.id));
 }
 
 /**
- * Works out what wrapping `selection` would produce.
+ * 计算封装 `selection` 会得到什么。
  *
- * THE BOUNDARY IS DERIVED FROM THE WIRES, which is the only honest source: a
- * component's pins are exactly the places where a wire crosses the selection's
- * edge, so a player who wires something new around the selection gets a new pin
- * without declaring anything, and one who declares nothing gets a component with
- * no way in or out -- which is what their circuit does.
+ * 边界由导线推导——这是唯一诚实的来源：一个元件的引脚，恰好是导线跨越
+ * 选区边缘的那些地方。于是玩家在选区外新接一根线，就自动多一个引脚，
+ * 不需要声明什么；而什么都没接的选区，得到一个没有出入口的元件——这恰
+ * 好也是它电路的实际行为。
  *
- *  * a wire from OUTSIDE to a selected input pin  -> an INPUT pin of the component
- *  * a wire from a selected output pin to OUTSIDE -> an OUTPUT pin
- *  * a wire between two selected instances        -> body wiring, moved as-is
- *  * a selected input pin with no wire at all     -> reads 0 inside the body, the
- *    same as it does now, so it is deliberately NOT given a pin: declaring one
- *    would invent a control the circuit does not have.
+ *  * 从外部接到选区内某个输入引脚的导线 → 元件的 INPUT 引脚
+ *  * 从选区内某个输出引脚接到外部的导线     → 元件的 OUTPUT 引脚
+ *  * 两端都在选区内的导线                   → 元件体内部接线，原样移入
+ *  * 选区内完全没接线的输入引脚             → 在体内读 0，和现在一样，
+ *    所以刻意不给它引脚：硬造一个引脚，等于凭空发明电路本来没有的控制端。
  *
- * The component's declared pins are the DERIVED ones, one per crossing wire, and
- * every crossing wire is redrawn to the new instance. `undeclared` counts the
- * crossings that could not be redrawn -- a wire whose endpoint vanished, which
- * `validateGraph` has already reported -- so the caller can say so rather than
- * silently dropping a connection.
+ * 元件声明的引脚就是这些推导出来的引脚，每根跨界导线一个；每根跨界导线
+ * 也都改画到新实例上。`undeclared` 统计无法改画的跨界导线——端点已经
+ * 不存在的那种，`validateGraph` 早就报告过——于是调用方可以如实告诉玩家，
+ * 而不是悄悄丢掉一条连接。
  */
 export function planWrap(
   graph: Graph,
@@ -100,10 +109,9 @@ export function planWrap(
 
   const body = emptyGraph();
   for (const inst of selection) {
-    // A COPY, not the instance itself: the body outlives this plan, and handing
-    // the document's own object to the library would make the two share a record.
-    // The id, position and params are what the body needs, so the copy carries
-    // them and nothing else changes.
+    // 放进元件体的是副本，不是实例本身：元件体的寿命长于这份计划，把
+    // 文档自己的对象交给元件库，二者会共用同一条记录。元件体需要 id、位置
+    // 和 params，所以副本带上它们，其余字段不变。
     body.instances.push({ ...inst, params: { ...inst.params } });
   }
 
@@ -113,7 +121,7 @@ export function planWrap(
   const movedWires: Wire[] = [];
   let undeclared = 0;
 
-  /** The selected instance an endpoint names, or `null` for an outer endpoint. */
+  /** 端点所指的选中实例；端点在选区外时为 `null`。 */
   const selectedAt = (end: WireEnd): Instance | null =>
     inside.has(end.inst) ? (selection.find((inst) => inst.id === end.inst) ?? null) : null;
 
@@ -128,24 +136,24 @@ export function planWrap(
       wires.push({ ...wire, from: { ...wire.from }, to: { ...wire.to } });
       continue;
     }
-    // One end inside, one outside: this wire becomes a pin. The pin keeps the
-    // width of the INNER pin it reaches -- a component whose `a` is one bit wide
-    // because the wire happened to be one bit would quietly cut a byte in half.
+    // 一端在里、一端在外：这条导线变成一个引脚。引脚继承它所连接的那个
+    // 内侧引脚的位宽——若只看导线恰好在用一位，就给元件一个一位宽的 `a`，
+    // 会把一个字节悄悄切成两半。
     const inner = from ? wire.from : wire.to;
     const outer = from ? wire.to : wire.from;
     const host = selection.find((inst) => inst.id === inner.inst)!;
     const def = registry.has(host.def) ? registry.get(host.def) : null;
     if (!def || def.body !== undefined) {
-      // A plumbing pin (`level_*`) or a nested component inside the selection:
-      // there is no pin of its own to expose, so the wire cannot be redrawn.
+      // 选区内是管道引脚（`level_*`）或嵌套元件：没有它自己的引脚可暴露，
+      // 因此这条导线无法重画。
       undeclared += 1;
       continue;
     }
     const pins = from ? def.outputs : def.inputs;
     const width = host.params.width ?? pins.find((pin) => pin.id === inner.port)?.width ?? 1;
     if (from) {
-      // A wire OUT of the selection: the component now drives the outside pin, so
-      // the component's own pin is the SOURCE of the redrawn wire.
+      // 导线指向选区外：从此由新元件驱动外部引脚，所以新元件自己的引脚是
+      // 重画后那条导线的 SOURCE（起点）。
       const pin: DraftPin = {
         id: uniquePinId(outputs, inner.port),
         name: { zh: inner.port, en: inner.port },
@@ -160,8 +168,8 @@ export function planWrap(
         to: { ...outer },
       });
     } else {
-      // A wire INTO the selection: the outside pin now drives the component, so
-      // the component's own pin is the DESTINATION.
+      // 导线指入选区内：从此由外部引脚驱动新元件，所以新元件自己的引脚是
+      // DESTINATION（终点）。
       const pin: DraftPin = {
         id: uniquePinId(inputs, inner.port),
         name: { zh: inner.port, en: inner.port },
@@ -210,21 +218,20 @@ export function planWrap(
 }
 
 /**
- * The id the new instance carries while the plan is being built.
+ * 计划构建期间新实例携带的 id。
  *
- * A placeholder, not an id: `applyWrap` mints the real one against the graph it
- * writes into (the plan is pure and cannot know what is free). Every wire the
- * plan redraws names this placeholder, and applying the plan resolves it once.
+ * 它是占位符，不是真正的 id：真正的 id 由 `applyWrap` 针对它要写入的那张
+ * 图现场生成（计划是纯函数，无从知道哪个 id 空着）。计划重画的每一条
+ * 导线都写成这个占位符，应用计划时统一替换一次。
  */
 export const NEW_INSTANCE = '\u0000new';
 
 /**
- * A pin id that is not already taken, so two `a` pins become `a` and `a2`.
+ * 取一个尚未被占用的引脚 id，于是两个 `a` 引脚会变成 `a` 和 `a2`。
  *
- * The uniqueness is per PLACEHOLDER, not per component: `new` and `out` may both
- * exist, and suffixes only appear where a name really repeats. A component whose
- * second input was forced to `a2` because an output is called `a` would be
- * renamed for no reason a player could see.
+ * 唯一性按输入、输出各自计算，而不是整颗元件统一：`new` 与 `out` 可以
+ * 同时存在，只有真正重名时才加后缀。否则一个“输出叫 a”的元件会逼得
+ * 第二个输入被改名成 `a2`，而玩家看不出任何理由。
  */
 function uniquePinId(taken: readonly DraftPin[], port: string): string {
   const used = new Set(taken.map((pin) => pin.id));
@@ -235,12 +242,11 @@ function uniquePinId(taken: readonly DraftPin[], port: string): string {
 }
 
 /**
- * The plan applied to a graph and a library, as the two values they become.
+ * 把计划应用到一张图和一个元件库上，返回它们变成的两个值。
  *
- * The new instance's id is minted here, from the graph the wrap writes into, so
- * the placeholder in the plan's redrawn wires is replaced in the same pass. The
- * result is a plain `{ graph, library }` so the caller can hand it to a command
- * without this module knowing what a command is.
+ * 新实例的 id 在这里、从封装要写入的那张图生成，因此计划里重画导线上的
+ * 占位符会在同一趟里被替换。返回值是普通的 `{ graph, library }`，调用方
+ * 可以直接把它交给一条命令，而本模块不必知道“命令”是什么。
  */
 export function applyWrap(
   graph: Graph,
@@ -258,15 +264,14 @@ export function applyWrap(
   };
   if (graph.level !== undefined) next.level = graph.level;
 
-  // THE ID IS MINTED FROM THE GRAPH THE PLAYER HAS, not from the one being built.
-  // The instances that moved into the body have left `next.instances`, and minting
-  // against that shortened list would re-issue an id one of them still uses inside
-  // the component -- so a wire to the new instance would silently resolve to a
-  // body instance of the same name, and the circuit would wire itself in a loop.
+  // ID 从玩家当前持有的图里生成，而不是从正在构建的图。移入元件体的实例
+  // 已经不在 `next.instances` 里，若对着这份缩短后的列表生成 id，就会重新
+  // 发出元件体内部还在使用的 id——于是接到新实例的导线会悄悄解析到同名的
+  // 体内实例，电路把自己接成了环。
   const instanceId = nextId('i', graph.instances);
   const instance = addInstance(next, plan.component.id, plan.at.x, plan.at.y, instanceId);
-  // Rebound as a value: `WireEnd` is readonly, so the placeholder is replaced by
-  // building the endpoint again rather than by assigning through it.
+  // 重新绑定成新值：`WireEnd` 是只读的，所以占位符靠重新构造端点来替换，
+  // 而不是原地赋值。
   next.wires = next.wires.map((wire) => ({
     ...wire,
     from: wire.from.inst === NEW_INSTANCE ? { inst: instance.id, port: wire.from.port } : wire.from,

@@ -1,108 +1,101 @@
 /**
- * OVERTURE's instruction ENCODING, as data -- and nothing else.
+ * OVERTURE 的指令编码，以数据的形式存在——仅此而已。
  *
- * The layout is ruling 5 of
- * `docs/superpowers/plans/2026-09-29-turing-complete-phase2.md`: the top two
- * bits select one of four modes and the low six bits are that mode's argument.
- * The source material fixes "top 2 bits opcode, low 6 bits argument" and the
- * four modes (`GAME_REFERENCE.md` §6.1, §6.3) but NOT the field order inside
- * the low six bits. That order is this replica's design, and this file is its
- * single authority -- the assembler, the `instr_decoder` component and every
- * chapter-3 level's hand-written bytes are all read against it.
+ * 布局来自 `docs/superpowers/plans/2026-09-29-turing-complete-phase2.md` 的
+ * 裁定 5：最高两位选择四种模式之一，低六位是该模式的参数。原始资料固定的是
+ * "高 2 位操作码、低 6 位参数"以及四种模式（`GAME_REFERENCE.md` §6.1、§6.3），
+ * 但没有规定低六位内部的字段顺序。那个顺序是本复刻的设计，本文件则是它的唯一
+ * 权威——汇编器、`instr_decoder` 元件，以及第三章每个关卡的手写字节，都以它
+ * 为准来解读。
  *
- * WHAT IS DELIBERATELY ABSENT: any statement of what an instruction DOES. That
- * `loadi` writes REG0, that `add` reads REG1/REG2 and writes REG3, that a jump
- * takes its target from REG0 and its condition from REG3 -- none of it is here.
- * The CPU is a circuit the player builds (spec §6.1, phase-2 constraint 11), so
- * an instruction's meaning must come from that circuit. A copy in the toolchain
- * would be a second source of truth for behaviour, and the day the two
- * disagreed, a level author would have a table telling them the circuit was
- * wrong. The register numbers below are operand CODES, not roles.
+ * 刻意不包含的内容：任何"指令做什么"的陈述。`loadi` 写 REG0、`add` 读
+ * REG1/REG2 并写 REG3、跳转从 REG0 取目标、从 REG3 取条件——这些都不在这里。
+ * CPU 是玩家自己搭建的电路（规格 §6.1、第二阶段约束 11），所以一条指令的含义
+ * 必须来自那个电路。工具链里再抄一份，就成了行为的第二个权威；哪天两者不一致，
+ * 关卡作者手里会有一张表告诉他"电路错了"。下面的寄存器编号是操作数编码，不是
+ * 角色分工。
  *
- * `instr_decoder` -- also the player's to build -- is the mirror image of this
- * module: it slices the same bits back out. `assemble.ts` is the only reader.
+ * `instr_decoder`——同样由玩家搭建——是本模块的镜像：它把这些位原样切回去。
+ * `assemble.ts` 是本模块唯一的读取者。
  */
 
-/** A named slice of the instruction word. `offset` is its lowest bit index. */
+/** 指令字中的一个具名位段。`offset` 是它的最低位下标（从 0 数起）。 */
 export interface FieldRange {
   /**
-   * Field name. Where the player's `instr_decoder` exposes the same slice this
-   * is the decoder's own pin name (`mode`, `op`, `src`, `dst`, `imm`), so a
-   * level author reading a byte maps it in one step; `cond` and `reserved` name
-   * slices no pin carries on its own.
+   * 位段名。当玩家的 `instr_decoder` 暴露同一个位段时，这里用的是译码器自己的
+   * 引脚名（`mode`、`op`、`src`、`dst`、`imm`），于是关卡作者读到一字节就能一步
+   * 对应到引脚；`cond` 与 `reserved` 则是没有单独引脚承载的位段名。
    */
   readonly id: string;
-  /** Index of the field's lowest bit within the word. */
+  /** 该位段最低位在指令字中的下标。 */
   readonly offset: number;
+  /** 该位段的宽度，单位是位。 */
   readonly width: number;
 }
 
-/** The four modes, named by the toolchain (the source calls them 立即数 etc.). */
+/** 四种模式；名字由工具链起（原始资料里对应"立即数"等说法）。 */
 export type ModeId = 'immediate' | 'calc' | 'move' | 'jump';
 
-/** How a written operand token becomes a field value. */
+/** 写出的操作数 token 如何变成一个字段值。 */
 export type OperandKind =
-  /** A number or a label: the value is what the source wrote. */
+  /** 数字或标号：值就是源里写的那个数。 */
   | 'immediate'
-  /** A token looked up in `OperandDef.codes` (`s1`, `inp`, `out`, ...). */
+  /** 在 `OperandDef.codes` 里查表的 token（`s1`、`inp`、`out` 等）。 */
   | 'code';
 
 export interface OperandDef {
-  /** The slice this operand fills; must name a `FieldRange` of the same mode. */
+  /** 该操作数填充的位段；必须指向同一模式里存在的 `FieldRange`。 */
   readonly field: string;
   readonly kind: OperandKind;
   /**
-   * Accepted tokens and the code each writes, for `kind: 'code'`.
+   * `kind: 'code'` 时接受的 token，以及每个 token 写入的编码。
    *
-   * Absent for `immediate`, whose value is the number or label the source wrote
-   * -- an `immediate` operand has no token table because every 6-bit value is
-   * legal, and a table of 64 entries would be a second way to say "0 to 63".
+   * `immediate` 没有这张表：立即数的值就是源里写的数字或标号——每个 6 位值都
+   * 合法，列一张 64 项的表只会变成"0 到 63"的第二种说法。
    */
   readonly codes?: Readonly<Record<string, number>>;
 }
 
 export interface ModeDef {
   readonly id: ModeId;
-  /** This mode's selector value, written into `Isa.modeField`. */
+  /** 该模式的选择子值，会写进 `Isa.modeField`。 */
   readonly opcode: number;
   /**
-   * Every slice of the low six bits, `reserved` included where the mode has
-   * unused bits. They tile `[0, 6)` exactly -- no gap, no overlap -- and that
-   * tiling is what pins ruling 5's field order; a range test asserts it.
+   * 低六位的全部位段；模式有未用位时连 `reserved` 一起列出。它们恰好平铺
+   * `[0, 6)`——没有空隙、没有重叠——正是这种平铺固定了裁定 5 的字段顺序；
+   * 有一条范围测试会断言它。
    */
   readonly fields: readonly FieldRange[];
   /**
-   * Mnemonic -> the value written into `selectField`, or `null` when the mode
-   * has no selector and its mnemonic names the mode outright (`loadi`, `move`).
+   * 助记符 -> 写入 `selectField` 的值；当模式没有选择子、助记符本身就直接
+   * 命名该模式时（`loadi`、`move`）为 `null`。
    *
-   * `null` rather than a sentinel number, because 0 is a real selector value --
-   * `add` and `j` both use it. With a number sentinel there would be no way to
-   * tell "no selector" from "selector 0" except by also testing `selectField`,
-   * and two fields saying one thing is how a `move` silently becomes `add`.
+   * 用 `null` 而不是哨兵数字，因为 0 是真实的选择子值——`add` 与 `j` 都用它。
+   * 若用数字哨兵，就只能同时再查 `selectField` 才能区分"没有选择子"与
+   * "选择子 0"；两个字段表达同一件事，正是 `move` 悄悄变成 `add` 的由来。
    */
   readonly mnemonics: Readonly<Record<string, number | null>>;
-  /** The field a mnemonic's value goes into; absent for the modes above. */
+  /** 助记符的值写入哪个字段；上面那种直接命名的模式没有该字段。 */
   readonly selectField?: string;
-  /** Operand slots, in the order the source writes them. */
+  /** 操作数槽位，顺序就是源中书写的顺序。 */
   readonly operands: readonly OperandDef[];
 }
 
 export interface Isa {
   readonly id: string;
-  /** Instruction width in bits: one 8-bit word, per the source material §6.1. */
+  /** 指令位宽：按原始资料 §6.1，一个 8 位字。 */
   readonly wordWidth: number;
-  /** The selector every mode shares: word bits [7:6]. */
+  /** 所有模式共用的选择子：指令字的 [7:6] 位。 */
   readonly modeField: FieldRange;
   readonly modes: readonly ModeDef[];
 }
 
 /**
- * What a 3-bit operand code addresses, index = the code.
+ * 3 位操作数编码各自指向什么，下标就是编码值。
  *
- * `0-5` are REG0-REG5, `6` is `inp` and `7` is `out` (`GAME_REFERENCE.md` §6.2).
- * This is the naming authority the two token tables below and the decoder's
- * `src`/`dst` pins are read against; it is not itself a token table, because a
- * register is spelled `sN` in the source field and `dN` in the destination one.
+ * `0-5` 是 REG0-REG5，`6` 是 `inp`、`7` 是 `out`（`GAME_REFERENCE.md` §6.2）。
+ * 它是下面两张 token 表和译码器 `src`/`dst` 引脚共同遵循的命名权威；它本身不是
+ * token 表，因为同一个寄存器在源字段里写作 `sN`、在目标字段里写作 `dN`。
  */
 export const OPERAND_NAMES = [
   'REG0',
@@ -116,13 +109,12 @@ export const OPERAND_NAMES = [
 ] as const;
 
 /**
- * Tokens accepted in the `move` mode's SOURCE field, and the code each writes.
+ * `move` 模式"源"字段接受的 token，以及每个 token 写入的编码。
  *
- * The source material's grammar spells a source `sN`/`inp` (`move|s1|d2`,
- * `move|inp|d1`, §6.4 and §10.2). One shared map of all eight codes, valid in
- * both fields, was rejected: it would accept `move|out|d3` and `move|s1|inp`,
- * spellings the grammar never shows, and both fields are three bits wide either
- * way -- so nothing is gained by admitting them but a byte nobody reviewed.
+ * 原始资料的语法把源写作 `sN`/`inp`（`move|s1|d2`、`move|inp|d1`，§6.4 与
+ * §10.2）。曾被否决的方案是一张八种编码共用、两个字段都合法的表：它会接受
+ * `move|out|d3` 与 `move|s1|inp` 这些语法从未展示过的拼法；反正两个字段都是
+ * 三位宽，接受它们除了多出一个没人审过的字节之外毫无好处。
  */
 export const SOURCE_CODES: Readonly<Record<string, number>> = {
   s0: 0,
@@ -135,9 +127,9 @@ export const SOURCE_CODES: Readonly<Record<string, number>> = {
 };
 
 /**
- * Tokens accepted in the `move` mode's DESTINATION field: `dN` for REG0-REG5
- * and `out` for the output port (`move|s0|d2`, `move|s3|out`, §6.2/§10.2).
- * `inp` is not a destination and `out` is not a source; see `SOURCE_CODES`.
+ * `move` 模式"目标"字段接受的 token：`dN` 对应 REG0-REG5，`out` 对应输出端口
+ * （`move|s0|d2`、`move|s3|out`，§6.2/§10.2）。`inp` 不是目标、`out` 不是源；
+ * 见 `SOURCE_CODES`。
  */
 export const DEST_CODES: Readonly<Record<string, number>> = {
   d0: 0,
@@ -150,14 +142,13 @@ export const DEST_CODES: Readonly<Record<string, number>> = {
 };
 
 /**
- * Ruling 5, transcribed.
+ * 裁定 5 的逐字转写。
  *
- * The encoder writes `modeField`, then the mode's `selectField` when it has one,
- * then the operand fields, and nothing else: every other slice -- notably the
- * `reserved` field of `calc` and `jump` -- is left 0 by construction. That is
- * what ruling 5's 「[2:0] 保留必须为 0」 means, and there is deliberately no
- * `mustBeZero` flag to keep in sync with it, because a flag and an unwritten
- * field can disagree while an unwritten field cannot.
+ * 编码器先写 `modeField`，再写模式的选择字段（若有），再写各操作数字段，除此之外
+ * 什么都不写：其余所有位段——尤其是 `calc` 与 `jump` 的 `reserved`——按构造保持为
+ * 0。这正是裁定 5 中「[2:0] 保留必须为 0」的含义；这里刻意不设 `mustBeZero` 之类
+ * 的标志去同步，因为标志可以和一个未写入的字段相矛盾，而未写入的字段不会自相
+ * 矛盾。
  */
 export const OVERTURE_ISA: Isa = {
   id: 'overture',
@@ -165,7 +156,7 @@ export const OVERTURE_ISA: Isa = {
   modeField: { id: 'mode', offset: 6, width: 2 },
   modes: [
     {
-      // 00 iiiiii: the low six bits ARE the immediate value (0-63).
+      // 00 iiiiii：低六位就是立即数值本身（0-63）。
       id: 'immediate',
       opcode: 0b00,
       fields: [{ id: 'imm', offset: 0, width: 6 }],
@@ -173,7 +164,7 @@ export const OVERTURE_ISA: Isa = {
       operands: [{ field: 'imm', kind: 'immediate' }],
     },
     {
-      // 01 ooo 000: operation in [5:3], reserved zeros in [2:0].
+      // 01 ooo 000：运算码在 [5:3]，[2:0] 为保留的 0。
       id: 'calc',
       opcode: 0b01,
       fields: [
@@ -185,7 +176,7 @@ export const OVERTURE_ISA: Isa = {
       operands: [],
     },
     {
-      // 10 sss ddd: source in [5:3], destination in [2:0].
+      // 10 sss ddd：源在 [5:3]，目标在 [2:0]。
       id: 'move',
       opcode: 0b10,
       fields: [
@@ -199,7 +190,7 @@ export const OVERTURE_ISA: Isa = {
       ],
     },
     {
-      // 11 ccc 000: condition in [5:3], reserved zeros in [2:0].
+      // 11 ccc 000：条件在 [5:3]，[2:0] 为保留的 0。
       id: 'jump',
       opcode: 0b11,
       fields: [

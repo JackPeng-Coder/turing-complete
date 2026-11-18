@@ -1,78 +1,94 @@
 /**
- * The serial line protocol between the game and the board.
+ * 游戏与开发板之间的串口线协议。
  *
- * EVERY LINE IS ASCII AND EVERY LINE ENDS WITH `\n`; the firmware ignores `\r`.
- * It is deliberately a line protocol rather than a binary frame: the same
- * commands work typed into a serial monitor, which is what makes the board
- * debuggable without the game, and a garbled line is one bad line rather than a
- * desynchronised stream.
+ * 每一行都是 ASCII，并且都以 `\n` 结尾；固件忽略 `\r`。它刻意设计成行协议而不是
+ * 二进制帧：同样的命令可以直接敲进串口监视器，这让板子在没有游戏时也能调试，
+ * 而且一行乱码只毁掉一行，不会让整条流失去同步。
  *
- * Host to board:
+ * 宿主 -> 开发板：
  *
- *   I <connector-index> <value>   set an input connector (index in IN_1, IN_2 order)
- *   T                             apply one clock edge, settle, print a frame
- *   R                             clear storage and inputs, settle, print a frame
- *   C <hz>                        free-run the clock at hz (0 stops it)
- *   S                             print the current frame
- *   B                             print the banner again
+ *   I <connector-index> <value>   设置一个输入连接器（下标按 IN_1、IN_2 的顺序）
+ *   T                            施加一个时钟沿，结算，打印一帧
+ *   R                            清零存储与输入（tick 也归零），结算，打印一帧
+ *   C <hz>                       以 hz 自由运行时钟（0 表示停止）
+ *   S                            打印当前帧
+ *   B                            再次打印 banner
  *
- * Board to host:
+ * 开发板 -> 宿主：
  *
  *   #TC1 <hash> <nodes> <slotBytes> <inputs> <outputs>
  *   F <tick> <stable> <out0> <out1> ...
  *   E <text>
  *
- * The banner carries the image hash so the game can say "the board is running a
- * different circuit" without trusting the port to be the one it flashed; the
- * frame carries every output connector as one unsigned number.
+ * banner 携带映像哈希，游戏因此能判断"板子跑的是另一份电路"，而不必信任端口就
+ * 一定是它烧录的那个；帧则把每个输出连接器表示成一个无符号数字。
  */
 
-/** A board that just booted (or was asked for its banner). */
+/** 一块刚启动（或被要求重新打印 banner）的开发板。 */
 export interface BoardBanner {
+  /** 行类型判别字段。 */
   readonly kind: 'banner';
+  /** 映像哈希，与 `imageSignature` 的哈希结果一致。 */
   readonly hash: number;
+  /** 计算节点数。 */
   readonly nodes: number;
+  /** 槽位数组占用的字节数。 */
   readonly slotBytes: number;
+  /** 输入连接器个数。 */
   readonly inputCount: number;
+  /** 输出连接器个数。 */
   readonly outputCount: number;
 }
 
-/** One settled state of the board. */
+/** 开发板的一个已结算状态。 */
 export interface BoardFrame {
+  /** 行类型判别字段。 */
   readonly kind: 'frame';
+  /** 已经过的时钟沿数：T 命令与自由运行的每个时钟沿都会让它加 1。 */
   readonly tick: number;
+  /** 最近一次结算是否收敛；Jacobi 模式下反复振荡会返回 false。 */
   readonly stable: boolean;
+  /** 每个输出连接器的值，顺序与 `F` 帧各列一致。 */
   readonly outputs: readonly number[];
 }
 
-/** A command the firmware refused or a line it could not parse. */
+/** 固件拒绝的命令，或它无法解析的一行。 */
 export interface BoardError {
+  /** 行类型判别字段。 */
   readonly kind: 'error';
+  /** 错误文本。 */
   readonly message: string;
 }
 
-/** Anything else the board printed (a boot message, a future line). */
+/** 开发板打印的其他内容（启动消息、将来新增的行）。 */
 export interface BoardOther {
+  /** 行类型判别字段。 */
   readonly kind: 'other';
+  /** 未识别的原始行（已去掉行尾 `\r`）。 */
   readonly text: string;
 }
 
+/** 从开发板读到的任意一行。 */
 export type BoardLine = BoardBanner | BoardFrame | BoardError | BoardOther;
 
-/** The largest value an output connector can carry on the wire. */
+/** 输出连接器在线上能承载的最大值（`uint32_t` 上限）。 */
 export const MAX_WIRE_VALUE = 0xffff_ffff;
 
 /**
- * One line from the board, or `null` for a blank one.
+ * 解析开发板的一行；空行返回 `null`。
  *
- * A malformed `F`/`#TC1` line becomes `other` rather than throwing: the serial
- * stream is not a trusted channel, a half-received line after a reconnect is
- * normal, and a reader that threw would drop the port for a single bad byte.
+ * 格式不对的 `F`/`#TC1` 行会变成 `other` 而不是抛异常：串口流不是可信信道，
+ * 重连后收到半行是正常现象，而一个会抛异常的读取器会因为一个坏字节就丢掉整个
+ * 端口。
+ *
+ * @param raw 原始一行，可能带行尾 `\r`。
+ * @returns 解析结果；空行返回 `null`。
  */
 export function parseBoardLine(raw: string): BoardLine | null {
   const line = raw.replace(/\r$/, '');
   if (line === '') return null;
   if (line.startsWith('#TC1 ')) {
+    // banner：先按空格切分并去掉空串；字段不足或数字解析失败都算"未识别行"。
     const parts = line.slice(5).split(' ').filter((part) => part !== '');
     if (parts.length < 5) return { kind: 'other', text: line };
     const hash = Number.parseInt(parts[0]!, 16);
@@ -86,6 +102,7 @@ export function parseBoardLine(raw: string): BoardLine | null {
     return { kind: 'banner', hash, nodes, slotBytes, inputCount, outputCount };
   }
   if (line.startsWith('F ')) {
+    // 帧：tick、stable（'1' 表示收敛），之后每个输出一个十进制数。
     const parts = line.slice(2).split(' ').filter((part) => part !== '');
     if (parts.length < 2) return { kind: 'other', text: line };
     const tick = Number.parseInt(parts[0]!, 10);
@@ -99,36 +116,37 @@ export function parseBoardLine(raw: string): BoardLine | null {
     if (!Number.isFinite(tick)) return { kind: 'other', text: line };
     return { kind: 'frame', tick, stable, outputs };
   }
+  // 固件报错行；`E ` 之后的内容就是消息体。
   if (line.startsWith('E ')) return { kind: 'error', message: line.slice(2) };
   return { kind: 'other', text: line };
 }
 
-/** `I <index> <value>`: drive one input connector. */
+/** 编码 `I <index> <value>`：驱动一个输入连接器，值按无符号 32 位发送。 */
 export function encodeInput(index: number, value: number): string {
   return `I ${index} ${value >>> 0}\n`;
 }
 
-/** `T`: one clock edge. */
+/** 编码 `T`：一个时钟沿。 */
 export function encodeTick(): string {
   return 'T\n';
 }
 
-/** `R`: clear storage and inputs. */
+/** 编码 `R`：清零存储与输入，并把 tick 归零。 */
 export function encodeReset(): string {
   return 'R\n';
 }
 
-/** `C <hz>`: free-run the board's own clock, or stop it. */
+/** 编码 `C <hz>`：自由运行开发板自己的时钟，或停止它。 */
 export function encodeClock(hz: number): string {
   return `C ${Math.max(0, Math.floor(hz))}\n`;
 }
 
-/** `S`: print the current frame. */
+/** 编码 `S`：打印当前帧。 */
 export function encodePoll(): string {
   return 'S\n';
 }
 
-/** The value of one output connector in a frame, or `undefined` if absent. */
+/** 取一帧里某个输出连接器的值；该列不存在时返回 `undefined`。 */
 export function frameValue(frame: BoardFrame, index: number): number | undefined {
   return frame.outputs[index];
 }

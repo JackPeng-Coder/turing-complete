@@ -1,36 +1,43 @@
+/**
+ * 沙盒：一份“没有题目”的关卡规格，以及它如何把画板上的接插件当作引脚。
+ *
+ * 沙盒被建模成 `LevelSpec`，而不是另起一种屏幕：画板、调色板、相机、
+ * 读数、智能体都已经只会读 `LevelSpec`，另起一套必然与关卡那一套漂移。
+ *
+ * 依赖同层 `spec.ts` 的类型，以及调用方传入的 `core/graph` 与
+ * `core/registry`；被 `main.ts`、`app/inputs.ts`、`app/progress.ts` 与
+ * 测试使用。关键不变量：沙盒的 `io` 永远为空，它的引脚来自画板上放置的
+ * `level_input` / `level_output` 实例，且实例 id 就是引脚 id。
+ */
+
 import type { Graph } from '../core/graph';
 import type { Registry } from '../core/registry';
 import type { LevelSpec, PinSpec } from './spec';
 
 /**
- * The sandbox screen, as a `LevelSpec`.
+ * 沙盒屏幕，用一份 `LevelSpec` 表示。
  *
- * IT IS A SPEC BECAUSE THE BOARD ALREADY SPEAKS SPEC. Everything the app does to
- * a circuit -- `openLevel`, `rebuild`, `measure`, `createDisplay`, the palette,
- * the camera framing -- takes a `LevelSpec` and reads `io`, `checks`,
- * `allowedComponents` and `board` off it. A sandbox that were a second kind of
- * screen would need a second copy of all of it, and the two copies would drift
- * the first time either changed. So the sandbox is a spec whose every challenge
- * field is empty:
+ * 之所以能是一个 spec，是因为画板本来就只会读 spec：应用对电路做的每件事
+ * （`openLevel`、`rebuild`、`measure`、`createDisplay`、调色板、相机
+ * 取景）都接受 `LevelSpec`，并从它读 `io`、`checks`、`allowedComponents`
+ * 与 `board`。若沙盒是“另一种屏幕”，上面每一项都得再实现一遍，而两份
+ * 实现第一次改动就会漂移。于是沙盒就是一份“挑战字段全空”的 spec：
  *
- *  * `checks: []` -- nothing grades it. The readout still measures gate, delay
- *    and tick, because measuring is not judging (`AppState.metrics`).
- *  * `io` empty -- there is no level to bind pins to. The player's own
- *    `level_input` / `level_output` parts are what drive a sandbox circuit, and
- *    they are ordinary parts here rather than level plumbing: `sandboxPins` reads
- *    the placed connectors as the board's pins, and `boardPins` hands the same
- *    list to the readout, the display and the assistant.
- *  * `allowedComponents: []` -- deliberately NOT the sandbox's palette. The
- *    palette is derived from the registry instead (`sandboxPaletteDefs`), which
- *    is the whole point of the screen: every part the base registry has, plus
- *    whatever the player has unlocked, plus their own components.
- *  * `sandbox: true` -- so a panel can tell "the sandbox has no cases" from "a
- *    level is missing its cases" without guessing from an id.
+ *  * `checks: []` —— 没有任何判定。读数仍会测量门数、延迟与节拍，因为
+ *    “测量”不等于“评判”（见 `AppState.metrics`）。
+ *  * `io` 为空 —— 没有关卡需要绑定引脚。驱动沙盒电路的是玩家自己放置的
+ *    `level_input` / `level_output` 元件，它们在这里是普通元件而不是
+ *    关卡管道：`sandboxPins` 把放下的接插件读成画板的引脚，`boardPins`
+ *    再把同一份列表交给读数、显示与智能体。
+ *  * `allowedComponents: []` —— 刻意不是沙盒的调色板。调色板改为从元件
+ *    注册表推导（`sandboxPaletteDefs`），这正是这块屏幕的意义：基础
+ *    注册表里的全部元件、玩家已解锁的元件，加上玩家自制的元件。
+ *  * `sandbox: true` —— 面板因此能区分“沙盒本来就没有测试用例”与
+ *    “某一关漏了测试用例”，而不必靠 id 猜。
  *
- * `chapter` 0 and `index` 0 are placeholders: the sandbox is not a chapter and
- * has no address. It is NOT in `ALL_LEVELS` or `LEVEL_ORDER`, so the chapter
- * map, the unlock chain and every walk over the shipped levels are untouched by
- * its existence.
+ * `chapter` 为 0、`index` 为 0 是占位值：沙盒不属于任何章节，也没有
+ * 关卡位次。它不在 `ALL_LEVELS` 或 `LEVEL_ORDER` 里，所以章节地图、
+ * 解锁链以及任何遍历已发布关卡的地方，都不会因为它的存在而改变。
  */
 export const SANDBOX_ID = 'sandbox';
 
@@ -53,42 +60,39 @@ export const SANDBOX_LEVEL: LevelSpec = {
   sandbox: true,
 };
 
-/** True when this spec is the sandbox rather than a level of the campaign. */
+/** 判断一份规格是沙盒而不是战役关卡。 */
 export function isSandbox(level: LevelSpec): boolean {
   return level.sandbox === true;
 }
 
 /**
- * The two connectors a sandbox palette offers, as ordinary parts.
+ * 沙盒调色板提供的两个接插件，作为普通元件。
  *
- * They are the SAME registry defs a level uses (`level_input` / `level_output`)
- * and they keep their `hidden` flag, which is what keeps them out of every level's
- * palette except the one that lists them. The sandbox is the exception because it
- * has no level spec to declare pins, so the connectors ARE its pins: without them
- * a sandbox circuit has nowhere to be driven and no number to report, which is
- * what a player found the hard way ("怎么没有输出").
+ * 它们与关卡使用的是同一批注册表定义（`level_input` / `level_output`），
+ * 也保留了自己的 `hidden` 标记——正因如此，它们不会出现在其他关卡的调色板
+ * 里，只会出现在明确列出它们的关卡。沙盒是例外：它没有关卡规格来声明
+ * 引脚，所以这两个接插件“就是”它的引脚；没有它们，沙盒电路既没有地方
+ * 施加输入，也没有数字可报告——这正是有玩家踩过的坑（“怎么没有输出”）。
  */
 export const SANDBOX_CONNECTORS = ['level_input', 'level_output'] as const;
 
-/** The pins a board has: what it is driven from and what it publishes. */
+/** 一块画板的引脚：从哪里施加输入、向哪里读出输出。 */
 export interface BoardPins {
   readonly inputs: readonly PinSpec[];
   readonly outputs: readonly PinSpec[];
 }
 
 /**
- * A SANDBOX BOARD'S PINS ARE THE CONNECTORS ON IT.
+ * 沙盒画板的引脚，就是画板上的接插件。
  *
- * `SANDBOX_LEVEL.io` is empty on purpose: a sandbox has no puzzle to fix a pin
- * list, so the list is whatever the player placed. Each connector instance becomes
- * one pin named by its instance id (`IN_1`, `OUT_1`, ...); its width is the
- * instance's `params.width` when it sets one and the def's declared width (one
- * bit) otherwise -- the same rule `compile` uses, so a pin here always agrees with
- * the compiled slot it names.
+ * `SANDBOX_LEVEL.io` 刻意留空：沙盒没有题目来固定引脚表，所以引脚表就是
+ * 玩家放了什么。每个接插件实例成为一个引脚，名字用实例 id（`IN_1`、
+ * `OUT_1`……）；位宽取实例的 `params.width`（若设置了），否则取定义声明
+ * 的位宽（1 位）——与 `compile` 用的是同一条规则，所以这里的引脚永远与
+ * 它所指的已编译槽位一致。
  *
- * ORDER IS THE BOARD'S OWN. Instances come back in the graph's order, which is
- * creation order, so the panel lists `IN_1` before `IN_2` and does not renumber
- * them when one is deleted.
+ * 顺序就是画板自身的顺序。实例按图的顺序返回，也就是创建顺序，所以面板里
+ * `IN_1` 排在 `IN_2` 前面，且删掉其中一个不会让其余引脚重新编号。
  */
 export function sandboxPins(graph: Graph, registry: Registry): BoardPins {
   const inputs: PinSpec[] = [];
@@ -105,18 +109,18 @@ export function sandboxPins(graph: Graph, registry: Registry): BoardPins {
   return { inputs, outputs };
 }
 
+/** 引脚的最终位宽：实例覆盖值优先，其次定义声明的位宽，最后兜底 1 位。 */
 function widthOf(override: number | undefined, declared: number | undefined): number {
   if (override !== undefined && Number.isSafeInteger(override) && override > 0) return override;
   return declared ?? 1;
 }
 
 /**
- * The pins of whatever board is open: a level's own for a level, the placed
- * connectors for the sandbox.
+ * 当前打开的画板的引脚：关卡用关卡自己的，沙盒用放上去的接插件。
  *
- * Every reader of a board's pins goes through this -- the sidebar's readout, the
- * live display, the assistant's `read_board` -- so "what the pins are" has one
- * answer for all three. A second list would be a second thing to keep in step.
+ * 所有读取画板引脚的地方都走这里——侧边读数、实时显示、智能体的
+ * `read_board`——于是“引脚是什么”对三者只有一个答案。另起一份列表，
+ * 就是又一处需要同步维护的东西。
  */
 export function boardPins(level: LevelSpec, graph: Graph, registry: Registry): BoardPins {
   return isSandbox(level) ? sandboxPins(graph, registry) : level.io;

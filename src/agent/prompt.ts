@@ -1,31 +1,29 @@
 /**
- * The instructions the model starts every run with.
+ * 模型每次运行开始时收到的指令。
  *
- * A PROMPT IS A SPECIFICATION, NOT A PERSONALITY. Everything here is either a
- * fact about this program the model cannot discover (what a coordinate means,
- * how big a part is, that the level binds its pins by instance name) or a rule
- * about how the work has to be done. Nothing here asks it to be helpful; that is
- * not what goes wrong.
+ * 提示词是规格说明，不是性格设定。这里写的要么是本程序的事实，
+ * 模型自己无法发现（坐标是什么含义、一个元件多大、关卡按实例名绑定引脚），
+ * 要么是「活该怎么干」的规则。没有任何一句是在请它「乐于助人」——
+ * 出问题的从来不是这个。
  *
- * THE FEEDBACK LOOP IS THE LOAD-BEARING PART. A real session failed a level by
- * placing a part, testing, reading "2 cases failed", placing another part and
- * testing again -- sixteen times. It was not the model's fault: a verdict with no
- * expected-versus-actual in it says only "wrong", and the only move left is to
- * guess. So the prompt now says where the difference is reported and what to do
- * with it, and the tool that reports it carries the numbers.
+ * 反馈闭环是承重结构。有一次真实会话连续十六轮都是
+ * 「放一个元件 → 测试 → 读到 2 个用例不通过 → 再放一个」，
+ * 把整个步数预算耗光了。那不是模型的错：
+ * 一个不含「期望值对实际值」的判定只说了「错了」，剩下能做的只有再猜。
+ * 所以提示词现在会说明差值报在哪里、拿到之后该怎么做，
+ * 而负责报告的工具会带上具体数字。
  *
- * THE BOARD'S OWN VOCABULARY, IN CHINESE, because the player's request is in
- * Chinese and a model that has to translate pin names between two languages makes
- * mistakes that look like arithmetic errors. The tool names stay English -- they
- * are identifiers.
+ * 使用画板自己的词汇，而且是中文：玩家的请求是中文，
+ * 如果模型还要在两种语言之间翻译引脚名，犯的错看起来会像算错。
+ * 工具名保持英文——它们是标识符。
  *
- * THE SNAPSHOT IS REBUILT EVERY STEP rather than repeated in the conversation, so
- * the model always knows which screen it is on and what the level is asking for
- * without spending a tool call. The parts and wires stay out of it: those are what
- * `read_board` is for.
+ * 这份快照每一步都重新生成，而不是塞进对话历史里反复发送，
+ * 这样模型不用花一次工具调用，就能知道自己在哪个界面、关卡要求什么。
+ * 元件和导线不在快照里：那正是 read_board 的职责。
  */
 import type { BoardSnapshot } from './host';
 
+/** 生成系统提示词：把当前画板状态写成一小段「你在哪里、要做什么」。 */
 export function systemPrompt(snapshot: BoardSnapshot): string {
   const where =
     snapshot.mode === 'sandbox'

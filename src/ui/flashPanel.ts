@@ -23,61 +23,57 @@ import { circuitSignature } from '../persist/sandbox';
 import { SerialLink, serialApi, type SerialPortLike } from './serial';
 
 /**
- * 开发板: the panel that writes a sandbox circuit to a real Arduino.
+ * 开发板：把沙盒里的电路写进真实 Arduino 的面板。
  *
- * FOUR CARDS, in the order a player uses them. 映像 is what the circuit compiles
- * to on the board and what it will cost; 引脚 maps a one-bit connector onto a
- * physical board pin (`pins.ts` holds the rules) so the circuit can drive an LED
- * or read a button, not only the serial line; 本地桥 is the local daemon that runs
- * `arduino-cli` (the browser cannot); 串口 is the board itself, driven by the
- * line protocol in `flash/protocol.ts`. The panel does not own any circuit: it
- * reads the store, builds an image only when asked or when the tab is opened, and
- * caches that image by the circuit's signature so dragging a wire does not
- * rebuild 900 gates every frame. The pin assignment is remembered with the
- * bridge and board in `tc.flash.v1`, not in the circuit: it belongs to the board
- * the circuit is flashed to, and it changes only the firmware's I/O, not its
- * price.
+ * 四张卡，按玩家实际使用的顺序排列。「映像」是电路在板子上编译成的样子与代价；
+ * 「引脚」把一位连接器映射到板子的物理引脚（规则在 `pins.ts`），
+ * 让电路能驱动 LED 或读取按钮，而不只是走串口；「本地桥」是运行 `arduino-cli`
+ * 的本地守护进程（浏览器自己做不到）；「串口」是板子本身，由 `flash/protocol.ts`
+ * 里的行协议驱动。面板不拥有任何电路：它读 store，只在被要求或标签页打开时构建映像，
+ * 并按电路签名缓存该映像，这样拖动一根导线不会每帧重建 900 个门。
+ * 引脚分配与桥、开发板一起记在 `tc.flash.v1` 里，而不是记在电路里：
+ * 它属于"电路被烧到哪块板子上"，只改变固件的 I/O，不改变它的代价。
  *
- * IT IS A SANDBOX VIEW. A level's pins are the puzzle's contract and the exporter
- * refuses a level board; the composition root hides the tab outside the sandbox,
- * and `buildImage`'s own refusal is the second fence rather than a duplicated one.
+ * 它只是沙盒视图。关卡的引脚是题目的契约，导出器会拒绝关卡板；
+ * 组合根在沙盒之外隐藏这个标签页，而 `buildImage` 自己的拒绝是第二道栅栏，
+ * 不是重复的一道。
  *
- * WHY THE DOWNLOAD IS HERE AND THE UPLOAD IS NOT. A browser can save a file, but
- * it cannot start `arduino-cli`; so the sketch can always be downloaded and
- * compiled by hand, and the bridge is the optional convenience that also uploads.
- * Both paths use the same `planSketch`, so what is downloaded and what is flashed
- * are byte-identical.
+ * 为什么下载在这里而上传不在。浏览器能保存文件，但启动不了 `arduino-cli`；
+ * 所以固件草图永远可以手动下载再编译，本地桥只是"顺带上传"的可选便利。
+ * 两条路径都用同一个 `planSketch`，因此下载到的和烧进去的字节完全一致。
  */
 
+/** 开发板面板对外的操作句柄。 */
 export interface FlashPanel {
-  /** Redraw the readouts; cheap, and never builds an image. */
+  /** 重绘各个读数区；开销很小，并且绝不构建映像。 */
   render(): void;
-  /** The bottom-panel tab opened: build a fresh image if the circuit changed. */
+  /** 底部面板标签被打开：若电路已改动就构建一份新映像。 */
   reveal(): void;
-  /** The tab is showing or not; while hidden the panel does no work. */
+  /** 标签页是否显示；隐藏时面板不做任何工作。 */
   setVisible(visible: boolean): void;
   destroy(): void;
 }
 
+/** 挂载选项：测试用的注入缝，以及下载草图的回调。 */
 export interface FlashPanelOptions {
-  /** The `fetch` seam, for tests; defaults to the platform's. */
+  /** `fetch` 的注入缝，供测试使用；默认用平台自带的。 */
   fetch?: FetchLike;
-  /** The object `navigator.serial` is read from, for tests; defaults to `navigator`. */
+  /** 从中读取 `navigator.serial` 的对象，供测试使用；默认为 `navigator`。 */
   serialSource?: unknown;
-  /** Where a downloaded sketch goes, for tests; defaults to a blob download. */
+  /** 下载的草图去向，供测试使用；默认用 Blob 触发浏览器下载。 */
   onDownload?(fileName: string, sketch: string): void;
-  /** The in-page input values, for the "sync from the page" button. */
+  /** 页面上的输入值，供「同步面板输入」按钮使用。 */
   vector?(): Readonly<Record<string, number>>;
 }
 
-/** Where the panel remembers its bridge and board between reloads. */
+/** 面板在两次刷新之间记住桥与开发板的 localStorage 键。 */
 const PREFS_KEY = 'tc.flash.v1';
 
 interface Prefs {
   readonly url?: string;
-  /** A `BOARD_CHOICES` row id, which is why the Nano's old bootloader is one. */
+  /** `BOARD_CHOICES` 里某一行的 id；Nano 的旧 bootloader 之所以也单独成行，就是为了能把这一选择记住。 */
   readonly board?: string;
-  /** Connector id -> board pin, the 引脚 card's assignments. */
+  /** 连接器 id 到板子引脚的映射，即「引脚」卡里的分配。 */
   readonly pins?: Readonly<Record<string, string>>;
 }
 
@@ -105,7 +101,7 @@ function loadPrefs(): Prefs {
       ...(Object.keys(pins).length === 0 ? {} : { pins }),
     };
   } catch {
-    // A corrupt or unavailable save is "no prefs", never a failed boot.
+    // 存档损坏或不可读就当作"没有偏好"，绝不让启动因此失败。
     return {};
   }
 }
@@ -114,7 +110,7 @@ function savePrefs(prefs: Prefs): void {
   try {
     globalThis.localStorage?.setItem(PREFS_KEY, JSON.stringify(prefs));
   } catch {
-    // Private mode and a full quota both make this a no-op; the fields still work.
+    // 隐私模式或配额已满都会让保存变成空操作；输入框本身仍然照常工作。
   }
 }
 
@@ -152,7 +148,7 @@ function card(title: string): { section: HTMLElement; body: HTMLElement } {
   return { section, body };
 }
 
-/** A note whose colour says what kind of thing it is reporting. */
+/** 一条提示；它的颜色表示正在报告的是哪一类信息。 */
 function note(className = 'flash-note'): HTMLElement {
   const node = element('div', className);
   node.dataset.tone = 'info';
@@ -164,13 +160,12 @@ function toneOf(node: HTMLElement, tone: 'info' | 'good' | 'bad' | 'warn'): void
 }
 
 /**
- * The sentence a failed compile or upload ends on.
+ * 编译或上传失败时，最后落在面板上的那句话。
  *
- * The two failures a player is most likely to meet have nothing to do with the
- * circuit: the serial port is still held open (by this card before an upload, or
- * by another serial tool), or an ATmega-class board does not answer because the
- * wrong bootloader was picked. Naming which one it is saves reading an avrdude
- * log, which is otherwise the only place the difference shows.
+ * 玩家最常遇到的两种失败都与电路无关：串口仍被占用（上传前被本卡占着，
+ * 或被别的串口工具占着），或者 ATmega 系板子因为选错 bootloader 而不应答。
+ * 直接把是哪一种说出来，省得玩家去读 avrdude 日志——
+ * 否则只有那份日志才能看出区别。
  */
 function failureText(result: BridgeBuild): string {
   const log = `${result.log}\n${result.error ?? ''}`;
@@ -183,6 +178,12 @@ function failureText(result: BridgeBuild): string {
   return result.error ?? 'arduino-cli 没有通过：日志见下方。';
 }
 
+/**
+ * 把四张卡（映像、引脚、本地桥、串口）挂到 root 上，返回面板句柄。
+ *
+ * 订阅 store 以便在可见时重绘；映像按电路签名缓存，切换开发板或引脚分配
+ * 都会让缓存失效。面板不拥有电路，也不在隐藏时做任何工作（见 setVisible）。
+ */
 export function mountFlashPanel(
   root: HTMLElement,
   store: Store<AppState>,
@@ -192,7 +193,7 @@ export function mountFlashPanel(
   const wrap = element('div', 'flash-panel');
   root.append(wrap);
 
-  // ------------------------------------------------------------------ image --
+  // ------------------------------------------------------------------ 映像 --
   const imageCard = card('映像');
   const summary = element('div', 'flash-summary');
   const limits = element('div', 'flash-limits');
@@ -205,7 +206,7 @@ export function mountFlashPanel(
   imageButtons.append(buildButton, downloadButton);
   imageCard.body.append(summary, limits, staleNote, refusalNote, messageNote, imageButtons);
 
-  // ------------------------------------------------------------------- pins --
+  // ------------------------------------------------------------------- 引脚 --
   const pinCard = card('引脚');
   const pinHint = note('flash-note flash-pin-hint');
   pinHint.textContent =
@@ -213,7 +214,7 @@ export function mountFlashPanel(
   const pinList = element('div', 'flash-pin-list');
   pinCard.body.append(pinHint, pinList);
 
-  // ----------------------------------------------------------------- bridge --
+  // ----------------------------------------------------------------- 本地桥 --
   const bridgeCard = card('本地桥');
   const urlInput = element('input', 'flash-input');
   urlInput.type = 'text';
@@ -250,7 +251,7 @@ export function mountFlashPanel(
   bridgeButtons.append(healthButton, compileButton, flashButton);
   bridgeCard.body.append(bridgeFields, bridgeStatus, bridgeButtons, bridgeLog);
 
-  // ----------------------------------------------------------------- serial --
+  // ----------------------------------------------------------------- 串口 --
   const serialCard = card('串口');
   const bannerLine = note('flash-note flash-banner');
   const frameLine = note('flash-note flash-frame');
@@ -281,7 +282,7 @@ export function mountFlashPanel(
 
   wrap.append(imageCard.section, pinCard.section, bridgeCard.section, serialCard.section);
 
-  // ------------------------------------------------------------------ state --
+  // ------------------------------------------------------------------ 状态 --
   let built: { readonly image: ProgramImage; readonly signature: string } | null = null;
   let refusal: ImageRefusal | null = null;
   let message: { readonly text: string; readonly tone: 'info' | 'good' | 'bad' | 'warn' } | null = null;
@@ -297,24 +298,24 @@ export function mountFlashPanel(
   let lastInputsFor: ProgramImage | null = null;
   let inputFields = new Map<string, HTMLInputElement>();
   let serialLines: string[] = [];
-  /** Connector id -> board pin; mutated by the 引脚 card, persisted in prefs. */
+  /** 连接器 id 到板子引脚；由「引脚」卡修改，并持久化到偏好设置里。 */
   const pinMap: Record<string, string> = { ...(prefs.pins ?? {}) };
   const unsubscribe = store.subscribe(() => {
     if (visible) render();
   });
 
-  // ------------------------------------------------------------- the image --
+  // ------------------------------------------------------------- 映像构建 --
 
   function boardId(): BoardId {
     return boardChoice(boardSelect.value).board;
   }
 
-  /** The picker's row, for the budget line and the bridge request. */
+  /** 下拉框选中的那一行，供预算行和发给本地桥的请求使用。 */
   function selectedBoard() {
     return boardChoice(boardSelect.value);
   }
 
-  /** The plan both the download and the bridge request are built from. */
+  /** 下载与本地桥请求共同依据的草图方案。 */
   function planFor(image: ProgramImage, port?: string) {
     const choice = selectedBoard();
     return planSketch(image, choice.board, {
@@ -323,7 +324,7 @@ export function mountFlashPanel(
     });
   }
 
-  /** The assignments in a stable spelling, for the image's cache key. */
+  /** 把引脚分配写成稳定顺序的字符串，作为映像缓存键的一部分。 */
   function pinSignature(): string {
     return Object.keys(pinMap)
       .sort()
@@ -335,15 +336,15 @@ export function mountFlashPanel(
     return `${level.id}@${circuitSignature(graph)}@${boardId()}@${pinSignature()}`;
   }
 
-  /** Remember everything the panel owns in one save; the fields call it. */
+  /** 把面板自己拥有的全部设置一次存下；各处输入框在变化时调用。 */
   function rememberPrefs(): void {
     savePrefs({ url: urlInput.value, board: boardSelect.value, pins: pinMap });
   }
 
   /**
-   * The built image, built on first use and rebuilt when the circuit, the board
-   * or a pin assignment changed. A refusal is kept as a refusal: the panel shows
-   * why rather than leaving the last good image on screen.
+   * 已构建的映像：首次使用时构建，并只在电路、开发板或引脚分配变化后重建。
+   * 被拒绝就保留"被拒绝"这个结果：面板显示原因，
+   * 而不是继续把上一次成功的映像留在屏幕上误导玩家。
    */
   function ensureImage(): ProgramImage | null {
     const state = store.get();
@@ -367,7 +368,7 @@ export function mountFlashPanel(
     return built?.image ?? null;
   }
 
-  // -------------------------------------------------------------- the pins --
+  // -------------------------------------------------------------- 引脚分配 --
 
   interface ConnectorRow {
     readonly id: string;
@@ -375,7 +376,7 @@ export function mountFlashPanel(
     readonly direction: '输入' | '输出';
   }
 
-  /** The connectors the circuit has now, in the order the cards list them. */
+  /** 电路当前的连接器，按卡片中的排列顺序。 */
   function connectorRows(): readonly ConnectorRow[] {
     const state = store.get();
     if (!isSandbox(state.level)) return [];
@@ -387,11 +388,10 @@ export function mountFlashPanel(
   }
 
   /**
-   * Drop assignments that cannot be used any more: a deleted connector, a
-   * connector that became wide, a pin that board does not have (after a board
-   * switch) and a second connector on a pin already taken. The image builder
-   * refuses the same states, but pruning here is what keeps the pickers usable
-   * instead of leaving the player to repair a crossing that the UI created.
+   * 丢掉已经不能用的分配：已删除的连接器、变成多位宽的连接器、
+   * 当前开发板没有的引脚（切换开发板之后），以及同一个引脚上的第二个连接器。
+   * 映像构建器也会拒绝同样的状态，但在这里清理能让下拉框保持可用，
+   * 而不是留一个 UI 自己造成的冲突让玩家去修。
    */
   function prunePins(): void {
     const allowed = new Set(boardPinChoices(boardId()));
@@ -412,7 +412,7 @@ export function mountFlashPanel(
     rememberPrefs();
   }
 
-  /** Rebuild the connector rows and their pin pickers. */
+  /** 重建连接器行以及各自的引脚选择框。 */
   function renderPins(): void {
     prunePins();
     const rows = connectorRows();
@@ -497,7 +497,7 @@ export function mountFlashPanel(
     render();
   }
 
-  // ------------------------------------------------------------ the bridge --
+  // ------------------------------------------------------------ 本地桥 --
 
   function makeClient(): FlashClient {
     const url = urlInput.value.trim();
@@ -553,9 +553,8 @@ export function mountFlashPanel(
       render();
       return;
     }
-    // `arduino-cli` cannot open a port Web Serial is holding, so an upload owns
-    // the port: close it through the same teardown path 「断开」 uses, then let
-    // the player reconnect after the flash.
+    // `arduino-cli` 打不开被 Web Serial 占着的串口，所以上传要独占该串口：
+    // 走和「断开」相同的收尾路径先关掉它，烧录完成后再让玩家重新连接。
     if (upload) await disconnectSerial();
     busy = upload ? '正在烧录…这一步会调用 arduino-cli，可能需要半分钟。' : '正在编译…';
     build = null;
@@ -578,7 +577,7 @@ export function mountFlashPanel(
     render();
   }
 
-  // ------------------------------------------------------------ the serial --
+  // ------------------------------------------------------------ 串口 --
 
   function appendSerial(text: string): void {
     serialLines.push(text);
@@ -625,9 +624,8 @@ export function mountFlashPanel(
       await link.open(port);
       serial = link;
       appendSerial('— 串口已连接 —');
-      // Ask for the banner: the board printed one at boot, which was before this
-      // tab opened the port, so the first useful thing a fresh connection sees is
-      // the answer to `B`.
+      // 主动索要横幅：板子在启动时打印过一次，而那时本标签页还没打开串口，
+      // 所以新连接能看到的第一个有用信息，就是对 `B` 命令的回答。
       await link.write('B').catch(() => undefined);
     } catch (error) {
       const name = error instanceof Error ? error.name : '';
@@ -649,7 +647,7 @@ export function mountFlashPanel(
     try {
       await link?.close();
     } catch {
-      // The link's own teardown path reports anything that matters.
+      // 链路的收尾路径会自己报告任何真正重要的问题。
     }
     render();
   }
@@ -695,7 +693,7 @@ export function mountFlashPanel(
     }
   }
 
-  // --------------------------------------------------------------- drawing --
+  // --------------------------------------------------------------- 绘制 --
 
   function staleNow(): boolean {
     if (built === null) return false;
@@ -735,9 +733,9 @@ export function mountFlashPanel(
       }
     }
 
-    // The fields are built once per image, so their enabled state is refreshed
-    // on every render instead: a port connected after the build must make them
-    // typeable, and an upload (which closes the port) must grey them again.
+    // 输入框是按映像一次性建好的，所以它们的可用状态要在每次渲染时刷新：
+    // 构建之后才连接上的串口必须让它们可输入，而上传（会关闭串口）
+    // 必须把它们重新变灰。
     for (const field of inputFields.values()) field.disabled = serial === null;
 
     outputsBox.replaceChildren();
@@ -863,25 +861,24 @@ export function mountFlashPanel(
     renderIo();
   }
 
-  // ------------------------------------------------------------------ boot --
-  // The remembered board is the picker's row, not the FQBN: two rows share the
-  // Nano's chip and only one of them carries the old bootloader's options. The
-  // pin assignments ride along in the same record.
+  // ------------------------------------------------------------------ 启动 --
+  // 记住的"开发板"是下拉框里的一行，而不是 FQBN：Nano 的芯片对应两行，
+  // 只有其中一行带有旧 bootloader 的选项。引脚分配也放在同一条记录里。
   rememberPrefs();
   urlInput.addEventListener('change', () => {
     rememberPrefs();
   });
   boardSelect.addEventListener('change', () => {
     rememberPrefs();
-    // The pin list belongs to the board too: a Mega pin is not an Uno pin, so a
-    // switch prunes the assignments that the new board cannot make (render does
-    // it through the pin card) before the next build.
+    // 引脚列表同样属于开发板：Mega 的引脚不是 Uno 的引脚，
+    // 所以切换开发板会在下一次构建之前清掉新板子做不到的分配
+    // （由 render 经引脚卡完成）。
     if (visible) render();
   });
-  // 烧录 is enabled by the port picker, and nothing in the store changes when a
-  // port is chosen: without this the button stayed grey after selecting COM3
-  // (found by driving the real board from a browser, not by the unit tests,
-  // which called render() by hand until this listener made that unnecessary).
+  // 「烧录」按钮是否可用由串口下拉框决定，而选串口不会改变 store 里的任何东西：
+  // 没有这个监听器时，选中 COM3 之后按钮仍然是灰的（这个问题是在浏览器里
+  // 实际操作真实板子时发现的，不是单元测试发现的——那些测试此前一直手动调
+  // render()，直到这个监听器让手动调用变得不必要）。
   portSelect.addEventListener('change', () => {
     if (visible) render();
   });

@@ -30,31 +30,25 @@ import {
 } from './image';
 
 /**
- * Building the board program from a sandbox circuit.
+ * 由沙盒电路构建开发板要运行的程序映像。
  *
- * THE SUPPORTED SET IS A DELIBERATE, NARROW CONTRACT. The first version knows
- * the ten one-bit gates, `full_adder`, the two one-bit memories and the two
- * connectors. A wide part (`and8`, `add8`), a decoder, a CPU part or a player's
- * component built from one of those is REFUSED with the instance named, not
- * quietly left out: a board that runs most of a circuit is worse than a board
- * that says which part it cannot run.
+ * 受支持的元件集合是一份刻意收窄的契约。第一版只认识十种 1 位门、`full_adder`、
+ * 两种 1 位存储器和两种连接器。宽位元件（`and8`、`add8`）、译码器、CPU 元件，
+ * 以及用它们搭出来的玩家自定义元件，都会被**拒绝并点名实例**，而不是悄悄略过：
+ * 一块"能跑电路大部分"的板子，比一块明确说"这个元件跑不了"的板子更糟。
  *
- * WHAT MAKES A CIRCUIT RUN THE SAME ON THE BOARD AS IN THE PAGE: every table is
- * extracted from the part's own JavaScript (`extract.ts`), the slot edges come
- * straight from the compiled netlist (`inputSlot` + `drive`), and a combinational
- * dependency cycle falls back to the kernel's own Jacobi settle rule instead of
- * pretending a topological order exists.
+ * 同一电路在板上与在页面里运行结果一致的原因：每张表都从元件自己的 JavaScript
+ * 行为中抽取（`extract.ts`），槽位边直接来自编译后的网表（`inputSlot` 加 `drive`），
+ * 组合依赖环则回落到底层内核同样的 Jacobi 结算规则，而不是假装存在拓扑序。
  *
- * THE RAM BUDGET IS A REFUSAL, NOT A WARNING. An Uno has 2 KiB of SRAM, and the
- * failure mode of overrunning it is a board that resets or garbles the serial
- * link -- which is much harder to diagnose than a message in the panel. The
- * estimate is deliberately conservative, and it is checked against the board the
- * player picked (`boards.ts`): a circuit too large for an Uno may still fit a
- * Mega, and the refusal says which board refused it. The real size comes back
- * from `arduino-cli compile` after the choice, and the panel shows both.
+ * RAM 预算是一次**拒绝**，不是警告。Uno 只有 2 KiB SRAM，超限的失败方式是板子
+ * 复位或串口链路串码，这比面板上的一条消息难诊断得多。估算刻意保守，并且对照
+ * 玩家选中的板卡检查（`boards.ts`）：对 Uno 太大的电路也许仍能放进 Mega，拒绝
+ * 消息会说明是哪块板卡拒绝的。真实尺寸在选定板卡后由 `arduino-cli compile`
+ * 回报，面板两个数字都会显示。
  */
 
-/** The one-bit gates the first version can extract tables for. */
+/** 第一版能够抽取真值表的 1 位门元件。 */
 const COMBINATIONAL = new Set([
   'const_on',
   'const_off',
@@ -70,47 +64,55 @@ const COMBINATIONAL = new Set([
   'full_adder',
 ]);
 
-/** The two storage parts: one state byte each, publish-from-state and sample. */
+/** 两种存储元件：各占 1 个状态字节，先由状态发布输出，再由时钟沿采样。 */
 const SEQUENTIAL = new Set(['delay_line', 'mem1']);
 
+/** 支持集合：组合元件与存储元件的并集，其余元件一律拒绝。 */
 const SUPPORTED = new Set([...COMBINATIONAL, ...SEQUENTIAL]);
 
-/** Widest connector the line protocol can carry in one number. */
+/**
+ * 串口线协议一个数字能承载的最大位宽。
+ *
+ * 固件里 `TC_IN[]` 是 `uint32_t`，输入值由 `strtoul` 读入，所以 32 位是协议上限；
+ * 更宽的连接器只能继续留在网页里，或者由玩家拆成多个连接器。
+ */
 const MAX_SERIAL_BITS = 32;
 
 /**
- * SRAM the estimate leaves for the serial buffers and the call stack, on top of
- * the circuit's own bytes. Deliberately not "almost all of the chip": the
- * firmware's own tables, `Serial`'s ring buffers and every nested call in a
- * Jacobi sweep share the board's SRAM with the slot array.
+ * 估算在"电路自身字节"之外，给串口缓冲与调用栈留出的 SRAM。
+ *
+ * 刻意不是"几乎整块芯片"：固件自己的表、`Serial` 的环形缓冲，以及 Jacobi 每轮
+ * 扫描里层层嵌套的调用，都和槽位数组共享同一块 SRAM。
  */
 const RAM_RESERVE = 400;
 
-/** The runtime template's share of the sketch: Serial, the line reader, the loops. */
+/** 草图中运行时代码占用的 flash：Serial、行读取器、各个循环。 */
 const FLASH_RUNTIME = 8_192;
 
 /**
- * A document to a board program, or the reason it is not one.
+ * 把一张画板文档变成开发板程序映像；变不成时给出原因。
  *
- * `board` decides only the budget the estimate is checked against; the image is
- * the same bytes on every AVR, which is why the board is not part of its hash.
- * The default is the Uno the first version was built and measured around.
+ * `board` 只决定估算要对照哪块板卡的预算——在没有引脚映射时，映像在所有 AVR 上
+ * 是同样的字节，所以板卡不进哈希。默认是 Uno，即第一版实现与实测围绕的板卡。
  *
- * The order of refusals is the order a player can act on them: wrong screen,
- * doesn't compile, no connectors, unsupported parts, a pin assignment that cannot
- * work, never settles, doesn't fit. A circuit with two defects reports the first
- * one, which is the one to fix first anyway.
+ * 拒绝的先后顺序，就是玩家可以依次处理的顺序：屏幕不对、编译不过、没有连接器、
+ * 有元件不支持、引脚分配不可用、电路不收敛、放不下。同时有两个缺陷的电路报告
+ * 第一个，而那通常正是应该先修的那个。
  *
- * `board` decides the budget the estimate is checked against, and -- once a
- * connector is mapped to an analogue pin -- the pin NUMBER the sketch writes,
- * because A0 is 14 on a 328P and 54 on a Mega. Without a mapping the image is the
- * same bytes on every AVR; with one, the number is in the image and its hash.
+ * 一旦某个连接器映射到模拟引脚，`board` 还决定草图写出的引脚**编号**：A0 在 328P
+ * 上是 14，在 Mega 上是 54。没有映射时，映像在所有 AVR 上字节相同；有映射时，
+ * 编号本身就在映像里，也就在哈希里。
  *
- * `pinMap` is what the panel's 引脚 card chose: a connector id to a board pin.
- * It is validated here as well as in the panel (a stale save or another caller
- * must not produce firmware that shares a pin or uses one the board lacks), and
- * it is part of the image's hash because it changes what the firmware does --
- * see `pins.ts` for the rules.
+ * `pinMap` 是面板"引脚"卡片选出的结果：连接器 id → 板卡引脚。它在这里与面板里
+ * 各校验一次（过期存档或其他调用方不能产出共用同一引脚、或用了板上没有的引脚的
+ * 固件），并且因为它改变固件行为，所以参与映像哈希——规则见 `pins.ts`。
+ *
+ * @param graph 画板文档，提供实例与连线。
+ * @param registry 元件定义表，用来读取每个实例的 `evaluate`/`clockEdge`。
+ * @param level 关卡规格；只有沙盒关卡允许烧录。
+ * @param board 预算与引脚编号所依据的板卡，默认 Uno。
+ * @param pinMap 连接器 id 到板卡引脚的映射；缺省表示全部走串口。
+ * @returns 成功时是 `{ image }`，失败时是 `{ refusal }`（含中英两种原因文本）。
  */
 export function buildImage(
   graph: Graph,
@@ -188,9 +190,8 @@ export function buildImage(
     outputs.push({ id: pin.id, index, width, base });
   }
 
-  // The pin card's assignments. Errors are refusals so a stale save, a second
-  // caller or a future import path cannot produce firmware that fights itself
-  // for a pin; the panel removes the same collisions before they can occur.
+  // 引脚卡片里的分配。校验失败会变成拒绝值返回，这样过期存档、第二个调用方或
+  // 未来的导入路径都不可能产出"抢同一根引脚"的固件；面板只是提前挡住同样的冲突。
   const pinConnectors: PinConnector[] = [
     ...inputs.map((pin) => ({ id: pin.id, width: pin.width })),
     ...outputs.map((pin) => ({ id: pin.id, width: pin.width })),
@@ -228,15 +229,13 @@ export function buildImage(
     const origin = net.refs.get(path) ?? path;
     const label = origin === path ? `${path} (${defId})` : `${origin} → ${path} (${defId})`;
 
-    // A level input is driven from outside: its slot is a `ImageSource`, not a
-    // node. A nested one is never driven (the checker only writes a top-level
-    // pin), so skipping it is exactly what the page does.
+    // 关卡输入由外部驱动：它的槽位是一个 `ImageSource`，不是节点。嵌套在自定义
+    // 元件里的输入永远没人驱动（判定器只写顶层引脚），所以跳过它正是页面里的行为。
     if (defId === 'level_input') continue;
 
-    // A level output is a mirror: every bit is a copy of the slot its `in` bit
-    // reads. Doing this for EVERY compiled connector, not only the board's own
-    // pins, is what keeps the `mirror` output correct when a player wires it
-    // somewhere else as well.
+    // 关卡输出是一面镜子：每一位都拷贝它 `in` 位读到的那个槽位。对**每一个**
+    // 编译出来的连接器都这样做（而不只是开发板自己的引脚），玩家把这个输出另外
+    // 连到别处时，`mirror` 输出才会保持正确。
     if (defId === 'level_output') {
       const inputPin = def.inputs[0];
       if (inputPin === undefined) {
@@ -282,6 +281,8 @@ export function buildImage(
       continue;
     }
 
+    // 输入槽位按引脚顺序、每个引脚低位在前展开成向量，与 extract.ts 的
+    // `inputsFor` 的顺序完全一致；节点里的真值表就是按这个下标索引的。
     const slots: number[] = [];
     for (let pinAt = 0; pinAt < def.inputs.length; pinAt += 1) {
       const pin = def.inputs[pinAt]!;
@@ -302,6 +303,8 @@ export function buildImage(
           unsupported.push(`${label} — ${extracted.stateCount} states`);
           continue;
         }
+        // 每个存储元件分到一个状态下标（固件里对应 TC_STATE/TC_PENDING 的一格），
+        // 与它在节点发射顺序里的位置无关，只要求边与 pub 节点引用同一个下标。
         const state = stateCount;
         stateCount += 1;
         for (let pinAt = 0; pinAt < def.outputs.length; pinAt += 1) {
@@ -352,9 +355,8 @@ export function buildImage(
     );
   }
 
-  // THE KERNEL'S OWN VERDICT, before the board's. A circuit the page cannot
-  // settle has no fixed point for the firmware to reproduce, and letting an
-  // oscillator onto the board would look like a firmware bug.
+  // 先取内核自己的判决，再谈板卡预算。页面里都无法结算的电路没有不动点可供固件
+  // 复现；让一个振荡器上板，看起来会像是固件的 bug。
   try {
     new Simulation(net, registry).settle();
   } catch (error) {
@@ -381,15 +383,14 @@ export function buildImage(
 
   const slotBytes = Math.ceil(slots / 8);
   const buffered = ordered.mode === 'dag' ? slotBytes : slotBytes * 2;
-  // The firmware holds the connector values in `TC_IN` outside the settle
-  // buffers (`uint32_t` each), a state byte plus its pending byte per storage
-  // element, and one previous-level byte per input pin it polls.
+  // 固件把连接器值放在结算缓冲之外的 `TC_IN`（每个 `uint32_t`），每个存储元件
+  // 还要一个状态字节加一个待提交字节，每个被轮询的输入引脚还要一个"上一次电平"
+  // 字节。
   const ramBytes =
     buffered + stateCount * 2 + inputs.length * 4 + pinInputs.length * PIN_RAM_BYTES + RAM_RESERVE;
   const tableBytes = tables.reduce((sum, table) => sum + table.length, 0);
-  // Every PROGMEM array the sketch emits is counted, not just the descriptors:
-  // the source table, the per-output base/width tables and the pin tables are
-  // flash too.
+  // 草图里每一个 PROGMEM 数组都计入，不只是描述符：源表、每个输出的 base/width
+  // 表以及引脚表同样占 flash。
   const flashBytes =
     ordered.nodes.length * NODE_BYTES +
     edges.length * EDGE_BYTES +
@@ -402,9 +403,8 @@ export function buildImage(
 
   const limits = boardProfile(board);
   if (ramBytes > limits.maxRam || flashBytes > limits.maxFlash) {
-    // The way out depends on the board: a Mega is the answer for a circuit too
-    // big for an Uno, and there is nothing bigger to offer once the player is
-    // already on one.
+    // 出路取决于板卡：对 Uno 太大的电路，换 Mega 是答案；玩家已经在 Mega 上时，
+    // 就没有更大的板子可推荐了。
     const hint =
       board === 'arduino:avr:mega'
         ? ''
@@ -453,10 +453,10 @@ export function buildImage(
 }
 
 /**
- * One pin problem as the panel's sentence, in the app's two languages.
+ * 一条引脚问题，转成面板上给玩家看的中文句子。
  *
- * Kept next to `buildImage` rather than in `pins.ts` because the wording belongs
- * to the refusal the player reads, not to the validator.
+ * 放在 `buildImage` 旁边而不是 `pins.ts`，因为措辞属于玩家读到的拒绝消息，
+ * 而不属于校验器本身；英文版本是紧挨着的 `pinIssueEn`。
  */
 function pinIssueZh(issue: PinIssue): string {
   switch (issue.code) {
@@ -481,11 +481,11 @@ function pinIssueEn(issue: PinIssue): string {
 }
 
 /**
- * `compile`, with the kernel's validation refusal turned into a value.
+ * 调用 `compile`，并把内核的验证异常转成拒绝值。
  *
- * The guard exists only because `compile` throws and this builder's contract is
- * a discriminated result; a non-validation throw is a defect in the kernel or in
- * this file and is re-thrown rather than dressed up as the player's fault.
+ * 这个包装存在，只是因为 `compile` 会 throw，而本构建器的契约是"返回可判别的
+ * 结果"；非验证类的异常是内核或本文件的缺陷，应当原样抛出，而不是伪装成玩家的
+ * 错误。
  */
 function compileOrRefuse(
   graph: Graph,
@@ -507,13 +507,11 @@ function compileOrRefuse(
 }
 
 /**
- * Nodes in a settle order, or `jacobi` when no such order exists.
+ * 按结算顺序排列节点；不存在这种顺序时返回 `jacobi` 模式。
  *
- * A combinational cycle is not an error here: the kernel settles one with Jacobi
- * sweeps, and the board must do the same rather than refuse a NAND latch. The
- * order is a permutation of the node list when it succeeds; when it does not,
- * the list is left in emission order and the firmware runs the double-buffered
- * loop, which is order-independent by construction.
+ * 组合环在这里不是错误：内核用 Jacobi 迭代结算它，开发板也必须照做，而不能因为
+ * 看到 NAND 锁存器就拒绝。排序成功时，返回值是节点列表的一个排列；失败时列表
+ * 保持发射顺序，由固件走双缓冲循环——那个循环按构造与顺序无关。
  */
 function orderNodes(nodes: readonly ImageNode[]): {
   readonly nodes: readonly ImageNode[];

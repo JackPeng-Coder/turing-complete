@@ -1,32 +1,28 @@
 /**
- * Developer mode: the switch that opens every gate at once.
+ * 开发者模式：一次性打开所有闸门的开关。
  *
- * It is a URL PARAMETER and nothing else -- `?dev=1` -- because that is the one
- * place a mode can live without becoming a lie. A stored flag survives a reload
- * nobody was thinking about, and a hidden flag that quietly unlocks the game
- * makes a developer report "progress is broken" about a session they turned into
- * a sandbox an hour earlier. The URL is visible, copyable, and gone the moment
- * the tab is.
+ * 它只是一个 URL 参数——`?dev=1`——这不是偷懒，而是唯一不会变成谎言的位置：
+ * 存进 localStorage 的开关会熬过一次没人留意的刷新；而一个悄悄解锁全游戏的
+ * 隐藏开关，会让开发者在一小时前把会话变成沙盒之后，来报告"进度坏了"。
+ * URL 可见、可复制，标签页关掉就消失，因此不会留下"上次谁开过它"的疑问。
  *
- * WHAT IT OPENS is exactly two gates, both in `app/progress.ts`: every level
- * becomes reachable from the chapter map, and every component a level lists is
- * offered by its palette. Without the second one the first is useless -- opening
- * level 47 with a starter palette leaves nothing to build it out of -- which is
- * why the flag travels to both and is tested at both.
+ * 它到底打开什么：恰好两个闸门，都在 `app/progress.ts` 里——每个关卡都能从
+ * 章节地图进入，且关卡列出的每个元件都会出现在它的托盘里。只开第一个没有
+ * 意义：用初始托盘打开第 47 关，玩家没有可搭的元件——所以这个标志同时传给
+ * 两处，也在两处接受测试。
  *
- * WHAT IT DOES NOT DO: it never writes progress. Levels opened this way are not
- * passed, no stars are awarded, and a save is not touched. That is what keeps it
- * a debugging tool rather than a cheat code, and it is why turning it off leaves
- * the game exactly where it was.
+ * 它不做什么：它从不写进度。这样打开的关卡不算通过、不发星、不碰存档。
+ * 这正是它保持"调试工具"身份而不变成"作弊码"的原因，也是关掉它之后游戏
+ * 会停在原处的原因。
  */
 
 /**
- * Whether the given `location.search` asks for developer mode.
+ * 判断给定的 `location.search` 是否要求开发者模式。
  *
- * `?dev`, `?dev=1` and `?dev=anything` turn it on; `?dev=0` and `?dev=false`
- * turn it off, so a URL can carry the switch in either position -- a link that
- * says "not in dev mode" is as useful as one that says it is, and neither needs
- * the reader to know that absence means off.
+ * `?dev`、`?dev=1`、`?dev=anything` 都算开启；`?dev=0` 与 `?dev=false`
+ * 算关闭，于是同一个开关在 URL 里写"开"还是写"关"都可以——一条声称
+ * "当前不在开发者模式"的链接和一条声称在的链接一样有用，而两者都不需要
+ * 读者知道"缺省即关闭"这条规则。
  */
 export function devModeFrom(search: string): boolean {
   const value = new URLSearchParams(search).get('dev');

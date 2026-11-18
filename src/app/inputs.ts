@@ -1,23 +1,20 @@
 import type { BoardPins } from '../levels/sandbox';
 
 /**
- * What a click on an input connector leaves that pin driven with, or `null`.
+ * 点击一个输入连接器后，该引脚应被驱动成什么值；点击的不是输入连接器则为 `null`。
  *
- * ONE BIT TOGGLES; A WIDER PIN COUNTS UP AND WRAPS. That is the board's own nudge
- * gesture -- the readout panel's per-bit cells are how an exact byte is typed --
- * and it is the same rule on a level as in the sandbox. The only difference
- * between the two boards is what names the pin: a level's pin is `IN_<pinId>`,
- * while a sandbox connector's pin id IS its instance id (`sandboxPins`).
+ * 一位引脚是"翻转"；更宽的引脚是"加一并回绕"。这是画板自己的微调手势——读数
+ * 面板上的逐位格子才是精确输入一个字节的地方——关卡与沙盒执行的是同一条规则。
+ * 两种画板唯一的区别是引脚由什么来命名：关卡的引脚叫 `IN_<pinId>`，而沙盒
+ * 连接器的 pin id 就是它的实例 id（见 `sandboxPins`）。
  *
- * BOTH SPELLINGS, ONE PLACE. The board used to resolve the name itself, by
- * slicing `IN_` off the instance id and looking the rest up in `level.io`. A
- * sandbox has no `level.io`, so a click on `IN_1` found nothing and did nothing --
- * the same defect as a sandbox that offered no connectors, one layer up. Reading
- * the pins from `boardPins` (which every other reader already uses) is what makes
- * a click work on both boards.
+ * 两种拼写只在一个地方处理。从前画板自己解析名字：把实例 id 里的 `IN_` 前缀
+ * 切掉，再用剩下的部分去 `level.io` 里查。沙盒没有 `level.io`，于是点击 `IN_1`
+ * 什么也找不到、什么也不发生——这和"沙盒根本不提供连接器"是同一个缺陷，只是
+ * 高了一层。改成从 `boardPins` 读引脚（其他读取方本来就都走它），点击在两种
+ * 画板上都能生效。
  *
- * `null` for a click on anything that is not an input connector: a click on a gate
- * means select, and always has.
+ * 点击任何非输入连接器的东西都返回 `null`：点在门上表示选中，这条规则从未变过。
  */
 export function nudgedInput(
   pins: BoardPins,

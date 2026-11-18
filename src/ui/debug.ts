@@ -1,61 +1,62 @@
 import { THEME } from './theme';
 
 /**
- * The debugger: what the machine is holding, one page at a time.
+ * 调试器：机器内部此刻存着什么，一页一页地看。
  *
- * WHY A PANEL AND NOT THE BOARD. A stepped program's state lives where no pin can
- * show it: `regfile6` keeps six bytes behind its two read ports, `pc8` one address
- * the program counter publishes only as itself, and `ram_prog` 256 bytes of which
- * a single addressed byte is visible at a time. The board paints signals, and
- * these are not signals -- they are the state a signal is a function of, which is
- * exactly the thing a player stepping a program needs to watch.
+ * 为什么做成面板而不是画在画板上。单步程序的内部状态在没有任何引脚能显示的地方：
+ * `regfile6` 在两个读端口后面藏着六个字节；`pc8` 只保存一个地址，程序计数器对外发布的也只有它；
+ * `ram_prog` 有 256 字节，同一时刻只有一个被寻址的字节可见。画板画的是信号，
+ * 而这些不是信号——它们是"信号作为其函数"的状态，恰恰是单步执行程序的玩家
+ * 最需要看的东西。
  *
- * NOTHING HERE RUNS ANYTHING. Every value arrives through `DebugOptions`, which
- * `main.ts` answers from `ProgramRun` (over the kernel's `Simulation.readState`),
- * so the panel is a readout and cannot disagree with the run: there is one copy of
- * the state and this draws it. A reader that has nothing to say answers `null`,
- * and a field with no reading shows a dash -- never a zero, which would be a value
- * the machine has not been asked about.
+ * 这里不运行任何东西。每个值都经 `DebugOptions` 到达，由 `main.ts` 从
+ * `ProgramRun`（再往下经内核的 `Simulation.readState`）给出，所以面板只是读数器，
+ * 不可能和运行结果不一致：状态只有一份，这里只是把它画出来。
+ * 没有话可说的读取器返回 `null`，没有读数的字段显示短横线——绝不显示 0，
+ * 因为 0 会是一个机器从未被问过的值。
  *
- * THE RAM WINDOW PAGES RATHER THAN SCROLLS THROUGH 256 ROWS. Eight rows of eight
- * bytes is a page, and the counter's page is what is on screen: the byte being
- * executed is marked, and the window FOLLOWS the counter when the machine moves to
- * another page. Paging by hand is honoured until then, because reading the rest of
- * a program while the machine sits on one address is the other thing this window
- * is for.
+ * RAM 窗口分页显示，而不是滚过 256 行。八行、每行八字节是一页，
+ * 屏幕上显示的是计数器所在的那一页：正在执行的字节有标记，
+ * 机器走到另一页时窗口会跟随计数器。在此之前，手动翻页会被尊重，
+ * 因为机器停在某个地址时去读程序的其他部分，正是这个窗口的另一个用途。
  */
+
+/** 面板读取的五个读数；`main.ts` 用 `ProgramRun` 实现它们。 */
 export interface DebugOptions {
-  /** REG0..REG5, or `null` when the circuit has no `regfile6`. */
+  /** REG0..REG5 六个寄存器的值；电路里没有 `regfile6` 时为 `null`。 */
   registers(): readonly number[] | null;
-  /** The `pc8` state, or `null` when the circuit has no counter. */
+  /** `pc8` 的状态；电路里没有计数器时为 `null`。 */
   pc(): number | null;
-  /** The 256-byte program image, or `null` when there is no `ram_prog` to show. */
+  /** 256 字节的程序映像；没有 `ram_prog` 可显示时为 `null`。 */
   ram(): readonly number[] | null;
-  /** The circuit's `halt` line: `true` halted, `false` counting, `null` no part. */
+  /** 电路的 `halt` 线：`true` 已停机、`false` 在计数、`null` 没有该元件。 */
   halt(): boolean | null;
-  /** Edges clocked so far. */
+  /** 到目前为止已打入的时钟沿数（拍数）。 */
   ticks(): number;
 }
 
-/** Rows of eight bytes per page: 64 bytes, so `ram_prog` is four pages. */
+/** 每页八行、每行八字节：一页 64 字节，所以 `ram_prog` 共四页。 */
 const PAGE_ROWS = 8;
 const ROW_BYTES = 8;
 const PAGE_BYTES = PAGE_ROWS * ROW_BYTES;
 
 /**
- * "Nothing has been built yet", which is not the same answer as "there is
- * nothing to read".
+ * "还没有构建过"，这与"没有东西可读"不是同一个答案。
  *
- * A reader answering `null` is a READING -- the circuit has no register file, or
- * the program was refused -- and it has to build the dash rows the first time it
- * is seen. A plain `null` starting value would make that first build look like an
- * unchanged re-render.
+ * 读取器返回 `null` 本身就是一个读数——电路里没有寄存器文件，或程序被拒绝——
+ * 第一次看到它时必须把短横线行建出来。若用普通的 `null` 当初始值，
+ * 首次构建就会被误判成"内容没变、不必重画"。
  */
 const UNBUILT = Symbol('unbuilt');
 
-/** The six registers `regfile6` keeps, in the order its state stores them. */
+/** `regfile6` 保存的六个寄存器，按其状态存储的顺序排列。 */
 const REGISTERS = ['REG0', 'REG1', 'REG2', 'REG3', 'REG4', 'REG5'] as const;
 
+/**
+ * 挂载调试面板，并立即渲染一次；返回的 render 由 `main.ts` 在每次 store
+ * 变化时调用。面板只读不写：所有值都经 DebugOptions 取回，读数没变时
+ * 对应的 DOM 不会重建（见 shownRam / shownRegisters / shownPc 的比较）。
+ */
 export function mountDebug(root: HTMLElement, options: DebugOptions): { render(): void } {
   const panel = document.createElement('section');
   panel.className = 'debug';
@@ -105,38 +106,34 @@ export function mountDebug(root: HTMLElement, options: DebugOptions): { render()
   panel.append(head, regs, pcRow, ramHead, ram);
   root.append(panel);
 
-  /** The page on screen; the counter's own page is followed separately. */
+  /** 屏幕上显示的页；计数器自己所在的页另行跟随。 */
   let page = 0;
   /**
-   * The counter's page the window last followed.
+   * 窗口上一次跟随到的计数器页。
    *
-   * `-1` before anything has been read, so the first render takes the counter's
-   * page. Only a CHANGE of the counter's page moves the window, which is what
-   * lets a player page away and stay there while the machine sits still.
+   * 在读到任何东西之前是 `-1`，这样第一次渲染就会采用计数器所在的页。
+   * 只有计数器的页真的改变时窗口才移动，这也正是"玩家手动翻页离开后，
+   * 机器不动时就能停在那里"的原因。
    */
   let followed = -1;
   /**
-   * What the panel was last built from, so a pan does not rebuild it.
+   * 面板上一次构建 RAM 窗口所依据的内容，避免平移画板也重建它。
    *
-   * `main.ts` re-renders this panel on EVERY store change, and a pan or a click
-   * costs the same as a step. The window is 64 cells and the register block seven
-   * rows, and rebuilding either for a camera move is work done for nothing.
+   * `main.ts` 在每次 store 变化时都重绘本面板，而平移或点击与单步一样频繁。
+   * 窗口是 64 个格子、寄存器块是七行，为一次相机移动重建其中任何一个都是白做功。
    *
-   * IDENTITY CANNOT DECIDE THAT. `ProgramRun.readRam` and `readRegisters` build a
-   * fresh array out of `Simulation.readState` -- which itself copies -- on every
-   * call, so the array is new even when not one byte has moved, and an identity
-   * test would rebuild every time. What is compared here is therefore the BYTES,
-   * the page, and the addressed byte: what actually decides whether a cell would
-   * look different.
+   * 用引用相等判断行不通。`ProgramRun.readRam` 与 `readRegisters` 每次调用都会从
+   * `Simulation.readState`（它自己也会复制）新建一个数组，所以哪怕一个字节都没变，
+   * 数组也是新的；用引用比较会导致每次重绘都重建。因此这里比较的是字节内容、页码
+   * 和当前寻址的字节——这些才是真正决定"某一格看起来会不会不同"的东西。
    */
   let shownRam: { image: readonly number[]; first: number; counter: number | null } | null = null;
   /**
-   * The registers and the counter the block was last built from.
+   * 寄存器块和程序计数器上一次构建所依据的值。
    *
-   * `UNBUILT` rather than `null` as the starting value, and that distinction is
-   * the whole reason the sentinel exists: `null` is a READING -- the run had no
-   * register file to read -- so starting there would make the first render look
-   * like an unchanged one and leave the panel empty.
+   * 初始值用 `UNBUILT` 而不是 `null`，这个区别正是该哨兵存在的全部理由：
+   * `null` 是一个读数——运行环境里没有寄存器文件可读——若从它开始，
+   * 第一次渲染就会被当成"没有变化"，面板会一直空着。
    */
   let shownRegisters: readonly number[] | null | typeof UNBUILT = UNBUILT;
   let shownPc: number | null | typeof UNBUILT = UNBUILT;
@@ -157,16 +154,15 @@ export function mountDebug(root: HTMLElement, options: DebugOptions): { render()
     const counter = options.pc();
     const tick = options.ticks();
     const halted = options.halt();
-    // The text is assigned only when the reading actually moved: writing it every
-    // render throws the text node away and builds a new one, and `main.ts` renders
-    // this panel on every store change, pans included.
+    // 只有读数真的变化时才写文本：每次渲染都写会丢掉旧文本节点、新建一个，
+    // 而 `main.ts` 在每次 store 变化时都会重绘本面板，包括平移。
     const tickText = `${tick} 拍`;
     if (ticks.textContent !== tickText) ticks.textContent = tickText;
 
     const haltText = halted === null ? '—' : halted ? '停机' : '运行';
     if (halt.textContent !== haltText) halt.textContent = haltText;
-    // The instrument's own voice, and never one of the board's value colours: a
-    // state is not a signal, and green here would read as the halt pin carrying 1.
+    // 用仪表自己的语气色，绝不用画板上的取值颜色：状态不是信号，
+    // 这里的绿色会被误读成 halt 引脚正携带 1。
     halt.style.color = halted === true ? THEME.title : THEME.textMuted;
     halt.title =
       halted === null
@@ -187,8 +183,7 @@ export function mountDebug(root: HTMLElement, options: DebugOptions): { render()
       pcRow.replaceChildren(named('PC'), hexCell(counter), decimalCell(counter));
     }
 
-    // Follow the counter, but only when it moves to another page: paging by hand
-    // while the machine sits still has to stick.
+    // 跟随计数器，但只在它移动到另一页时跟随：机器不动时，手动翻页必须能停住。
     if (image !== null && counter !== null) {
       const counterPage = pageOf(counter);
       if (counterPage !== followed) {
@@ -223,21 +218,19 @@ export function mountDebug(root: HTMLElement, options: DebugOptions): { render()
 }
 
 /**
- * Whether two readings render as the same thing.
+ * 两个读数是否会渲染成同一样东西。
  *
- * `null` means the run had nothing to say -- no such part, or a program that was
- * refused -- and is equal only to itself, because the empty state is a different
- * panel from a page of zeros. Two arrays are compared byte by byte: the readers in
- * `levels/run.ts` copy out of `Simulation.readState` on every call, so identity
- * says "changed" every time and only the contents can answer the question the
- * guard is asking.
+ * `null` 表示运行环境无话可说——没有这个元件，或程序被拒绝——它只等于它自己，
+ * 因为"空状态"与"一页零"是两个不同的面板。两个数组按字节比较：
+ * `levels/run.ts` 的读取器每次调用都从 `Simulation.readState` 复制出来，
+ * 引用永远显示"变了"，只有内容才能回答这个守卫真正要问的问题。
  */
 function sameBytes(a: readonly number[] | null, b: readonly number[] | null): boolean {
   if (a === null || b === null) return a === b;
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
-/** One `REGn 0xNN NN` row: the name, the byte in hex, and the same byte in decimal. */
+/** 一行 `REGn 0xNN NN`：名称、十六进制字节，以及同一个字节的十进制值。 */
 function registerRow(name: string, value: number | null): HTMLElement {
   const row = document.createElement('div');
   row.className = 'debug-reg';
@@ -253,11 +246,10 @@ function named(text: string): HTMLElement {
 }
 
 /**
- * A byte as two hex digits, or a dash.
+ * 一个字节显示为两位十六进制，或一根短横线。
  *
- * Upper case with the `0x` prefix, which is what the assembler's own listing and
- * every datasheet use; a dash for no reading at all, which is the same convention
- * the input readout panel uses for a pin nothing has driven.
+ * 大写并带 `0x` 前缀，与汇编器自己的列表和所有数据手册的写法一致；
+ * 完全没有读数时显示短横线，与输入读数面板对"没有东西驱动过的引脚"的约定相同。
  */
 function hexCell(value: number | null): HTMLElement {
   const cell = document.createElement('span');
@@ -277,7 +269,7 @@ function hexText(value: number): string {
   return value.toString(16).toUpperCase().padStart(2, '0');
 }
 
-/** The page's rows: eight addresses each, and the counter's byte marked. */
+/** 本页的每一行：每行八个地址，并标出计数器所指的那个字节。 */
 function ramRows(image: readonly number[], first: number, counter: number | null): HTMLElement[] {
   const rows: HTMLElement[] = [];
   for (let line = 0; line < PAGE_ROWS; line += 1) {
@@ -292,8 +284,7 @@ function ramRows(image: readonly number[], first: number, counter: number | null
       const at = start + offset;
       const cell = document.createElement('span');
       cell.className = 'debug-byte';
-      // Past the end of a short image: the byte is not there, and printing 00
-      // would say it is zero.
+      // 超过程序映像末尾的位置：那里没有字节，打印 00 会声称它是 0。
       cell.textContent = at < image.length ? hexText(image[at]!) : '  ';
       if (at === counter) cell.classList.add('debug-byte-pc');
       row.append(cell);
@@ -303,7 +294,7 @@ function ramRows(image: readonly number[], first: number, counter: number | null
   return rows;
 }
 
-/** The whole window's stand-in when the circuit has no program memory to show. */
+/** 电路没有程序存储器可显示时，替代整个窗口的占位提示。 */
 function emptyRam(): HTMLElement {
   const empty = document.createElement('div');
   empty.className = 'debug-ram-empty';

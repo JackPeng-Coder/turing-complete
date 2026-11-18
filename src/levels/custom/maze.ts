@@ -1,3 +1,9 @@
+// `maze` 检查器：第 4 章「路在脚下 / The Maze」的闭环导航判定。
+// 本模块位于 levels 层，依赖 `custom/index.ts` 的注册与校验设施、`checks.ts` 的程序装载与
+// LevelIo 抽象，向注册表登记 id `maze`。使用方是内容路径 `content/ch4/index.ts`（副作用 import）。
+// 关键不变量：机器人状态只由关卡网格与电路发布的动作码决定；传感器位相对当前朝向计算；
+// 预算单位 = 一次交换；同样的画板永远得到同样的评分。
+
 import {
   effectiveBudget,
   invalidOutcome,
@@ -15,62 +21,50 @@ import {
 import type { CheckFailure, CheckOutcome, CustomCheck, LevelSpec } from '../spec';
 
 /**
- * `maze` -- 路在脚下 / The Maze, chapter 4's closed-loop navigation checker.
+ * `maze` —— 路在脚下 / The Maze，第 4 章的闭环导航检查器。
  *
- * THE PUZZLE. The board is the player's OVERTURE CPU, and a robot walks a grid
- * the level declares. The CPU sees three bits -- a wall directly ahead, one to
- * the left, one to the right, all relative to where the robot is facing -- and
- * answers with a move code. The checker applies the move, publishes the sensors
- * for the state the robot is now in, settles, advances the clock, and asks again.
- * The robot wins by standing on the goal.
+ * 谜题。画板是玩家自己的 OVERTURE CPU，一个机器人在关卡声明的网格上行走。
+ * CPU 看到三位——正前方有墙、左边有墙、右边有墙，全部相对机器人当前朝向——
+ * 并用一个动作码作答。检查器应用这个动作，发布机器人新状态对应的传感器字节，
+ * 结算、推进时钟，然后再次询问。机器人站上终点就赢。
  *
- * WHY THE CHECKER TICKS THE BOARD ITSELF. The sensors are a function of the
- * robot's own history: a step list cannot say "the byte you see now depends on
- * the moves you have made", which is the whole puzzle. `LevelIo` is the whole
- * vocabulary used here -- `reset`, `readOutput`, `writeInput`, `settle`, `tick`
- * -- and `io.sim` is never touched, so a scripted stub can drive the checker in a
- * test and the verdict never depends on the kernel's internals. The player's
- * program is loaded through `loadProgramImage`, the same helper the `program`
- * branch loads with, so the parse, the target lookup and the reset-then-load
- * ordering exist once.
+ * 检查器自己驱动节拍的原因。传感器是机器人自身历史的函数：
+ * 步进表说不出"你现在看到的字节取决于你走过的步"——而这正是谜题的全部。
+ * 这里用到的全部词汇就是 `LevelIo` 的 `reset`、`readOutput`、`writeInput`、`settle`、`tick`，
+ * 从不触碰 `io.sim`，所以测试里的脚本化 stub 可以驱动检查器，判定也永不依赖内核内部。
+ * 玩家程序通过 `loadProgramImage` 装载——与 `program` 分支用的是同一个 helper，
+ * 所以解析、目标查找、先 reset 再装载的顺序只存在一处。
  *
- * DETERMINISM. No clock, no randomness, no hidden state: the grid, the start and
- * the facing all come from level data, and the move sequence comes from the
- * circuit. The same board always grades the same way.
+ * 确定性。没有时钟、没有随机数、没有隐藏状态：网格、起点、朝向全部来自关卡数据，
+ * 动作序列来自电路。同一块画板永远得到同一个评分。
  *
- * THE SENSOR BITS ARE THE LEVEL'S BRIEF. bit0 = a wall directly ahead, bit1 = a
- * wall to the left, bit2 = a wall to the right, relative to the current facing,
- * with everything outside the grid counted as a wall. The move codes are 0 stay,
- * 1 forward, 2 turn left, 3 turn right, and a code above 3 is treated as 0 --
- * stated here as well as in the brief because this file is what the checker
- * actually implements, and a brief that drifted from it would teach a program
- * that cannot pass.
+ * 传感器位就是关卡的题目说明。bit0 = 正前方有墙，bit1 = 左边有墙，bit2 = 右边有墙，
+ * 全部相对当前朝向，网格之外一律算墙。动作码为 0 原地、1 前进、2 左转、3 右转，
+ * 大于 3 的码按 0 处理——这里也要写一遍，因为本文件才是检查器真正实现的东西，
+ * 一份与它漂移的题目说明会教出一个永远过不了的程序。
  *
- * ONE BUDGET UNIT IS ONE EXCHANGE, the same unit `lock` uses: read the move code
- * the circuit publishes, apply it, publish the sensors of the state it produced,
- * settle, apply one edge. A run of `budget` units therefore reads `move` `budget`
- * times and applies `budget` edges, and the arrival it reports after the last
- * edge is charged the edge that reached it.
+ * 一个预算单位 = 一次交换，与 `lock` 的单位相同：读电路发布的动作码，应用它，
+ * 发布该动作产生的状态的传感器，结算，再走一个节拍。
+ * 因此一个 `budget` 单位的运行会读 `move` `budget` 次、执行 `budget` 个节拍；
+ * 它报告的最后一次到达，是算上把它送到终点的那一拍之后的到达。
  */
 
-/** Ticks a `maze` check runs before it gives up, when the check declares none. */
+/** 检查没有声明预算时，`maze` 在放弃前运行的最大节拍数。 */
 export const DEFAULT_MAZE_BUDGET = 4096;
 
 /**
- * THE PINS THIS CHECKER DRIVES, and the narrowest widths that can carry what it
- * moves: three sensor bits in, a two-bit move code out.
+ * 本检查器驱动的引脚，以及能承载这些取值的最窄位宽：三位传感器输入，两位动作码输出。
  *
- * Validated before anything else, because the checker addresses the board by
- * name -- see `ioIssue`. A level whose `io` names them differently has to hear
- * about it from the level's own failure, not from a robot that walked a board the
- * checker never reached.
+ * 最先校验，因为检查器按名字操作画板——见 `ioIssue`。
+ * 把引脚名起得不一样的关卡应当从"关卡自己的失败"里听到这件事，
+ * 而不是从一个"走在一块检查器从未接上的画板上的机器人"那里听到。
  */
 const MAZE_PINS: CheckerIo = {
   inputs: [{ id: 'sensors', width: 3 }],
   outputs: [{ id: 'move', width: 2 }],
 };
 
-/** The four facings, clockwise: turning right is `+1` and left is `+3`, mod 4. */
+/** 四个朝向，按顺时针排列：右转是 `+1`，左转是 `+3`，对 4 取模。 */
 const FACINGS = ['north', 'east', 'south', 'west'] as const;
 type Facing = (typeof FACINGS)[number];
 const STEPS: Readonly<Record<Facing, { readonly dx: number; readonly dy: number }>> = {
@@ -80,31 +74,30 @@ const STEPS: Readonly<Record<Facing, { readonly dx: number; readonly dy: number 
   west: { dx: -1, dy: 0 },
 };
 
-/** Move codes the circuit may publish. Anything above `TURN_RIGHT` means stay. */
+/** 电路可以发布的动作码。大于 `TURN_RIGHT` 的一律表示原地。 */
 const STAY = 0;
 const FORWARD = 1;
 const TURN_LEFT = 2;
 const TURN_RIGHT = 3;
 
-/** The three sensor bits, named so the masks below read as the brief's words. */
+/** 三个传感器位，先起好名字，好让下面的掩码读起来就是题目说明里的词。 */
 const AHEAD_BIT = 1;
 const LEFT_BIT = 2;
 const RIGHT_BIT = 4;
 
-/** The grid the checker walks, as rows of characters. */
+/** 检查器行走的网格，以字符行表示。 */
 interface MazeGrid {
   readonly rows: readonly string[];
   readonly start: { readonly x: number; readonly y: number };
 }
 
 /**
- * The failure a program that will not load produces: keyed by nothing, because
- * no pin was ever driven, and carrying the loader's own sentence.
+ * 程序装不进去时产生的失败：不挂任何引脚键，因为一个引脚也没有被驱动，
+ * 并带上装载器自己的句子。
  *
- * `emptyProgram` is the one case that is not a refusal at all -- a text both
- * readers accept as zero bytes -- and it gets the wording the `program` branch
- * gives the player's buffer, because to the circuit "nothing typed" and "a
- * comment" are the same nothing.
+ * `emptyProgram` 是唯一完全不算拒绝的情况——两个读取器都接受它为零字节文本——
+ * 它得到的措辞与 `program` 分支给玩家缓冲区的完全一样，
+ * 因为对电路而言，"什么都没输入"和"只写了一条注释"是同一个"什么都没有"。
  */
 function programFailure(error: string, reason: NonNullable<CheckFailure['reason']>): CheckOutcome {
   const failure: CheckFailure = {
@@ -120,15 +113,12 @@ function programFailure(error: string, reason: NonNullable<CheckFailure['reason'
 }
 
 /**
- * Reads a grid, or `null` when it is not one.
+ * 读一个网格；不是网格则返回 `null`。
  *
- * THE RULES a grid must satisfy before a robot can walk it: every row is a
- * string, all rows are the same length (a ragged grid has no columns, so "one
- * cell to the east" would mean different things on different rows), the grid is
- * not empty, and there is exactly one start and one goal. One `S` and one `G`
- * rather than "the first of each": a grid with two starts has two answers to
- * "where is the robot", and a checker that picked one would grade a puzzle the
- * level never described.
+ * 机器人在能走之前，网格必须满足这些规则：每一行都是字符串，所有行等长
+ * （参差不齐的网格没有"列"，"东边一格"在不同行上会指不同的东西），网格非空，
+ * 并且恰好有一个起点和一个终点。要求恰好一个 `S` 和一个 `G`，而不是"各取第一个"：
+ * 有两个起点的网格对"机器人在哪"有两个答案，检查器挑一个就等于评一个关卡从未描述过的谜题。
  */
 function parseGrid(value: unknown): MazeGrid | null {
   const rows = Array.isArray(value) ? value : null;
@@ -157,7 +147,7 @@ function parseGrid(value: unknown): MazeGrid | null {
   return { rows: lines, start };
 }
 
-/** Why `value` is not a walkable grid, for the failure that refuses it. */
+/** 说明 `value` 为什么不是可走的网格，供拒绝它的失败记录使用。 */
 function gridIssue(value: unknown): string {
   if (!Array.isArray(value)) return `maze check declares grid=${describeValue(value)}, expected an array of row strings`;
   if (value.length === 0) return 'maze check declares an empty grid: there is no S to start on';
@@ -181,7 +171,7 @@ function gridIssue(value: unknown): string {
   return 'maze check declares a grid the checker cannot read';
 }
 
-/** The character at a cell; outside the grid is a wall, so callers need no bounds test. */
+/** 取某格的字符；网格之外算墙，所以调用方不需要做边界判断。 */
 function cellAt(grid: MazeGrid, x: number, y: number): string {
   if (y < 0 || y >= grid.rows.length) return '#';
   const row = grid.rows[y]!;
@@ -189,18 +179,17 @@ function cellAt(grid: MazeGrid, x: number, y: number): string {
   return row[x] ?? '#';
 }
 
-/** True when the robot cannot enter a cell: `#`, or anything outside the grid. */
+/** 当机器人无法进入某格时为真：`#`，或网格之外的任何地方。 */
 function isWall(grid: MazeGrid, x: number, y: number): boolean {
   return cellAt(grid, x, y) === '#';
 }
 
 /**
- * The sensor byte for a robot state: bit0 ahead, bit1 left, bit2 right.
+ * 一个机器人状态的传感器字节：bit0 前方、bit1 左方、bit2 右方。
  *
- * RELATIVE TO THE FACING, which is the whole reason the bits are computed here
- * rather than stored per cell: "a wall to the left" means a different cell after
- * every turn, and a checker that published absolute walls would make the puzzle
- * a map-reading exercise instead of a program.
+ * 相对当前朝向计算，这正是为什么这些位在这里算、而不是按格存储：
+ * "左边有墙"在每次转身之后都指向不同的格子；
+ * 一个发布绝对墙壁的检查器会把谜题变成看图题，而不是一道编程题。
  */
 function sensorsFor(grid: MazeGrid, x: number, y: number, facing: Facing): number {
   const index = FACINGS.indexOf(facing);
@@ -215,27 +204,21 @@ function sensorsFor(grid: MazeGrid, x: number, y: number, facing: Facing): numbe
 }
 
 /**
- * Walks the maze `check.params` describes against the board `io` drives.
+ * 在 `io` 驱动的画板上走 `check.params` 描述的迷宫。
  *
- * ONE TICK, ONE MOVE, in that order: read the code the circuit publishes, apply
- * it, publish the sensors of the state the move produced, settle so the byte
- * reaches the circuit, then advance the clock. The sensor byte the circuit reads
- * at tick N therefore describes where the robot IS after N moves, and a program
- * that plans from it is answering a question about the present rather than about
- * one move ago.
+ * 一拍一步，顺序如此：读电路发布的动作码，应用它，发布该动作产生的状态的传感器，
+ * 结算让字节到达电路，再推进时钟。因此电路在第 N 拍读到的传感器字节，
+ * 描述的是机器人走完 N 步之后所在的位置；据它做规划的程序回答的是"现在"的问题，
+ * 而不是"一步之前"的问题。
  *
- * THE RUN ENDS ONE OF THREE WAYS. The robot stands on `G` -- pass, with the ticks
- * it actually spent. It drives forward into a wall -- an immediate `mismatch`
- * naming the cell and the facing, because a robot that walks through walls is
- * not solving a maze and continuing would report a success the grid never
- * allowed. Or the budget runs out -- the other `mismatch`, naming the cell it
- * gave up in and the move it last applied, which is the only thing that ends a
- * robot that never arrives.
+ * 一局会以三种方式之一结束。机器人站在 `G` 上——通过，附上实际花掉的节拍。
+ * 它朝墙前进——立即 `mismatch`，点明格子与朝向：穿过墙的机器人不是在解迷宫，
+ * 继续走下去会报告一个网格从未允许过的成功。或者预算耗尽——另一种 `mismatch`，
+ * 点明它放弃时所在的格子与最后应用的动作，这是"永远到不了的机器人"唯一的终止方式。
  *
- * `spec` IS READ, FOR THE PINS, and `player` for the program: a level whose `io`
- * does not declare `sensors` and `move` cannot be played at all, and the robot's
- * moves have to come from the text the player wrote -- an empty buffer is a
- * refusal, never a board that quietly reads zeros.
+ * `spec` 会被读取，为了引脚；`player` 为了程序：某关的 `io` 若没有声明 `sensors` 与 `move`，
+ * 这局根本无法开始；机器人的动作必须来自玩家写下的文本——空缓冲区是拒绝，
+ * 绝不是一块安静读零的画板。
  */
 export const callMaze = (
   io: LevelIo,
@@ -263,16 +246,12 @@ export const callMaze = (
     );
   }
 
-  // RESET FIRST, THEN LOAD THE PLAYER'S PROGRAM, for the reasons `lock` states:
-  // `runChecks` compiled this circuit for this check alone but never settled it,
-  // so a read before the reset is a fabricated zero, and the program the moves
-  // come from has to be in the circuit before the first of them is read. The
-  // helper resets again on its own way in, which is harmless and is not something
-  // this checker relies on.
+  // 先 RESET，再装载玩家程序，理由与 `lock` 所述相同：`runChecks` 只为本次检查编译了电路，
+  // 却从未结算过它，所以 reset 之前的读数是一个伪造的 0；而动作来源的程序必须在读到第一个动作之前
+  // 就装进电路。helper 自己进入时还会再 reset 一次，这是无害的，也不是本检查器所依赖的。
   //
-  // `'player'` IS THE CHANNEL, named for the same reason: a comment-only buffer
-  // has to be reported as the PLAYER having compiled nothing, not as a level that
-  // shipped nothing.
+  // `'player'` 是通道名，同样必须显式写出：只有注释的缓冲区必须被报告成
+  // "玩家什么都没编译出来"，而不是"关卡什么都没发布"。
   io.reset();
   const image = loadProgramImage(io, playerProgramText(player), 'asm', 'player');
   if (image.errors.length > 0) {
@@ -288,21 +267,16 @@ export const callMaze = (
   let x = grid.start.x;
   let y = grid.start.y;
   let heading = facing as Facing;
-  // The move just read and applied, kept across the loop so the failure records
-  // can name it: the circuit's own code is the `actual` of a failure.
+  // 刚读到并应用的动作，跨循环保留，好让失败记录能点出它：电路自己的码就是失败记录的 `actual`。
   let pending = STAY;
 
-  // THE GOAL IS TESTED AFTER EVERY MOVE, NOT BEFORE THE FIRST ONE. `parseGrid`
-  // guarantees `G` is a different cell from the `S` the robot starts on, so a
-  // test before the loop could never be true -- and the test after each move is
-  // what makes "the goal is reached, not a move" true for a program whose last
-  // action is a turn or a stay: it passes on the state that move produced,
-  // whether or not that move went anywhere.
+  // 终点在每一动作之后判定，而不是第一步之前。`parseGrid` 保证 `G` 与机器人起步的 `S` 不是同一格，
+  // 所以循环前的判定永远不可能为真；而每一步之后的判定，才让"到达终点"而不是"到达某一步"
+  // 对最后动作是转身或原地的程序也成立：它按该动作产生的状态判通过，无论那一步有没有移动。
   for (let tick = 0; tick < budget; tick += 1) {
     pending = io.readOutput('move');
-    // A code above the documented three is the documented STAY. It is not a
-    // failure: the brief says what an out-of-range code means, and a level that
-    // failed one would be failing a program for a reason nothing stated.
+    // 大于文档所述三种的码就是文档所述的原地。它不是失败：题目说明了越界码的含义，
+    // 一个因此判失败的关卡，会因为一个从未声明过的理由判程序失败。
     const move = pending === FORWARD || pending === TURN_LEFT || pending === TURN_RIGHT ? pending : STAY;
     if (move === FORWARD) {
       const step = STEPS[heading];
@@ -324,29 +298,23 @@ export const callMaze = (
       heading = FACINGS[(index + (move === TURN_RIGHT ? 1 : 3)) % 4]!;
     }
 
-    // The sensors describe the state the move produced, and they are published
-    // and SETTLED before the edge for the reason `lock`'s answer is: an edge
-    // samples the storage elements' inputs out of the signal table, and this byte
-    // only arrives there through the combinational parts between the level's pin
-    // and the CPU's register file. Tick without settling and the machine steers
-    // by the sensors of the position it was in one move ago.
+    // 传感器描述的是动作产生的状态；它们要在节拍之前发布并结算，理由与 `lock` 的回答相同：
+    // 节拍会从信号表里采样存储元件的输入，而这个字节要经过关卡引脚与 CPU 寄存器堆之间的
+    // 组合元件才能到达那里。不结算就走节拍，机器会按"一步之前"的传感器转向。
     io.writeInput('sensors', sensorsFor(grid, x, y, heading));
     io.settle();
     io.tick();
 
-    // The arrival, and the stay: both are states the robot is IN after the edge,
-    // so both pass here -- the turn that lands on nothing (or on the goal) is
-    // inspected before the circuit is asked for another move.
+    // 到达与停留：两者都是节拍之后机器人所处的状态，所以都在这里判通过——
+    // 在向电路索要下一个动作之前，先检查"转了个身、没走到任何地方（或正好停在终点）"的这步。
     if (cellAt(grid, x, y) === 'G') {
       return { passed: true, failures: [], ticksUsed: tick + 1 };
     }
   }
 
-  // The budget ran out with the robot still walking. One record, keyed by the
-  // level's own pins: the sensors the circuit last saw, the move it answered
-  // with, and a detail naming the cell and the facing it gave up in. The goal was
-  // tested after the last move, so reaching this line means the robot is
-  // genuinely still in the maze.
+  // 预算耗尽，机器人还在走。只有一条记录，用关卡自己的引脚作键：
+  // 电路最后看到的传感器、它回答的动作，以及一句点明放弃时格子与朝向的 detail。
+  // 终点在最后一步之后已经判过，所以能走到这一行说明机器人确实还在迷宫里。
   return {
     passed: false,
     failures: [
@@ -357,12 +325,10 @@ export const callMaze = (
 };
 
 /**
- * The one failure shape both ways of losing a maze produce.
+ * 输掉一局迷宫的两种方式共用的失败形状。
  *
- * `sensors` is the byte the circuit was reading, `move` the code it answered
- * with, and the detail names the cell, the facing and what went wrong -- the
- * three things a player needs to find the line of their program that walked into
- * a wall, none of which fits in the numeric record.
+ * `sensors` 是电路当时读到的字节，`move` 是它回答的动作码，detail 点明格子、朝向和出了什么问题——
+ * 玩家定位到自己程序里撞墙那一行所需的三个事实，它们都塞不进数字记录。
  */
 function driveFailure(
   sensors: number,
@@ -384,19 +350,18 @@ function driveFailure(
     detail:
       why === 'wall'
         ? `the robot drove forward into a wall at ${at}`
-        : // THE LAST MOVE WAS APPLIED, and the sentence says so. It was read,
-          // applied, published and clocked before the goal was tested -- that is
-          // the loop -- so calling it "unapplied" would describe a run that never
-          // happened and hide the turn the robot really made from the player
-          // reading the failure. What ended the run is the budget, not the move.
+        : // 最后一个动作确实被应用了，句子也如实这么说。它被读取、应用、发布、走完节拍，
+          // 之后才判定终点——这就是循环——所以把它说成"未应用"，描述的是一个从未发生过的运行，
+          // 并且会把机器人真正做过的转身从玩家读到的失败里藏起来。
+          // 结束这次运行的是预算，不是那个动作。
           `the budget of ${tick} tick(s) ran out with the robot still at ${at} after applying move ${move}`,
   };
 }
 
-/** `params` is level data: an object or nothing, never a `TypeError`. */
+/** `params` 是关卡数据：要么是对象，要么什么都没有，绝不能抛 `TypeError`。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Registers this checker under the id a `custom` check names. */
+/** 把本检查器登记到 `custom` 检查点名的 id 下。 */
 registerCustomCheck('maze', callMaze);

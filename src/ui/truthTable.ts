@@ -6,60 +6,53 @@ import { bitsOf, bitElement } from './bit';
 import { THEME } from './theme';
 
 /**
- * The level's test cases, as the original's bottom panel: one row per pin, one
- * column per case, and one cell per pin -- a red cell for a 0, a green one for a
- * 1, olive while nothing is known.
+ * 关卡的测试用例，按原作底部面板的样子显示：每个引脚一行、每个用例一列，
+ * 每个引脚占一格——0 显示红格、1 显示绿格、尚不知道时显示橄榄色。
  *
- * The panel is a matrix rather than a list of failing vectors because that is
- * what the original shows and because it answers the question a player actually
- * has -- "which bit is wrong, and for which case" -- without reading a number.
+ * 面板做成矩阵而不是"失败向量列表"，既因为原作就是这样显示的，也因为它直接回答
+ * 玩家真正关心的问题——"哪一位错了、错在哪个用例"——而不必去读数字。
  *
- * THE PANEL PLANS; IT DOES NOT JUDGE. Three versions of this file ago it printed
- * one line of text per failing case (`用例 3 · out3: 0 ≠ 1`), which on a
- * fifteen-row level was fifteen lines of the same sentence: unreadable, and
- * unreadable in a way that got worse the more a player needed it. Then it was a
- * report on the last grade, so a player was told they were wrong while the wires
- * were still being drawn. Now the columns are the level's declared cases -- laid
- * out before the circuit is built, exactly as the original lays them out -- and
- * the numbers arrive one column at a time from the test run, which is a thing
- * the player asks for.
+ * 面板只负责"排版计划"，不负责判定。三个版本之前，这个文件给每个失败用例
+ * 打印一行文字（`用例 3 · out3: 0 ≠ 1`），在十五行的关卡上就是十五句同样的话：
+ * 无法阅读，而且玩家越需要它越难读。之后的版本改成"上一次判定的报告"，
+ * 于是玩家在导线还没画完时就被宣判错误。现在列来自关卡声明的用例——
+ * 在电路建好之前就排好，和原作一致——数字则在玩家主动发起测试后一列一列地到来。
  *
- * WHERE THE CASES COME FROM is `levels/checks.ts`'s `testCases`, the same
- * derivation the test run plays, so what is on screen before the run is what
- * will be driven during it. A level whose cases the checker generates privately
- * (a `program`'s image, a `custom` hook) has no columns to lay out, and the note
- * beside the heading says so rather than inventing a row.
+ * 用例从哪来：`levels/checks.ts` 的 `testCases`，与测试运行播放的是同一份推导，
+ * 所以运行前屏幕上排出的列，就是运行中会被驱动的列。如果某个关卡的用例由检查器
+ * 私有生成（`program` 的程序映像、`custom` 钩子），就没有列可排，
+ * 标题旁的说明会如实写出这一点，而不是凭空造一行。
  *
- * WHICH INPUT IS WHICH. The label column carries the pin's ordinal as well as
- * its name (`输入 1 a`, not `输入 a`), because a board of identical arrows and a
- * table of identical cells give a player no way to tell the second input from
- * the first. A single output drops its ordinal: the original's own panel says
- * `预期输出`, and with one output there is nothing to disambiguate.
+ * 哪个输入是哪个。标签列带上引脚的序号和名字（`输入 1 a`，而不是 `输入 a`），
+ * 因为画板上一串一模一样的箭头、表格里一格一模一样的格子，会让玩家分不清
+ * 第二个输入和第一个输入。只有一个输出时省略序号：原作面板自己就写
+ * `预期输出`，而且只有一个输出时也没有什么可区分的。
  */
+
+/** 真值表面板的挂载选项：宿主之外的读数与操作都从这里注入。 */
 export interface TruthTableOptions {
-  /** The level's output values right now, or `null` when nothing is running. */
+  /** 关卡输出此刻的值；没有在运行时为 `null`。 */
   live(): Readonly<Record<string, number>> | null;
-  /** The case the test run is on, or `null` when it is not running. */
+  /** 测试运行当前所在的用例下标；未运行时为 `null`。 */
   active(): number | null;
   /**
-   * What the run has read off the board so far, one entry per case.
+   * 本次运行到目前为止从画板上读到的结果，每个用例一项。
    *
-   * Held by the caller rather than by the grade, because the grade only records
-   * the cases that FAILED: a column that passed would have no number in it, and
-   * a table that goes blank wherever the circuit was right is no use to anyone.
+   * 由调用方持有而不是由判定结果持有，因为判定只记录失败的用例：
+   * 通过的列会在表里留空，而一张"电路对的地方就变空白"的表对谁都没用。
    */
   results?(): readonly (Readonly<Record<string, number>> | null)[];
-  /** True while the cases are being played. */
+  /** 用例正在播放中时为 true。 */
   testing?(): boolean;
-  /** The play speed, as the button labels it (`2×`). */
+  /** 播放速度，与按钮上的标签一致（例如 `2×`）。 */
   rate?(): string;
-  /** Start or stop playing the cases. Absent leaves the button out. */
+  /** 开始或停止播放用例；不提供时按钮不出现。 */
   onToggleTest?(): void;
-  /** Step through the play speeds. Absent leaves the button out. */
+  /** 在几档播放速度之间切换；不提供时按钮不出现。 */
   onCycleRate?(): void;
 }
 
-/** One column: the vector driven, what was expected and what came out. */
+/** 一列：驱动了哪个输入向量、期望什么、实际得到什么。 */
 export interface Case {
   readonly inputs: Readonly<Record<string, number>>;
   readonly expected: Readonly<Record<string, number>>;
@@ -67,38 +60,41 @@ export interface Case {
 }
 
 /**
- * How many case columns fit before the matrix stops being readable.
+ * 矩阵还能读得下去时最多排多少列用例。
  *
- * A fuzz level may declare hundreds of rounds; the run plays all of them and the
- * table shows the first twenty. Truncating silently would be a lie about the
- * size of the test, so the note beside the heading carries the real count.
+ * 模糊测试类关卡可能声明几百轮；运行会把它们全部播完，而表格只显示前 20 个。
+ * 悄悄截断等于对测试规模撒谎，所以标题旁的说明会写出真实总数。
  */
 const COLUMN_LIMIT = 20;
 
 /**
- * How many cases the run demonstrates one at a time before it hurries.
+ * 运行逐帧演示多少个用例之后开始加速。
  *
- * `ch2-38-little-box` declares 513 cases and `ch2-39-counter` 265: at the pace a
- * fifteen-row truth table wants, those are four minutes of watching a counter
- * count, and no one learns anything after the first few seconds. The run is
- * therefore a demonstration with a limit -- the first `TEST_DEMO_LIMIT` cases are
- * played at the chosen speed, and the rest are driven as fast as the browser
- * will take them so that the verdict still arrives. The panel says so, because a
- * demonstration that silently stopped demonstrating would be the same lie as a
- * truncated test.
+ * `ch2-38-little-box` 声明了 513 个用例，`ch2-39-counter` 有 265 个：
+ * 按十五行真值表想要的节奏，那就是盯着计数器数四分钟，
+ * 而头几秒之后没人还能学到东西。因此运行是"有上限的演示"——
+ * 前 `TEST_DEMO_LIMIT` 个用例按选定速度播放，其余用例以浏览器能接受的最快速度驱动，
+ * 好让判定结果仍然能出来。面板会说明这一点，因为"悄悄停止演示"的演示
+ * 与"被截断的测试"是同一种谎言。
  *
- * Exported because the run's pacing is `main.ts`'s, and a note that named a
- * different number from the one the run obeys would be worse than no note.
+ * 之所以导出，是因为运行的节奏由 `main.ts` 控制；若说明里写的数字与运行实际遵守的
+ * 数字不一致，那还不如不写说明。
  */
 export const TEST_DEMO_LIMIT = 32;
 
-/** Why a level has no columns to lay out, in the panel's own words. */
+/** 关卡为什么没有列可排——用面板自己的说法记录。 */
 const NO_CASES: Record<'program' | 'custom' | 'empty', string> = {
   program: '本关的用例是一次程序运行，无法逐列演示',
   custom: '本关的用例由本关自己的检查器生成，无法逐列演示',
   empty: '本关没有可演示的用例',
 };
 
+/**
+ * 挂载真值表面板，并订阅 store：关卡改变、判定改变或测试运行推进时重绘。
+ *
+ * 用例列表来自 testCases(level) 的推导，只负责排版与展示；真正的判定
+ * 由 levels/grader 完成，面板只读取判定结果与运行记录（见 TruthTableOptions）。
+ */
 export function mountTruthTable(
   root: HTMLElement,
   store: Store<AppState>,
@@ -107,14 +103,13 @@ export function mountTruthTable(
   const panel = document.createElement('section');
   panel.className = 'truth-table';
 
-  // The header is built once and the body is replaced, so the test button keeps
-  // its identity across renders: a control that is recreated on every board edit
-  // loses the focus and the pressed state a player is watching.
+  // 表头只建一次，表体每次替换，这样测试按钮在多次重绘之间保持同一个节点：
+  // 若控件在每次画板编辑时重建，就会丢掉焦点和玩家正在看的按下状态。
   const head = document.createElement('div');
   head.className = 'case-head';
   const heading = document.createElement('h2');
-  // Not `case-note`: that class is the "—" and "???" cell of the matrix, and a
-  // header sharing it would make every `td` a match for the header's selectors.
+  // 不用 `case-note`：那个类是矩阵里 "—" 和 "???" 单元格的类名，
+  // 表头若也用它，所有 `td` 都会命中表头的选择器。
   const note = document.createElement('span');
   note.className = 'case-count';
   const spacer = document.createElement('span');
@@ -143,7 +138,7 @@ export function mountTruthTable(
 
   root.append(panel);
 
-  /** Level, grade identity and the run's position: nothing else shows. */
+  /** 上次绘制依据的关卡、判定身份和运行位置：除此之外的变化不触发重绘。 */
   let shown: {
     level: string;
     grade: GradeResult | null;
@@ -151,7 +146,7 @@ export function mountTruthTable(
     testing: boolean;
     rate: string;
   } | null = null;
-  /** The derived plan, kept until the level changes: levels are static data. */
+  /** 推导出的测试计划，缓存到关卡改变为止：关卡是静态数据。 */
   let plannedFor = '';
   let plan: TestPlan = { kind: 'none', reason: 'empty' };
 
@@ -204,7 +199,7 @@ export function mountTruthTable(
 
     if (planned.kind === 'cases') {
       const total = planned.cases.length;
-      // The heading already says 用例, so the note counts them and nothing more.
+      // 标题已经写了「用例」，所以说明里只数个数，不再重复别的。
       const parts = [`共 ${total} 个`];
       if (total > TEST_DEMO_LIMIT) parts.push(`逐帧演示前 ${TEST_DEMO_LIMIT} 个`);
       if (total > COLUMN_LIMIT) parts.push(`显示前 ${COLUMN_LIMIT} 列`);
@@ -223,12 +218,10 @@ export function mountTruthTable(
 
     body.replaceChildren();
 
-    // Two kinds of failure have no column to sit in, and they are reported
-    // whatever else the panel is showing. A graph-level error stops the checker
-    // before it can produce a single failing row, and `unstable` is raised by
-    // `settle` before any vector is driven -- `unstable` in particular is the one
-    // failure the matrix can never express, because every cell of it would read
-    // `???` for the same reason, which looks like "not run yet".
+    // 有两类失败没有列可以安放，而且无论面板正在显示什么都要报出来。
+    // 图级错误会让检查器在产出第一行失败记录之前就停下；`unstable` 则由
+    // `settle` 在驱动任何向量之前抛出——尤其 `unstable` 是矩阵永远无法表达的失败：
+    // 它的每一格都会因为同一个原因显示 `???`，看起来像"还没运行"。
     const error = lastGrade?.issues.find((issue) => issue.severity === 'error');
     if (error) body.append(noteLine(error.message.zh, 'case-error'));
     for (const failure of lastGrade?.failures ?? []) {
@@ -237,10 +230,9 @@ export function mountTruthTable(
     }
 
     if (declared.length > 0) {
-      // A grade can be rendered without the caller's run records: the failures
-      // it carries name the vector they drove, which is enough to give that
-      // column its number. The run's own records win when they exist, because
-      // they cover the cases that PASSED as well.
+      // 即使调用方没提供运行记录，判定结果也能画出来：它携带的失败记录带着
+      // 所驱动的向量，足以给那一列填上数字。运行自身的记录存在时优先用它，
+      // 因为那些记录也覆盖通过的用例。
       const recorded = new Map<string, CheckFailure>();
       for (const failure of lastGrade?.failures ?? []) {
         if (hasVector(failure)) recorded.set(vectorKey(failure.inputs), failure);
@@ -261,8 +253,7 @@ export function mountTruthTable(
       return;
     }
 
-    // No playable list: a `program` or `custom` level still has to show what its
-    // checker found.
+    // 没有可播放的用例列表：`program` 或 `custom` 关卡仍然要显示它的检查器发现了什么。
     const driven = (lastGrade?.failures ?? []).filter(hasVector).slice(0, COLUMN_LIMIT);
     renderMatrix(
       body,
@@ -281,9 +272,9 @@ export function mountTruthTable(
 }
 
 /**
- * The value to show for one case's output pins: the live board while the run is
- * ON that case -- which is the whole point of playing them one at a time -- and
- * the run's own record otherwise. `null` before anything has been run.
+ * 一个用例的输出引脚该显示什么：运行"正停在该用例上"时用实时画板的值——
+ * 这正是逐个播放用例的意义——其余情况用运行自己的记录。
+ * 任何东西都还没跑过时为 `null`。
  */
 function actualOf(
   index: number,
@@ -295,19 +286,17 @@ function actualOf(
   return results?.[index] ?? null;
 }
 
-/** True when a failure recorded a vector it can be rendered pin by pin. */
+/** 失败记录里带了向量、因而能逐引脚渲染时为 true。 */
 function hasVector(failure: CheckFailure): boolean {
   return Object.keys(failure.inputs).length > 0 || Object.keys(failure.expected).length > 0;
 }
 
 /**
- * A case's input vector as one string, so a failure record can be matched to the
- * column it came from.
+ * 把一个用例的输入向量写成一个字符串，好让失败记录能匹配回它来自哪一列。
  *
- * Matching on the vector rather than on the position is what makes it correct:
- * a check records only the cases that FAILED, so the third failure is usually
- * not the third case, and every pin is included in the key because two cases
- * that drove the same thing are the same case.
+ * 按向量匹配而不是按位置匹配，才是正确的做法：一次检查只记录失败的用例，
+ * 所以第三条失败记录通常并不是第三个用例；键里要包含每一个引脚，
+ * 因为驱动了同样输入的两次用例就是同一个用例。
  */
 function vectorKey(inputs: Readonly<Record<string, number>>): string {
   return Object.keys(inputs)
@@ -326,8 +315,8 @@ function renderMatrix(
   const inputs = level.io.inputs;
   const outputs = level.io.outputs;
   const manyOutputs = outputs.length > 1;
-  // Which row is the table's first, so the active column's band can be rounded
-  // at its ends: a level with no input pins starts on its expectations.
+  // 表格的第一行是哪一行，用来给活动列的色带两端做圆角：
+  // 没有输入引脚的关卡，第一行就是"预期"行。
   const startsOnOutputs = inputs.length === 0;
 
   for (const [position, pin] of inputs.entries()) {
@@ -336,8 +325,8 @@ function renderMatrix(
     for (const [index, item] of cases.entries()) {
       const cell = bitsCell(item.inputs[pin.id] ?? 0, pin.width);
       if (disagrees(item, pin)) cell.classList.add('case-bad', 'bad-cap-top', 'bad-cap-bottom');
-      // While the run is on a case, that case's column is the one being driven:
-      // the board is showing it and the reader's eye has to follow.
+      // 运行停在一个用例上时，那一列就是正在被驱动的列：
+      // 画板正在显示它，读者的视线也要跟过去。
       if (index === active) {
         cell.classList.add('case-active');
         if (position === 0) cell.classList.add('cap-top');
@@ -356,11 +345,9 @@ function renderMatrix(
     actual.append(labelCell(`当前${ordinal} ${pinName(pin)}`.trim()));
 
     for (const [index, item] of cases.entries()) {
-      // THE PAIR IS WRONG TOGETHER, so it is boxed together: what the level asked
-      // for on top, what came out below, one red block. Boxing only the `当前`
-      // cell said "this is wrong" but made the reader find the expectation again
-      // two rows up; the two cells are adjacent for every pin, so the box is
-      // simply both of them.
+      // 这一对是"一起错的"，所以框在一起：上面是关卡要求的值，下面是实际得到值，
+      // 合成一个红块。只框住 `当前` 那一格虽然也说了"错了"，却要读者再往上两行
+      // 去找预期；而每个引脚的两格本来就相邻，所以框就是它们两个。
       const wrong = disagrees(item, pin);
 
       const want = item.expected[pin.id];
@@ -392,11 +379,10 @@ function renderMatrix(
 }
 
 /**
- * True when this case's recorded output disagreed with what the level expected.
+ * 该用例记录的实际输出与关卡预期不一致时为 true。
  *
- * Only a pin the case states an expectation for can be wrong, which is what
- * keeps an input cell from being outlined red because the OUTPUT was wrong: the
- * driver of a failing case is not a mistake.
+ * 只有用例明确给出预期的引脚才可能"错"，这也正是输入格不会因为输出错了而被描红的原因：
+ * 失败用例的驱动向量本身并不是错误。
  */
 function disagrees(item: Case, pin: PinSpec): boolean {
   if (!item.actual) return false;
@@ -427,17 +413,16 @@ function noteCell(text: string): HTMLTableCellElement {
 }
 
 /**
- * One pin's bits for one case, most significant first.
+ * 某个引脚在某个用例里的各位，最高位在前。
  *
- * No text: the cell is the bits. `panels.test.ts` reads every `td` in the panel
- * to prove a failure that drove no vector fabricates no `0`, and a bit cell that
- * also spelled its value out would defeat that reading.
+ * 不含文字：格子本身就是位。`panels.test.ts` 会读取面板里的每个 `td`，
+ * 以证明"没有驱动向量的失败不会凭空造出 0"；如果位格还额外写出数值，
+ * 这个检查就失效了。
  *
- * The cell is also the BOX. A highlight is a translucent fill on the `td` itself
- * rather than a ring around the bits inside it, so a column's cells stack into
- * one continuous band instead of a ladder of little outlines -- see `.case-active`
- * and `.case-bad` in `style.css`, and the `cap-top`/`cap-bottom` classes the
- * caller adds to round the two ends.
+ * 格子同时也是"框"。高亮是画在 `td` 自身上的半透明填充，而不是给里面的位套一个圆圈，
+ * 这样一列的格子会连成一条连续的色带，而不是一截截小轮廓组成的梯子——
+ * 见 `style.css` 里的 `.case-active` 与 `.case-bad`，以及调用方为两端加圆角
+ * 而添加的 `cap-top`/`cap-bottom` 类。
  */
 function bitsCell(value: number, width: number): HTMLTableCellElement {
   const cell = document.createElement('td');
@@ -449,19 +434,16 @@ function bitsCell(value: number, width: number): HTMLTableCellElement {
 }
 
 /**
- * A cell for a value that has not been read yet: one NEUTRAL dot per bit.
+ * 尚未读到的值所用的格子：每一位一个中性的点。
  *
- * It used to be the literal text `???`, which was three problems at once. It said
- * the same thing in every column of a sixteen-case table, so a row of them was a
- * wall of punctuation where a row of dots is a row of "nothing here yet". It was
- * the wrong KIND of thing -- these cells hold bits, and the readout panel beside
- * the board had already settled what an unknown bit looks like: a plain grey dot,
- * no point, which is the honest shape for "no direction known yet". And it was
- * the only place in the game that spelled a state out in words instead of drawing
- * it.
+ * 以前这里写的是字面文本 `???`，那同时是三个问题。第一，十六个用例的表格里
+ * 每一列都写同样的东西，一整行就是一面标点墙，而一排点才像"这里还没有值"。
+ * 第二，事物的"种类"不对——这些格子装的是位，而画板旁的读数面板早就确定了未知位
+ * 长什么样：一个普通的灰点、不发光，那才是"方向未知"的诚实形状。
+ * 第三，这是整个游戏里唯一一处用文字拼出状态、而不是把它画出来的地方。
  *
- * The third bit state is not invented here: `bit.ts` has carried `'x'` since the
- * input readout needed it. This is the test matrix learning the same vocabulary.
+ * 第三种位状态不是这里发明的：自从输入读数需要它以来，`bit.ts` 就一直带着 `'x'`。
+ * 这里只是测试矩阵学会了同一套词汇。
  */
 function unknownCell(width: number): HTMLTableCellElement {
   const cell = document.createElement('td');

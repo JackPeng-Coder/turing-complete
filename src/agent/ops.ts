@@ -1,23 +1,18 @@
 /**
- * The operations an agent may perform, as tools.
+ * 智能体可以执行的操作，以工具的形式给出。
  *
- * ONE TOOL PER THING A HAND CAN DO, and every one of them is built out of the
- * same pieces the hand uses: an undoable `Command` on the player's own stack, or
- * one of the toolbar's buttons reached through `AgentHost`. Nothing here touches
- * the graph directly -- `do` and `undo` are the only places a mutation happens,
- * which is what makes an agent edit undoable with Ctrl+Z and identical to the
- * edit the player would have made by hand (requirement A3).
+ * 手上的每个动作对应一个工具，而每个工具都复用玩家双手所用的同一批零件：
+ * 玩家自己撤销栈上的一个可撤销 `Command`，或者通过 `AgentHost` 触达的某个工具栏按钮。
+ * 这里不直接改动电路图——只有 `do` 与 `undo` 会真正改动状态，所以智能体的编辑
+ * 既能用 Ctrl+Z 撤销，也和玩家亲手做出的编辑完全一致（需求 A3）。
  *
- * WHY THE SURFACE IS NOT "EVERYTHING". The tool list is what the model reads
- * before every step, so every tool in it costs attention on every request and
- * adds a way to choose wrongly. What is left out is left out on purpose and
- * recorded as such: opening levels, unlocking parts, editing progress and the
- * blueprint library are absent, because the objective scopes the agent to the
- * circuit in front of the player. See the phase plan's 裁决 table.
+ * 为什么工具面不是「全部功能」。工具清单是模型在每一步之前都要读的东西，
+ * 每多一个工具，就在每次请求里多占一份注意力，也多一条选错的路。省略的工具
+ * 是有意省略并记录在案的：打开关卡、解锁元件、修改进度与蓝图库都不在其中，
+ * 因为目标把智能体限定在玩家眼前的电路上。见阶段计划的「裁决」表。
  *
- * COORDINATES ARE THE BOARD'S OWN. A tool takes world pixels and snaps them
- * through the host, so the agent's arithmetic never has to know the grid size --
- * `ui/theme.ts` owns that, and this layer may not import it.
+ * 坐标就是画板自己的坐标。工具接收世界像素，再通过宿主吸附到网格，
+ * 因此智能体的算术不必知道网格尺寸——那由 `ui/theme.ts` 负责，而本层不允许导入它。
  */
 import {
   addInstance,
@@ -32,7 +27,7 @@ import {
 import type { AgentHost, PartInfo } from './host';
 import { ToolError, numberArg, optionalString, stringArg, stringArrayArg, type ToolSpec, type ToolArgs } from './tools';
 
-/** A bit of schema, so every tool's parameters read the same way. */
+/** 一小段 schema 工厂：让每个工具的参数声明都用同一种写法。 */
 const TEXT = (description: string): { type: 'string'; description: string } => ({
   type: 'string',
   description,
@@ -46,11 +41,10 @@ const BOARD_HELP =
   '元件 id（例如 i1）、元件类型（nand）、引脚 id 都在 read_board 和 list_parts 的结果里，不要凭空猜。';
 
 /**
- * What the palette says about one instance's pins.
+ * 元件托盘对一个实例的引脚给出的说法。
  *
- * The instance's DEF is looked up rather than assumed: a board can hold a part
- * whose definition the agent has not seen, and a pin id is only meaningful
- * against the definition that declared it.
+ * 实例的定义（def）必须查表得到，不能凭假设：画板上可能有智能体从未见过的元件，
+ * 而引脚 id 只有对照声明它的那份定义才有意义。
  */
 interface Placement {
   readonly graph: Graph;
@@ -96,7 +90,7 @@ function copyWire(wire: Wire): Wire {
   return { id: wire.id, from: { ...wire.from }, to: { ...wire.to } };
 }
 
-/** The whole tool list, bound to one host. */
+/** 整份工具清单，绑定到一个宿主上。 */
 export function circuitTools(host: AgentHost): ToolSpec[] {
   const tools: ToolSpec[] = [
     {
@@ -112,10 +106,9 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
         '列出当前可以放置的元件类型及其全部引脚（id、位宽）。放置前用 pin 的 id 来连线。注意「关卡输入/关卡输出」也是普通元件：把它们放进电路，电路才和关卡接上。',
       parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
       run: () =>
-        // THE PALETTE, VERBATIM. Whatever the parts tray offers is what the agent
-        // may place, connectors included -- they are ordinary parts a player drops
-        // like any other, and hiding them from this list is what left a real
-        // session unable to connect its circuit to the level at all.
+        // 元件托盘原样照搬。托盘提供什么，智能体就能放什么，连接器也不例外——
+        // 它们和别的元件一样，是玩家会随手放下的普通元件；把它们从这份清单里
+        // 藏掉，曾让一次真实会话完全无法把电路接到关卡上。
         host.parts().map((part) => ({
           id: part.id,
           nameZh: part.nameZh,
@@ -143,10 +136,9 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
         const placement = placementOf(host);
         const def = placement.defs.get(defId);
         if (!def) {
-          // A CAP, NOT THE WHOLE CATALOGUE. A wall of fifty ids is expensive to
-          // read, it is the same wall on every retry, and a model that is guessing
-          // names will keep guessing -- what it needs is the pointer to the list
-          // and the count, not the list itself.
+          // 只给上限，不倾倒整个目录。五十个 id 排成一面墙，读起来很贵，
+          // 而且每次重试都是同一面墙；一个在猜名字的模型会继续猜下去——
+          // 它需要的是列表的指针和数量，不是列表本身。
           const known = [...placement.defs.values()].map((part) => part.id);
           const sample = known.slice(0, 12).join('、');
           throw new ToolError(
@@ -155,16 +147,14 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
           );
         }
         const at = host.snap(numberArg(args, 'x'), numberArg(args, 'y'));
-        // A LEVEL CONNECTOR TAKES THE ID THE LEVEL BINDS BY. `compile` matches a
-        // level's pins to instances called `IN_<pin>` and `OUT`, so a connector
-        // added under a minted id would sit on the board looking right and never
-        // be read -- an unfixable circuit that tests as "2 cases failed" with no
-        // hint why. The host answers with the same `levelIoPlacement` a hand
-        // placement uses, and `null` means "name it yourself".
+        // 关卡连接器要拿关卡绑定的那个 id。`compile` 把关卡的引脚匹配到
+        // 名为 `IN_<pin>` 与 `OUT` 的实例上，所以用临时 id 放下的连接器
+        // 会看起来好好地待在画板上，却永远不会被读取——这是一个无法修复的
+        // 电路，测试只会报「2 个用例失败」而不给任何线索。宿主给出的是与
+        // 手工放置相同的 `levelIoPlacement`，`null` 表示「你自己起名」。
         const connector = host.connectorFor(defId);
-        // THE ID IS MINTED HERE, not inside `do`: a command has to be repeatable
-        // (it runs again on every redo), so everything it does must be decided
-        // before it is pushed -- see `app/commands.ts`.
+        // id 在这里铸出，而不是在 `do` 里：命令必须可重复执行（每次重做都会
+        // 再跑一遍），所以它要做的一切都必须在入栈之前决定——见 `app/commands.ts`。
         const id = connector?.id ?? nextId('i', placement.graph.instances);
         const width = connector?.width;
         host.apply(
@@ -172,9 +162,8 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
             label: `agent add ${defId}`,
             do: (g) => {
               const inst = addInstance(g, defId, at.x, at.y, id);
-              // The binding is the id AND the width: a level pin is only as wide
-              // as the level declares it, and `compile` refuses a connector whose
-              // width disagrees.
+              // 绑定的是 id 与位宽两者：关卡引脚只有关卡声明的那么宽，
+              // `compile` 会拒绝位宽不一致的连接器。
               if (width !== undefined) inst.params.width = width;
             },
             undo: (g) => {
@@ -260,9 +249,8 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
         const replaced = placement.graph.wires.filter(
           (wire) => wire.to.inst === toInst && wire.to.port === toPort,
         );
-        // The replaced wires are captured here, not read again during undo: a
-        // command has to put the board back where it was BEFORE it ran, and by
-        // undo time that state is only available in this closure.
+        // 被替换的导线在这里捕获，撤销时不重新读取：命令必须把画板恢复成
+        // 它运行之前的样子，而到撤销时，那个状态只存在于这个闭包里。
         const id = nextId('w', placement.graph.wires);
         host.apply(
           {
@@ -608,13 +596,12 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
   ];
 
   /**
-   * THE PLAYER'S LINE FOR EACH TOOL, kept out of the tool objects.
+   * 每个工具交给玩家看的那一句话，放在工具对象之外。
    *
-   * A presenter is a pure function of what the tool returned and what it was
-   * asked, so it belongs beside the list rather than inside each entry -- and
-   * writing them as one table is what makes it obvious at a glance which tools
-   * have nothing to say (none of them, as it turns out: a row that reads
-   * `read_board · {"mode":"level","dev":false,…}` is a row nobody can use).
+   * presenter 是「工具返回了什么」与「它被要求做什么」的纯函数，所以它属于
+   * 清单旁边而不是每个条目内部——把它们写成一张表，一眼就能看出哪些工具
+   * 无话可说（结果一个也没有：一行只显示 `read_board · {"mode":"level",...}`
+   * 的日志，是没人能用的日志）。
    */
   const nameOf = (defId: string): string =>
     host.parts().find((part) => part.id === defId)?.nameZh ?? defId;
@@ -625,11 +612,10 @@ export function circuitTools(host: AgentHost): ToolSpec[] {
       return `看了一眼电路：${board.parts.length} 个元件、${board.wires.length} 根导线`;
     },
     list_parts: () => {
-      // Hidden plumbing is noise on a LEVEL: its connectors are the level's, and
-      // the player already knows a board has pins. In a SANDBOX the connectors ARE
-      // the board's pins (`sandboxPins`), so a line that dropped them would read as
-      // "there is no input or output here" while the palette offers both -- the
-      // exact confusion this summary is supposed to prevent.
+      // 隐藏的管道在关卡里是噪音：关卡连接器属于关卡，玩家早就知道画板有引脚。
+      // 在沙盒里，连接器就是画板的引脚（`sandboxPins`），所以把它们丢掉的一行
+      // 会读成「这里没有输入或输出」，而元件托盘明明两样都提供——这正是本摘要
+      // 要避免的困惑。
       const sandbox = host.snapshot().mode === 'sandbox';
       const shown = host.parts().filter((part) => sandbox || !part.hidden);
       return `列出可用元件：${shown.map((part) => part.nameZh).join('、')}`;

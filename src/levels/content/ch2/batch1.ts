@@ -1,43 +1,37 @@
 import { generateRows } from '../../checks';
 import type { LevelSpec, TruthRow } from '../../spec';
-// `LevelIo` -- the pin shape -- is `tables.ts`'s; `checks.ts` exports an
-// unrelated runtime interface of the same name (the bound simulation), so the
-// two must not be confused.
+// `LevelIo`——引脚形状——来自 `tables.ts`；`checks.ts` 还导出了一个同名的运行时接口
+//（已绑定仿真的接口），两者不能混淆。
 import { truthTable, type LevelIo } from '../../tables';
 
 /**
- * Chapter 2, levels 13-17: scalar logic and counting -- the first batch of the
- * chapter, and the first level data in the game with multi-bit pins.
+ * 第 2 章第 13~17 关：标量逻辑与计数——本章第一批，也是游戏中第一批带多位引脚的
+ * 关卡数据。
  *
- * WHAT THE SOURCE FIXES, AND WHAT IT DOES NOT. The compendium gives each of
- * these levels exactly three things: its name (English and Chinese), its place
- * in the chapter, and one line of teaching concept. It gives no ports, no
- * widths, no pass conditions, no targets and no rewards. Everything else below
- * is this replica's design, derived from the name and that one line -- so each
- * level carries a data comment split into `SOURCED` and `AUTHORED`, and
- * `test/levels/ch2-batch1.test.ts` fails if either marker is missing. No number
- * in this file may be presented as the source's own.
+ * 源资料固定了什么、没有固定什么。资料集对这几关只给三样东西：名称（中英文）、
+ * 在本章中的位置、以及一行教学概念。它没有端口、位宽、通过条件、目标和奖励。
+ * 下面其余内容都是本复刻的设计，由名称和那一行概念推导而来——所以每一关都带一段
+ * 分成 `SOURCED`（有出处）与 `AUTHORED`（自创）的数据注释，
+ * `test/levels/ch2-batch1.test.ts` 在缺少任一标记时失败。
+ * 本文件里的任何数字都不能被说成是源资料自己的。
  *
- * Level 13's four-bit input is the clearest case of an authored choice: the
- * source says nothing about width (see that level's comment).
+ * 第 13 关的四位输入是「自创选择」最清楚的例子：源资料对位宽只字未提
+ *（见该关注释）。
  *
- * `AUTHORED` also covers the parts the task brief fixes (each level's checker
- * kind, and its rewards): those are this replica's design too, not the source's,
- * even where this file did not pick them.
+ * `AUTHORED` 也覆盖任务书固定的部分（每关的检查类型和奖励）：它们同样是本复刻的
+ * 设计，不是源资料的，即使不是这个文件选的。
  *
- * EVERY LEVEL HERE IS PURELY COMBINATIONAL, so `tick` is 0 on every three-star
- * target, for the same reason chapter 1's combinational levels state it: no
- * check in this batch ever ticks the clock, so the metric is genuinely 0 and its
- * target can never be what denies a player three stars. The metrics that do the
- * work here are `gate` and `delay`, and every target below is the reference
- * solution's own measured score -- `three-star targets are the reference
- * solutions own metrics` in the test file is what holds that to a number rather
- * than a promise.
+ * 这里每一关都是纯组合逻辑，所以每个三星目标的 `tick` 都是 0，理由与第 1 章的
+ * 组合关卡所说的一样：本批没有任何检查推进时钟，所以该指标确实是 0，其目标永远
+ * 不会成为玩家拿不到三星的原因。真正起作用的是 `gate` 和 `delay`，下面每个目标
+ * 都是参考解自身的实测分数——测试文件里的
+ *「three-star targets are the reference solutions own metrics」用数字而不是承诺
+ * 来保证这一点。
  */
 
 /**
- * The five pin shapes this batch uses, so a level's io is one named constant
- * instead of six lines of literal in the middle of a spec.
+ * 本批用到的五种引脚形状，这样一关的 io 就是一个有名字的常量，
+ * 而不是写在 spec 中间的一堆字面量。
  */
 const IO_A4_OUT1: LevelIo = { inputs: [{ id: 'a', width: 4 }], outputs: [{ id: 'out', width: 1 }] };
 const IO_ABCD_OUT1: LevelIo = {
@@ -61,12 +55,11 @@ const IO_ABCD_OUT3: LevelIo = {
 const IO_A8_OUT8: LevelIo = { inputs: [{ id: 'a', width: 8 }], outputs: [{ id: 'out', width: 8 }] };
 
 /**
- * The four-bit reader's shape: four 1-bit inputs in, four 1-bit outputs out.
+ * 四位读取器的形状：四个 1 位输入进，四个 1 位输出出。
  *
- * This constant moved here with the level that uses it (`ch2-14-binary-racer`)
- * when the 2.x realignment moved that level from chapter 1 into chapter 2. A
- * constant belongs beside its only consumer: left behind in `ch1/part2.ts` it was
- * both a `ReferenceError` here and dead code there.
+ * 这个常量随着使用它的关卡（`ch2-14-binary-racer`）一起搬到这里——2.x 改版把
+ * 那一关从第 1 章挪进了第 2 章。常量应当紧挨它唯一的使用者：留在 `ch1/part2.ts`
+ * 时，这里会 `ReferenceError`，那边则是死代码。
  */
 const IO_NIBBLE: LevelIo = {
   inputs: [
@@ -84,18 +77,16 @@ const IO_NIBBLE: LevelIo = {
 };
 
 /**
- * Rows for a level that publishes one value, enumerated by the kernel's own
- * generator.
+ * 为一个「发布单个数值」的关卡生成行，由内核自己的生成器枚举。
  *
- * `generateRows(spec, expected)` walks every input combination of `spec.io` and
- * slices one whole number into `spec.io.outputs`, low pin first;
- * `truthTable(io, perPin)` is the same walk with one function per pin. A level's
- * checks are written before its spec object exists, so this hands
- * `generateRows` the one field it reads -- with the rest of the shape present
- * but empty, which is why `checks` is `[]` here and never on a level.
+ * `generateRows(spec, expected)` 遍历 `spec.io` 的每种输入组合，并把一个整数按
+ * 低引脚在前切进 `spec.io.outputs`；`truthTable(io, perPin)` 是同样的遍历，
+ * 只是每个引脚一个函数。关卡的 `checks` 写在 spec 对象存在之前，所以这里把
+ * `generateRows` 唯一读取的字段交给它——形状的其余部分存在但为空，这就是
+ * `checks` 在这里是 `[]`、而在关卡上永远不会是 `[]` 的原因。
  *
- * Rows are built, never omitted: an omitted or empty `rows` array is a hard
- * `missing-rows` failure, not "enumerate every combination for me".
+ * 行必须显式构建，不能省略：`rows` 缺失或为空是硬性的 `missing-rows` 失败，
+ * 而不是「帮我枚举所有组合」。
  */
 function valueRows(io: LevelIo, expected: (inputs: Record<string, number>) => number): TruthRow[] {
   return generateRows(
@@ -115,12 +106,11 @@ function valueRows(io: LevelIo, expected: (inputs: Record<string, number>) => nu
 }
 
 /**
- * High bits among the low `bits` bits of `value`: the count `ch2-18-counting-signals`
- * publishes.
+ * `value` 的低 `bits` 位里有多少位为高：`ch2-18-counting-signals` 发布的就是这个
+ * 计数。
  *
- * It served two levels while the 1.x campaign had a second counter at what is now
- * this batch's first slot; the 2.x realignment retired that level (it duplicated
- * this count), so the helper has one caller again.
+ * 当 1.x 战役在现在这个批次的第一格位置还有第二个计数器时，它服务过两关；
+ * 2.x 改版淘汰了那一关（它重复了本函数），所以这个辅助函数又只剩一个调用者。
  */
 function onesIn(value: number, bits: number): number {
   let count = 0;
@@ -128,27 +118,24 @@ function onesIn(value: number, bits: number): number {
   return count;
 }
 
+/** 第 2 章本批次的关卡数据，按 `index` 顺序排列；章节顺序由 `ch2/index.ts` 汇合、`content/index.ts` 统一排序。 */
 export const CH2_BATCH1: readonly LevelSpec[] = [
   /**
-   * ch2-14-binary-racer -- Binary Racer / 二进制速算
+   * ch2-14-binary-racer —— 二进制速算 / Binary Racer
    *
-   * SOURCED: the name in both languages, its position (2.x's first chapter-2
-   * level; the 1.x compendium has it as chapter 2's third, global 15), and the
-   * concept -- the source calls it a timed "read the binary number at a glance"
-   * minigame, and 2.x still lists it that way.
+   * SOURCED（有出处）：两种语言的名称、位置（2.x 的第 2 章第一关；1.x 资料集里它是第 2 章
+   * 第三关，全局第 15 关），以及概念——资料称它为限时的「一眼读二进制数」小游戏，
+   * 2.x 仍这样列。
    *
-   * AUTHORED (this replica's design): everything a minigame cannot carry. A timed
-   * level needs a real clock, which the global constraints forbid in a checker, so
-   * the puzzle is the deterministic core of the same lesson -- four inputs b3..b0
-   * spell one number, the four outputs repeat it, 16 rows, no gates. Also
-   * authored: the `less_u` reward (it belonged to the chapter's removed popcount
-   * level, which duplicated Counting Signals) and the fact that `mem1` is NOT
-   * handed out here any more -- chapter 1's capstone does that now, because 2.x
-   * plays Circular Dependency before this level and the latch needs it.
+   * AUTHORED（本复刻的设计）：小游戏无法承载的一切。限时关卡需要真实时钟，而全局约束
+   * 禁止检查器里的时钟，所以谜题变成同一课可确定性的核心——四个输入 b3..b0 拼出
+   * 一个数，四个输出重复它，16 行，没有门。同样自创的还有 `less_u` 奖励（它原属于
+   * 被移除的 popcount 关卡，而那一关重复了 Counting Signals），以及「`mem1` 不再在
+   * 这里发放」这一事实——现在由第 1 章的收尾关负责，因为 2.x 里 Circular Dependency
+   * 排在本关之前，锁存器需要它。
    *
-   * The level itself is old: it was chapter 1's twelfth level until the 2.x
-   * realignment moved it here, which is why its `threeStar` is the floor (0/0/0,
-   * a straight wire) and why this comment is newer than the spec below it.
+   * 这一关本身很旧：在 2.x 改版把它挪来之前，它是第 1 章第 12 关；所以它的
+   * `threeStar` 是下限（0/0/0，一根直连线），而这段注释比下面的 spec 新。
    */
   {
     id: 'ch2-14-binary-racer',
@@ -180,10 +167,9 @@ export const CH2_BATCH1: readonly LevelSpec[] = [
     io: IO_NIBBLE,
     checks: [
       truthTable(IO_NIBBLE, {
-        // `?? 0` is dead weight at runtime -- the enumerator always fills every
-        // declared input -- but a record lookup is `number | undefined` under
-        // `noUncheckedIndexedAccess`, and "an absent bit reads low" is the
-        // honest reading of it.
+        // 运行时 `?? 0` 是多余的——枚举器总会填满每个声明的输入——
+        // 但在 `noUncheckedIndexedAccess` 下，记录的下标访问类型是 `number | undefined`，
+        // 而「缺失的位读作低电平」是对它最诚实的解释。
         out3: ({ b3 }) => b3 ?? 0,
         out2: ({ b2 }) => b2 ?? 0,
         out1: ({ b1 }) => b1 ?? 0,
@@ -191,39 +177,31 @@ export const CH2_BATCH1: readonly LevelSpec[] = [
       }),
     ],
     threeStar: { gate: 0, delay: 0, tick: 0 },
-    // `mem1` is chapter 1's last hand-out, and this is where it has to happen:
-    // chapter 2's latch level ("Circular Dependency") is built from a 1-bit
-    // memory, and no earlier level's puzzle has any use for one. Before this
-    // reward existed, `mem1` was defined in `core/defs/index.ts` and rewarded by
-    // no level anywhere, so it could never appear in any palette and that level
-    // could not be built at all.
+    // `mem1` 是第 1 章最后一次发放，而这里正是它必须发生的位置：第 2 章的锁存器
+    // 关卡（「Circular Dependency」）用一位存储器搭建，而更早关卡的谜题都用不到它。
+    // 在这个奖励存在之前，`mem1` 定义在 `core/defs/index.ts` 里，却没有任何关卡奖励它，
+    // 于是它永远不会出现在任何托盘里，那一关也根本搭不出来。
     //
-    // The capstone is a plausible place for a first memory to appear: "read the
-    // nibble at a glance, then forward it" is one wire away from "hold a bit",
-    // and this level's own palette does not change -- it does not list `mem1`,
-    // and a level's palette stays bounded by its `allowedComponents`. Rewards are
-    // not scored either (`grade()` reads the checks and the `threeStar` metrics,
-    // never `rewards`), so no chapter-1 score or target moves with this line.
+    // 第一次出现存储器放在收尾关是合理的：「一眼读出 nibble 再原样转发」距离
+    //「记住一位」只差一根线，而且本关托盘不变——它不列出 `mem1`，关卡的托盘始终受
+    // `allowedComponents` 限制。奖励也不参与评分（`grade()` 只读检查和 `threeStar` 指标，
+    // 从不读 `rewards`），所以第 1 章的任何分数或目标都不会因这一行而移动。
     rewards: { components: ['less_u'] },
   },
   /**
-   * ch2-15-double-detection -- Double Trouble / 成对的麻烦
+   * ch2-15-double-detection —— 成双成对 / Double Trouble
    *
-   * SOURCED: the name in both languages, its position (14th), and the concept --
-   * "pairs": what the output answers is whether at least two of the signals are
-   * high at the same time.
+   * SOURCED（有出处）：两种语言的名称、位置（第 14 关），以及概念——「成对」：输出回答的是
+   *「是否至少有两个信号同时为高」。
    *
-   * AUTHORED (this replica's design): which pins the rule ranges over (`a`, `b`,
-   * `c`, `d`), which pin it writes (`out`), the four 1-bit pins and the 1-bit
-   * output themselves, the measured three-star target, and the palette. The
-   * brief fixes the checker kind (`constraint`) and the rule (`at-least` 2); the
-   * other rule, `sum-equals`, reduces its sum modulo the output pin's width, so
-   * on this level's 1-bit `out` it would state parity -- level 13's function --
-   * rather than "at least two". The palette is 1-bit parts only: every pin here
-   * is one bit wide, so the wide parts levels 9-13 unlocked have nothing to
-   * attach to.
+   * AUTHORED（本复刻的设计）：规则覆盖哪些引脚（`a`、`b`、`c`、`d`）、写到哪个引脚（`out`）、
+   * 四个 1 位引脚与 1 位输出本身、实测三星目标，以及托盘。
+   * 任务书固定了检查类型（`constraint`）和规则（`at-least` 2）；另一条规则
+   * `sum-equals` 会把和按输出引脚位宽取模，于是对本关 1 位的 `out` 它表达的是奇偶性
+   *（按源资料编号，第 13 关就是「奇数计数」），而不是「至少两个」。
+   * 托盘只有 1 位元件：本关每个引脚都是一位宽，第 9~13 关解锁的宽位元件没有东西可接。
    *
-   * This level hands out no component at all, which is the brief's decision.
+   * 本关不发放任何元件，这是任务书的决定。
    */
   {
     id: 'ch2-15-double-detection',
@@ -258,41 +236,34 @@ export const CH2_BATCH1: readonly LevelSpec[] = [
     checks: [
       { kind: 'constraint', rule: { kind: 'at-least', inputs: ['a', 'b', 'c', 'd'], count: 2, output: 'out' } },
     ],
-    // Measured: the reference is (a&b)|(c&d)|((a|b)&(c|d)) -- two ANDs, two ORs,
-    // one more AND and a 3-input OR = 2+2+3+3+2+6 = 18 NAND equivalents -- with
-    // the OR-AND-OR3 path setting the depth at 3.
+    // 实测：参考解是 (a&b)|(c&d)|((a|b)&(c|d))——两个 AND、两个 OR、一个 AND 和一个
+    // 三输入 OR = 2+2+3+3+2+6 = 18 个 NAND 等价门——其中 OR-AND-OR3 这条路径
+    // 把深度定在 3。
     threeStar: { gate: 18, delay: 3, tick: 0 },
   },
 
   /**
-   * ch2-16-odd-number-of-signals -- ODD Number of Signals / 奇数个信号
+   * ch2-16-odd-number-of-signals —— 奇数计数技术 / ODD Number of Signals
    *
-   * SOURCED: the name in both languages, its position (the 13th level, and the
-   * first of chapter 2), and the source's one-line concept -- a set of signals
-   * whose count is odd reads high. That is the whole of it: no ports, no widths,
-   * no pass condition, no reward.
+   * SOURCED（有出处）：两种语言的名称、位置（第 13 关，也是第 2 章第一关），以及源资料的一行
+   * 概念——一个信号集合里为高的个数是奇数时输出为高。就这些：没有端口、位宽、
+   * 通过条件和奖励。
    *
-   * AUTHORED (this replica's design): the input is FOUR bits wide, which is this
-   * replica's choice and not the source's. 16 rows exhaust a nibble, and a wide
-   * value is the natural place to meet `splitter`/`maker`. Also authored: the
-   * `a:4 -> out:1` shape, the exhaustive 16-row truth table (`truthTable`, which
-   * refuses to build one that leaves a declared output pin uncompared), the
-   * measured three-star target, and the three rewards.
+   * AUTHORED（本复刻的设计）：输入是四位宽，这是本复刻的选择而不是源资料的。
+   * 16 行刚好穷尽一个 nibble，而宽位值正是接触 `splitter`/`maker` 的自然场合。
+   * 同样自创的还有：`a:4 -> out:1` 形状、穷尽的 16 行真值表（`truthTable` 拒绝构建
+   * 会漏掉声明输出引脚的表）、实测三星目标，以及三个奖励。
    *
-   * THIS LEVEL'S OWN REWARDS ARE WHAT IT BUILDS WITH, and that is now the app's
-   * rule rather than a seam: `paletteDefsFor` (`src/app/progress.ts`) adds a
-   * level's own rewards to the unlocked set before filtering by
-   * `allowedComponents`, because the parts a level hands out are the parts its
-   * puzzle was designed around. It has to be, here: `splitter`, `maker` and
-   * `const8` are this level's own rewards, and a first-time palette without the
-   * splitter cannot build the level at all -- the splitter is the only part that
-   * can expose bits 1-3 of `a` (every chapter-1 part has 1-bit pins, and a wire
-   * from a 4-bit output to a 1-bit input copies bit 0 and nothing else). While
-   * the helper offered the rewards of PASSED levels only, this level was
-   * unplayable on the first attempt; `test/levels/level-buildability.test.ts`
-   * now walks every shipped level for exactly that, and `test/app/progress.test.ts`
-   * states both halves of the rule (own rewards are offered; a reward outside
-   * `allowedComponents` still stays out).
+   * 本关自己的奖励就是它搭建时用的东西，这已经是应用的规则而不是接缝：
+   * `paletteDefsFor`（`src/app/progress.ts`）在按 `allowedComponents` 过滤之前，
+   * 会把关卡自己的奖励加进已解锁集合，因为一关发放的元件正是它谜题设计时依赖的元件。
+   * 这里必须如此：`splitter`、`maker` 和 `const8` 是本关自己的奖励，而首次游玩时
+   * 没有位拆分器就根本搭不出这一关——位拆分器是唯一能取出 `a` 第 1~3 位的元件
+   *（第 1 章的所有元件都是一位引脚，从 4 位输出接到 1 位输入的导线只会复制第 0 位）。
+   * 当辅助函数只提供「已通过关卡」的奖励时，这一关在第一次尝试时无法游玩；
+   * `test/levels/level-buildability.test.ts` 现在会逐个遍历所有已发布关卡检查这一点，
+   * `test/app/progress.test.ts` 也明确写下了这条规则的两半（自己的奖励会提供；
+   * 不在 `allowedComponents` 里的奖励仍然不提供）。
    */
   {
     id: 'ch2-16-odd-number-of-signals',
@@ -328,24 +299,22 @@ export const CH2_BATCH1: readonly LevelSpec[] = [
     ],
     io: IO_A4_OUT1,
     checks: [truthTable(IO_A4_OUT1, { out: ({ a }) => onesIn(a ?? 0, 4) % 2 })],
-    // Measured, not guessed: the reference is a splitter plus three XORs -- 3 x
-    // the four-NAND XOR cell = 12 NAND equivalents -- and the longest path is
-    // two gates, because both pair-XORs sit at depth 1 and the combining XOR at
-    // depth 2 while the splitter is free on both metrics.
+    // 实测而非估算：参考解是一个位拆分器加三个异或——3 x 四与非异或单元
+    // = 12 个 NAND 等价门——最长路径两层，因为两个成对异或都在第 1 层，合并异或
+    // 在第 2 层，而位拆分器在两个指标上都是免费的。
     threeStar: { gate: 12, delay: 2, tick: 0 },
     rewards: { components: ['splitter', 'maker', 'const8'] },
   },
 
   /**
-   * ch2-18-counting-signals -- Counting Signals / 信号计数
+   * ch2-18-counting-signals —— 信号计数 / Counting Signals
    *
-   * SOURCED: the name in both languages, its position (16th), and the concept --
-   * adding four one-bit signals, the half-adder idea.
+   * SOURCED（有出处）：两种语言的名称、位置（第 16 关），以及概念——把四个一位信号相加，
+   * 半加器的思路。
    *
-   * AUTHORED (this replica's design): the four 1-bit pins and the 3-bit output;
-   * the generated 16 rows of the same count level 15 publishes (see that level's
-   * note -- the two functions coincide by the brief's own table); the measured
-   * three-star target; and the `equal8` reward.
+   * AUTHORED（本复刻的设计）：四个 1 位引脚与 3 位输出；生成的 16 行（与第 15 关相同的
+   * 计数，见该关注释——按任务书自己的表，两个函数恰好重合）；实测三星目标；
+   * 以及 `equal8` 奖励。
    */
   {
     id: 'ch2-18-counting-signals',
@@ -388,28 +357,24 @@ export const CH2_BATCH1: readonly LevelSpec[] = [
         rows: valueRows(IO_ABCD_OUT3, ({ a, b, c, d }) => (a ?? 0) + (b ?? 0) + (c ?? 0) + (d ?? 0)),
       },
     ],
-    // Measured: level 15's tree without the splitter -- five XORs (20) and four
-    // ANDs (8) = 28 NAND equivalents at depth 3, the maker free.
+    // 实测：第 16 关的树去掉位拆分器——五个 XOR（20 门）与四个 AND（8 门）
+    // = 28 个 NAND 等价门、深度 3，位合并器免费。
     threeStar: { gate: 28, delay: 3, tick: 0 },
     rewards: { components: ['equal8'] },
   },
 
   /**
-   * ch2-21-double-the-number -- Double the Number / 加倍
+   * ch2-21-double-the-number —— 超级加倍 / Double the Number
    *
-   * SOURCED: the name in both languages, its position (17th), and the concept --
-   * a left shift by one bit is a doubling.
+   * SOURCED（有出处）：两种语言的名称、位置（第 17 关），以及概念——左移一位就是乘二。
    *
-   * AUTHORED (this replica's design): the `a:8 -> out:8` shape; the 256 generated
-   * rows (2^8 -- the first level in the game whose table cannot be written out by
-   * hand); the measured three-star target; and the `add8`/`mul8` rewards.
+   * AUTHORED（本复刻的设计）：`a:8 -> out:8` 形状；生成的 256 行（2^8——游戏中第一关
+   * 的表没法手写出来）；实测三星目标；以及 `add8`/`mul8` 奖励。
    *
-   * The reference the target is measured from is WIRING, not arithmetic: a
-   * `splitter` and a `maker` re-index the byte one slot up, so the level is 0
-   * gates and 0 delay, and what its target says is the lesson -- shifting is
-   * free, adding is not (`add8(a, a)` doubles too, for 72 gates and 1 delay, and
-   * scores one star). A shift component would be the obvious tool and is
-   * deliberately not unlocked until a later chapter-2 level.
+   * 目标测量所用的参考解是「接线」而不是「算术」：一个 `splitter` 加一个 `maker`
+   * 把字节各重新编号到高一格，所以这关是 0 门 0 延迟，目标要说明的正是这一课——
+   * 移位是免费的，加法不是（`add8(a, a)` 也能加倍，但要 72 门 1 延迟，只得一星）。
+   * 移位元件是显而易见的工具，本项目故意把它留到第 2 章更晚的关卡才解锁。
    */
   {
     id: 'ch2-21-double-the-number',
@@ -449,10 +414,9 @@ export const CH2_BATCH1: readonly LevelSpec[] = [
     ],
     io: IO_A8_OUT8,
     checks: [{ kind: 'truth-table', rows: valueRows(IO_A8_OUT8, ({ a }) => ((a ?? 0) * 2) & 0xff) }],
-    // Measured: the wiring reference is 0 NAND equivalents and 0 delay -- a
-    // splitter, a maker and a constant are all free on both metrics -- so this
-    // target is the floor itself, and `add8(a, a)` (72 gates, 1 delay) is the
-    // one-star alternative the level's rewards make possible.
+    // 实测：接线参考解是 0 个 NAND 等价门、0 延迟——位拆分器、位合并器和常量在
+    // 两个指标上都是免费的——所以这个目标就是下限；`add8(a, a)`（72 门、1 延迟）
+    // 是本关奖励让它成为可能的一星替代解。
     threeStar: { gate: 0, delay: 0, tick: 0 },
     rewards: { components: ['add8', 'mul8'] },
   },

@@ -5,50 +5,45 @@ import { bitsOf, bitElement } from './bit';
 
 export interface IoPanelOptions {
   /**
-   * The pins of the board on screen.
+   * 屏幕上画板的引脚。
    *
-   * A LEVEL DECLARES THEM; A SANDBOX DOES NOT. There the pins are the connectors
-   * the player placed, so this is asked every render rather than read off the
-   * level spec once: adding or deleting a `关卡输入`/`关卡输出` changes the list,
-   * and the panel is one of the three readers that must agree with it.
+   * 关卡会声明引脚，沙盒不会。沙盒的引脚就是玩家放下的连接器，
+   * 所以每次渲染都要重新询问，而不是从关卡规格里读一次：
+   * 增删一个「关卡输入」/「关卡输出」会改变这个列表，
+   * 而本面板正是必须与它保持一致的三处读者之一。
    */
   pins(): BoardPins;
-  /** The values the board's input pins are currently driven with. */
+  /** 画板输入引脚当前被驱动的值。 */
   vector(): Readonly<Record<string, number>>;
-  /** Flips one bit of one input pin, then re-settles. */
+  /** 翻转某个输入引脚的一位，然后重新结算。 */
   onToggleBit(pinId: string, bit: number): void;
-  /** Settled values at the board's output pins, or `null` when nothing runs. */
+  /** 输出引脚结算后的值；没有任何东西在运行时为 `null`。 */
   outputs(): Readonly<Record<string, number>> | null;
   /**
-   * Sandbox only: change one connector's pin width.
+   * 仅沙盒：改变某个连接器的引脚位宽。
    *
-   * A LEVEL'S WIDTHS ARE THE LEVEL'S CONTRACT -- the checks compare against them,
-   * so a button that changed them would be a button that changed the puzzle. In a
-   * sandbox there is no contract: the connector IS the pin, and a circuit built
-   * from the 8-bit family cannot be driven at one bit. Absent on a level, and the
-   * width chip is not drawn.
+   * 关卡里的位宽是关卡的契约——检查会拿它作比较，
+   * 所以一个能改位宽的按钮就是「能改题」的按钮。沙盒里没有契约：
+   * 连接器本身就是引脚，而用 8 位家族搭出的电路没法按 1 位驱动。
+   * 关卡上不提供这个回调，位宽小标签也就不画。
    */
   onCycleWidth?(pinId: string): void;
-  /** The clock's rate, as the original labels it: `10Hz`. */
+  /** 时钟频率，按原作的写法：10Hz。 */
   rate(): string;
-  /** Steps the clock to its next rate. */
+  /** 把时钟切到下一档频率。 */
   onCycleRate(): void;
-  /** Clock edges applied since the last reset. */
+  /** 自上次复位以来走过的时钟沿数。 */
   tick(): number;
 }
 
 /**
- * The sidebar's readout: the clock above, the level's input and output state
- * below -- the original's own two cards, in its own order.
+ * 侧栏的读数：上面是时钟，下面是关卡输入与输出的状态——原作的同两张卡片、同样的顺序。
  *
- * IT IS ALSO THE INPUT CONTROL. Clicking a bit of a level input flips that bit
- * and re-settles the board, which is how a player drives a circuit they are
- * still building and watches it work: the original puts switches on the board,
- * this replica has no switch part yet, and a clickable bit cell is the same
- * affordance without inventing one.
+ * 它同时也是输入控件。点一个关卡输入的比特格，就翻转那一位并重新结算画板，
+ * 玩家因此能在电路还没搭完时驱动它、看它工作：原作把开关放在画板上，
+ * 这个复刻版还没有开关元件，可点击的比特格提供了同样的操作可能，而不必凭空造一个元件。
  *
- * Values are shown as numbers as well as bits because that is what a level's own
- * check compares: `a = 5` is a far easier thing to reason about than five cells.
+ * 值既用数字也用比特格显示，因为关卡检查比较的就是数字：`a = 5` 比五格比特容易推理得多。
  */
 export function mountIoPanel(
   root: HTMLElement,
@@ -76,17 +71,16 @@ export function mountIoPanel(
     const pins = options.pins();
     const vector = options.vector();
     const outputs = options.outputs();
-    // A SANDBOX HAS NO PINS UNTIL SOMETHING IS PLACED, and "尚未放置输入元件" is the
-    // wrong sentence there: nothing is missing from the level, the player just has
-    // not put a connector down yet. Say what would put a row here instead.
+    // 沙盒在放下东西之前没有引脚，此时「尚未放置输入元件」是错的说法：
+    // 关卡什么也没缺，只是玩家还没放下连接器。改为说明怎样才能多出一行。
     const sandbox = isSandbox(level);
     const emptyIn = sandbox ? '放一个「关卡输入」元件来驱动电路' : '尚未放置输入元件';
     const emptyOut = sandbox ? '放一个「关卡输出」元件来读数' : '尚未放置输出元件';
 
     clock.body.textContent = `${options.tick()} 拍 · ${options.rate()}`;
     clock.rate.textContent = options.rate();
-    // A sandbox connector's width is its own (`sandboxPins` reads it off the
-    // instance), so the chip only exists when the caller can change it.
+    // 沙盒连接器的位宽是它自己的（`sandboxPins` 从实例上读），
+    // 所以只有调用方提供了修改能力时，才画出这个位宽小标签。
     const widthChip = (pin: PinSpec): HTMLElement | undefined => {
       if (!sandbox || options.onCycleWidth === undefined) return undefined;
       const chip = document.createElement('button');
@@ -130,10 +124,9 @@ export function mountIoPanel(
 }
 
 /**
- * The clock card, handed back with the nodes that change: the button that
- * collapses the state card, the rate button and the line that reports the edge
- * count. The caller owns all three, so nothing here reads the store or the
- * options on its own.
+ * 时钟卡片，连同会变化的几个节点一起交回：收起状态卡片的按钮、频率按钮，
+ * 以及报告时钟沿计数的那一行文字。三者的更新都由调用方负责，
+ * 这里不自行读 store，也不自行读 options。
  */
 function mountClock(options: IoPanelOptions): {
   element: HTMLElement;
@@ -157,9 +150,8 @@ function mountClock(options: IoPanelOptions): {
   collapse.textContent = '−';
   collapse.setAttribute('aria-label', '收起状态面板');
   const body = document.createElement('div');
-  // `io-value` because it is the same kind of readout as a pin's number, and
-  // `panels.test.ts` reads it as one; `io-tick` because a block of text is not a
-  // column of numbers and must not be right-aligned like one.
+  // `io-value`：它与引脚的数值读数是同一类读数，`panels.test.ts` 也按读数来读它；
+  // `io-tick`：一整行文本不是一列数字，不能像数字那样右对齐。
   body.className = 'io-value io-tick';
   head.append(title, rate, collapse);
   element.append(head, body);
@@ -171,15 +163,14 @@ function unknownBits(width: number): Array<0 | 1 | 'x'> {
 }
 
 /**
- * One `输入状态` / `输出状态` block: a heading over one row per pin.
+ * 一块 `输入状态` / `输出状态`：标题下面每个引脚一行。
  *
- * The ordinal leads each row, because a board of two identical green arrows and
- * a panel of two rows of identical cells leave the player no way to tell the
- * second input from the first. The name follows it when there is one: `1. clk`
- * says both which pin it is and what the level calls it.
+ * 序号放在每行最前，因为画板上两个一模一样的绿色箭头、面板里两行一模一样的格子，
+ * 会让玩家分不清第二个输入和第一个输入。有名字时名字跟在序号后：`1. clk`
+ * 同时说明这是第几个引脚、关卡管它叫什么。
  *
- * A level that declares no pin of a kind gets a sentence instead of an empty
- * box, so "nothing here yet" and "this level has none" do not look the same.
+ * 关卡没有声明某一类引脚时给一句话而不是空框，
+ * 这样「这里暂时没有」和「本关压根没有」看起来才不会一样。
  */
 function group(
   title: string,
@@ -211,8 +202,8 @@ function group(
     name.textContent = pinName === String(position + 1) ? `${position + 1}` : `${position + 1}. ${pinName}`;
     const readout = document.createElement('div');
     readout.className = 'io-value';
-    // A dash, not `???`: the dots above already say the bits are unknown, and a
-    // blank is what an instrument shows for a reading it does not have.
+    // 用一个破折号，而不是 `???`：上面的点阵已经说明比特未知，
+    // 而仪器没有读数时显示的本来就是空白。
     readout.textContent = value === undefined ? '—' : String(value);
     row.append(name);
     if (extra !== undefined) row.append(extra);
