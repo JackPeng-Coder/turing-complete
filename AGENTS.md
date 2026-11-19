@@ -1,47 +1,17 @@
 # AGENTS.md
 
-What a new session -- human or agent -- needs before touching this repository.
-These rules used to live only inside a dated plan
-(`docs/superpowers/plans/2026-09-25-turing-complete-phase0.md`), which is now a
-historical document: read it for the reasoning behind a decision, not for what
-the repository looks like today.
+Compact rules for working in this repo. The gate is below — read it before calling anything done.
 
-## The rules
+## Hard rules (enforced by tests)
 
-**1. Zero runtime dependencies.** `package.json` has no `dependencies` field and
-must not grow one: state, the undo stack, the renderer and the assembler are all
-hand-written. Every `devDependency` is pinned to an exact version -- no `^`, no
-`~` -- and adding one needs a reason, because this host's pnpm rejects packages
-published inside a supply-chain cutoff window (see the waiver in
-`pnpm-workspace.yaml`, and add an entry only if a clean
-`pnpm install --frozen-lockfile` demands it).
-
-**2. Dependencies flow one way.** `core` <- `asm` <- `levels` <- `flash`, with
-`app` beside `flash` (the exporter reads a circuit, not the application), and
-`persist` reading `app` to build an empty save and `agent` reading `app` to
-drive it the way a player does, through the `agent/host.ts` interface the
-composition root implements; the chrome imports `agent` and `flash`, never the
-other way, and `agent/` may not import `ui/`. Nothing imports upwards, runtime or type.
-`src/app/viewport.ts` exists only to keep that true: the camera
-and point types are declared in `app/` because `AppState` holds them, and the
-board reads them downwards.
-
-**3. Colour, spacing and geometry come from `src/ui/theme.ts`.** No literal
-colour in drawing code. On the board green is 1, red is 0 and blue is wider than
-one bit; slate -- never red -- means nothing has been simulated. On the chrome
-cyan is the instrument's voice and magenta is the operator's hand, and magenta
-never appears on the board. There are no shadows anywhere, and no rounded corners
-except the bit arrows and the result medal.
-
-**4. Commits: Conventional Commits, in English, `type(scope): summary`.** The
-scope is the area, not the file: `board`, `ui`, `levels`, `core`, `panel`,
-`docs`. One commit per coherent change, and no commit that leaves the tree
-failing the gate below.
+1. **No runtime dependencies.** `package.json` has no `dependencies` field: state, the undo stack, the renderer and the assembler are all hand-written. Every `devDependency` is pinned to an exact version (`^` / `~` are forbidden). `pnpm-workspace.yaml` carries a `minimumReleaseAgeExclude` list for four pinned dev deps — this host's pnpm rejects packages published inside a supply-chain cutoff window, so a clean `pnpm install --frozen-lockfile` fails without the exemption.
+2. **Dependencies point one way.** `core` <- `asm` <- `levels` <- `flash`, with `app` beside `flash` (the exporter reads a circuit, not the application), `persist` reading `app`, and `agent` reading `app` through the `agent/host.ts` interface the composition root implements. The chrome imports `agent` and `flash`, never the reverse; `agent/` may not import `ui/`. Nothing imports upwards, runtime or type. `src/app/viewport.ts` exists only to keep the camera and point types in `app/`, where `AppState` holds them.
+3. **Colour, spacing and geometry come from `src/ui/theme.ts`.** No literal colour in drawing code. On the board green is 1, red is 0, blue is wider than one bit, and slate — never red — means not simulated. On the chrome cyan is the instrument's voice and magenta is the operator's hand; magenta never appears on the board. No shadows anywhere; the only rounded corners are the bit arrows and the result medal.
+4. **Commits:** English Conventional Commits, `type(scope): summary`. Scope is the area, not the file: `board`, `ui`, `levels`, `core`, `panel`, `docs`. One coherent change per commit, and never leave the tree failing the gate.
 
 ## The gate
 
-Every one of these must pass before a change is called done. All three are run
-from the repository root.
+All three run from the repository root; all must pass before a change is called done.
 
 | Task | Command |
 | --- | --- |
@@ -49,82 +19,42 @@ from the repository root.
 | Unit, level and convention tests | `pnpm test` |
 | Browser smoke tests (builds and serves the bundle first) | `pnpm smoke` |
 
-On this host `pnpm` on `PATH` is a broken wrapper; README.md's "Running it"
-section has the bundled-node invocation that works instead.
+On this host `pnpm` on `PATH` is a broken wrapper. The portable form is `pnpm <task>`; the invocation that actually works here is:
 
-## What is enforced, and where
-
-`test/conventions.test.ts` is this project's linter. There is no ESLint or
-Prettier, deliberately: the dependency policy above is worth more than the
-convenience, and the rules that matter are cheap to assert directly.
-
-That file fails the build when: a module imports upwards; a top-level source
-directory is missing from the README's layout block; the README claims a
-directory that does not exist; a runtime dependency appears, or a devDependency
-is not pinned exactly; a shadow or an unlisted rounded corner appears in the
-stylesheet; or two levels share an id. A rule worth keeping belongs there, not in
-prose.
-
-One level-data rule is enforced the same way, outside that file: **no level may
-be answered by one part of its own palette.** `test/levels/palette-answer.test.ts`
-grades every shipped level against every part it offers, every way of wiring that
-part to the level's pins, and against empty, constant-only and wire-only boards;
-the drop-ins that are the campaign's own design are an exemption table with a
-reason per row, and a row that stops firing fails the test. A level that hands
-over its own answer therefore fails the gate rather than being found by a player.
-
-## Layout
-
-```
-src/core/     simulator: signals, registry and definitions, graph/netlist, settle and tick
-src/asm/      the assembler and its ISA: field ranges, modes, operands, program images
-src/levels/   LevelSpec types, checks, grader, and content/ (chapters 1-4 so far)
-src/flash/    the Arduino exporter: component tables, the program image, the sketch, the line protocol
-src/app/      state, command/undo stack, progress, shared viewport types
-src/agent/    the built-in assistant: tool list, operations, streaming client, run loop
-src/ui/       the chrome, and ui/board/ -- camera, hit testing, routing, painting
-src/persist/  localStorage save and load
-test/         Vitest tests, the convention assertions, and the Playwright smoke spec
-tools/        the SDD PowerShell helpers, the session-transcript readers, the visual check,
-              and `arduino-bridge.mjs` (the local compile-and-upload daemon)
-docs/         the design spec, the phase plans, level provenance
+```powershell
+$NODE = "$env:USERPROFILE\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
+$PNPM = "$env:USERPROFILE\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs"
+& $NODE $PNPM build
+& $NODE $PNPM test
+& $NODE $PNPM smoke
 ```
 
-## Where the game's facts come from
+Focused runs:
 
-Two third-party research documents sit at the repository root, and they describe **different versions
-of the game**: `GAME_REFERENCE.md` is the 1.x compendium, `GAME_RESEARCH_2026-10-03.md` is a sourced
-2.x dossier (93 levels, Symphony in place of LEG, 2-64-bit widths). `RESEARCH.md` indexes both, lists
-every place they contradict each other, and names which one this project follows for what.
+- `pnpm test test/levels/campaign-shape.test.ts` — pass the path **without** `--`. `pnpm test -- <path>` silently ran the whole 78-file suite here.
+- `pnpm smoke test/smoke/agent-live.spec.ts`, or `pnpm smoke -g "real model"`; `pnpm smoke --list <path>` enumerates.
+- Smoke needs Chromium installed once: `node node_modules\@playwright\test\cli.js install chromium`. Playwright builds and previews on 4173 itself. Screenshots go to `test-results/` and are wiped each run. Two live-model tests skip unless `DEEPSEEK_API_KEY` is set.
 
-The shipped campaign follows the **2.x** structure as of 2026-10-04. `src/levels/campaign.ts` is the
-table that fixes its shape and `test/levels/campaign-shape.test.ts` holds every level to it, so change
-that table — not a level object — when the campaign's shape has to change. Chapters 1-4 (56 levels)
-are built; chapters 5-7 (37 levels) are listed in the dossier's §5, and the phases that will build
-them -- 5 for Symphony and functions, 6a for 16/32/64-bit widths, 6b for the peripherals, 7 for the
-four optional-part levels -- are scoped in
-`docs/superpowers/plans/2026-10-16-turing-complete-chapters-5-7.md`.
+## What fails the build, and where
 
-Read `RESEARCH.md` before planning chapter 5. No image of the original's art may be committed, in any
-case — that is a hard constraint in the design spec (§1.4), and it is why the `imgs/` folder that came
-with the 2.x dossier is not in the tree. The 1.x compendium contains no images at all.
+- `test/conventions.test.ts` is this project's linter — there is deliberately no ESLint or Prettier. It fails on upward imports, a top-level source directory missing from the README layout block (or a claimed directory that does not exist), a runtime dependency, an imprecise devDependency pin, a CSS shadow or unlisted rounded corner, and duplicate level ids. The literal README headings `## Project layout` and `## Running it` and the fenced layout block are parsed as text: do not rename or remove them, and keep the two-space-aligned child entries.
+- Level comments carry test-enforced tokens. The `SOURCED` / `AUTHORED` markers are asserted by the chapter-2 and chapter-4 batch tests, and these English strings must survive edits: `periodicity`, `kind`, `driver selection`, `2-Bit Decoder`, `addressable`, `defines`, `achievement, not a pass condition`, `ABSOLUTE`, `SAME tick`.
+- `test/levels/palette-answer.test.ts`: no level may be solved by one part on its own palette. Its exemption table is load-bearing — a row that stops firing fails the test.
+- `test/levels/campaign-shape.test.ts`: `src/levels/campaign.ts` is the authority for id, chapter, index and both names. Change that table, not a level object. The shape is four chapters of 13 / 26 / 10 / 7 levels.
 
-## Where the record lives
+## Toolchain quirks
 
-`.superpowers/sdd/<date>-<plan-slug>/` holds each phase's build record: task
-briefs, implementer reports, review diffs, the decision ledger. It is tracked
-deliberately -- it is the evidence behind each verdict -- and it is the one place
-in the repository whose files are ignored by default and un-ignored per phase:
+- `vite.config.ts`: Vitest runs `test/**/*.test.ts` in Node; `test/smoke/**` is excluded and belongs to Playwright — never rename a spec to `*.test.ts`. DOM tests opt in with `// @vitest-environment jsdom` on the first line. Vitest 5 silently ignores `environmentMatchGlobs`; do not reintroduce it.
+- `playwright.config.ts` sits outside `tsconfig.include` because it reads `process.env` and the project pins no `@types/node`. It finds the bundled `pnpm.mjs` itself and falls back to a real `pnpm`; `NODE_BIN` / `PNPM_BIN` override both.
+- Build output `dist/` is static (`base: './'`); `pnpm dev` is only for development.
 
-```gitignore
-*                      # inside .superpowers/sdd/.gitignore
-!<phase directory>/    # one pair per phase, added when the phase starts
-```
+## Behaviours that are easy to misread
 
-`tools/sdd/sdd-workspace.ps1` creates that file **only when it is absent**; it
-must never overwrite it, because doing so would silently hide every phase from
-git. `docs/session-archive/` keeps one raw transcript, `session.v4.jsonl` (5.1 MB),
-the session behind the phase-3 record, at the owner's request; earlier
-transcripts were dropped from the working tree and remain reachable through
-`git log --all -- docs/session-archive`. The flat `digest.md` view is
-regenerated by `tools/transcript-digest.mjs` and git-ignored.
+- `?dev=1` opens every level and offers every listed part, but writes no progress. `resumePointOf` ignores dev, so startup does not jump to a late level. The amber DEV light in the shell exits dev mode and cleans the URL in place.
+- Progress is per-browser in `localStorage`; there is no cross-machine sync. The built-in agent is a feature of the game, needs a user-supplied key, and is not required to play.
+
+## Records to leave alone
+
+- `.superpowers/sdd/.gitignore` is deny-by-default with one `!<phase>/` pair per phase. `tools/sdd/sdd-workspace.ps1` writes it only when absent; never overwrite it or every phase disappears from git.
+- Root research documents and `docs/superpowers/` are historical records, not product docs; nothing under `src/` reads them.
+- `record.md` and `dsh-session-*.zip` are git-ignored because they carry keys or large dumps. Do not sweep them into a commit with `git add -A`.
