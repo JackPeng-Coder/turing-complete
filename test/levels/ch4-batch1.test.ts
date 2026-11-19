@@ -702,7 +702,7 @@ describe('chapter 4 batch 1 - level data', () => {
 
   it('carries the sourced-vs-authored data comment', () => {
     // The 2.x dossier fixes the names and the concept; the io, the programs,
-    // the boards and the targets are this replica's design. The marker block is
+    // the boards and the targets are this project's design. The marker block is
     // what a reviewer reads to tell the two apart, and this checks it exists.
     const source = readFileSync(
       new URL('../../src/levels/content/ch4/batch1.ts', import.meta.url),

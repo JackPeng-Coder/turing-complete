@@ -56,7 +56,7 @@ import { registry } from '../fixtures/build';
  *    hands it out so chapter 2's latch level has a storage element to build its
  *    loop from; §3.3's chapter-1 row names it and the chapter-2 row no longer
  *    does.
- *  * `switch` unlocks at level 17 and `switch8` at level 27 in this replica --
+ *  * `switch` unlocks at level 17 and `switch8` at level 27 in this project --
  *    the two are no longer one hand-out. The latch level's reference is built
  *    from two `switch`es, so the 1-bit part lands there; the 8-bit version
  *    arrives with the byte adder. §3.3's chapter-2 row names both. The source

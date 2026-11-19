@@ -1,9 +1,9 @@
 {
-  "name": "turing-complete-replica",
+  "name": "logic-workshop",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "An educational replica of the NAND-to-CPU puzzle game. Not affiliated with LevelHead.",
+  "description": "从与非门到 CPU 的闯关式计算机原理教育游戏。",
   "packageManager": "pnpm@11.7.0",
   "engines": {
     "node": "^20.19.0 || >=22.12.0",

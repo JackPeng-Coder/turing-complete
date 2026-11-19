@@ -24,7 +24,7 @@ import { CH2_BATCH1_REFERENCES } from '../fixtures/ch2-references';
  *
  * The source compendium fixes these levels' names, their order and a one-line
  * concept each, and nothing else -- no ports, no widths, no pass conditions, no
- * rewards. Every other number in the level data is this replica's design, which
+ * rewards. Every other number in the level data is this project's design, which
  * is why each level carries a data comment saying which is which; the last
  * describe block here checks that the comments exist.
  *
@@ -486,7 +486,7 @@ describe('every level carries its sourced-vs-authored data comment', () => {
   /**
    * The compendium fixes a name, an order and a one-line concept per level and
    * nothing else, so every port, width, check, target and reward in this file is
-   * this replica's design. The data comment on each level has to say which is
+   * this project's design. The data comment on each level has to say which is
    * which, and a reviewer checks it by reading; this checks that the marker
    * block exists at all, so a later batch cannot quietly drop it.
    */

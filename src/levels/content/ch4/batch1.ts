@@ -186,7 +186,7 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
    * 外加它的一句话概念"手写二进制编码"，以及它 1.x 前身的名字（"Add 5"）。
    * 第 4 章的教学目标也一并来自资料：先手写机器码，再解锁汇编器，用你自己的 CPU 解编程谜题。
    *
-   * AUTHORED（本复刻的设计）：玩家能看到、测试能测到的一切。`in:8 -> out:8` 引脚形状；
+   * AUTHORED（本项目的设计）：玩家能看到、测试能测到的一切。`in:8 -> out:8` 引脚形状；
    * 语义 `out = (in + 5) & 0xff`；画板（第 3 章机器，`overtureBoard({ inputId: 'in' })`，
    * 默认停机——见模块说明）；读"玩家"缓冲区、按每行一字节机器码解析的 `program` 检查
    * （`from: 'player'`、`format: 'bytes'`）；两段四步步进及其输入 100 与 42
@@ -242,7 +242,7 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
    * 以及它的一句话概念：汇编语法、imm/mov/add。本章的顺序也来自资料——
    * 这一关就是解锁汇编器的那一关，紧接在手写编码之后。
    *
-   * AUTHORED（本复刻的设计）：`in:8 -> out:8` 引脚形状；语义 `out = (in + 3) & 0xff`；
+   * AUTHORED（本项目的设计）：`in:8 -> out:8` 引脚形状；语义 `out = (in + 3) & 0xff`；
    * 画板（同一台第 3 章机器，`overtureBoard({ inputId: 'in' })`）；读"玩家"缓冲区、
    * 按汇编解析的 `program` 检查（`from: 'player'`、`format: 'asm'`）；
    * 两段步进——第 50 关的形状对着 `in + 3`，用裁决 R9 要求的两个向量；
@@ -297,7 +297,7 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
    * 一句话概念也一并来自资料：计算 6r。笑点就在算术本身——圆周长约等于 6r，
    * 而"三番两次"读作"三，两次"，正是参考程序算法的方式。
    *
-   * AUTHORED（本复刻的设计）：`r:8 -> out:8` 引脚形状（半径是本章唯一改过名字的输入）；
+   * AUTHORED（本项目的设计）：`r:8 -> out:8` 引脚形状（半径是本章唯一改过名字的输入）；
    * 语义 `out = (6 * r) & 0xff`，连回绕一起；画板（`overtureBoard({ inputId: 'r' })`）；
    * 读"玩家"汇编的 `program` 检查；两段步进——r = 200 时 6r 回绕成 176，r = 9 时是 54——
    * 用裁决 R9 要求的两个向量（本关尤其如此：见步进注释）；托盘与缺席的奖励；以及实测的三星目标。

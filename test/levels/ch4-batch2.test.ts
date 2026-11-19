@@ -1109,7 +1109,7 @@ describe('chapter 4 batch 2 - level data', () => {
 
   it('carries the sourced-vs-authored data comment', () => {
     // The 2.x dossier fixes the names and the concepts; the io, the walks, the
-    // boards, the grids and the targets are this replica's design. The marker
+    // boards, the grids and the targets are this project's design. The marker
     // block is what a reviewer reads to tell the two apart, and this checks it
     // exists for every level in the batch.
     const source = readFileSync(

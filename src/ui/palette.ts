@@ -7,7 +7,7 @@ import { partCodeOf } from './board/markings';
 import { THEME } from './theme';
 
 /**
- * 本关允许玩家使用的元件，即原作右侧的元件面板。
+ * 本关允许玩家使用的元件，即界面右侧的元件面板。
  *
  * 列表来自 `offeredDefsFor`，而不是直接读 `level.allowedComponents`：
  * 那个辅助函数对关卡求「关卡允许的元件」与「玩家已解锁的元件（含本关自己的奖励）」的交集，
@@ -17,7 +17,7 @@ import { THEME } from './theme';
  * 文字用本地化的元件名称——玩家绝不该看到 `const_on` 这种裸 def id——
  * 而 `onPick` 上报的是 id，因为画板存的是 id。
  *
- * 保留作者写下的顺序。原作把面板收在分类页签后面；本复刻没有可放进页签的
+ * 保留作者写下的顺序。面板曾收在分类页签后面；本项目没有可放进页签的
  * 自定义元件家族，所以分类标题改为内联的分组标签。它们只在分类变化处插入，
  * 从不重排列表，因为关卡列出元件的顺序是教学顺序——
  * 第 1 关先给 `const_on`、`const_off`，再给两个关卡连接器，
@@ -129,7 +129,7 @@ export function mountPalette(
   return { render };
 }
 
-/** 每个分类贡献的标题，沿用原作的词汇。 */
+/** 每个分类贡献的标题，沿用通行的词汇。 */
 const CATEGORY_LABEL: Record<ComponentCategory, string> = {
   logic1: '布尔',
   io: '常量',

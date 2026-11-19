@@ -229,7 +229,7 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
    * 来自阶段计划的第 4 章表格，它转录了 2.x 档案的第 4 章表格（本任务的 brief，
    * `task-8-brief.md`）；概念就是条件跳转——`jz`/`jnz` 把机器的直线变成循环。
    *
-   * AUTHORED（本复刻的设计）：`n:8 -> out:8` 引脚形状；语义
+   * AUTHORED（本项目的设计）：`n:8 -> out:8` 引脚形状；语义
    * `out = n + (n-1) + ... + 1, mod 256`；画板（第 3 章机器，`overtureBoard({ inputId: 'n' })`，
    * 默认停机）；读"玩家"缓冲区、按汇编解析的 `program` 检查（`from: 'player'`）；
    * 两段步进及其向量 10 与 1，节拍由参考程序自身形状固定（裁决 R9——见步进注释）；
@@ -280,7 +280,7 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
    * 它转录了 2.x 档案的第 4 章表格。本关在 1.x 攻略里的前身属于 "code lock" 家族，
    * 检查器的名字就来自那里。
    *
-   * AUTHORED（本复刻的设计）：`match:8 -> try:8` 引脚形状；秘密值（42，关卡自己选的非零字节——
+   * AUTHORED（本项目的设计）：`match:8 -> try:8` 引脚形状；秘密值（42，关卡自己选的非零字节——
    * 见下面的注释）；预算（1024，对着参考程序的 590 实测）；带 params 的 `custom: lock` 检查；
    * 画板（`overtureBoard({ inputId: 'match', halt: false })`，本关离不开它——见模块说明）；
    * 托盘与缺席的奖励；以及实测的三星目标。
@@ -323,7 +323,7 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
    * 位掩码——来自阶段计划的第 4 章表格（本任务的 brief），它转录了 2.x 档案的第 4 章表格。
    * 中文名"高速掩码"就是本关所教的"快掩码"：一个 `and` 取代一次除法或一次倒数。
    *
-   * AUTHORED（本复刻的设计）：`in:8 -> out:8` 引脚形状；语义 `out = in & 3`；
+   * AUTHORED（本项目的设计）：`in:8 -> out:8` 引脚形状；语义 `out = in & 3`；
    * 画板（`overtureBoard({ inputId: 'in' })`）；读"玩家"汇编的 `program` 检查；
    * 两段步进，42（求 2）与 255（求 3）——裁决 R9 要求的两个向量，
    * 也是答案都属于单指令常数的那一对；托盘与缺席的奖励；以及实测的三星目标。
@@ -374,7 +374,7 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
    * 它转录了 2.x 档案的第 4 章表格。参考算法也一并来自资料：把手一直放在墙上，
    * 也就是 fixture 程序实现的"左边通就左转；否则前方通就前进；否则右转"规则。
    *
-   * AUTHORED（本复刻的设计）：`sensors:8 -> move:8` 引脚形状，
+   * AUTHORED（本项目的设计）：`sensors:8 -> move:8` 引脚形状，
    * 以及检查器与 brief 共享的传感器/动作编码（bit0 前方、bit1 左、bit2 右，墙 = 1；
    * move 0 原地、1 前进、2 左转、3 右转）；迷宫网格本身、它朝东的起点与 1024 的预算；
    * 带 params 的 `custom: maze` 检查；画板（`overtureBoard({ inputId: 'sensors', halt: false })`，

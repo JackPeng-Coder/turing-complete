@@ -13,10 +13,10 @@ export interface Narrative {
 
 /**
  * 叙事外壳的原创文本。参考材料用的是一套「外星人绑架」的框架；
- * 本复刻保留这个框架，但角色与台词都是自写的，而且不绘制任何角色形象。
+ * 本项目保留这个框架，但角色与台词都是自写的，而且不绘制任何角色形象。
  *
  * 声音属于「考核者 / The Assessor」：名字与台词一样是我们自己的，
- * 因为原作中有名字的角色不再复用（设计规格 §1.4）。
+ * 因为有名字的角色不再复用（设计规格 §1.4）。
  */
 export const NARRATIVE: Readonly<Record<string, Narrative>> = {
   'ch1-01-humble-beginnings': {

@@ -1,356 +1,192 @@
-# Turing Complete Replica (图灵完备 · 复刻版)
+# 逻辑工坊 · 从与非门到 CPU
 
-**This project is not affiliated with, endorsed by, or produced by LevelHead, and it is not an
-official product.** None of the original game's art, audio, or fonts is included: every graphic is
-drawn procedurally and every line of in-game copy is original. It is an independent implementation
-for study and personal use, not for commercial distribution. The mechanics and the teaching
-progression are a homage to LevelHead's *Turing Complete* — please support the original.
+一款由学生从零设计并实现的计算机原理教育游戏：所有图形由程序绘制，所有界面文字与游戏文案均为原创，不引入任何运行时依赖，也不用于商业发行。仓库中的源码、测试与文档共同记录了它的设计、实现与验证过程。
 
-**One exception, and it is deliberate.** The repository also carries two user-supplied research
-documents that this replica was built from — [`GAME_REFERENCE.md`](GAME_REFERENCE.md) (a 1.x
-compendium) and [`GAME_RESEARCH_2026-10-03.md`](GAME_RESEARCH_2026-10-03.md) (a sourced 2.x
-dossier) — plus the structure extract derived from the first under `.superpowers/research/`. Both
-are third-party documents about the game and **both reproduce passages of the original's text**,
-including dialogue and the official store description. They are committed as research provenance,
-not as content the game ships: nothing under `src/` reads them, no image of the original's art is
-committed at all, and the shipped game's own text remains entirely original.
+## 这是什么
 
-[`RESEARCH.md`](RESEARCH.md) is the entry point to all of it: what each file is, where the two
-disagree — they describe different versions of the game — and which one this replica follows. For
-what the *game* contains level by level, see
-[chapter-2 level provenance](docs/research/chapter-2-level-provenance.md), which records exactly
-which facts came from the source and which are this replica's own design.
+一款从零实现的“从与非门到 CPU”教育闯关游戏：从一个最简单的门电路开始，逐级搭建，最终做出一台能工作的 CPU。
 
-## What this is
+本文件面向三类读者：想边玩边学的学生、准备在机房部署课程演示的老师，以及希望接手维护或二次开发的开发者；大赛评委可据此快速了解作品的功能与边界。
 
-A from-scratch, from-NAND-to-CPU educational puzzle game that reimplements the *learning path* of
-LevelHead's *Turing Complete*: you start with one primitive gate and build your way up, gate by gate,
-towards a working CPU.
+面向第 42 届江门市青少年科技创新大赛的三份材料已填写完成，放在仓库根目录：
 
-## What works today (phases 0–3, the sandbox, and the agent)
+- `1.1.科技创新成果项目申报表——创新发明和科研论文（已填写）.docx`
+- `1.2.科技创新成果项目研究报告书（已填写）.docx`
+- `1.3.江门市青少年科技创新大赛查新报告（已填写）.docx`
 
-- **Chapter 1 — 13 levels**, from the NAND gate to the logic exam.
-- **Chapter 2 — 26 levels (14–39)**: the four-bit reader, parity and counting, the byte operators,
-  half and full adders, two's complement, decoders, the feedback and storage half — switch, delay,
-  selector, register, RAM and counter.
-- **Chapter 3 — 10 levels (40–49)**: the ALU and the machine around it — registers and buses, the
-  opcode decoder, the program counter and its RAM, and a capstone that runs an assembled program
-  against the machine you built.
-- **Chapter 4 — 7 levels (50–56)**: programming the CPU you built — hand-written machine code, the
-  assembler, arithmetic and conditional jumps, and two closed-loop puzzles (the code lock and the
-  maze) whose checker drives your program one tick at a time.
-- A **canvas wiring board**: place parts, drag wires, pan and zoom. Wires are routed, not just drawn:
-  a run is chosen against every part and every wire already on the board, so it goes *around* a gate
-  rather than through it, and two nets never settle into the same lane and read as one wire.
-- **A live board**: every wire and pin shows the value it is carrying, the level's input bits are
-  clickable so you can drive a half-built circuit and watch it work, and the clock can be stepped,
-  run or reset.
-- **The level's test cases, laid out as a matrix** while you build: one row per pin, one column per
-  case, expectations filled in and your own output unknown until you run them.
-- **An on-demand test run.** Nothing grades your circuit while you are drawing it. Press 测试 and the
-  board is driven through the level's cases one at a time -- the inputs change, the column lights up,
-  the output takes its value -- at a speed you choose, and the verdict comes at the end. A level whose
-  cases the checker generates privately (a program image) says so instead of inventing one.
-- **Gate / delay / tick cost, measured live**, and a three-star target for every level. The cost is a
-  measurement and updates as you edit; whether the circuit is *correct* is what the test run says.
-- **Progress saved to `localStorage`**, so a refresh keeps your stars.
-- A **chapter map** for navigating levels and seeing what is unlocked.
-- **A sandbox**: a board with no puzzle, no test cases and no verdict, holding every part the game has.
-  It is reached from the map and is always open. What you build there is saved as you draw it and can
-  be exported to a `.json` circuit file and imported back — the only way work leaves the browser.
-- **Components of your own.** Band-select parts (Ctrl+drag), press 封装为元件, and the selection becomes
-  one part: the wires crossing its edge become its pins, and it joins the palette so the next circuit
-  can use it. 编辑内部 opens it again on the same board. Cost is measured through the expansion, so
-  wrapping a circuit never makes it cheaper.
-- **A sandbox circuit can be written to an Arduino.** The 开发板 tab builds a table-driven sketch
-  from the sandbox board — the first version knows the one-bit gates, the full adder, the delay
-  line, the one-bit memory and the two connectors — costs it against Uno, Nano or Mega budgets,
-  and either downloads a self-contained `.ino` or flashes it through `tools/arduino-bridge.mjs`, a
-  loopback daemon that runs `arduino-cli` (a browser cannot). A one-bit connector can also be put on
-  a physical pin: an output drives it with `digitalWrite`, an input is read with the internal pull-up.
-  Once flashed, the board is driven and read over Web Serial with the sketch's own line protocol; the
-  banner's hash says whether the board is running the circuit on screen.
-- **A built-in agent you can talk to.** Fill in an API address, a key and a model once — the request
-  goes straight from the browser to that endpoint, so the app still ships **no runtime dependency and
-  no server** — then describe what you want in Chinese and watch it happen. The agent calls one
-  operation at a time: place, move, wire, disconnect, delete, select, 封装 as a component, open a
-  component's circuit and edit it, rename or delete one, undo and redo, drive an input pin, run the
-  clock, step it, press 测试, write the program text, and export or import the circuit. The board holds
-  a frame between steps, so each one is visible, and the part just touched wears the selection ring.
-  Its edits go through the same command stack as your own, so Ctrl+Z walks back through them, and it
-  may place exactly the parts the level's palette is offering you. The key is kept in `localStorage`
-  under `tc.agent.v1` — 设置 can forget it, the panel says what is missing when it is not set up, and
-  nothing asks at startup, because the game plays fine without any of it.
+原始模板 `.doc` 未被修改。个人信息处仍以 `【】` 占位，签字盖章处留空待签，截图与附件标注为“待补”，提交前请补齐。
 
-Chapters 5–7 (the Symphony CPU, functions, the assembly challenges, and the peripherals) are planned but
-not built yet.
+## 目前已经实现的内容（阶段 0–3、沙盒与智能体）
 
-## Interface
+- **第 1 章——13 关**，从与非门到逻辑考试。
+- **第 2 章——26 关（14–39）**：四位读取器、奇偶与计数、字节运算、半加器与全加器、补码、译码器，以及反馈与存储部分——开关、延迟线、选择器、寄存器、RAM 和计数器。
+- **第 3 章——10 关（40–49）**：ALU 及其外围——寄存器与总线、操作码译码器、程序计数器及其 RAM，最后一关用汇编好的程序在你搭建的机器上运行。
+- **第 4 章——7 关（50–56）**：给你搭出的 CPU 编程——手写机器码、汇编器、算术与条件跳转，以及两个闭环谜题（密码锁与迷宫），判定器会按时钟节拍逐拍驱动你的程序。
+- **Canvas 画板**：放置元件、拖动导线、平移与缩放。导线是“布线”而非简单画线：每条走线都要避开画板上已有的所有元件和导线，因此会*绕过*门电路而不是穿过它；两个网络也不会挤进同一车道而被看成一根线。
+- **实时画板**：每条导线和每个引脚都显示当前值，关卡输入位可点击，便于驱动一个尚未完成的电路并观察其工作；时钟可以单步、连续运行或复位。
+- **测试用例矩阵**：搭建时，关卡的测试用例以矩阵形式铺开——每个引脚一行、每个用例一列，期望值已填好，你自己的输出在运行前未知。
+- **按需测试**：你画图时判定器不会评分。按下“测试”后，画板才会逐条跑关卡用例——输入变化、对应列点亮、输出取值——速度由你选择，结论在最后给出。若某关的用例由判定器私下生成（程序映像），它会明确说明，而不是编造一个。
+- **实时计费**：门数 / 延迟 / 时钟成本随编辑实时更新，每关都有三星目标。成本是测量值；电路是否*正确*，由“测试”判定。
+- **进度保存到 `localStorage`**，刷新后星级仍然保留。
+- **章节地图**，用于导航关卡并查看解锁状态。
+- **沙盒**：没有题目、没有测试用例、没有判定，开放全部元件的画板。从地图进入，始终开放。其中的作品随画随存，可导出为 `.json` 电路文件并重新导入——这是作品离开浏览器的唯一方式。
+- **自定义元件**：框选一组元件（Ctrl+拖动），按“封装为元件”，选区就变成一个元件：跨越选区边界的导线成为它的引脚，它随即进入元件托盘，供下一个电路使用。“编辑内部”可在同一画板上再次展开它。成本按展开后的网络计算，因此封装不会让电路变便宜。
+- **沙盒电路可写入 Arduino**：“开发板”页签从沙盒画板生成表驱动的草图——第一版支持一位门、全加器、延迟线、一位存储器和两个连接器——按 Uno、Nano 或 Mega 的预算估算占用，既可以下载自包含的 `.ino`，也可以通过 `tools/arduino-bridge.mjs` 烧录；这是一个在本地运行 `arduino-cli` 的回环守护进程（浏览器做不到）。一位连接器还可以绑定到物理引脚：输出用 `digitalWrite` 驱动，输入用内部上拉读取。烧录后通过 Web Serial 按草图自身的行协议驱动和读取电路；顶栏的散列值会告诉你开发板运行的是否就是屏幕上的电路。
+- **可用中文对话的内置智能体**：填入 API 地址、密钥和模型即可——请求从浏览器直连该端点，因此应用仍然**没有运行时依赖、没有服务端**——然后用中文描述需求，看着它被逐步执行。智能体一次调用一个操作：放置、移动、连线、断开、删除、选择、封装为元件、打开元件电路并编辑、重命名或删除、撤销与重做、驱动输入引脚、运行时钟、单步、按“测试”、写入程序文本、导入导出电路。两步之间画板会停一帧，因此每一步都可见，刚操作过的元件会带上选中环。它的编辑和你自己的编辑进入同一个命令栈，Ctrl+Z 可以逐步回退；它只能放置关卡托盘里实际提供的元件。密钥以明文保存在 `localStorage` 的 `tc.agent.v1` 下，“设置”可以清除它；未配置时面板会说明缺什么，启动时不会询问，因为不配置也能正常游玩。
 
-The chrome is styled as bench instrumentation, not as a page with cards on it: flat slabs separated
-by 1px hairlines, **no shadows anywhere** — not one `box-shadow` or `text-shadow` in the stylesheet —
-and no rounded corners except the bit arrows, whose roundness carries the value, and the result
-medal, which is a stamped disc rather than a glowing orb. `test/conventions.test.ts` asserts both
-halves of that — no shadow property anywhere, and no radius outside those two.
+第 5–7 章（Symphony CPU、函数、汇编挑战和外设）已规划，但尚未实现。
 
-It is a **workbench**, laid out the way a code editor is: an activity rail on the left, the parts
-tray beside it (with the component library a tab away and the clock/IO readout pinned below), the
-board as the document in the middle, the assistant in a collapsible sidebar on the right, the level's
-cases and the programming bench in a tabbed panel under the board, and the measured cost along the
-bottom in a status bar. Every panel is docked in flow, so a tool never covers a wire being drawn. The
-three docks fold away and drag wider or taller, and the workbench remembers the sizes and which of
-them were left folded (`tc.layout.v1`); scrollbars are drawn by the stylesheet rather than left to
-the platform.
+## 界面
 
-Two colour axes, kept apart on purpose:
+整个外壳被设计成台式仪器，而不是摆着卡片的网页：平面板块之间用 1px 细线分隔，**处处没有阴影**——样式表里没有任何 `box-shadow` 或 `text-shadow`——除了承载数值的比特箭头和作为压印圆片的结果奖章，没有任何圆角。`test/conventions.test.ts` 同时断言这两点：既没有阴影属性，也没有这两处之外的圆角。
 
-- **On the board**, green is 1, red is 0, and blue is wider than one bit. That is the value rule
-  stated in [`src/ui/theme.ts`](src/ui/theme.ts), and slate — never red — means nothing has been
-  simulated yet.
-- **On the chrome**, cyan is the instrument's voice (titles, labels, measured numbers) and magenta is
-  the operator's hand: every control you can press. Magenta never appears on the board, so a value
-  can never be mistaken for something clickable.
+布局像代码编辑器一样是一张**工作台**：左侧活动栏，旁边是元件托盘（元件库为一个页签，时钟 / I/O 读数固定在下方），中间是作为文档的画板，右侧是可折叠的智能体侧栏，画板下方的页签面板放关卡测试用例和编程台，底部状态栏显示实时成本。每个面板都在文档流中停靠，因此工具不会盖住正在画的导线。三个停靠区都可以折叠、拖拽改变宽高，工作台会记住尺寸和折叠状态（`tc.layout.v1`）；滚动条由样式表绘制，而不是交给平台。
 
-A scale of 1px ticks finishes the two edges where something is *measured* — the cost readout in the
-status bar and the case matrix along the bottom — and appears nowhere else.
+两条颜色轴线被刻意分开：
 
-A part is marked the way a chip is: a short uppercase mnemonic (`NAND`, `MUX`, `ADD`) with its width
-in a corner badge, so `and` and `and8` share a marking and the `8` tells them apart. The palette keeps
-the Chinese name, because that is what you read when *choosing* a part; the tooltip carries the English
-name and the board marking, which is where the two vocabularies meet.
+- **画板上**，绿色是 1，红色是 0，蓝色表示宽于一位的信号。这是 [`src/ui/theme.ts`](src/ui/theme.ts) 规定的取值规则；尚未仿真的状态用石板色——绝不是红色——表示。
+- **外壳上**，青色是仪器的声音（标题、标签、测量数字），洋红是操作者的手：每一个可按压的控件。洋红绝不出现在画板上，因此数值永远不会被误认为可点击。
 
-A level connector is named by a badge and carries its **number**: the output's disc shows what it holds
-and the input's arrow shows what it is driving, so the two ends of a level are one kind of part rather
-than two.
+只有在“测量”的两条边缘——状态栏的成本读数和底部用例矩阵——才有 1px 刻度尺，其他地方没有。
 
-The board's gestures:
-| Gesture | What it does |
+元件的标注方式像芯片：短的大写助记符（`NAND`、`MUX`、`ADD`）加上角落的位宽角标，因此 `and` 与 `and8` 共用同一标注，靠 `8` 区分。托盘保留中文名称，因为那是你*挑选*元件时读的；悬停提示给出英文名和画板标记，两套术语在这里相遇。
+
+关卡连接器用角标命名，并携带自己的**编号**：输出的圆盘显示它当前持有的值，输入的箭头显示它正在驱动什么，因此关卡的两端是同一种元件，而不是两种。
+
+画板手势：
+
+| 手势 | 作用 |
 | --- | --- |
-| Drag empty board, or drag with the middle button | Pan the view |
-| Click empty board | Clear the selection |
-| **Ctrl+drag** | Band-select every part the band touches |
-| Right-click a part or a wire | Delete it — one undoable step |
-| Click a palette slot | Arm that part: the slot stays lit and a translucent copy follows the pointer, on the grid, at the size and position it will land |
-| Click the board while armed | Place a copy, and stay armed so you can stamp several |
-| The ✕ in the palette's plate, or Esc | Put the part back down, which gives the plain drag back to the board |
+| 拖动空白画板，或按住中键拖动 | 平移视图 |
+| 点击空白画板 | 清除选择 |
+| **Ctrl+拖动** | 框选触摸到的所有元件 |
+| 右键点击元件或导线 | 删除它——一次可撤销的操作 |
+| 点击托盘槽位 | 武装该元件：槽位保持点亮，半透明副本跟随指针，并落在网格、目标尺寸和最终位置上 |
+| 武装时点击画板 | 放置一个副本，并保持武装以便连续放置 |
+| 托盘铭牌上的 ✕，或 Esc | 放回元件，恢复画板的普通拖动 |
 
-### The agent
+### 智能体
 
-The agent is a dock, not a dialog: the `Agent` button in the activity rail claims the secondary sidebar
-(the column closes and gives the board its width back), and the panel is available on every board
-screen — an ordinary level, the sandbox, and `?dev=1`.
-Type what you want in Chinese and press 发送 (Enter sends, Shift+Enter is a newline). While it works,
-each step is a row in the log — `place_part · 在 (160, 160) 放了 与非门（i1）` — and each one is a
-frame on the board: the parts appear one at a time, and the part just touched wears the selection ring
-so you can see where the last action landed. Above the rows, the model's own reasoning scrolls through
-a six-line window as it is written and then folds to `▸ 思考 · N 行`, one click from being read again;
-the step that answers rather than acts keeps its sentence open.
+智能体是一个停靠区，不是对话框：活动栏中的 `Agent` 按钮占用副侧栏（该列关闭，把宽度还给画板），面板在每一种画板界面上都可用——普通关卡、沙盒和 `?dev=1`。
 
-设置 holds the API address, the key, the model and the **step limit** — 16 model calls per request by
-default, `0` for no limit. When a request reaches the limit the log ends with a 继续执行 button, which
-sends the same conversation again with a fresh budget: a long build is one click from finishing rather
-than a retyped request.
+用中文输入需求后按“发送”（Enter 发送，Shift+Enter 换行）。工作过程中，每一步都是日志里的一行——`place_part · 在 (160, 160) 放了 与非门（i1）`——同时也是画板上的一帧：元件逐个出现，刚操作过的元件带上选中环，便于看清最后一步落在哪里。日志行上方是模型自身的推理，在一个六行窗口里随写随滚，结束后折叠为 `▸ 思考 · N 行`，点一下即可重新阅读；只回答而不执行的那一步会保持句子展开。
 
-The readings are **live**: the totaliser under the log starts ticking the moment a request begins and
-updates at every step — elapsed time, steps, tokens, output speed, cache share and estimated cost — so a
-long build is never a blank wait. Each finished request also leaves its own row under the reply
-(`2.4s · 1.2k tok · 20 tok/s · 缓存 83% · ¥0.0004`). Token counts come from the provider's own usage
-frame (the request asks for one) and the times from the wall clock; a provider that reports no usage
-gets a time-only reading, never invented zeroes. The cost is estimated from DeepSeek's published price
-list — CNY per million tokens, with the documented half-price idle windows (Chinese public holidays are
-not modelled, so a holiday weekday is priced at peak) — and is shown only for models on that list.
+“设置”里保存 API 地址、密钥、模型和**步数上限**——每次请求默认最多调用 16 次模型，`0` 表示不限。请求到达上限时，日志末尾出现“继续执行”按钮：用新的预算重发同一段对话，长任务点一下就能接着完成，不必重新输入需求。
 
-What it will not do, and why:
+读数是**实时**的：日志下方的合计表从请求开始就计时，并在每一步更新——耗时、步数、token、输出速度、缓存占比和估算费用——因此长任务不会是空白等待。每次完成的请求还会在回复下方留下自己的一行（`2.4s · 1.2k tok · 20 tok/s · 缓存 83% · ¥0.0004`）。token 数来自服务商自己的用量帧（请求会要求返回），时间来自系统时钟；不报告用量的服务商只显示时间，绝不编造零值。费用按 DeepSeek 公开价目表估算——每百万 token 的人民币价格，含文档记载的半价空闲时段（不模拟中国法定节假日，因此节假日的工作日按高峰计价）——且只对价目表内的模型显示。
 
-- **It cannot touch your progress.** No level is opened, passed, skipped or cleared by the agent, and
-  the campaign's stars change only when *you* press 测试 on a circuit. The tool list is the contract:
-  it is what the model is offered, and nothing outside it is reachable.
-- **It cannot place parts the level does not offer you.** The tool's palette is derived from the same
-  function the parts tray uses, and `?dev=1` only relaxes the unlock filter — it never adds a part a
-  level's brief did not list — so a level's puzzle is not bypassed by asking nicely.
-- **It does not pan, zoom, toggle the grid or band-select.** Those are the view, not the circuit: an
-  agent that could move the camera could put the board somewhere you did not ask for it, and every one
-  of them is one gesture away.
-- **It only speaks OpenAI-compatible `chat/completions`** with streaming. Anthropic's messages API
-  needs a browser-specific header and is not wired up; every other provider that speaks the OpenAI
-  shape — including the DeepSeek, Moonshot and Zhipu endpoints — works.
-- **The key is stored in this browser, in the clear.** There is no server to hold it: `localStorage`
-  under `tc.agent.v1`, readable by any script on this origin. 设置 forgets it.
-- **It is not a chat memory.** The conversation lasts for the session; a reload starts a new one. The
-  circuit is what persists, and it persists the way it always has.
+它不会做的事，以及原因：
 
-## Running it
+- **不能触碰你的进度。** 智能体不会打开、通过、跳过或清除任何关卡，也不会写入存档。它工具清单里的“运行测试”（`run_tests`）等于工具栏的“测试”，但只用于读取判定结果、帮助它修正电路——这次运行不会记星、不会解锁下一关。战役星级和解锁只在你*本人*对电路按下“测试”时改变。工具清单就是契约：模型只能拿到清单里的操作，清单之外一律不可达。
+- **不能放置关卡未提供的元件。** 工具的元件清单来自元件托盘所用的同一个函数；`?dev=1` 只放宽解锁过滤——绝不增加关卡简介里没有列出的元件——因此关卡谜题不会因为好好说话就被绕过。
+- **不平移、不缩放、不切换网格、不框选。** 那些属于视图，不属于电路：能移动相机的智能体可能把画板放到你没要求的位置，而这些操作你自己一个手势就能完成。
+- **只支持带流式输出的 OpenAI 兼容 `chat/completions`。** Anthropic 的 messages API 需要浏览器专用头，未接入；其他使用 OpenAI 格式的供应商——包括 DeepSeek、Moonshot 和智谱的端点——都能使用。
+- **密钥以明文存在本浏览器中。** 没有服务端代为保管：`localStorage` 的 `tc.agent.v1`，同一来源下的任何脚本都能读取。“设置”可以清除它。
+- **不是聊天记忆。** 对话只在本次会话中存在，刷新即重新开始；持久的是电路，而且一直按原来的方式持久。
 
-On any normal machine with Node and pnpm on `PATH`:
+## Running it（运行方式）
 
-| Task | Command |
+在 Node 和 pnpm 都在 `PATH` 上的普通机器上：
+
+| 任务 | 命令 |
 | --- | --- |
-| Dev server (http://localhost:5173) | `pnpm dev` |
-| Unit and level tests (Vitest) | `pnpm test` |
-| Production build (`tsc --noEmit && vite build`) | `pnpm build` |
-| Browser smoke test (Playwright) | `pnpm smoke` |
+| 开发服务器（http://localhost:5173） | `pnpm dev` |
+| 单元与关卡测试（Vitest） | `pnpm test` |
+| 生产构建（`tsc --noEmit && vite build`） | `pnpm build` |
+| 浏览器冒烟测试（Playwright） | `pnpm smoke` |
 
-On **this** host the `pnpm` on `PATH` is a broken wrapper script, so the same four tasks are run by
-handing the bundled `pnpm.mjs` to the bundled Node binary. These are the commands that actually work
-here:
+在**本机**，`PATH` 上的 `pnpm` 是一个损坏的包装脚本，因此同样的四个任务要通过把捆绑的 `pnpm.mjs` 交给捆绑的 Node 可执行文件来运行。以下是本机实际可用的命令：
 
 ```powershell
-$NODE = "C:\Users\ME\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
-$PNPM = "C:\Users\ME\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs"
+$NODE = "$env:USERPROFILE\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
+$PNPM = "$env:USERPROFILE\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs"
 
-& $NODE $PNPM dev     # dev server on http://localhost:5173
-& $NODE $PNPM test    # Vitest, once
+& $NODE $PNPM dev     # 开发服务器，http://localhost:5173
+& $NODE $PNPM test    # Vitest，运行一次
 & $NODE $PNPM build   # tsc --noEmit && vite build -> dist/
-& $NODE $PNPM smoke   # Playwright end-to-end smoke test
+& $NODE $PNPM smoke   # Playwright 端到端冒烟测试
 ```
 
-`pnpm <task>` is the portable form and the one to put in a script or a document; the `& $NODE $PNPM`
-form is only the workaround for this machine.
+`pnpm <任务>` 是可移植写法，脚本和文档里都应使用；`& $NODE $PNPM` 只是本机的绕行办法。
 
-`pnpm-workspace.yaml` exists for one reason and carries one thing: a `minimumReleaseAgeExclude`
-list. This host's pnpm refuses packages published inside a supply-chain cutoff window, the four
-pinned versions are younger than that window, and without the exemption a clean
-`pnpm install --frozen-lockfile` fails with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. Every entry is
-a devDependency; nothing is exempted on the runtime side, because there is nothing there to exempt.
+### 机房离线部署
 
-### Smoke test prerequisites
+构建产物 `dist/` 是纯静态文件，不依赖任何服务端或运行时依赖：用 `pnpm build` 生成后，拷到机房任一静态服务器上、或用任意一个静态文件服务器指向该目录即可（`pnpm dev` 只用于开发）。接口完全中文本地渲染，断网也能正常闯关。进度保存在各台机器浏览器的 `localStorage` 中（`tc.progress.v1` 等键），因此**每台机器、每个浏览器各自记录**，不会跨机同步——若要让学生接着上次的进度，需在同一浏览器中使用。智能体是唯一需要联网的可选功能：不填 API 信息时面板会说明缺什么，游戏其余部分不受影响。
 
-The Playwright suite (`pnpm smoke`) needs two things the unit tests do not:
+`pnpm-workspace.yaml` 存在只有一个原因，也只装了一样东西：`minimumReleaseAgeExclude` 列表。本机的 pnpm 拒绝发布处于供应链截止窗口内的包，而四个精确锁定的开发依赖正好比这个窗口年轻；没有豁免时，干净的 `pnpm install --frozen-lockfile` 会以 `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` 失败。表中每一项都是开发依赖；运行时一侧没有任何东西需要豁免，因为它根本不存在。
 
-1. **A Chromium build, installed once:**
-   `node node_modules\@playwright\test\cli.js install chromium`
-2. **A build and preview server**, which Playwright starts itself on port 4173 (see the `webServer`
-   block in `playwright.config.ts`). The config finds the Node binary and this host's bundled
-   `pnpm.mjs` on its own — no environment variables are needed — and falls back to a real `pnpm`
-   executable when the bundled script is not there. Set `NODE_BIN` / `PNPM_BIN` to override either one.
+### 浏览器冒烟测试的前提条件
 
-Screenshots are written under `test-results/`, which Playwright wipes at the start of every run.
+Playwright 测试套件（`pnpm smoke`）需要两样单元测试不需要的东西：
 
-### Developer mode
+1. **一次性安装 Chromium：** `node node_modules\@playwright\test\cli.js install chromium`
+2. **构建与预览服务器**，由 Playwright 自己在 4173 端口启动（见 `playwright.config.ts` 中的 `webServer` 配置）。配置会自行找到 Node 可执行文件和本机的捆绑 `pnpm.mjs`——无需环境变量——当捆绑脚本不存在时回退到真实的 `pnpm`。可用 `NODE_BIN` / `PNPM_BIN` 覆盖其中任意一个。
 
-`?dev=1` opens every level from the chapter map and offers every part a level lists, so a level can be
-opened and built without playing up to it. It opens exactly those two gates and nothing else: it never
-writes progress, so no level is passed and no star is awarded on its account. Nor does it widen a
-level's palette: `?dev=1` on level 2 offers the NAND on that level's list, not the sandbox's 8-bit
-adder — the flag only stops hiding listed parts the campaign has not handed out yet. The agent reads
-the same list, so `?dev=1` does not turn it into a way around a level's puzzle either.
+截图写入 `test-results/`，Playwright 每次运行开始时都会清空该目录。
 
-While it is on, the top bar carries an amber `DEV` light — a mode that unlocks the whole game has to be
-impossible to forget — and clicking that light leaves the mode and cleans the URL, so a refresh does not
-bring it back.
+### 开发者模式
 
-### Writing a sandbox circuit to a board
+`?dev=1` 会打开章节地图上的所有关卡，并提供关卡列出的所有元件，因此无需一路闯关即可打开并搭建任意一关。它只放开这两道限制，别的一概不动：它不写进度，因此不会因此通过任何关卡或获得星星。它也不扩大关卡的元件清单：`?dev=1` 下第 2 关提供的仍是其清单上的与非门，而不是沙盒里的 8 位加法器——这个标志只是不再隐藏战役尚未发给你的、清单中已有的元件。智能体读取的是同一份清单，因此 `?dev=1` 也不会成为绕过关卡谜题的途径。
 
-The 开发板 tab in the bottom panel is only there in the sandbox. It needs three things outside the
-browser:
+开启时顶栏会亮起琥珀色的 `DEV` 灯——一个能解锁整个游戏的状态必须让人无法忘记——点击这盏灯即可退出该模式并清理 URL，刷新也不会再回来。
 
-1. **`arduino-cli` on `PATH`** (1.x), with the AVR core installed once:
-   `arduino-cli core install arduino:avr`. Set `TC_ARDUINO_CLI` to point at a binary that is not on
-   `PATH`.
-2. **The local bridge**, run from the repository root while you want to flash:
-   `node tools/arduino-bridge.mjs` (`pnpm arduino` runs the same file; default `http://127.0.0.1:8765`).
-   It binds loopback only, refuses
-   origins other than the game's own tabs, and requires the `X-TC-Arduino: 1` header on every request.
-   Set `TC_ARDUINO_TOKEN` to require a shared secret as well; type the same value into the panel's
-   令牌 field. The bridge can program a microcontroller, so do not expose it.
-3. **A Chromium browser** for Web Serial (Chrome or Edge, over `localhost` or `https`). Firefox and
-   Safari cannot open a serial port.
+### 把沙盒电路写到开发板上
 
-Then, on the sandbox screen: place at least one 关卡输入 or 关卡输出, open 开发板, and press 构建映像.
-The card reports what the circuit compiles to (nodes, slots, states, tables) and what it is estimated
-to cost in RAM and flash, against the board chosen in the 本地桥 card; a circuit that will not fit is
-refused by name rather than failing on the board. The picker lists Uno, Nano and Mega, plus the
-Nano's old bootloader as its own row (same chip, compiled with `--board-options cpu=atmega328old`).
-下载 .ino writes the sketch to disk — put it in a
-folder of the same name and the Arduino IDE opens it — and 检查连接 / 编译 / 烧录 take the same sketch
-through the bridge. The compiler's own size report and log are shown beside the estimate.
+底部面板中的“开发板”页签只在沙盒里出现。它需要浏览器之外的三样东西：
 
-An upload closes the port first — `arduino-cli` cannot open one Web Serial is holding — so after a
-flash press 连接串口 again. The banner's hash is compared with the image the panel built, so "the board
-is running the circuit on screen" is a check rather than a guess. 单步 T applies one clock edge, 复位
-R clears the storage and the inputs, 读取 S prints the current frame, each input connector has a value
-field and 同步面板输入 copies the in-page input values onto the board, and the command line accepts
-the documented protocol lines (`I <index> <value>`, `T`, `R`, `S`, `C <hz>`, `B`) directly.
+1. **`arduino-cli` 在 `PATH` 上**（1.x），并一次性安装 AVR 核心：`arduino-cli core install arduino:avr`。若可执行文件不在 `PATH` 上，可用 `TC_ARDUINO_CLI` 指向它。
+2. **本地桥**：在需要烧录时从仓库根目录运行 `node tools/arduino-bridge.mjs`（`pnpm arduino` 运行同一个文件；默认 `http://127.0.0.1:8765`）。它只绑定回环地址，拒绝游戏自身标签页以外的来源，并要求每个请求带 `X-TC-Arduino: 1` 头。可设置 `TC_ARDUINO_TOKEN` 要求共享密钥，并在面板的“令牌”字段里填同一个值。这个桥能给微控制器烧录程序，不要把它暴露出去。
+3. **Chromium 内核浏览器**，用于 Web Serial（Chrome 或 Edge，通过 `localhost` 或 `https`）。Firefox 和 Safari 无法打开串口。
 
-The 引脚 card puts a one-bit connector on a physical pin. An output is driven with `digitalWrite` after
-every settle, so D13's LED or a relay on D7 follows the circuit; an input is read with `digitalRead`
-every loop with the internal pull-up on, so a button wired to GND works (and an unwired input reads 1).
-One pin can belong to one connector — the pickers disable a pin another row already holds, and
-`buildImage` refuses the same collision from a stale save. D0/D1 are not offered (they are the USB
-serial line) and neither are the 328P's analogue-only A6/A7; the Mega adds D22–D53 and A6–A15. A wide
-connector stays on the serial line: one pin per connector is the first version's contract. Assignments
-are remembered with the board in the browser, are compiled into the sketch (and therefore into the
-banner hash), so "what is flashed" and "what is on screen" still agree.
+然后，在沙盒界面：至少放置一个“关卡输入”或“关卡输出”，打开“开发板”，按“构建映像”。卡片会报告电路被编译成什么（节点、槽位、状态、表），以及按“本地桥”卡片里选中的开发板估算的 RAM 和闪存占用；放不下的电路会被明确拒绝，而不是在板上失败。选择器列出 Uno、Nano 和 Mega，并把 Nano 的旧引导程序单列一行（同一芯片，用 `--board-options cpu=atmega328old` 编译）。“下载 .ino”把草图写到磁盘——放进同名文件夹后 Arduino IDE 即可打开——“检查连接 / 编译 / 烧录”则让同一份草图经过本地桥。编译器自己的体积报告和日志会显示在估算值旁边。
 
-The supported set is deliberately narrow: a wide part, a decoder or a CPU part is refused with the
-instance named, and `src/flash/build.ts` is where the set is stated. The sketch is a table-driven
-interpreter rather than one statement per gate, which is what lets a board of several hundred gates
-fit an Uno at all; the price is settling speed, paid only while the circuit runs.
+上传会先关闭串口——`arduino-cli` 无法打开 Web Serial 正占用的端口——因此烧录后要再次按“连接串口”。顶栏的散列值会与面板构建的映像比对，所以“开发板运行的就是屏幕上的电路”是一项检查，而不是猜测。“单步 T”施加一个时钟沿，“复位 R”清除存储和输入，“读取 S”打印当前帧；每个输入连接器都有值字段，“同步面板输入”把页面里的输入值复制到板上；命令行还直接接受文档中规定的协议行（`I <index> <value>`、`T`、`R`、`S`、`C <hz>`、`B`）。
 
-## Project layout
+“引脚”卡片把一位连接器放到物理引脚上。输出在每次结算后用 `digitalWrite` 驱动，因此 D13 的板载 LED 或 D7 上的继电器会跟随电路；输入在每个循环中用 `digitalRead` 读取，并开启内部上拉，因此接到 GND 的按钮可以工作（未接线的输入读到 1）。一个引脚只能属于一个连接器——选择器会禁用其他行已占用的引脚，`buildImage` 也会拒绝来自旧存档的同类冲突。D0/D1 不提供（它们是 USB 串口），328P 上仅支持模拟功能的 A6/A7 也不提供；Mega 额外提供 D22–D53 和 A6–A15。宽位连接器仍走串口：一个连接器对应一个引脚是第一版的契约。引脚分配与开发板一起保存在浏览器里，并被编译进草图（因此也进入散列值），所以“烧录进去的”和“屏幕上的”始终一致。
+
+支持范围刻意很窄：宽位元件、译码器或 CPU 元件会被拒绝，并指出实例名；支持集合写在 `src/flash/build.ts` 里。草图是表驱动解释器，而不是每个门一条语句——正因如此，几百个门的电路才能塞进 Uno；代价是结算速度，而且只在电路运行时付出。
+
+## Project layout（项目结构）
 
 ```
 src/
-  core/     simulator: signals, component registry + definitions, graph/netlist, settle & tick
-  asm/      the assembler and its ISA: field ranges, addressing modes, operands, program images
-  levels/   LevelSpec types, the campaign table, checks, grader, content/ (chapters 1–4), the
-            sandbox spec, and the custom-component library and wrap
-  flash/    the Arduino exporter: component tables, the program image, the pin map, the sketch
-            emitter, the serial line protocol and the local bridge's client
-  app/      application state, command/undo stack, progress, and the shared viewport types
-  agent/    the built-in assistant: the tool list it may call, the operations behind them, the
-            OpenAI-compatible streaming client, its settings, and the run loop
-  ui/       the board's chrome: top bar, palette, clock + I/O readout, tool grid, test cases,
-            chapter map, the components panel, the agent panel, and the Canvas board (see ui/board/)
-  ui/board/ the board itself: camera and hit testing, wire routing, painting, live signals
-  persist/  localStorage save and load, the sandbox circuit, and the `tc-circuit` file format
-test/       Vitest unit and level tests, the convention assertions, and the Playwright smoke spec
-tools/      the SDD PowerShell helpers that build a phase workspace and its briefs, and the
-            session-transcript readers and the visual check (tools/*.mjs)
-docs/       the design spec, the phase plans, and the per-chapter level provenance
+  core/     仿真内核：信号、元件定义与注册表、网表、结算与时钟节拍
+  asm/      汇编器与指令集：字段范围、寻址模式、操作数、程序映像
+  levels/   关卡规格、战役表、检查、判定器、关卡内容（第 1–4 章）、
+            沙盒规格，以及自定义元件库与封装
+  flash/    Arduino 导出器：元件表、程序映像、引脚映射、草图生成、
+            串口行协议与本地桥客户端
+  app/      应用状态、命令与撤销栈、进度、共享视口类型
+  agent/    内置智能体：可调用工具清单、工具实现、OpenAI 兼容流式客户端、
+            设置与运行循环
+  ui/       界面外壳：顶栏、元件托盘、时钟与 I/O 读数、工具网格、测试用例、
+            章节地图、元件面板、智能体面板与 Canvas 画板（见 ui/board/）
+  ui/board/  画板本身：相机与命中测试、导线布线、绘制、实时信号
+  persist/  localStorage 存档、沙盒电路与 `tc-circuit` 文件格式
+test/       Vitest 单元与关卡测试、约定断言、Playwright 冒烟测试
+tools/      SDD PowerShell 助手（生成阶段工作区与任务简报）、会话记录读取器与视觉检查（tools/*.mjs）
+docs/       设计规格、阶段计划与各章关卡出处
 ```
 
-Dependencies run one way: `core` ← `asm` ← `levels` ← `flash`, and `app` sits beside `flash` (it
-does not import it: the exporter reads a circuit, not the application). `persist` reads `app` to
-build an empty save and `agent` reads `app` to drive it the way a player does — the chrome imports
-`agent` and `flash`, never the other way, and `agent/` may not import `ui/` at all. Nothing imports
-upwards, and `test/conventions.test.ts` fails the build if anything starts to — that file is this
-project's linter, because no linter is pinned (see `AGENTS.md` for why, along with the four rules
-that shape everything else).
+依赖方向是单向的：`core` ← `asm` ← `levels` ← `flash`，`app` 与 `flash` 并列（它不导入 `flash`：导出器读取的是电路，不是应用）。`persist` 读取 `app` 以构造空存档，`agent` 读取 `app`，像玩家一样通过组合根实现的 `agent/host.ts` 接口驱动它；外壳导入 `agent` 和 `flash`，绝不反向，而 `agent/` 完全不能导入 `ui/`。没有任何模块向上导入，一旦出现，`test/conventions.test.ts` 就会让构建失败——这个文件就是本项目的 linter，因为按约定没有固定任何 linter。
 
-## Contributing / scope
+塑造整个项目的四条硬规则（详见 `AGENTS.md`）：
 
-Phases 0–3 cover chapters 1–4, which is **56 of the campaign's 93 levels**. Two phases followed outside
-the campaign: the **sandbox** with **player-built components** — the two things the spec called for
-(spec §3.4, §7, §8.1) — and the **built-in agent**, which is this project's own addition rather than a
-feature of the game being replicated. The campaign follows the
-**2.x** structure of the game (13/26/10/7/26/7/4 chapters, Symphony in place of LEG, 2–64-bit
-widths); the table that fixes it is [`src/levels/campaign.ts`](src/levels/campaign.ts), and
-`test/levels/campaign-shape.test.ts` holds every level to it. The remaining chapters 5–7 are listed
-in [`GAME_RESEARCH_2026-10-03.md`](GAME_RESEARCH_2026-10-03.md) §5, and the scope and acceptance
-criteria for the phases that will build them are in
-[`docs/superpowers/plans/2026-10-16-turing-complete-chapters-5-7.md`](docs/superpowers/plans/2026-10-16-turing-complete-chapters-5-7.md).
-[`RESEARCH.md`](RESEARCH.md) records where the two research documents disagree
-and which one this project follows for what.
+1. **零运行时依赖**：`package.json` 没有 `dependencies`，状态、撤销栈、渲染器和汇编器全部手写；每个开发依赖都锁定精确版本。
+2. **依赖单向**：不允许向上导入，运行时和类型都一样；这就是上面那条由测试强制的规则。
+3. **颜色、间距与几何都来自 `src/ui/theme.ts`**：绘图代码里不写颜色常量；画板上绿=1、红=0、蓝=宽信号，石板色=未仿真；外壳上青色是仪器、洋红是操作者，洋红不上画板；处处无阴影，除比特箭头和结果奖章外无圆角。
+4. **提交信息**：英文 Conventional Commits，`type(scope): summary`；每个连贯的改动一个提交，且不得留下未通过门禁的提交。
 
-The record of how it was built is committed too. [`.superpowers/sdd/`](.superpowers/sdd/) holds one
-directory per phase: phases 0 and 1 carry every task's brief, its implementer's report, and the
-review diffs behind each verdict — phase 0 is missing the briefs for tasks 9 and 11, which were
-written before the workspace convention settled — and phase 2 carries the decision ledger and the
-ALU handoff rather than per-task reports, because it ran as fewer and larger tasks. `tools/sdd/`
-holds the three PowerShell helpers that resolve such a workspace, write a task brief, and stage a
-review package.
+提交前必须通过三道门禁：`pnpm build`（类型检查与生产构建）、`pnpm test`（单元、关卡与约定测试）、`pnpm smoke`（浏览器冒烟测试）。
 
-`docs/session-archive/` keeps one raw transcript, `session.v4.jsonl` (5.1 MB), the session behind the
-phase-3 record, at the repository owner's request; earlier transcripts were dropped from the working
-tree and remain reachable through `git log --all -- docs/session-archive`. The flat `digest.md` view is
-regenerated by `tools/transcript-digest.mjs` and git-ignored, so a derived copy never becomes a second
-source of truth.
+## 贡献范围与后续计划
 
-## License
+阶段 0–3 覆盖第 1–4 章，即规划中的 93 关里的 **56 关**。在战役之外还做了两个阶段：**沙盒**与**玩家自建元件**——设计规格要求的两个功能（规格 §3.4、§7、§8.1）——以及**内置智能体**，这是本项目自主实现的一项 AI 功能。各章关数为 13/26/10/7/26/7/4，宽信号 2–64 位；固定这一结构的表在 [`src/levels/campaign.ts`](src/levels/campaign.ts)，[`test/levels/campaign-shape.test.ts`](test/levels/campaign-shape.test.ts) 让每一关都符合它。剩余第 5–7 章的阶段范围与验收标准见 [`docs/superpowers/plans/2026-10-16-turing-complete-chapters-5-7.md`](docs/superpowers/plans/2026-10-16-turing-complete-chapters-5-7.md)。
 
-MIT — see [LICENSE](LICENSE). Not affiliated with LevelHead; no original art, audio, or fonts are
-included, and every line of the game's own copy is original. The two research documents committed at
-the repository root are separate third-party documents: they are not covered by that statement, and
-[LICENSE](LICENSE) excludes them from the MIT grant by name. If you enjoy this, buy *Turing Complete*
-and support the original.
+构建过程的记录也一并提交。[`.superpowers/sdd/`](.superpowers/sdd/) 每个阶段一个目录：阶段 0 和 1 保存每项任务的任务简报、实现者报告，以及每个结论背后的评审差异——阶段 0 缺少任务 9 和 11 的简报，因为它们写于工作区约定确立之前——阶段 2 保存的是决策记录和 ALU 交接，而不是逐任务报告，因为它以更少、更大的任务进行。`tools/sdd/` 保存三个 PowerShell 助手，用于解析这样的工作区、编写任务简报和准备评审包。
+
+`docs/session-archive/` 按仓库所有者要求保留了一份原始记录 `session.v4.jsonl`（5.1 MB），即阶段 3 记录背后的会话；更早的记录已从工作树中移除，仍可通过 `git log --all -- docs/session-archive` 找到。扁平化的 `digest.md` 视图由 `tools/transcript-digest.mjs` 重新生成，并被 git 忽略，因此派生的副本不会成为第二个事实来源。
+
+## 许可证
+
+MIT——见 [LICENSE](LICENSE)。所有图形由程序绘制，游戏自身的所有文字均为原创。

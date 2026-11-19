@@ -35,7 +35,7 @@ import {
  *
  * The source compendium fixes these levels' names, their order and a one-line
  * concept each, and nothing else -- no ports, no widths, no pass conditions, no
- * targets and no rewards. Every other number in the level data is this replica's
+ * targets and no rewards. Every other number in the level data is this project's
  * design, which is why each level carries a data comment saying which is which;
  * the marker block near the end of this file checks that the comments exist.
  *
@@ -550,7 +550,7 @@ describe('every level carries its sourced-vs-authored data comment', () => {
   /**
    * The compendium fixes a name, an order, a one-line concept and -- for two
    * levels in this batch -- an achievement note, and nothing else. So every
-   * port, width, check, target and reward in this file is this replica's design.
+   * port, width, check, target and reward in this file is this project's design.
    * The data comment on each level has to say which is which, and a reviewer
    * checks the wording by reading; this checks that the marker block exists at
    * all, so a later batch cannot quietly drop it.
@@ -840,7 +840,7 @@ describe('an empty circuit fails every level instead of throwing', () => {
 describe("level 22's five-component construction is the reference it names", () => {
   it('is five components and measures the gate target the achievement maps to', () => {
     // The source's note for this level is the achievement "仅用 5 个蓝色元件" --
-    // five blue components. This replica has no blue-component system (those are
+    // five blue components. This project has no blue-component system (those are
     // custom/blueprint parts, a later phase), so the achievement is mapped to
     // the measured gate target of the circuit it describes. Measured here rather
     // than asserted in prose: five components, 15 NAND equivalents, depth 3.

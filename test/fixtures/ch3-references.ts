@@ -181,7 +181,7 @@ export function aluReference(): Graph {
  * ADD/SUB to.
  *
  * WHY IT IS NOT `aluReference()`. The two levels' contracts coincide today -- this
- * replica's ALU 1 was authored as the chapter's arithmetic engine and answers all
+ * project's ALU 1 was authored as the chapter's arithmetic engine and answers all
  * eight codes -- but they are separate levels with separate targets, and the source
  * intends ALU 1 to be the four logic operations alone. One shared graph would make
  * a later narrowing of ALU 1 silently change what level 42 is measured from;

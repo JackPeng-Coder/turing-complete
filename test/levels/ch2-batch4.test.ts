@@ -42,7 +42,7 @@ import {
  * gives each of these levels exactly three things -- its name (English and
  * Chinese), its place in the chapter, and one line of teaching concept. It gives
  * no ports, no widths, no pass conditions, no targets and no rewards. Everything
- * else in the level data is this replica's design, which is why each level
+ * else in the level data is this project's design, which is why each level
  * carries a data comment split into `SOURCED` and `AUTHORED`; the marker block
  * below checks that those comments exist and that the four notes this batch owes
  * a reader are in them (level 23's periodicity, level 32's change of kind under
@@ -546,7 +546,7 @@ describe('chapter 2, levels 17-39', () => {
 
   it('tells the player level 38 means all 256 bytes, and says how', () => {
     // The source gives this level one line ("刚好装满存储空间的电路设计") and
-    // defines neither the capacity nor what "full" means, so this replica's
+    // defines neither the capacity nor what "full" means, so this project's
     // definition is the level's contract and the player has to be told it.
     expect(L38.brief.zh).toContain('256');
     expect(L38.brief.zh).toContain('装满');
@@ -779,7 +779,7 @@ describe('every level carries its sourced-vs-authored data comment', () => {
   /**
    * The compendium fixes a name, an order and a one-line concept per level and
    * nothing else, so every port, width, check, target and reward in this file is
-   * this replica's design. The data comment on each level has to say which is
+   * this project's design. The data comment on each level has to say which is
    * which, and a reviewer checks the wording by reading; this checks that the
    * marker block exists at all, so a later batch cannot quietly drop it, plus
    * the four notes this batch owes.
@@ -811,7 +811,7 @@ describe('every level carries its sourced-vs-authored data comment', () => {
     expect(l23).toContain('周期');
     expect(l23).toContain('periodicity');
     // The source gives no period, no duty cycle and no gating rule; the comment
-    // has to say that the period and the hold are this replica's design.
+    // has to say that the period and the hold are this project's design.
     expect(l23).toContain('AUTHORED');
   });
 
@@ -833,14 +833,14 @@ describe('every level carries its sourced-vs-authored data comment', () => {
     expect(l38).toContain('刚好装满存储空间的电路设计');
     expect(l38).toContain('256');
     expect(l38).toContain('addressable');
-    // The definition has to be this replica's and be presented as such.
+    // The definition has to be this project's and be presented as such.
     expect(l38).toContain('AUTHORED');
     expect(l38).toContain('defines');
   });
 
   it("records level 39's achievement without turning it into a pass condition", () => {
     // The source's note is 成就：≤ 65 个门 -- a count of basic logic gates, in the
-    // source's own metric. This replica's `gate` is NAND equivalents, so the
+    // source's own metric. This project's `gate` is NAND equivalents, so the
     // comment records the source's number and says what it is NOT, exactly as
     // batch 2 recorded level 22's five components and level 27's delay of 35.
     const l39 = comments.get('ch2-39-counter') ?? '';

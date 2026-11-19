@@ -15,7 +15,7 @@ import type { Isa } from '../../src/asm/index';
  * WHY EVERY BYTE BELOW IS A LITERAL. A round-trip test that encoded with
  * `assemble` and decoded with a helper of its own would pass with a WRONG
  * layout, as long as both halves were wrong the same way -- and the layout in
- * this phase is this replica's own design (plan ruling 5), so there is no
+ * this phase is this project's own design (plan ruling 5), so there is no
  * upstream byte to compare against. Each expectation here is therefore written
  * as the hand-computed word: mode bits [7:6], then the mode's fields, with the
  * bit layout in the comment above it. The ISA structure tests at the end pin

@@ -29,7 +29,7 @@ import { CH2_BATCH3_REFERENCES, bits } from '../fixtures/ch2-references';
  *
  * The source compendium fixes these levels' names, their order and a one-line
  * concept each, and nothing else -- no ports, no widths, no pass conditions, no
- * targets and no rewards. Every other number in the level data is this replica's
+ * targets and no rewards. Every other number in the level data is this project's
  * design, which is why each level carries a data comment saying which is which;
  * the marker block below checks that the comments exist and that the notes this
  * batch owes a reader are in them (level 29's change of KIND and the per-width
@@ -484,7 +484,7 @@ describe('every level carries its sourced-vs-authored data comment', () => {
    * The compendium fixes a name, an order and a one-line concept per level --
    * and for level 29 it fixes neither a circuit nor a pass condition, because
    * its source form is a timed mini-game. So every port, width, check, target
-   * and reward in this file is this replica's design. The data comment on each
+   * and reward in this file is this project's design. The data comment on each
    * level has to say which is which, and a reviewer checks the wording by
    * reading; this checks that the marker block exists at all, so a later batch
    * cannot quietly drop it, plus the two specific notes this batch owes.

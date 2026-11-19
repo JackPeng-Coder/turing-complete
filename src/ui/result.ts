@@ -20,7 +20,7 @@ export interface ResultOptions {
 }
 
 /**
- * 通关对话框，沿用原作的内容构成：本关解锁了什么、电路代价的小结，以及继续前进的方式。
+ * 通关对话框，采用如下内容构成：本关解锁了什么、电路代价的小结，以及继续前进的方式。
  *
  * 每次访问只显示一次。它曾经是关卡的尾声，每次仍然通过的 `regrade()` 都会重放——
  * 也就是首次通关之后的每次编辑都会重放，于是对话框每点一下就重新出现。
@@ -84,7 +84,7 @@ export function showResult(
     ['门数量', String(grade.metrics.gate)],
     ['总延迟', String(grade.metrics.delay)],
     // 唯一一个玩家会与自己较劲的数字，而且它是代价：越低越好，
-    // 所以原作称它为「总开销」而不是分数。
+    // 所以这里称它为「总开销」而不是分数。
     ['总开销', String(grade.score)],
     ['评级', grade.stars > 0 ? '★'.repeat(grade.stars) : '未通过'],
   ] as const) {
@@ -172,7 +172,7 @@ function hint(text: string): HTMLElement {
   return p;
 }
 
-/** 关卡发放的元件，按原作芯片徽章的样子绘制。 */
+/** 关卡发放的元件，按芯片徽章的样子绘制。 */
 function chip(def: ComponentDef): HTMLElement {
   const box = document.createElement('span');
   box.className = 'result-chip';
