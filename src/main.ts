@@ -53,7 +53,17 @@ import type { LevelSpec } from './levels/spec';
 
 const registry = createRegistry(BASE_DEFS);
 let progress: Progress = loadProgress();
-const level: LevelSpec = getLevel(resumePointOf(progress, LEVEL_ORDER));
+
+/** ?dev=1 开发模式：全部关卡可达、清单里的元件全部开放。见 dev.ts。 */
+let dev = devModeFrom(globalThis.location.search);
+
+// Chapter 4 is experimental and hidden outside dev mode. A normal save that has
+// already passed level 49 must not boot straight into level 50, and an old save
+// that carries chapter-4 stars must not either: both clamp to the campaign's
+// last visible level. `?dev=1` keeps the true resume point.
+const resumed = getLevel(resumePointOf(progress, LEVEL_ORDER));
+const level: LevelSpec =
+  !dev && resumed.chapter === 4 ? getLevel('ch3-49-turing-complete') : resumed;
 
 /**
  * 文档编译时使用的注册表：基础元件目录 + 玩家自定义元件。
@@ -64,9 +74,6 @@ const level: LevelSpec = getLevel(resumePointOf(progress, LEVEL_ORDER));
  * 详见 composeRegistry：玩家的元件永远不会进入那个单例注册表。
  */
 let composed = composeRegistry(registry, progress.blueprints);
-
-/** ?dev=1 开发模式：全部关卡可达、清单里的元件全部开放。见 dev.ts。 */
-let dev = devModeFrom(globalThis.location.search);
 
 const store: Store<AppState> = createStore<AppState>({
   level,
@@ -958,10 +965,12 @@ if (app) {
     measure();
   };
 
-  /** 发行顺序中的下一关；已经是最后一关时返回 null。 */
+  /** 发行顺序中的下一关；已经是最后一关、或下一关属于隐藏的实验章节时返回 null。 */
   const nextLevelId = (): string | null => {
     const index = LEVEL_ORDER.indexOf(store.get().level.id);
-    return index >= 0 && index + 1 < LEVEL_ORDER.length ? LEVEL_ORDER[index + 1]! : null;
+    if (index < 0 || index + 1 >= LEVEL_ORDER.length) return null;
+    const next = LEVEL_ORDER[index + 1]!;
+    return !dev && getLevel(next).chapter === 4 ? null : next;
   };
 
   const closeResult = (): void => {
@@ -1501,6 +1510,9 @@ if (app) {
       // 所以关掉它就会原地重绘；同时清理地址栏，避免刷新后它又回来。
       dev = false;
       store.set({ dev });
+      // 如果退出时正站在实验章节里，把那块板子也收回去：正常模式没有
+      // 通往第 4 章的入口，不能把玩家留在一张地图上找不到的关卡上。
+      if (store.get().level.chapter === 4) openLevel('ch3-49-turing-complete');
       const url = new URL(globalThis.location.href);
       url.searchParams.delete('dev');
       globalThis.history.replaceState(null, '', url);

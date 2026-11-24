@@ -470,8 +470,11 @@ test('?dev=1 opens every level, and says so', async ({ page }) => {
 
   await page.getByRole('button', { name: '章节地图' }).click();
   // Every one of the 56, from a save with nothing passed in it. Level 1 alone
-  // would be enabled without the flag.
+  // would be enabled without the flag. Chapter 4 is only visible here, and the
+  // band says what it is.
   await expect(page.locator('.map-tile:not([disabled])')).toHaveCount(56);
+  await expect(page.locator('.map-chapter-key b', { hasText: 'CH.4' })).toBeVisible();
+  await expect(page.locator('.map-chapter-tag')).toHaveText('实验性章节');
   await page.screenshot({ path: 'test-results/smoke-dev-map.png' });
 
   // Level 49 opens -- chapter 3's last level, not the game's last any more, which
@@ -674,9 +677,8 @@ test('chapter 2 is reachable: level 14 opens once chapter 1 is passed', async ({
   await expect(page.locator('.truth-table')).toBeVisible();
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  // All 56 tiles -- chapter 2's 26, chapter 3's ten and chapter 4's seven are on
-  // the map, which is the player's only view of them.
-  await expect(page.locator('.map-tile')).toHaveCount(56);
+  // Chapters 1-3: 49 tiles. Chapter 4 is experimental and hidden unless `?dev=1`.
+  await expect(page.locator('.map-tile')).toHaveCount(49);
   await expect(page.locator('.map-tile').nth(13)).toContainText('二进制速算');
   await expect(page.locator('.map-tile').nth(13)).toBeEnabled();
   // Unlocking stays strictly linear across the join: level 15 waits for 14.
@@ -743,7 +745,7 @@ test('the last chapter-2 level opens: level 39 is reachable', async ({ page }) =
   await expect(page.locator('.shell-bar')).toContainText('计数器');
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  await expect(page.locator('.map-tile')).toHaveCount(56);
+  await expect(page.locator('.map-tile')).toHaveCount(49);
   await expect(page.locator('.map-tile').nth(38)).toContainText('计数器');
   await expect(page.locator('.map-tile').nth(38)).toBeEnabled();
 
@@ -819,7 +821,7 @@ test('chapter 3 is reachable: level 40 opens once chapter 2 is passed', async ({
   await expect(page.locator('.shell-bar')).toContainText('逻辑整合');
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  await expect(page.locator('.map-tile')).toHaveCount(56);
+  await expect(page.locator('.map-tile')).toHaveCount(49);
   await expect(page.locator('.map-tile').nth(39)).toContainText('逻辑整合');
   await expect(page.locator('.map-tile').nth(39)).toBeEnabled();
   // Unlocking stays strictly linear across the second join too: 41 waits for 40.
@@ -838,16 +840,16 @@ test('chapter 3 ends with a level that mounts its program check: level 49', asyn
   // 48 passed: the resume point is the phase's acceptance level -- the one whose
   // check runs a real OVERTURE program against the machine the player built,
   // rather than a truth table. Reaching it proves the join reaches the end of
-  // chapter 3 (it is no longer the game's last level -- chapter 4 follows it), and
-  // that the `program` check kind (level data + `checks.ts`) is wired into the app
-  // rather than only into the unit tests.
+  // chapter 3 (it is the last level visible outside `?dev=1`; chapter 4 is
+  // experimental and hidden), and that the `program` check kind (level data +
+  // `checks.ts`) is wired into the app rather than only into the unit tests.
   await seedProgress(page, 48);
   await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('图灵完备');
 
   await page.getByRole('button', { name: '章节地图' }).click();
-  await expect(page.locator('.map-tile')).toHaveCount(56);
+  await expect(page.locator('.map-tile')).toHaveCount(49);
   await expect(page.locator('.map-tile').nth(48)).toContainText('图灵完备');
   await expect(page.locator('.map-tile').nth(48)).toBeEnabled();
 
@@ -865,6 +867,26 @@ test('chapter 3 ends with a level that mounts its program check: level 49', asyn
   // bench here -- its verdict is the cases tab's.
   await expect(page.locator('.truth-table')).toBeVisible();
   await page.screenshot({ path: 'test-results/smoke-ch3-level49-open.png' });
+});
+
+/**
+ * CHAPTER 4 IS HIDDEN UNTIL DEVELOPER MODE.
+ *
+ * A normal save with every visible level passed must open on level 49, and the
+ * map must contain no CH.4 band and no experimental tag. This is the counterpart
+ * of the dev-map assertion: the same save plus `?dev=1` shows all 56.
+ */
+test('chapter 4 stays hidden outside developer mode', async ({ page }) => {
+  await seedProgress(page, 49);
+  await open(page, '/');
+  await page.getByRole('button', { name: '开始' }).click();
+  // The resume point is clamped to the last visible level, not chapter 4's first.
+  await expect(page.locator('.shell-bar')).toContainText('图灵完备');
+
+  await page.getByRole('button', { name: '章节地图' }).click();
+  await expect(page.locator('.map-tile')).toHaveCount(49);
+  await expect(page.locator('.map-chapter-key b', { hasText: 'CH.4' })).toHaveCount(0);
+  await expect(page.locator('.map-chapter-tag')).toHaveCount(0);
 });
 
 /**
@@ -897,10 +919,11 @@ const LEVEL_50_PROGRAM = [
  * assembles the text, loads it into the board's RAM and grades in one step.
  */
 test('chapter 4 grades a hand-written program: level 50', async ({ page }) => {
-  // 49 passed -- every level of chapters 1 to 3 -- so the resume point is
-  // chapter 4's first level. Reaching it is what this walk is here to prove.
+  // 49 passed -- every level of chapters 1 to 3 -- so the dev-mode resume point
+  // is chapter 4's first level. Chapter 4 is experimental: `?dev=1` is what makes
+  // it visible and reachable outside the hidden band.
   await seedProgress(page, 49);
-  await open(page, '/');
+  await open(page, '/?dev=1');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('打孔编程');
 
@@ -968,7 +991,7 @@ test('chapter 4 grades a hand-written program: level 50', async ({ page }) => {
  */
 test('chapter 4 resets the board without losing the program: level 50', async ({ page }) => {
   await seedProgress(page, 49, { 'ch4-50-punchcard-programming': LEVEL_50_PROGRAM });
-  await open(page, '/');
+  await open(page, '/?dev=1');
   await page.getByRole('button', { name: '开始' }).click();
   await expect(page.locator('.shell-bar')).toContainText('打孔编程');
 

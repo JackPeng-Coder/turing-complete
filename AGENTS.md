@@ -51,6 +51,7 @@ Focused runs:
 ## Behaviours that are easy to misread
 
 - `?dev=1` opens every level and offers every listed part, but writes no progress. `resumePointOf` ignores dev, so startup does not jump to a late level. The amber DEV light in the shell exits dev mode and cleans the URL in place.
+- Chapter 4 (levels 50–56) is **experimental and hidden outside dev mode**: the map omits the CH.4 band, normal-mode resume clamps to level 49, and `nextLevelId` returns null after 49. In dev mode the band is shown with the `实验性章节` tag.
 - The Arduino export is **standalone**: the sketch has no serial protocol, D0–D13 and A0–A5 are pin-mappable, and the run clock is compiled in from the panel field (default 1 Hz; 0 = combinational only). Wide connectors are refused at build time. Upload still uses the bootloader on D0/D1, so external wiring on those pins can break flashing.
 - Progress is per-browser in `localStorage`; there is no cross-machine sync. The built-in agent is a feature of the game, needs a user-supplied key, and is not required to play.
 

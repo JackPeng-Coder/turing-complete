@@ -877,6 +877,9 @@ describe('narrative coverage', () => {
 });
 
 describe('chapter map', () => {
+  /** Chapter 4 is experimental and hidden unless `?dev=1` is on. */
+  const NORMAL_TILES = LEVELS.filter((level) => level.chapter !== 4).length;
+
   function mapStore(levelId: string, progress: Progress = emptyProgress()): Store<AppState> {
     const store = makeStore(levelId);
     store.set({ progress });
@@ -911,10 +914,24 @@ describe('chapter map', () => {
     const root = document.createElement('div');
     mountMap(root, mapStore('ch1-01-humble-beginnings'), () => {});
     const tiles = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
-    expect(tiles).toHaveLength(LEVELS.length);
+    expect(tiles).toHaveLength(NORMAL_TILES);
     expect(tiles[0]!.disabled).toBe(false);
     expect(tiles[1]!.disabled).toBe(true);
     expect(tiles[2]!.disabled).toBe(true);
+  });
+
+  it('hides the experimental chapter until dev mode, then labels it', () => {
+    const store = mapStore('ch1-01-humble-beginnings');
+    const root = document.createElement('div');
+    mountMap(root, store, () => {});
+    expect(root.querySelectorAll<HTMLButtonElement>('.map-tile')).toHaveLength(NORMAL_TILES);
+    expect(root.textContent).not.toContain('CH.4');
+    expect(root.textContent).not.toContain('实验性章节');
+
+    store.set({ dev: true });
+    expect(root.querySelectorAll<HTMLButtonElement>('.map-tile')).toHaveLength(LEVELS.length);
+    expect(root.textContent).toContain('CH.4');
+    expect(root.textContent).toContain('实验性章节');
   });
 
   it('marks the level that is open, and only that one', () => {
@@ -955,7 +972,7 @@ describe('chapter map', () => {
 
     store.set({ progress: passedLevel1 });
     const after = [...root.querySelectorAll<HTMLButtonElement>('.map-tile')];
-    expect(after).toHaveLength(LEVELS.length);
+    expect(after).toHaveLength(NORMAL_TILES);
     expect(after[1]!.disabled).toBe(false);
   });
 });

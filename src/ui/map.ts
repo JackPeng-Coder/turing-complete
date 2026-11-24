@@ -34,12 +34,18 @@ export function mountMap(
     heading.textContent = '章节地图';
     section.append(heading);
 
+    // Chapter 4 is experimental: it is written, tested and playable, but it is
+    // hidden from the normal campaign until `?dev=1` asks for it. The band is
+    // what carries that label, so a developer who lands there cannot mistake it
+    // for shipped content.
     const chapters: number[] = [];
     for (const level of LEVELS) {
+      if (!dev && level.chapter === 4) continue;
       if (!chapters.includes(level.chapter)) chapters.push(level.chapter);
     }
 
-    for (const chapter of chapters) {      const band = document.createElement('section');
+    for (const chapter of chapters) {
+      const band = document.createElement('section');
       band.className = 'map-chapter';
 
       const inChapter = LEVELS.filter((level) => level.chapter === chapter);
@@ -55,7 +61,14 @@ export function mountMap(
       size.textContent = `${inChapter.length} 关`;
       const stars = document.createElement('span');
       stars.textContent = `★ ${earned} / ${inChapter.length * 3}`;
-      key.append(number, size, stars);
+      if (chapter === 4) {
+        const tag = document.createElement('span');
+        tag.className = 'map-chapter-tag';
+        tag.textContent = '实验性章节';
+        key.append(number, tag, size, stars);
+      } else {
+        key.append(number, size, stars);
+      }
       band.append(key);
 
       const grid = document.createElement('div');

@@ -985,6 +985,13 @@ button { font-family: inherit; }
 }
 .map-chapter-key b { font-size: 20px; font-weight: 600; color: var(--neon); letter-spacing: 0; }
 .map-chapter-key span { color: var(--text-muted); }
+.map-chapter-key .map-chapter-tag {
+  color: var(--amber);
+  border: 1px solid var(--amber);
+  padding: 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
 .map-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 6px; }
 /* 一个关卡格是机架上的一个插槽：一列地址、一个名称、一个状态。 */
 .map-tile {
