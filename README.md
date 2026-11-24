@@ -90,18 +90,23 @@
 
 | 任务 | 命令 |
 | --- | --- |
-| 开发服务器（http://localhost:5173） | `pnpm dev` |
+| 开发服务器 + 本地桥（推荐，http://127.0.0.1:5173） | `pnpm dev` |
+| 只启动开发服务器（不启动桥） | `pnpm dev:vite` |
+| 构建后演示（构建 + 预览 + 本地桥） | `pnpm start` |
 | 单元与关卡测试（Vitest） | `pnpm test` |
 | 生产构建（`tsc --noEmit && vite build`） | `pnpm build` |
 | 浏览器冒烟测试（Playwright） | `pnpm smoke` |
 
-在**本机**，`PATH` 上的 `pnpm` 是一个损坏的包装脚本，因此同样的四个任务要通过把捆绑的 `pnpm.mjs` 交给捆绑的 Node 可执行文件来运行。以下是本机实际可用的命令：
+`pnpm dev` 与 `pnpm start` 由 `tools/launch.mjs` 驱动：它在同一个 Node 进程里先启动本地桥（`127.0.0.1:8765`），再启动 Vite；按 Ctrl+C 或关闭终端时两者一起退出。8765 上已经有桥时直接复用（不健康的桥也会复用并提示原因；复用的桥不会随启动器退出）。`pnpm start` 会先构建 `dist/`，再用 4173 端口预览并自动打开浏览器；加 `--no-open` 可阻止自动打开（`node tools/launch.mjs start --no-open`）。只想单独启动桥时仍可用 `pnpm arduino`。
+
+在**本机**，`PATH` 上的 `pnpm` 是一个损坏的包装脚本，因此同样的任务要通过把捆绑的 `pnpm.mjs` 交给捆绑的 Node 可执行文件来运行。以下是本机实际可用的命令：
 
 ```powershell
 $NODE = "$env:USERPROFILE\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
 $PNPM = "$env:USERPROFILE\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs"
 
-& $NODE $PNPM dev     # 开发服务器，http://localhost:5173
+& $NODE $PNPM dev     # 开发服务器 + 本地桥，http://127.0.0.1:5173
+& $NODE $PNPM start   # 构建 + 预览 + 本地桥，并打开浏览器
 & $NODE $PNPM test    # Vitest，运行一次
 & $NODE $PNPM build   # tsc --noEmit && vite build -> dist/
 & $NODE $PNPM smoke   # Playwright 端到端冒烟测试
@@ -111,7 +116,7 @@ $PNPM = "$env:USERPROFILE\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnp
 
 ### 机房离线部署
 
-构建产物 `dist/` 是纯静态文件，不依赖任何服务端或运行时依赖：用 `pnpm build` 生成后，拷到机房任一静态服务器上、或用任意一个静态文件服务器指向该目录即可（`pnpm dev` 只用于开发）。接口完全中文本地渲染，断网也能正常闯关。进度保存在各台机器浏览器的 `localStorage` 中（`tc.progress.v1` 等键），因此**每台机器、每个浏览器各自记录**，不会跨机同步——若要让学生接着上次的进度，需在同一浏览器中使用。智能体是唯一需要联网的可选功能：不填 API 信息时面板会说明缺什么，游戏其余部分不受影响。
+构建产物 `dist/` 是纯静态文件，不依赖任何服务端或运行时依赖：用 `pnpm build` 生成后，拷到机房任一静态服务器上、或用任意一个静态文件服务器指向该目录即可（`pnpm dev` / `pnpm start` 只用于开发与本机演示）。接口完全中文本地渲染，断网也能正常闯关。进度保存在各台机器浏览器的 `localStorage` 中（`tc.progress.v1` 等键），因此**每台机器、每个浏览器各自记录**，不会跨机同步——若要让学生接着上次的进度，需在同一浏览器中使用。智能体是唯一需要联网的可选功能：不填 API 信息时面板会说明缺什么，游戏其余部分不受影响。
 
 `pnpm-workspace.yaml` 存在只有一个原因，也只装了一样东西：`minimumReleaseAgeExclude` 列表。本机的 pnpm 拒绝发布处于供应链截止窗口内的包，而四个精确锁定的开发依赖正好比这个窗口年轻；没有豁免时，干净的 `pnpm install --frozen-lockfile` 会以 `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` 失败。表中每一项都是开发依赖；运行时一侧没有任何东西需要豁免，因为它根本不存在。
 
@@ -135,7 +140,7 @@ Playwright 测试套件（`pnpm smoke`）需要两样单元测试不需要的东
 底部面板中的“开发板”页签只在沙盒里出现。它需要浏览器之外的三样东西：
 
 1. **`arduino-cli` 在 `PATH` 上**（1.x），并一次性安装 AVR 核心：`arduino-cli core install arduino:avr`。若可执行文件不在 `PATH` 上，可用 `TC_ARDUINO_CLI` 指向它。
-2. **本地桥**：在需要烧录时从仓库根目录运行 `node tools/arduino-bridge.mjs`（`pnpm arduino` 运行同一个文件；默认 `http://127.0.0.1:8765`）。它只绑定回环地址，拒绝游戏自身标签页以外的来源，并要求每个请求带 `X-TC-Arduino: 1` 头。可设置 `TC_ARDUINO_TOKEN` 要求共享密钥，并在面板的“令牌”字段里填同一个值。这个桥能给微控制器烧录程序，不要把它暴露出去。
+2. **本地桥**：用 `pnpm dev` 或 `pnpm start` 启动游戏时，桥会随程序自动启动；若要单独运行，从仓库根目录执行 `node tools/arduino-bridge.mjs`（`pnpm arduino` 运行同一个文件；默认 `http://127.0.0.1:8765`）。它只绑定回环地址，拒绝游戏自身标签页以外的来源，并要求每个请求带 `X-TC-Arduino: 1` 头。可设置 `TC_ARDUINO_TOKEN` 要求共享密钥，并在面板的“令牌”字段里填同一个值。这个桥能给微控制器烧录程序，不要把它暴露出去。
 3. **一个现代浏览器**，从 `localhost` 打开本页（本地桥只接受游戏自身标签页的来源）。不再需要 Web Serial，也不再要求 Chrome/Edge。
 
 然后，在沙盒界面：至少放置一个“关卡输入”或“关卡输出”，打开“开发板”，按“构建映像”。卡片会报告电路被编译成什么（节点、槽位、状态、表），以及按“本地桥”卡片里选中的开发板估算的 RAM 和闪存占用；放不下的电路会被明确拒绝，而不是在板上失败。选择器列出 Uno、Nano 和 Mega，并把 Nano 的旧引导程序单列一行（同一芯片，用 `--board-options cpu=atmega328old` 编译）。“下载 .ino”把草图写到磁盘——放进同名文件夹后 Arduino IDE 即可打开——“检查连接 / 编译 / 烧录”则让同一份草图经过本地桥。编译器自己的体积报告和日志会显示在估算值旁边。
@@ -166,7 +171,7 @@ src/
   ui/board/  画板本身：相机与命中测试、导线布线、绘制、实时信号
   persist/  localStorage 存档、沙盒电路与 `tc-circuit` 文件格式
 test/       Vitest 单元与关卡测试、约定断言、Playwright 冒烟测试
-tools/      SDD PowerShell 助手（生成阶段工作区与任务简报）、会话记录读取器与视觉检查（tools/*.mjs）
+tools/      SDD PowerShell 助手、会话记录读取器、视觉检查、Arduino 本地桥与启动器（tools/*.mjs）
 docs/       设计规格、阶段计划与各章关卡出处
 ```
 

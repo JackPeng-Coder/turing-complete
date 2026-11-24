@@ -10,7 +10,9 @@
     "pnpm": ">=11"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "node tools/launch.mjs dev",
+    "dev:vite": "vite",
+    "start": "node tools/launch.mjs start",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",

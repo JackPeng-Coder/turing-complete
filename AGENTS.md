@@ -46,6 +46,7 @@ Focused runs:
 
 - `vite.config.ts`: Vitest runs `test/**/*.test.ts` in Node; `test/smoke/**` is excluded and belongs to Playwright — never rename a spec to `*.test.ts`. DOM tests opt in with `// @vitest-environment jsdom` on the first line. Vitest 5 silently ignores `environmentMatchGlobs`; do not reintroduce it.
 - `playwright.config.ts` sits outside `tsconfig.include` because it reads `process.env` and the project pins no `@types/node`. It finds the bundled `pnpm.mjs` itself and falls back to a real `pnpm`; `NODE_BIN` / `PNPM_BIN` override both.
+- `pnpm dev` and `pnpm start` run `tools/launch.mjs`, which starts the Arduino bridge in the same Node process (`startBridge()`, 127.0.0.1:8765) and stops it on exit (a bridge already on 8765 is reused and left running); `pnpm dev:vite` and `pnpm preview` are the plain servers. The browser cannot spawn a process: a bare `dist/index.html` can never compile or flash, and the bridge's Origin allowlist rejects `file://`.
 - Build output `dist/` is static (`base: './'`); `pnpm dev` is only for development.
 
 ## Behaviours that are easy to misread
