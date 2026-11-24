@@ -3,20 +3,14 @@
  *
  * Usage: harness <commands-file>
  *
- * `setup()` runs first, so the banner and the initial frame are part of the
- * output; then each line is fed to the sketch's serial queue and `loop()` is
- * pumped. Four pumps per line is plenty because `loop()` drains the whole queue
- * in one call, and the extra calls prove that an idle loop does not tick by
- * itself.
+ * `setup()` runs first; then each line drives the standalone sketch. `=` sets an
+ * input pin to a level, `T` advances one clock edge, `R` resets, `S` prints a
+ * snapshot of every output pin, and any other line is fed to the serial queue
+ * (kept only so old scripts fail loudly rather than silently doing nothing).
  *
- * TWO KINDS OF LINE. A plain line is a serial command (`B`, `I 0 1`, …). A line
- * beginning with `=` is a pin instead: `= <arduino-pin> <0|1>` holds an input pin
- * at that level before the pumps, which is how a mapped input connector gets a
- * value from the "outside world".
- *
- * PIN CHANGES are reported as `PIN <pin> <value>` lines, one per output pin the
- * sketch drives to a new level, so a test can assert the physical side of a
- * mapping as well as the serial frames.
+ * PIN CHANGES are also reported as `PIN <pin> <value>` lines, one per output pin
+ * the sketch drives to a new level, so a test can assert the physical side of a
+ * mapping.
  */
 #include <cstdio>
 #include <fstream>
@@ -39,6 +33,18 @@ void reportPinChanges(std::string &log) {
     std::snprintf(line, sizeof line, "PIN %d %d\n", pin, reported[pin]);
     log += line;
   }
+}
+
+/** Snapshot every pin the sketch configured as an output: `SNAP 13=1 12=0`. */
+void snapshot(std::string &log) {
+  log += "SNAP";
+  for (int pin = 0; pin < 70; pin += 1) {
+    if (tcShimPinMode[pin] != OUTPUT) continue;
+    char line[24];
+    std::snprintf(line, sizeof line, " %d=%d", pin, tcShimPinWritten[pin]);
+    log += line;
+  }
+  log += '\n';
 }
 
 /** Pump an idle loop a few times after a change. */
@@ -66,7 +72,15 @@ int main(int argc, char** argv) {
   while (std::getline(commands, line)) {
     if (!line.empty() && line.back() == '\r') line.pop_back();
     if (line.empty()) continue;
-    if (line[0] == '=') {
+    if (line == "T") {
+      // The sketch exposes its clock edge as a file-local function; the harness
+      // includes the .ino, so it can advance one edge without a serial command.
+      tcTick();
+    } else if (line == "R") {
+      tcReset();
+    } else if (line == "S") {
+      snapshot(pins);
+    } else if (line[0] == '=') {
       int pin = -1;
       int value = 0;
       if (std::sscanf(line.c_str(), "= %d %d", &pin, &value) == 2) {

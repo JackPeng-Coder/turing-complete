@@ -17,23 +17,21 @@ import {
 import { buildImage } from '../flash/build';
 import { isImage, type ImageRefusal, type ProgramImage } from '../flash/image';
 import { boardPinChoices } from '../flash/pins';
-import { parseBoardLine, type BoardBanner, type BoardFrame } from '../flash/protocol';
 import { isSandbox, sandboxPins } from '../levels/sandbox';
 import { circuitSignature } from '../persist/sandbox';
-import { SerialLink, serialApi, type SerialPortLike } from './serial';
 
 /**
  * 开发板：把沙盒里的电路写进真实 Arduino 的面板。
  *
- * 四张卡，按玩家实际使用的顺序排列。「映像」是电路在板子上编译成的样子与代价；
- * 「引脚」把一位连接器映射到板子的物理引脚（规则在 `pins.ts`），
- * 让电路能驱动 LED 或读取按钮，而不只是走串口；「本地桥」是运行 `arduino-cli`
- * 的本地守护进程（浏览器自己做不到）；「串口」是板子本身，由 `flash/protocol.ts`
- * 里的行协议驱动。面板不拥有任何电路：它读 store，只在被要求或标签页打开时构建映像，
- * 并按电路签名缓存该映像，这样拖动一根导线不会每帧重建 900 个门。
- * 引脚分配与桥、开发板一起记在 `tc.flash.v1` 里，而不是记在电路里：
- * 它属于"电路被烧到哪块板子上"，只改变固件的 I/O，不改变它的代价。
+ * 三张卡，按玩家实际使用的顺序排列。「映像」是电路在板子上编译成的样子、代价与
+ * 独立运行的时钟；「引脚」把一位连接器映射到板子的物理引脚（规则在 `pins.ts`），
+ * 让电路能驱动 LED 或读取按钮；「本地桥」是运行 `arduino-cli` 的本地守护进程
+ * （浏览器自己做不到）。面板不拥有任何电路：它读 store，只在被要求或标签页打开时
+ * 构建映像，并按电路签名缓存该映像，这样拖动一根导线不会每帧重建 900 个门。
+ * 引脚分配、开发板与时钟一起记在 `tc.flash.v1` 里，而不是记在电路里：
+ * 它们属于"电路被烧到哪块板子上"，只改变固件的 I/O 与节拍，不改变它的代价。
  *
+ * 独立模式没有串口链路：烧录后电路自己运行，面板不再回读帧或校验哈希。
  * 它只是沙盒视图。关卡的引脚是题目的契约，导出器会拒绝关卡板；
  * 组合根在沙盒之外隐藏这个标签页，而 `buildImage` 自己的拒绝是第二道栅栏，
  * 不是重复的一道。
@@ -58,12 +56,8 @@ export interface FlashPanel {
 export interface FlashPanelOptions {
   /** `fetch` 的注入缝，供测试使用；默认用平台自带的。 */
   fetch?: FetchLike;
-  /** 从中读取 `navigator.serial` 的对象，供测试使用；默认为 `navigator`。 */
-  serialSource?: unknown;
   /** 下载的草图去向，供测试使用；默认用 Blob 触发浏览器下载。 */
   onDownload?(fileName: string, sketch: string): void;
-  /** 页面上的输入值，供「同步面板输入」按钮使用。 */
-  vector?(): Readonly<Record<string, number>>;
 }
 
 /** 面板在两次刷新之间记住桥与开发板的 localStorage 键。 */
@@ -73,6 +67,8 @@ interface Prefs {
   readonly url?: string;
   /** `BOARD_CHOICES` 里某一行的 id；Nano 的旧 bootloader 之所以也单独成行，就是为了能把这一选择记住。 */
   readonly board?: string;
+  /** 独立运行的时钟频率（Hz）；0 表示只跑组合逻辑。 */
+  readonly clockHz?: number;
   /** 连接器 id 到板子引脚的映射，即「引脚」卡里的分配。 */
   readonly pins?: Readonly<Record<string, string>>;
 }
@@ -95,9 +91,17 @@ function loadPrefs(): Prefs {
         if (typeof value === 'string' && value.trim() !== '') pins[id] = value.trim();
       }
     }
+    const clockHz =
+      typeof record.clockHz === 'number' &&
+      Number.isInteger(record.clockHz) &&
+      record.clockHz >= 0 &&
+      record.clockHz <= 1000
+        ? record.clockHz
+        : undefined;
     return {
       ...(url === undefined ? {} : { url }),
       ...(board === undefined ? {} : { board }),
+      ...(clockHz === undefined ? {} : { clockHz }),
       ...(Object.keys(pins).length === 0 ? {} : { pins }),
     };
   } catch {
@@ -170,7 +174,7 @@ function toneOf(node: HTMLElement, tone: 'info' | 'good' | 'bad' | 'warn'): void
 function failureText(result: BridgeBuild): string {
   const log = `${result.log}\n${result.error ?? ''}`;
   if (/cannot open (?:the )?port|access is denied|permission denied|拒绝访问|被占用/i.test(log)) {
-    return '串口被占用或不允许访问：先在「串口」卡点「断开」，并关掉其他占用它的程序（Arduino IDE、串口监视器、别的标签页）再烧录。';
+    return '串口被占用或不允许访问：关掉其他占用它的程序（Arduino IDE、串口监视器、别的标签页）再烧录。';
   }
   if (/programmer is not responding|not in sync|stk500|wrong microcontroller|invalid device signature/i.test(log)) {
     return '板子的 bootloader 没有应答：确认「开发板」选的是板子上的型号；Nano 克隆板若是旧 bootloader，改选「Arduino Nano（旧 bootloader）」。';
@@ -179,7 +183,7 @@ function failureText(result: BridgeBuild): string {
 }
 
 /**
- * 把四张卡（映像、引脚、本地桥、串口）挂到 root 上，返回面板句柄。
+ * 把三张卡（映像、引脚、本地桥）挂到 root 上，返回面板句柄。
  *
  * 订阅 store 以便在可见时重绘；映像按电路签名缓存，切换开发板或引脚分配
  * 都会让缓存失效。面板不拥有电路，也不在隐藏时做任何工作（见 setVisible）。
@@ -200,17 +204,31 @@ export function mountFlashPanel(
   const staleNote = note('flash-note flash-stale');
   const refusalNote = note('flash-note flash-refusal');
   const messageNote = note('flash-note flash-message');
+  const clockInput = element('input', 'flash-input');
+  clockInput.type = 'number';
+  clockInput.min = '0';
+  clockInput.max = '1000';
+  clockInput.step = '1';
+  clockInput.value = String(prefs.clockHz ?? 1);
   const imageButtons = element('div', 'flash-row');
   const buildButton = button('构建映像', () => buildNow(), true);
   const downloadButton = button('下载 .ino', () => download());
   imageButtons.append(buildButton, downloadButton);
-  imageCard.body.append(summary, limits, staleNote, refusalNote, messageNote, imageButtons);
+  imageCard.body.append(
+    summary,
+    limits,
+    staleNote,
+    refusalNote,
+    messageNote,
+    field('运行时钟 (Hz)', clockInput, '0 = 只跑组合逻辑；烧录后由板子自己走时钟'),
+    imageButtons,
+  );
 
   // ------------------------------------------------------------------- 引脚 --
   const pinCard = card('引脚');
   const pinHint = note('flash-note flash-pin-hint');
   pinHint.textContent =
-    '1 位连接器可以接板子引脚：输出用 digitalWrite，输入用内部上拉读取（按钮接 GND，未接线读 1）。「不接」的连接器只走串口。D0/D1 是串口线，不在列表里。';
+    '1 位连接器可以接板子引脚：输出用 digitalWrite，输入用内部上拉读取（按钮接 GND，未接线读 1）。独立模式没有串口通道；D0–D13 与 A0–A5 全部可用，宽连接器在构建时会被拒绝。';
   const pinList = element('div', 'flash-pin-list');
   pinCard.body.append(pinHint, pinList);
 
@@ -251,36 +269,7 @@ export function mountFlashPanel(
   bridgeButtons.append(healthButton, compileButton, flashButton);
   bridgeCard.body.append(bridgeFields, bridgeStatus, bridgeButtons, bridgeLog);
 
-  // ----------------------------------------------------------------- 串口 --
-  const serialCard = card('串口');
-  const bannerLine = note('flash-note flash-banner');
-  const frameLine = note('flash-note flash-frame');
-  const serialNote = note('flash-note flash-serial-note');
-  const serialButtons = element('div', 'flash-row');
-  const connectButton = button('连接串口', () => void connectSerial(), true);
-  const disconnectButton = button('断开', () => void disconnectSerial());
-  serialButtons.append(connectButton, disconnectButton);
-  const inputsBox = element('div', 'flash-inputs');
-  const outputsBox = element('div', 'flash-outputs');
-  const commandInput = element('input', 'flash-input flash-command');
-  commandInput.type = 'text';
-  commandInput.placeholder = '命令：I 0 1 · T · R · S · C 2';
-  commandInput.spellcheck = false;
-  const serialCommandRow = element('div', 'flash-command-row');
-  serialCommandRow.append(
-    commandInput,
-    button('发送', () => sendCommand()),
-  );
-  const serialActions = element('div', 'flash-row');
-  const tickButton = button('单步 T', () => void sendLine('T'));
-  const resetButton = button('复位 R', () => void sendLine('R'));
-  const pollButton = button('读取 S', () => void sendLine('S'));
-  const syncButton = button('同步面板输入', () => void syncFromPage());
-  serialActions.append(tickButton, resetButton, pollButton, syncButton);
-  const serialLog = element('pre', 'flash-log flash-serial-log');
-  serialCard.body.append(serialButtons, bannerLine, frameLine, serialNote, inputsBox, outputsBox, serialActions, serialCommandRow, serialLog);
-
-  wrap.append(imageCard.section, pinCard.section, bridgeCard.section, serialCard.section);
+  wrap.append(imageCard.section, pinCard.section, bridgeCard.section);
 
   // ------------------------------------------------------------------ 状态 --
   let built: { readonly image: ProgramImage; readonly signature: string } | null = null;
@@ -289,15 +278,7 @@ export function mountFlashPanel(
   let health: BridgeHealth | null = null;
   let build: { readonly result: BridgeBuild; readonly action: 'compile' | 'flash' } | null = null;
   let busy: string | null = null;
-  let banner: BoardBanner | null = null;
-  let frame: BoardFrame | null = null;
-  let serial: SerialLink | null = null;
-  let connecting = false;
-  let serialMessage = '';
   let visible = false;
-  let lastInputsFor: ProgramImage | null = null;
-  let inputFields = new Map<string, HTMLInputElement>();
-  let serialLines: string[] = [];
   /** 连接器 id 到板子引脚；由「引脚」卡修改，并持久化到偏好设置里。 */
   const pinMap: Record<string, string> = { ...(prefs.pins ?? {}) };
   const unsubscribe = store.subscribe(() => {
@@ -324,6 +305,13 @@ export function mountFlashPanel(
     });
   }
 
+  /** 面板上填写的独立时钟；空白或非法值回落到 1 Hz。 */
+  function clockValue(): number {
+    const raw = Number(clockInput.value);
+    if (!Number.isFinite(raw)) return 1;
+    return Math.max(0, Math.min(1000, Math.trunc(raw)));
+  }
+
   /** 把引脚分配写成稳定顺序的字符串，作为映像缓存键的一部分。 */
   function pinSignature(): string {
     return Object.keys(pinMap)
@@ -333,12 +321,17 @@ export function mountFlashPanel(
   }
 
   function signatureOf(level: AppState['level'], graph: AppState['graph']): string {
-    return `${level.id}@${circuitSignature(graph)}@${boardId()}@${pinSignature()}`;
+    return `${level.id}@${circuitSignature(graph)}@${boardId()}@${clockValue()}@${pinSignature()}`;
   }
 
   /** 把面板自己拥有的全部设置一次存下；各处输入框在变化时调用。 */
   function rememberPrefs(): void {
-    savePrefs({ url: urlInput.value, board: boardSelect.value, pins: pinMap });
+    savePrefs({
+      url: urlInput.value,
+      board: boardSelect.value,
+      clockHz: clockValue(),
+      pins: pinMap,
+    });
   }
 
   /**
@@ -357,7 +350,7 @@ export function mountFlashPanel(
     prunePins();
     const signature = signatureOf(state.level, state.graph);
     if (built !== null && built.signature === signature) return built.image;
-    const result = buildImage(state.graph, state.registry, state.level, boardId(), pinMap);
+    const result = buildImage(state.graph, state.registry, state.level, boardId(), pinMap, clockValue());
     if (isImage(result)) {
       built = { image: result.image, signature };
       refusal = null;
@@ -431,7 +424,7 @@ export function mountFlashPanel(
       const line = element('div', 'flash-pin-row');
       line.append(element('span', 'flash-pin-name', `${row.direction} ${row.id}`));
       if (row.width !== 1) {
-        line.append(element('span', 'flash-empty', `${row.width} 位：只走串口`));
+        line.append(element('span', 'flash-empty', `${row.width} 位：独立模式不支持（构建会被拒绝）`));
         pinList.append(line);
         continue;
       }
@@ -553,9 +546,6 @@ export function mountFlashPanel(
       render();
       return;
     }
-    // `arduino-cli` 打不开被 Web Serial 占着的串口，所以上传要独占该串口：
-    // 走和「断开」相同的收尾路径先关掉它，烧录完成后再让玩家重新连接。
-    if (upload) await disconnectSerial();
     busy = upload ? '正在烧录…这一步会调用 arduino-cli，可能需要半分钟。' : '正在编译…';
     build = null;
     render();
@@ -569,7 +559,7 @@ export function mountFlashPanel(
     message = result.ok
       ? {
           text: upload
-            ? `烧录完成：${result.flashBytes ?? '—'} B flash、${result.ramBytes ?? '—'} B RAM。点「连接串口」读板子的横幅。`
+            ? `烧录完成：${result.flashBytes ?? '—'} B flash、${result.ramBytes ?? '—'} B RAM。电路将以 ${clockValue()} Hz 独立运行；拔下 USB 后仍然运行。`
             : `编译通过：${result.flashBytes ?? '—'} B flash、${result.ramBytes ?? '—'} B RAM。`,
           tone: 'good',
         }
@@ -577,213 +567,11 @@ export function mountFlashPanel(
     render();
   }
 
-  // ------------------------------------------------------------ 串口 --
-
-  function appendSerial(text: string): void {
-    serialLines.push(text);
-    if (serialLines.length > 200) serialLines = serialLines.slice(-200);
-    serialLog.textContent = serialLines.join('\n');
-    serialLog.scrollTop = serialLog.scrollHeight;
-  }
-
-  function handleLine(raw: string): void {
-    const line = parseBoardLine(raw);
-    if (line === null) return;
-    appendSerial(`< ${raw}`);
-    if (line.kind === 'banner') banner = line;
-    else if (line.kind === 'frame') frame = line;
-    else if (line.kind === 'error') serialMessage = line.message;
-    render();
-  }
-
-  async function connectSerial(): Promise<void> {
-    if (serial !== null || connecting) return;
-    const api = serialApi(options.serialSource ?? globalThis.navigator);
-    if (api === null) {
-      serialMessage = '此浏览器没有 Web Serial：请用 Chrome 或 Edge，并从 localhost 打开本页。';
-      render();
-      return;
-    }
-    connecting = true;
-    serialMessage = '';
-    render();
-    try {
-      const port: SerialPortLike = await api.requestPort();
-      const link = new SerialLink({
-        onLine: (line) => handleLine(line),
-        onClose: () => {
-          serial = null;
-          appendSerial('— 串口已关闭 —');
-          render();
-        },
-        onError: (text) => {
-          serialMessage = text;
-          render();
-        },
-      });
-      await link.open(port);
-      serial = link;
-      appendSerial('— 串口已连接 —');
-      // 主动索要横幅：板子在启动时打印过一次，而那时本标签页还没打开串口，
-      // 所以新连接能看到的第一个有用信息，就是对 `B` 命令的回答。
-      await link.write('B').catch(() => undefined);
-    } catch (error) {
-      const name = error instanceof Error ? error.name : '';
-      serialMessage =
-        name === 'NotFoundError'
-          ? '没有选择串口。'
-          : name === 'SecurityError'
-            ? '浏览器拒绝了串口权限。'
-            : '无法打开串口：它可能被 Arduino IDE 或另一个标签页占用。';
-    } finally {
-      connecting = false;
-      render();
-    }
-  }
-
-  async function disconnectSerial(): Promise<void> {
-    const link = serial;
-    serial = null;
-    try {
-      await link?.close();
-    } catch {
-      // 链路的收尾路径会自己报告任何真正重要的问题。
-    }
-    render();
-  }
-
-  async function sendLine(line: string): Promise<void> {
-    const link = serial;
-    if (link === null) {
-      serialMessage = '尚未连接串口。';
-      render();
-      return;
-    }
-    try {
-      await link.write(line);
-      appendSerial(`> ${line}`);
-      serialMessage = '';
-    } catch {
-      serialMessage = '发送失败：串口可能已断开。';
-    }
-    render();
-  }
-
-  function sendCommand(): void {
-    const text = commandInput.value.trim();
-    if (text === '') return;
-    commandInput.value = '';
-    void sendLine(text);
-  }
-
-  async function syncFromPage(): Promise<void> {
-    if (built === null) {
-      serialMessage = '先构建映像，才能知道要同步哪几个输入连接器。';
-      render();
-      return;
-    }
-    const vector = options.vector?.() ?? {};
-    for (const pin of built.image.inputs) {
-      const value = Math.max(0, Math.floor(vector[pin.id] ?? 0));
-      const max = pin.width >= 32 ? 0xffff_ffff : 2 ** pin.width - 1;
-      const clamped = Math.min(max, value);
-      const fieldElement = inputFields.get(pin.id);
-      if (fieldElement !== undefined) fieldElement.value = String(clamped);
-      await sendLine(`I ${pin.index} ${clamped}`);
-    }
-  }
-
   // --------------------------------------------------------------- 绘制 --
 
   function staleNow(): boolean {
     if (built === null) return false;
     return built.signature !== signatureOf(store.get().level, store.get().graph);
-  }
-
-  function renderIo(): void {
-    const image = built?.image ?? null;
-    if (image !== lastInputsFor) {
-      lastInputsFor = image;
-      inputFields = new Map();
-      inputsBox.replaceChildren();
-      if (image === null) {
-        inputsBox.append(element('div', 'flash-empty', '构建映像后这里列出输入连接器。'));
-      } else if (image.inputs.length === 0) {
-        inputsBox.append(element('div', 'flash-empty', '这块电路没有输入连接器。'));
-      } else {
-        for (const pin of image.inputs) {
-          const row = element('div', 'flash-pin-row');
-          row.append(element('span', 'flash-pin-name', pin.id));
-          const input = element('input', 'flash-input flash-pin-value');
-          input.type = 'number';
-          input.min = '0';
-          input.max = String(pin.width >= 32 ? 0xffff_ffff : 2 ** pin.width - 1);
-          input.value = '0';
-          input.disabled = serial === null;
-          inputFields.set(pin.id, input);
-          const max = Number(input.max);
-          const send = button('发送', () => {
-            const value = Math.max(0, Math.min(max, Math.floor(Number(input.value) || 0)));
-            input.value = String(value);
-            void sendLine(`I ${pin.index} ${value}`);
-          });
-          row.append(input, send);
-          inputsBox.append(row);
-        }
-      }
-    }
-
-    // 输入框是按映像一次性建好的，所以它们的可用状态要在每次渲染时刷新：
-    // 构建之后才连接上的串口必须让它们可输入，而上传（会关闭串口）
-    // 必须把它们重新变灰。
-    for (const field of inputFields.values()) field.disabled = serial === null;
-
-    outputsBox.replaceChildren();
-    if (built === null) {
-      outputsBox.append(element('div', 'flash-empty', '构建映像后这里列出输出连接器。'));
-    } else {
-      for (const pin of built.image.outputs) {
-        const row = element('div', 'flash-pin-row');
-        row.append(element('span', 'flash-pin-name', pin.id));
-        const value = frame?.outputs[pin.index];
-        row.append(element('span', 'flash-pin-value flash-readout', value === undefined ? '—' : String(value)));
-        outputsBox.append(row);
-      }
-    }
-  }
-
-  function renderBanner(): void {
-    if (banner === null) {
-      bannerLine.textContent = '尚未收到板子的横幅：连接串口后它会自己报出来。';
-      toneOf(bannerLine, 'info');
-      return;
-    }
-    bannerLine.textContent = `板子：${banner.nodes} 节点 · ${banner.slotBytes} B/槽 · 输入 ${banner.inputCount} · 输出 ${banner.outputCount} · hash ${banner.hash.toString(16)}`;
-    if (built === null) {
-      toneOf(bannerLine, 'warn');
-      return;
-    }
-    if (banner.hash === built.image.hash) {
-      bannerLine.textContent += ' · 与屏幕上的电路一致';
-      toneOf(bannerLine, 'good');
-    } else {
-      bannerLine.textContent += ' · 板子跑的是另一块电路';
-      toneOf(bannerLine, 'bad');
-    }
-  }
-
-  function renderFrame(): void {
-    if (frame === null) {
-      frameLine.textContent = '尚未收到帧：连接后点「单步 T」或「读取 S」。';
-      toneOf(frameLine, 'info');
-      return;
-    }
-    const values =
-      built === null
-        ? frame.outputs.map((value, index) => `#${index}=${value}`).join(' ')
-        : built.image.outputs.map((pin) => `${pin.id}=${frame?.outputs[pin.index] ?? '—'}`).join(' ');
-    frameLine.textContent = `第 ${frame.tick} 拍 · ${frame.stable ? '已稳定' : '未稳定'}${values === '' ? '' : ` · ${values}`}`;
-    toneOf(frameLine, frame.stable || built !== null ? 'good' : 'warn');
   }
 
   function render(): void {
@@ -801,10 +589,6 @@ export function mountFlashPanel(
     healthButton.disabled = busy !== null;
     compileButton.disabled = busy !== null || image === null;
     flashButton.disabled = busy !== null || image === null || portSelect.value === '';
-    connectButton.disabled = serial !== null || connecting;
-    disconnectButton.disabled = serial === null;
-    commandInput.disabled = serial === null;
-    for (const control of [tickButton, resetButton, pollButton, syncButton]) control.disabled = serial === null;
 
     if (image === null) {
       summary.textContent = isSandbox(store.get().level) ? '尚未构建映像。' : '开发板只在沙盒里可用。';
@@ -851,14 +635,6 @@ export function mountFlashPanel(
           : ` · ${build.result.flashBytes} B flash / ${build.result.ramBytes ?? '—'} B RAM`;
       bridgeLog.textContent = `${title}${verdict}（退出码 ${build.result.code ?? '—'}）${sizes}\n${build.result.log}${build.result.error === undefined ? '' : `\n${build.result.error}`}`.trim();
     }
-
-    renderBanner();
-    renderFrame();
-    serialNote.textContent = serialMessage;
-    serialNote.hidden = serialMessage === '';
-    toneOf(serialNote, 'bad');
-    serialLog.hidden = serialLines.length === 0;
-    renderIo();
   }
 
   // ------------------------------------------------------------------ 启动 --
@@ -882,8 +658,11 @@ export function mountFlashPanel(
   portSelect.addEventListener('change', () => {
     if (visible) render();
   });
-  commandInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') sendCommand();
+  clockInput.addEventListener('change', () => {
+    clockInput.value = String(clockValue());
+    rememberPrefs();
+    // 时钟改变固件行为，也改变映像签名；下一次构建会使用新值。
+    if (visible) render();
   });
 
   return {
@@ -899,7 +678,6 @@ export function mountFlashPanel(
     },
     destroy() {
       unsubscribe();
-      void serial?.close();
       wrap.remove();
     },
   };

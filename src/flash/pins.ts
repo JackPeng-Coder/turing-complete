@@ -6,15 +6,14 @@ import type { BoardId } from './boards';
  * 映射是**开发板**的属性而不是电路的属性：同一份电路可以跑在 Uno 上把输出接
  * D13，也可以跑在 Mega 上接 D40，所以分配由面板记住（localStorage 键
  * `tc.flash.v1`），而不是写进图里。但它确实是程序映像的一部分——固件行为会因此
- * 不同——这就是 `imageSignature` 把它算进哈希、banner 仍能回答"板子跑的是不是
- * 屏幕上的电路"的原因。
+ * 不同——所以 `imageSignature` 把它算进哈希。
  *
  * 第一版里**只有 1 位连接器能占一个引脚**。多位连接器要么一位一根引脚、要么走
- * 总线协议，两种都是面板不应该替玩家猜的契约；宽连接器继续走串口，协议本来就把它
- * 作为一个数字传输。
+ * 总线协议，两种都是面板不应该替玩家猜的契约；独立模式没有串口通道，因此宽连接器
+ * 在构建映像时会被直接拒绝。
  *
- * D0/D1 **不在可选列表中**：它们是游戏自己通信用的 USB 串口线。Nano 的 A6/A7 也
- * 不可选——在 ATmega328P 上它们只能做模拟输入，无法驱动，也无法开启内部上拉。
+ * 独立模式不再占用 D0/D1：它们和其余数字脚一样可选。328P 的 A6/A7 仍不可选——
+ * 它们只能做模拟输入，无法驱动，也无法开启内部上拉。
  */
 
 /** 玩家看到的引脚名：`2`…`13`、`A0`…，与 Arduino 核的定义一致。 */
@@ -23,33 +22,16 @@ export type PinId = string;
 /** 连接器实例 id（`IN_1`、`OUT_1`）到它使用的板卡引脚。 */
 export type PinMap = Readonly<Record<string, PinId>>;
 
-/** Uno 与 Nano：同一份 ATmega328P 引脚表，去掉 D0/D1 与 A6/A7。 */
+/** Uno 与 Nano：同一份 ATmega328P 引脚表，D0–D13 加 A0–A5。 */
 const UNO_PINS: readonly PinId[] = [
-  '2',
-  '3',
-  '4',
-  '5',
-  '6',
-  '7',
-  '8',
-  '9',
-  '10',
-  '11',
-  '12',
-  '13',
-  'A0',
-  'A1',
-  'A2',
-  'A3',
-  'A4',
-  'A5',
+  ...Array.from({ length: 14 }, (_, index) => String(index)),
+  ...Array.from({ length: 6 }, (_, index) => `A${index}`),
 ];
 
-/** Mega 2560：在 Uno 的基础上增加额外排针，全部可用作数字口。 */
+/** Mega 2560：全部 D0–D53 与 A0–A15，均可作数字口。 */
 const MEGA_PINS: readonly PinId[] = [
-  ...UNO_PINS,
-  ...Array.from({ length: 32 }, (_, index) => String(22 + index)),
-  ...Array.from({ length: 10 }, (_, index) => `A${6 + index}`),
+  ...Array.from({ length: 54 }, (_, index) => String(index)),
+  ...Array.from({ length: 16 }, (_, index) => `A${index}`),
 ];
 
 /**

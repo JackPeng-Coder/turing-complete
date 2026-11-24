@@ -42,13 +42,13 @@ const hasCli =
     'arduino:avr',
   ) === true;
 
-/** A 896-gate fan-in DAG behind one eight-bit input and one sixteen-bit output. */
+/** A 896-gate fan-in DAG behind one one-bit input and one one-bit output. */
 function benchmark() {
   const graph = emptyGraph('sandbox');
   const input = addInstance(graph, 'level_input', 0, 0, 'IN_1');
-  input.params.width = 8;
+  input.params.width = 1;
   const output = addInstance(graph, 'level_output', 0, 640, 'OUT_1');
-  output.params.width = 16;
+  output.params.width = 1;
 
   const gates: string[] = [];
   for (let index = 0; index < 896; index += 1) {

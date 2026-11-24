@@ -1322,17 +1322,15 @@ test('a sixteen-bit sandbox connector is split and packed by the wide packers', 
 });
 
 /**
- * THE SANDBOX CAN BE WRITTEN TO AN ARDUINO.
+ * THE SANDBOX CAN BE WRITTEN TO AN ARDUINO AS A STANDALONE CIRCUIT.
  *
- * The three halves of the feature, end to end: the panel builds the circuit's
- * image and costs it; the local bridge (mocked here, because a CI image has no
- * `arduino-cli` and no board) compiles the same sketch the download button would
- * hand over; and the board is driven through Web Serial (mocked, because a
- * headless browser has no USB port either). What is real is everything above the
- * transport: `buildImage`, `emitSketch`, `FlashClient`, the panel and the
- * protocol.
+ * The two halves of the feature, end to end: the panel builds the circuit's
+ * image, costs it and maps its one-bit connectors onto pins; the local bridge
+ * (mocked here, because a CI image has no `arduino-cli` and no board) compiles
+ * the same sketch the download button would hand over. The sketch carries the
+ * run clock and has no serial protocol, so the board runs on its own.
  */
-test('the sandbox circuit is costed, compiled through the bridge, and driven over serial', async ({ page }) => {
+test('the sandbox circuit is costed, compiled through the bridge, and written as standalone firmware', async ({ page }) => {
   const origin = 'http://127.0.0.1:4173';
   const cors = {
     'access-control-allow-origin': origin,
@@ -1371,39 +1369,6 @@ test('the sandbox circuit is costed, compiled through the bridge, and driven ove
       ramBytes: 9,
     });
   });
-  // A board on a desk, for a browser with no COM port: the banner deliberately
-  // carries hash 0, so the panel's "another circuit" branch is what is asserted.
-  await page.addInitScript(() => {
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
-    let push = (_text: string): void => undefined;
-    const port = {
-      readable: new ReadableStream<Uint8Array>({
-        start(controller) {
-          push = (text) => controller.enqueue(encoder.encode(text));
-        },
-      }),
-      writable: new WritableStream<Uint8Array>({
-        write(chunk) {
-          const line = decoder.decode(chunk).trim();
-          if (line === 'B') push('#TC1 0 3 1 1 1\n');
-          else if (line === 'T') push('F 4 1 1\n');
-        },
-      }),
-      open: async () => undefined,
-      close: async () => undefined,
-    };
-    const serial = { requestPort: async () => port };
-    try {
-      Object.defineProperty(globalThis.navigator, 'serial', { configurable: true, value: serial });
-    } catch {
-      Object.defineProperty(Object.getPrototypeOf(globalThis.navigator), 'serial', {
-        configurable: true,
-        get: () => serial,
-      });
-    }
-  });
-
   await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   await page.getByRole('button', { name: '章节地图' }).click();
@@ -1431,21 +1396,24 @@ test('the sandbox circuit is costed, compiled through the bridge, and driven ove
   await expect(page.locator('.flash-pin-list select')).toHaveCount(2);
   await page.locator('.flash-pin-list select').nth(0).selectOption('2');
   await page.locator('.flash-pin-list select').nth(1).selectOption('13');
+  // D0/D1 are ordinary pins in standalone mode, so the picker offers them too.
+  const pinOptions = await page.locator('.flash-pin-list select').nth(0).locator('option').allTextContents();
+  expect(pinOptions).toContain('引脚 0');
+  expect(pinOptions).toContain('引脚 1');
+  const clock = page.locator('.flash-input[type="number"]');
+  await clock.fill('2');
+  await clock.dispatchEvent('change');
   await page.getByRole('button', { name: '编译' }).click();
   await expect(page.locator('.flash-bridge-log')).toContainText('Sketch uses 924 bytes');
   await expect(page.locator('.flash-summary')).toContainText('2 个引脚');
   const sketch = (JSON.parse(bodies.at(-1) ?? '{}') as { sketch?: string }).sketch ?? '';
   expect(sketch).toContain('TC_PIN_IN');
   expect(sketch).toContain('TC_PIN_OUT');
+  expect(sketch).toContain('#define TC_CLOCK_HZ 2');
+  expect(sketch).toContain('#define TC_CLOCK_MS 500');
   expect(sketch).toContain('INPUT_PULLUP');
   expect(sketch).toContain('digitalWrite');
-
-  // The board: the banner is read, the hash is compared, a tick's frame is shown.
-  await page.getByRole('button', { name: '连接串口' }).click();
-  await expect(page.locator('.flash-banner')).toContainText('另一块电路');
-  await page.getByRole('button', { name: '单步 T' }).click();
-  await expect(page.locator('.flash-frame')).toContainText('第 4 拍');
-  await expect(page.locator('.flash-frame')).toContainText('OUT_1=1');
+  expect(sketch).not.toContain('Serial.begin');
   await page.screenshot({ path: 'test-results/smoke-arduino.png' });
 });
 

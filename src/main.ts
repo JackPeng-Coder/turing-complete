@@ -1513,7 +1513,7 @@ if (app) {
   const blueprintPanel = mountBlueprintPanel(componentsSection, store, blueprintOptions);
   // Arduino 面板是沙盒工具；它的标签页在其他关卡由 mountBench 隐藏。
   // 它从 store（而不是本闭包里的副本）读电路与关卡，“同步输入”时才惰性读取 vector。
-  flashPanel = mountFlashPanel(viewBoard, store, { vector: () => vector });
+  flashPanel = mountFlashPanel(viewBoard, store);
   const truth = mountTruthTable(viewCases, store, {
     live: levelOutputs,
     active: () => activeCase,

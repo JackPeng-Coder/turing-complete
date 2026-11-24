@@ -42,7 +42,7 @@ import {
  * 组合依赖环则回落到底层内核同样的 Jacobi 结算规则，而不是假装存在拓扑序。
  *
  * RAM 预算是一次**拒绝**，不是警告。Uno 只有 2 KiB SRAM，超限的失败方式是板子
- * 复位或串口链路串码，这比面板上的一条消息难诊断得多。估算刻意保守，并且对照
+ * 复位或输出乱跳，这比面板上的一条消息难诊断得多。估算刻意保守，并且对照
  * 玩家选中的板卡检查（`boards.ts`）：对 Uno 太大的电路也许仍能放进 Mega，拒绝
  * 消息会说明是哪块板卡拒绝的。真实尺寸在选定板卡后由 `arduino-cli compile`
  * 回报，面板两个数字都会显示。
@@ -70,24 +70,22 @@ const SEQUENTIAL = new Set(['delay_line', 'mem1']);
 /** 支持集合：组合元件与存储元件的并集，其余元件一律拒绝。 */
 const SUPPORTED = new Set([...COMBINATIONAL, ...SEQUENTIAL]);
 
-/**
- * 串口线协议一个数字能承载的最大位宽。
- *
- * 固件里 `TC_IN[]` 是 `uint32_t`，输入值由 `strtoul` 读入，所以 32 位是协议上限；
- * 更宽的连接器只能继续留在网页里，或者由玩家拆成多个连接器。
- */
-const MAX_SERIAL_BITS = 32;
+/** 独立模式允许的最大时钟频率：1 kHz，即最短 1 ms 一个节拍。 */
+const MAX_CLOCK_HZ = 1_000;
+
+/** 未指定时钟时的默认频率：1 Hz，足够看见寄存器和计数器在动。 */
+export const DEFAULT_CLOCK_HZ = 1;
 
 /**
- * 估算在"电路自身字节"之外，给串口缓冲与调用栈留出的 SRAM。
+ * 估算在"电路自身字节"之外，给调用栈与运行时留出的 SRAM。
  *
- * 刻意不是"几乎整块芯片"：固件自己的表、`Serial` 的环形缓冲，以及 Jacobi 每轮
- * 扫描里层层嵌套的调用，都和槽位数组共享同一块 SRAM。
+ * 刻意不是"几乎整块芯片"：固件自己的表，以及 Jacobi 每轮扫描里层层嵌套的调用，
+ * 都和槽位数组共享同一块 SRAM。
  */
-const RAM_RESERVE = 400;
+const RAM_RESERVE = 320;
 
-/** 草图中运行时代码占用的 flash：Serial、行读取器、各个循环。 */
-const FLASH_RUNTIME = 8_192;
+/** 草图中运行时代码占用的 flash：各张表、结算循环与引脚轮询。 */
+const FLASH_RUNTIME = 6_144;
 
 /**
  * 把一张画板文档变成开发板程序映像；变不成时给出原因。
@@ -111,7 +109,8 @@ const FLASH_RUNTIME = 8_192;
  * @param registry 元件定义表，用来读取每个实例的 `evaluate`/`clockEdge`。
  * @param level 关卡规格；只有沙盒关卡允许烧录。
  * @param board 预算与引脚编号所依据的板卡，默认 Uno。
- * @param pinMap 连接器 id 到板卡引脚的映射；缺省表示全部走串口。
+ * @param pinMap 连接器 id 到板卡引脚的映射；缺省表示不占用任何物理引脚。
+ * @param clockHz 固件自行推进时钟的频率（0–1000）；0 表示只结算组合逻辑。
  * @returns 成功时是 `{ image }`，失败时是 `{ refusal }`（含中英两种原因文本）。
  */
 export function buildImage(
@@ -120,7 +119,15 @@ export function buildImage(
   level: LevelSpec,
   board: BoardId = DEFAULT_BOARD,
   pinMap: PinMap = {},
+  clockHz: number = DEFAULT_CLOCK_HZ,
 ): BuildResult {
+  if (!Number.isInteger(clockHz) || clockHz < 0 || clockHz > MAX_CLOCK_HZ) {
+    return refusal(
+      'clock',
+      `运行时钟必须是 0 到 ${MAX_CLOCK_HZ} 之间的整数；0 表示只跑组合逻辑。`,
+      `The run clock must be an integer from 0 to ${MAX_CLOCK_HZ}; 0 means combinational logic only.`,
+    );
+  }
   if (!isSandbox(level)) {
     return refusal(
       'sandbox-only',
@@ -139,6 +146,19 @@ export function buildImage(
       'no-connectors',
       '沙盒里还没有连接器：放一个「关卡输入」和「关卡输出」再烧录，否则板上没有可接的引脚。',
       'The sandbox has no connectors yet: place a Level Input and a Level Output so the board has pins.',
+    );
+  }
+
+  // 独立模式没有串口通道：宽连接器既不能整字读到，也不能整字写出。与其生成一份
+  // 把它们悄悄丢掉的固件，不如在构建时点名拒绝。
+  const wide = [...pins.inputs, ...pins.outputs].filter((pin) => pin.width !== 1);
+  if (wide.length > 0) {
+    const names = wide.map((pin) => `${pin.id}（${pin.width} 位）`).join('、');
+    return refusal(
+      'wide-connector',
+      `独立模式只能接 1 位连接器：${names} 是宽连接器，没有串口通道。请把它拆成 1 位连接器，或改用一位的输入输出。`,
+      `Standalone mode only takes one-bit connectors: ${names} are wider and have no serial channel. Split them into one-bit connectors or use one-bit I/O.`,
+      wide.map((pin) => pin.id),
     );
   }
 
@@ -162,14 +182,6 @@ export function buildImage(
     const key = `${pin.id}.out`;
     const base = net.outputBase(key);
     const width = net.outputWidth(key);
-    if (width > MAX_SERIAL_BITS) {
-      return refusal(
-        'too-big',
-        `输入连接器 ${pin.id} 是 ${width} 位；串口协议最多传 32 位。`,
-        `Input connector ${pin.id} is ${width} bits wide; the serial protocol carries at most 32.`,
-        [pin.id],
-      );
-    }
     for (let bit = 0; bit < width; bit += 1) sources.push({ out: base + bit, ext: index, bit });
     inputs.push({ id: pin.id, index, width, base });
   }
@@ -179,14 +191,6 @@ export function buildImage(
     const key = `${pin.id}.mirror`;
     const base = net.outputBase(key);
     const width = net.outputWidth(key);
-    if (width > MAX_SERIAL_BITS) {
-      return refusal(
-        'too-big',
-        `输出连接器 ${pin.id} 是 ${width} 位；串口协议最多传 32 位。`,
-        `Output connector ${pin.id} is ${width} bits wide; the serial protocol carries at most 32.`,
-        [pin.id],
-      );
-    }
     outputs.push({ id: pin.id, index, width, base });
   }
 
@@ -200,8 +204,8 @@ export function buildImage(
   if (pinIssues.length > 0) {
     return refusal(
       'pins',
-      `引脚分配不可用：${pinIssues.slice(0, 6).map(pinIssueZh).join('；')}。只有 1 位连接器能接一个引脚；宽连接器请继续走串口。`,
-      `These pin assignments cannot be used: ${pinIssues.slice(0, 6).map(pinIssueEn).join('; ')}. Only one-bit connectors take a pin; wider connectors stay on the serial line.`,
+      `引脚分配不可用：${pinIssues.slice(0, 6).map(pinIssueZh).join('；')}。只有 1 位连接器能接一个引脚。`,
+      `These pin assignments cannot be used: ${pinIssues.slice(0, 6).map(pinIssueEn).join('; ')}. Only one-bit connectors take a pin.`,
       [...new Set(pinIssues.map((issue) => issue.connector))],
     );
   }
@@ -252,10 +256,6 @@ export function buildImage(
       for (const outPin of def.outputs) {
         const outBase = net.outputBase(`${path}.${outPin.id}`);
         const width = net.outputWidth(`${path}.${outPin.id}`);
-        if (width > MAX_SERIAL_BITS) {
-          unsupported.push(`${label} — ${width} bits`);
-          continue;
-        }
         for (let bit = 0; bit < width; bit += 1) {
           nodes.push({
             kind: 'copy',
@@ -423,6 +423,7 @@ export function buildImage(
   const built = {
     level: level.id,
     mode: ordered.mode,
+    clockHz,
     slots,
     nodes: ordered.nodes,
     sources,

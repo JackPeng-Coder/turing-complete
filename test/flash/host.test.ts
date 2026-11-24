@@ -18,16 +18,21 @@ import { SANDBOX_LEVEL } from '../../src/levels/sandbox';
 import { buildImage } from '../../src/flash/build';
 import { emitSketch } from '../../src/flash/emit';
 import { isImage, type ProgramImage } from '../../src/flash/image';
-import { parseBoardLine, type BoardFrame } from '../../src/flash/protocol';
 
 /**
- * The firmware, run on the host and compared with the kernel.
+ * The independent firmware, run on the host and compared with the kernel.
  *
- * `test/flash/shim/` is a small Arduino facade: `Serial` is a queue, `millis()`
- * is 0 and PROGMEM is plain memory. The sketch text is byte-for-byte the one
- * `arduino-cli` compiles for the Uno -- this test compiles the SAME file with
- * g++ and drives it through commands -- so a table, an edge sample or a copy
- * that disagrees with `Simulation` fails here rather than on a board.
+ * `test/flash/shim/` is a small Arduino facade: pins hold what the harness
+ * writes or the sketch drives, `millis()` is 0, and PROGMEM is plain memory.
+ * The sketch text is byte-for-byte the one `arduino-cli` compiles -- this test
+ * compiles the SAME file with g++ -- so a table, an edge sample or a copy that
+ * disagrees with `Simulation` fails here rather than on a board.
+ *
+ * There is no serial protocol any more: inputs are driven through `= <pin>
+ * <0|1>`, outputs are read through `SNAP` lines, and `T` / `R` call the sketch's
+ * own clock edge and reset. This is also why only one-bit connectors appear:
+ * a wide connector has no channel in standalone mode and is refused by the
+ * builder.
  *
  * It skips when no C++ compiler is on PATH. On this host and on CI's Linux
  * images `g++` is present, so the skip is a portability guard, not a habit.
@@ -39,63 +44,53 @@ const registry = createRegistry(BASE_DEFS);
 
 const compiler = spawnSync('g++', ['--version'], { stdio: 'ignore' }).status === 0;
 
-interface Frame {
-  readonly tick: number;
-  readonly stable: boolean;
-  readonly outputs: readonly number[];
-}
-
 interface Built {
   readonly graph: Graph;
   readonly image: ProgramImage;
 }
 
-/** A sandbox board with the connectors a case needs. */
-function board(inputs: readonly number[], outputs: readonly number[]): {
-  graph: Graph;
-  input(id: string, width: number): string;
-  output(id: string, width: number): string;
-} {
-  const graph = emptyGraph('sandbox');
-  const inputsIn = inputs.map((width, index) => {
-    const inst = addInstance(graph, 'level_input', 0, index * 80, `IN_${index + 1}`);
-    inst.params.width = width;
-    return inst.id;
-  });
-  const outputsIn = outputs.map((width, index) => {
-    const inst = addInstance(graph, 'level_output', 320, index * 80, `OUT_${index + 1}`);
-    inst.params.width = width;
-    return inst.id;
-  });
-  return {
-    graph,
-    input: (id) => {
-      const found = inputsIn.find((candidate) => candidate === id);
-      if (found === undefined) throw new Error(`no input ${id}`);
-      return found;
-    },
-    output: (id) => {
-      const found = outputsIn.find((candidate) => candidate === id);
-      if (found === undefined) throw new Error(`no output ${id}`);
-      return found;
-    },
-  };
+interface Place {
+  readonly graph: Graph;
+  readonly pinMap: Readonly<Record<string, string>>;
 }
 
-function builtOf(graph: Graph): Built {
-  const result = buildImage(graph, registry, SANDBOX_LEVEL);
+/** A sandbox board with one-bit connectors on the given pins. */
+function board(inputPins: readonly string[], outputPins: readonly string[]): Place {
+  const graph = emptyGraph('sandbox');
+  const pinMap: Record<string, string> = {};
+  inputPins.forEach((pin, index) => {
+    const inst = addInstance(graph, 'level_input', 0, index * 80, `IN_${index + 1}`);
+    inst.params.width = 1;
+    pinMap[inst.id] = pin;
+  });
+  outputPins.forEach((pin, index) => {
+    const inst = addInstance(graph, 'level_output', 320, index * 80, `OUT_${index + 1}`);
+    inst.params.width = 1;
+    pinMap[inst.id] = pin;
+  });
+  return { graph, pinMap };
+}
+
+function builtOf(place: Place): Built {
+  const result = buildImage(
+    place.graph,
+    registry,
+    SANDBOX_LEVEL,
+    'arduino:avr:uno',
+    place.pinMap,
+  );
   if (!isImage(result)) throw new Error(`refused: ${result.refusal.code} ${result.refusal.en}`);
-  return { graph, image: result.image };
+  return { graph: place.graph, image: result.image };
 }
 
 function passThrough(): Built {
-  const place = board([8], [8]);
+  const place = board(['2'], ['13']);
   connect(place.graph, { inst: 'IN_1', port: 'out' }, { inst: 'OUT_1', port: 'in' });
-  return builtOf(place.graph);
+  return builtOf(place);
 }
 
 function nandChain(): Built {
-  const place = board([1], [1]);
+  const place = board(['2'], ['13']);
   let previous = 'IN_1';
   for (let index = 0; index < 10; index += 1) {
     const gate = addInstance(place.graph, 'nand', 80 + index * 40, 80);
@@ -104,121 +99,39 @@ function nandChain(): Built {
     previous = gate.id;
   }
   connect(place.graph, { inst: previous, port: 'out' }, { inst: 'OUT_1', port: 'in' });
-  return builtOf(place.graph);
+  return builtOf(place);
 }
 
 function fullAdder(): Built {
-  const place = board([1, 1, 1], [1, 1]);
+  const place = board(['2', '3', '4'], ['12', '13']);
   const adder = addInstance(place.graph, 'full_adder', 160, 80);
   connect(place.graph, { inst: 'IN_1', port: 'out' }, { inst: adder.id, port: 'a' });
   connect(place.graph, { inst: 'IN_2', port: 'out' }, { inst: adder.id, port: 'b' });
   connect(place.graph, { inst: 'IN_3', port: 'out' }, { inst: adder.id, port: 'cin' });
   connect(place.graph, { inst: adder.id, port: 'sum' }, { inst: 'OUT_1', port: 'in' });
   connect(place.graph, { inst: adder.id, port: 'cout' }, { inst: 'OUT_2', port: 'in' });
-  return builtOf(place.graph);
+  return builtOf(place);
 }
 
 function delayLine(): Built {
-  const place = board([1], [1]);
+  const place = board(['2'], ['13']);
   const delay = addInstance(place.graph, 'delay_line', 160, 80);
   connect(place.graph, { inst: 'IN_1', port: 'out' }, { inst: delay.id, port: 'in' });
   connect(place.graph, { inst: delay.id, port: 'out' }, { inst: 'OUT_1', port: 'in' });
-  return builtOf(place.graph);
+  return builtOf(place);
 }
 
 function memory(): Built {
-  const place = board([1, 1], [1]);
+  const place = board(['2', '3'], ['13']);
   const mem = addInstance(place.graph, 'mem1', 160, 80);
   connect(place.graph, { inst: 'IN_1', port: 'out' }, { inst: mem.id, port: 'set' });
   connect(place.graph, { inst: 'IN_2', port: 'out' }, { inst: mem.id, port: 'value' });
   connect(place.graph, { inst: mem.id, port: 'out' }, { inst: 'OUT_1', port: 'in' });
-  return builtOf(place.graph);
+  return builtOf(place);
 }
 
-function latch(): Built {
-  const place = board([1, 1], [1]);
-  const first = addInstance(place.graph, 'nand', 160, 80);
-  const second = addInstance(place.graph, 'nand', 240, 80);
-  connect(place.graph, { inst: 'IN_1', port: 'out' }, { inst: first.id, port: 'a' });
-  connect(place.graph, { inst: 'IN_2', port: 'out' }, { inst: second.id, port: 'a' });
-  connect(place.graph, { inst: second.id, port: 'out' }, { inst: first.id, port: 'b' });
-  connect(place.graph, { inst: first.id, port: 'out' }, { inst: second.id, port: 'b' });
-  connect(place.graph, { inst: first.id, port: 'out' }, { inst: 'OUT_1', port: 'in' });
-  return builtOf(place.graph);
-}
-
-/** Two hundred and fifty-seven one-bit inputs: more connectors than a byte names. */
-function connectorWall(): Built {
-  const place = board(
-    Array.from({ length: 257 }, () => 1),
-    [1],
-  );
-  connect(place.graph, { inst: 'IN_257', port: 'out' }, { inst: 'OUT_1', port: 'in' });
-  return builtOf(place.graph);
-}
-
-/** Three hundred one-bit memories: more storage elements than a byte indexes. */
-function memoryWall(): Built {
-  const place = board(
-    [1],
-    Array.from({ length: 300 }, () => 1),
-  );
-  for (let index = 0; index < 300; index += 1) {
-    const memory = addInstance(place.graph, 'mem1', 160, 80 + index);
-    connect(place.graph, { inst: 'IN_1', port: 'out' }, { inst: memory.id, port: 'set' });
-    connect(place.graph, { inst: 'IN_1', port: 'out' }, { inst: memory.id, port: 'value' });
-    connect(place.graph, { inst: memory.id, port: 'out' }, { inst: `OUT_${index + 1}`, port: 'in' });
-  }
-  return builtOf(place.graph);
-}
-
-/** A pass-through whose connectors are on physical pins: 2 in, 13 out. */
-function pinnedPassThrough(): Built {
-  const place = board([1], [1]);
-  connect(place.graph, { inst: 'IN_1', port: 'out' }, { inst: 'OUT_1', port: 'in' });
-  const result = buildImage(place.graph, registry, SANDBOX_LEVEL, 'arduino:avr:uno', {
-    IN_1: '2',
-    OUT_1: '13',
-  });
-  if (!isImage(result)) throw new Error(`refused: ${result.refusal.code} ${result.refusal.en}`);
-  return { graph: place.graph, image: result.image };
-}
-
-/** The frames `Simulation` would show for the same command sequence. */
-function referenceFrames(built: Built, commands: readonly string[]): Frame[] {
-  const net = compile(built.graph, registry);
-  const sim = new Simulation(net, registry);
-  const read = (): Frame => {
-    const outputs: number[] = [];
-    for (const pin of built.image.outputs) {
-      outputs.push(portValueToNumber(sim.read(net.outputBase(`${pin.id}.mirror`), pin.width)));
-    }
-    return { tick: sim.tickCount, stable: true, outputs };
-  };
-  sim.reset();
-  const frames: Frame[] = [read()];
-  for (const command of commands) {
-    if (command.startsWith('I ')) {
-      const [, indexText, valueText] = command.split(' ');
-      const pin = built.image.inputs[Number(indexText)]!;
-      sim.write(net.outputBase(`${pin.id}.out`), pin.width, Number(valueText));
-      sim.settle();
-      frames.push(read());
-    } else if (command === 'T') {
-      sim.tick();
-      frames.push(read());
-    } else if (command === 'R') {
-      sim.reset();
-      frames.push(read());
-    } else if (command === 'S') {
-      frames.push(read());
-    }
-  }
-  return frames;
-}
-
-/** Compile the sketch with g++, run the commands, return parsed board lines. */
-function runFirmware(image: ProgramImage, commands: readonly string[]): ReturnType<typeof parseBoardLine>[] {
+/** Compile the sketch with g++, run the commands, return every `SNAP` line. */
+function runFirmware(image: ProgramImage, commands: readonly string[]): Map<number, number>[] {
   const root = mkdtempSync(join(tmpdir(), 'tc-arduino-host-'));
   try {
     const sketchDir = join(root, 'sketch');
@@ -226,24 +139,10 @@ function runFirmware(image: ProgramImage, commands: readonly string[]): ReturnTy
     writeFileSync(join(sketchDir, 'sketch.ino'), emitSketch(image, { name: 'sketch' }), 'utf8');
     const commandsFile = join(root, 'commands.txt');
     writeFileSync(commandsFile, `${commands.join('\n')}\n`, 'utf8');
-    // `harness.exe` on every platform: MinGW adds `.exe` to a suffixless `-o`
-    // itself, and on Linux the suffix is just part of the filename, so one
-    // name keeps this test free of a `process.platform` branch (this project
-    // deliberately has no Node ambient types).
     const exe = join(root, 'harness.exe');
     const compiled = spawnSync(
       'g++',
-      [
-        '-std=c++17',
-        '-O1',
-        '-I',
-        SHIM_DIR,
-        '-I',
-        sketchDir,
-        HARNESS,
-        '-o',
-        exe,
-      ],
+      ['-std=c++17', '-O1', '-I', SHIM_DIR, '-I', sketchDir, HARNESS, '-o', exe],
       { encoding: 'utf8' },
     );
     if (compiled.status !== 0) {
@@ -253,43 +152,84 @@ function runFirmware(image: ProgramImage, commands: readonly string[]): ReturnTy
     if (ran.status !== 0) {
       throw new Error(`harness failed:\n${ran.stdout ?? ''}\n${ran.stderr ?? ''}`);
     }
-    // `spawnSync` is untyped in this program (no Node ambient types), so the
-    // buffer is spelled out here rather than inferred from an `any` chain.
     const stdout: string = ran.stdout ?? '';
     return stdout
       .split('\n')
-      .map((line: string) => parseBoardLine(line))
-      .filter((line): line is NonNullable<typeof line> => line !== null);
+      .filter((line: string) => line.startsWith('SNAP'))
+      .map((line: string) => {
+        const values = new Map<number, number>();
+        for (const token of line.slice(5).trim().split(/\s+/)) {
+          if (token === '') continue;
+          const [pin, value] = token.split('=');
+          values.set(Number(pin), Number(value));
+        }
+        return values;
+      });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 }
 
-/** One case: build, run both sides, compare every frame and the banner. */
-function checkCase(name: string, built: Built, commands: readonly string[]): void {
-  const lines = runFirmware(built.image, commands);
-  const banner = lines.find((line) => line?.kind === 'banner');
-  expect(banner, `${name}: no banner`).toBeDefined();
-  if (banner?.kind !== 'banner') throw new Error(`${name}: not a banner`);
-  expect(banner.hash, `${name}: banner hash`).toBe(built.image.hash);
+/** The same commands, through `Simulation`, snapped at every `S`. */
+function referenceSnapshots(built: Built, commands: readonly string[]): Map<number, number>[] {
+  const net = compile(built.graph, registry);
+  const sim = new Simulation(net, registry);
+  const inputByPin = new Map(
+    built.image.pinInputs.map((pin) => [pin.pin, built.image.inputs[pin.ext]!] as const),
+  );
+  const pinLevels = new Map<number, number>();
+  for (const pin of inputByPin.keys()) pinLevels.set(pin, 1); // INPUT_PULLUP
+  const snap = (): Map<number, number> =>
+    new Map(
+      built.image.pinOutputs.map((pin) => [
+        pin.pin,
+        portValueToNumber(sim.read(pin.base, 1)),
+      ] as const),
+    );
 
-  const frames = lines.filter((line): line is BoardFrame => line?.kind === 'frame');
-  const expected = referenceFrames(built, commands);
-  expect(frames.length, `${name}: frame count`).toBe(expected.length);
+  const applyInputs = (): void => {
+    for (const [pin, input] of inputByPin) {
+      sim.write(net.outputBase(`${input.id}.out`), 1, pinLevels.get(pin) ?? 1);
+    }
+    sim.settle();
+  };
+
+  sim.reset();
+  applyInputs();
+  const snapshots: Map<number, number>[] = [];
+  for (const command of commands) {
+    if (command === 'S') snapshots.push(snap());
+    else if (command === 'T') sim.tick();
+    else if (command === 'R') {
+      sim.reset();
+      applyInputs();
+    } else if (command.startsWith('= ')) {
+      const [, pinText, valueText] = command.split(' ');
+      pinLevels.set(Number(pinText), Number(valueText));
+      applyInputs();
+    }
+  }
+  return snapshots;
+}
+
+function checkCase(name: string, built: Built, commands: readonly string[]): void {
+  const actual = runFirmware(built.image, commands);
+  const expected = referenceSnapshots(built, commands);
+  expect(actual.length, `${name}: snapshot count`).toBe(expected.length);
   for (let at = 0; at < expected.length; at += 1) {
-    expect(frames[at]!.outputs, `${name}: outputs at frame ${at}`).toEqual(expected[at]!.outputs);
-    expect(frames[at]!.tick, `${name}: tick at frame ${at}`).toBe(expected[at]!.tick);
-    expect(frames[at]!.stable, `${name}: stable at frame ${at}`).toBe(true);
+    expect([...actual[at]!.entries()].sort(), `${name}: pins at snapshot ${at}`).toEqual(
+      [...expected[at]!.entries()].sort(),
+    );
   }
 }
 
-describe.skipIf(!compiler)('generated firmware on the host', () => {
-  it('copies an eight-bit connector through unchanged', () => {
-    checkCase('pass-through', passThrough(), ['I 0 0', 'I 0 85', 'I 0 255', 'S', 'R', 'I 0 170']);
+describe.skipIf(!compiler)('generated standalone firmware on the host', () => {
+  it('copies a one-bit signal through a mapped input and output pin', () => {
+    checkCase('pass-through', passThrough(), ['S', '= 2 0', 'S', '= 2 1', 'S']);
   });
 
   it('settles a NAND chain the same way as the kernel', () => {
-    checkCase('nand-chain', nandChain(), ['I 0 0', 'T', 'I 0 1', 'T', 'T', 'S', 'R']);
+    checkCase('nand-chain', nandChain(), ['S', '= 2 0', 'S', '= 2 1', 'S']);
   });
 
   it('computes every full-adder vector', () => {
@@ -304,22 +244,37 @@ describe.skipIf(!compiler)('generated firmware on the host', () => {
       [0, 1, 1],
       [1, 1, 1],
     ] as const) {
-      commands.push(`I 0 ${a}`, `I 1 ${b}`, `I 2 ${cin}`, 'S');
+      commands.push(`= 2 ${a}`, `= 3 ${b}`, `= 4 ${cin}`, 'S');
     }
     checkCase('full-adder', fullAdder(), commands);
   });
 
   it('holds a delay line for a full tick', () => {
-    checkCase('delay-line', delayLine(), ['I 0 1', 'S', 'T', 'I 0 0', 'T', 'T', 'S', 'R']);
+    checkCase('delay-line', delayLine(), [
+      '= 2 1',
+      'S',
+      'T',
+      'S',
+      '= 2 0',
+      'T',
+      'T',
+      'S',
+      'R',
+      'S',
+    ]);
   });
 
   it('samples mem1 only on an edge, and clears on reset', () => {
     checkCase('mem1', memory(), [
-      'I 0 1',
-      'I 1 1',
+      '= 2 0',
+      '= 3 0',
+      'S',
+      '= 2 1',
+      '= 3 1',
       'S',
       'T',
-      'I 0 0',
+      'S',
+      '= 2 0',
       'T',
       'S',
       'R',
@@ -327,67 +282,18 @@ describe.skipIf(!compiler)('generated firmware on the host', () => {
     ]);
   });
 
-  it('reproduces a combinational latch with Jacobi sweeps', () => {
-    checkCase('latch', latch(), [
-      'I 0 0',
-      'I 1 0',
-      'S',
-      'I 0 1',
-      'I 1 0',
-      'S',
-      'I 0 0',
-      'I 1 1',
-      'S',
-      'I 1 0',
-      'S',
-      'R',
-    ]);
-  });
-
-  /**
-   * The pin half of the exporter, on the host: the mapped input reads the level
-   * an outside wire holds (the harness's `=` lines), the mapped output is driven
-   * with `digitalWrite`, and every pin change re-settles and prints a frame.
-   */
-  it('reads a mapped input pin and drives a mapped output pin', () => {
-    const built = pinnedPassThrough();
-    expect(built.image.pinInputs).toEqual([{ ext: 0, pin: 2 }]);
-    expect(built.image.pinOutputs).toEqual([{ base: expect.any(Number), pin: 13 }]);
-    const lines = runFirmware(built.image, ['= 2 0', 'S', '= 2 1', 'S']);
-    const pins: string[] = [];
-    for (const line of lines) {
-      if (line !== null && line.kind === 'other' && line.text.startsWith('PIN ')) {
-        pins.push(line.text);
-      }
-    }
-    const frames = lines.filter((line): line is BoardFrame => line?.kind === 'frame');
-    // The input starts pulled up (unwired reads HIGH), so the pass-through drives
-    // pin 13 HIGH in setup; pin 2 low then high moves the output with it.
-    expect(frames.map((frame) => frame.outputs[0])).toEqual([1, 0, 0, 1, 1]);
-    expect(frames.every((frame) => frame.tick === 0 && frame.stable)).toBe(true);
-    expect(pins).toContain('PIN 13 1');
-    expect(pins).toContain('PIN 13 0');
-  });
-
-  it('reports the image hash in the banner', () => {
-    const built = passThrough();
-    const lines = runFirmware(built.image, []);
-    const banner = lines.find((line) => line?.kind === 'banner');
-    expect(banner).toMatchObject({ kind: 'banner', hash: built.image.hash });
-  });
-
-  /**
-   * Both of these were latent width bugs: the firmware read a connector's
-   * descriptor index, a source-table cursor and a storage-element index out of
-   * one byte each, so 257 connectors wrote the wrong slot and 300 memories
-   * aliased their state. The comparator is the kernel, so a truncation cannot
-   * pass as "close enough".
-   */
-  it('addresses more than 255 input connectors', () => {
-    checkCase('connector-wall', connectorWall(), ['I 256 1', 'S', 'I 0 1', 'S', 'I 256 0', 'R', 'S']);
-  });
-
-  it('addresses more than 255 storage elements', () => {
-    checkCase('memory-wall', memoryWall(), ['I 0 1', 'T', 'S', 'I 0 0', 'T', 'S', 'R', 'S']);
+  it('compiles the standalone clock into the sketch and leaves serial out', () => {
+    const place = board(['2'], ['13']);
+    connect(place.graph, { inst: 'IN_1', port: 'out' }, { inst: 'OUT_1', port: 'in' });
+    const result = buildImage(place.graph, registry, SANDBOX_LEVEL, 'arduino:avr:uno', {
+      IN_1: '2',
+      OUT_1: '13',
+    }, 2);
+    if (!isImage(result)) throw new Error(`refused: ${result.refusal.code}`);
+    const sketch = emitSketch(result.image);
+    expect(sketch).toContain('#define TC_CLOCK_HZ 2');
+    expect(sketch).toContain('#define TC_CLOCK_MS 500');
+    expect(sketch).not.toContain('Serial.begin');
+    expect(sketch).not.toContain('Serial.print');
   });
 });

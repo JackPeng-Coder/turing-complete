@@ -6,8 +6,6 @@ import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
 import { SANDBOX_LEVEL } from '../../src/levels/sandbox';
-import { buildImage } from '../../src/flash/build';
-import { isImage, type ProgramImage } from '../../src/flash/image';
 import type { FetchLike } from '../../src/flash/client';
 import { mountFlashPanel, type FlashPanel, type FlashPanelOptions } from '../../src/ui/flashPanel';
 
@@ -67,12 +65,6 @@ function passStore(width: number): { store: Store<AppState>; graph: Graph } {
   return { store: storeOf(graph), graph };
 }
 
-function imageOf(graph: Graph): ProgramImage {
-  const result = buildImage(graph, registry, SANDBOX_LEVEL);
-  if (!isImage(result)) throw new Error(`refused: ${result.refusal.code} ${result.refusal.en}`);
-  return result.image;
-}
-
 /** Mount the panel and open its tab, the way the workbench does. */
 function mount(
   store: Store<AppState>,
@@ -129,42 +121,6 @@ function bridgeFetch(answer: (url: string) => unknown): { fetch: FetchLike; call
   return { fetch, calls };
 }
 
-/** A serial port backed by streams, plus the navigator the panel reads. */
-function fakeSerial(): {
-  serialSource: unknown;
-  push(text: string): void;
-  written(): string;
-  closes(): number;
-} {
-  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
-  const readable = new ReadableStream<Uint8Array>({
-    start(stream) {
-      controller = stream;
-    },
-  });
-  const chunks: string[] = [];
-  const writable = new WritableStream<Uint8Array>({
-    write(chunk) {
-      chunks.push(new TextDecoder().decode(chunk));
-    },
-  });
-  let closes = 0;
-  const port = {
-    open: async () => undefined,
-    close: async () => {
-      closes += 1;
-    },
-    readable,
-    writable,
-  };
-  return {
-    serialSource: { serial: { requestPort: async () => port } },
-    push: (text) => controller?.enqueue(new TextEncoder().encode(text)),
-    written: () => chunks.join(''),
-    closes: () => closes,
-  };
-}
-
 describe('the 开发板 panel', () => {
   it('builds an image when its tab opens and reports the cost against the board', () => {
     const { store } = sandboxStore();
@@ -176,6 +132,25 @@ describe('the 开发板 panel', () => {
     expect(text(root, '.flash-bridge-status')).toContain('tools/arduino-bridge.mjs');
     expect(buttonByText(root, '下载 .ino').disabled).toBe(false);
     expect(part(root, '.flash-refusal').hidden).toBe(true);
+  });
+
+  it('carries the run clock into the image and the downloaded sketch', () => {
+    const { store } = sandboxStore();
+    const downloads: Array<{ name: string; text: string }> = [];
+    const { root } = mount(store, {
+      onDownload: (name, text) => downloads.push({ name, text }),
+    });
+    const clock = root.querySelector<HTMLInputElement>('.flash-input[type="number"]');
+    if (clock === null) throw new Error('no run-clock field');
+    clock.value = '2';
+    clock.dispatchEvent(new Event('change'));
+    expect(part(root, '.flash-stale').hidden).toBe(false);
+    buttonByText(root, '构建映像').click();
+    buttonByText(root, '下载 .ino').click();
+    expect(downloads).toHaveLength(1);
+    expect(downloads[0]!.text).toContain('#define TC_CLOCK_HZ 2');
+    expect(downloads[0]!.text).toContain('#define TC_CLOCK_MS 500');
+    expect(downloads[0]!.text).not.toContain('Serial.begin');
   });
 
   it('marks a built image stale after an edit, and rebuilds on demand', () => {
@@ -311,7 +286,6 @@ describe('the 开发板 panel', () => {
     panel.render();
     buttonByText(root, '烧录').click();
     await until(() => text(root, '.flash-message').includes('占用'), 'the busy-port sentence');
-    expect(text(root, '.flash-message')).toContain('断开');
     expect(text(root, '.flash-bridge-log')).toContain('Access is denied');
   });
 
@@ -350,37 +324,6 @@ describe('the 开发板 panel', () => {
     expect(body.port).toBe('COM9');
   });
 
-  it('closes the port before uploading and leaves it closed for the linker', async () => {
-    const { store } = sandboxStore();
-    const serial = fakeSerial();
-    const bridge = bridgeFetch((url) =>
-      url.endsWith('/flash')
-        ? { ok: true, code: 0, log: 'avrdude done.', flashBytes: 924, ramBytes: 9 }
-        : {
-            ok: true,
-            cli: 'arduino-cli',
-            core: true,
-            ports: [{ address: 'COM3', label: 'Arduino Uno' }],
-          },
-    );
-    const { root, panel } = mount(store, { fetch: bridge.fetch, serialSource: serial.serialSource });
-    buttonByText(root, '检查连接').click();
-    await until(
-      () => root.querySelectorAll('.flash-fields select')[1]!.querySelectorAll('option').length > 1,
-      'the port list',
-    );
-    buttonByText(root, '连接串口').click();
-    await until(() => !buttonByText(root, '断开').disabled, 'the serial connection');
-    expect(serial.closes()).toBe(0);
-    panel.render();
-    buttonByText(root, '烧录').click();
-    await until(() => text(root, '.flash-bridge-log').includes('烧录成功'), 'the flash answer');
-    // `arduino-cli` cannot open a port Web Serial holds: the upload closes it.
-    expect(serial.closes()).toBe(1);
-    expect(buttonByText(root, '断开').disabled).toBe(true);
-    expect(buttonByText(root, '连接串口').disabled).toBe(false);
-  });
-
   it('hands the sketch to the downloader under a folder-matching name', () => {
     const { store } = sandboxStore();
     const downloads: Array<{ name: string; text: string }> = [];
@@ -391,47 +334,6 @@ describe('the 开发板 panel', () => {
     expect(downloads).toHaveLength(1);
     expect(downloads[0]!.name).toBe('tc_sandbox.ino');
     expect(downloads[0]!.text).toContain('#define TC_HASH 0x');
-  });
-
-  it('drives a connected board and reads its banner and frames', async () => {
-    const { store, graph } = sandboxStore();
-    const image = imageOf(graph);
-    const fake = fakeSerial();
-    const { root } = mount(store, { serialSource: fake.serialSource });
-    buttonByText(root, '连接串口').click();
-    await until(() => !buttonByText(root, '断开').disabled, 'the serial connection');
-    expect(fake.written()).toContain('B\n');
-    // A field built before the port existed becomes typeable with it.
-    expect((root.querySelector('.flash-pin-row input') as HTMLInputElement).disabled).toBe(false);
-    fake.push(`#TC1 ${image.hash.toString(16)} ${image.report.nodes} 1 1 1\n`);
-    await until(() => text(root, '.flash-banner').includes('一致'), 'the banner');
-    expect(text(root, '.flash-banner')).toContain('与屏幕上的电路一致');
-    fake.push('F 7 1 1\n');
-    await until(() => text(root, '.flash-frame').includes('第 7 拍'), 'the frame');
-    expect(text(root, '.flash-frame')).toContain('OUT_1=1');
-    const command = part(root, '.flash-command') as HTMLInputElement;
-    command.value = 'I 0 1';
-    command.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
-    await until(() => fake.written().includes('I 0 1\n'), 'the typed command');
-    buttonByText(root, '单步 T').click();
-    await until(() => fake.written().includes('T\n'), 'the tick command');
-  });
-
-  it('says the board is running another circuit when the hashes differ', async () => {
-    const { store } = sandboxStore();
-    const fake = fakeSerial();
-    const { root } = mount(store, { serialSource: fake.serialSource });
-    buttonByText(root, '连接串口').click();
-    await until(() => !buttonByText(root, '断开').disabled, 'the serial connection');
-    fake.push('#TC1 deadbeef 3 1 1 1\n');
-    await until(() => text(root, '.flash-banner').includes('另一块电路'), 'the mismatch note');
-  });
-
-  it('explains a browser without Web Serial instead of failing silently', async () => {
-    const { store } = sandboxStore();
-    const { root } = mount(store, { serialSource: {} });
-    buttonByText(root, '连接串口').click();
-    await until(() => text(root, '.flash-serial-note').includes('Web Serial'), 'the no-serial note');
   });
 
   it('maps connectors onto board pins and downloads a sketch that carries them', () => {
@@ -469,7 +371,7 @@ describe('the 开发板 panel', () => {
     const { store } = passStore(8);
     const { root } = mount(store);
     expect(pinSelects(root)).toHaveLength(0);
-    expect(root.querySelector('.flash-pin-list')?.textContent).toContain('8 位：只走串口');
+    expect(root.querySelector('.flash-pin-list')?.textContent).toContain('8 位：独立模式不支持');
   });
 
   it('remembers pin assignments across a remount', () => {

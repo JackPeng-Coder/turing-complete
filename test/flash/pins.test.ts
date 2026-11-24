@@ -15,29 +15,34 @@ const CONNECTORS: readonly PinConnector[] = [
 ];
 
 describe('the board pin vocabulary', () => {
-  it('offers the digital pins and the analogue header, never the serial line', () => {
+  it('offers D0–D13 and the analogue header on the 328P, and every digital pin on the Mega', () => {
     const uno = boardPinChoices('arduino:avr:uno');
+    expect(uno).toContain('0');
+    expect(uno).toContain('1');
     expect(uno).toContain('2');
     expect(uno).toContain('13');
     expect(uno).toContain('A0');
     expect(uno).toContain('A5');
-    // D0/D1 are the USB serial line the game talks on; A6/A7 are analogue-only
-    // on the 328P, so neither can be a mapped connector.
-    expect(uno).not.toContain('0');
-    expect(uno).not.toContain('1');
+    // A6/A7 are analogue-only on the 328P, so they cannot be mapped connectors.
     expect(uno).not.toContain('A6');
     expect(boardPinChoices('arduino:avr:nano')).toEqual(uno);
     const mega = boardPinChoices('arduino:avr:mega');
+    expect(mega).toContain('0');
+    expect(mega).toContain('1');
+    expect(mega).toContain('14');
+    expect(mega).toContain('21');
     expect(mega).toContain('22');
     expect(mega).toContain('53');
+    expect(mega).toContain('A6');
     expect(mega).toContain('A15');
-    expect(mega).not.toContain('0');
     expect(boardHasPin('arduino:avr:uno', 'A0')).toBe(true);
     expect(boardHasPin('arduino:avr:uno', '22')).toBe(false);
     expect(boardHasPin('arduino:avr:mega', '22')).toBe(true);
   });
 
   it('turns a pin name into the number the sketch writes', () => {
+    expect(pinValue('arduino:avr:uno', '0')).toBe(0);
+    expect(pinValue('arduino:avr:uno', '1')).toBe(1);
     expect(pinValue('arduino:avr:uno', '2')).toBe(2);
     expect(pinValue('arduino:avr:uno', '13')).toBe(13);
     expect(pinValue('arduino:avr:mega', '22')).toBe(22);
@@ -52,6 +57,7 @@ describe('the board pin vocabulary', () => {
 describe('validatePinMap', () => {
   it('accepts an empty map and a one-bit connector on a real pin', () => {
     expect(validatePinMap('arduino:avr:uno', CONNECTORS, {})).toEqual([]);
+    expect(validatePinMap('arduino:avr:uno', CONNECTORS, { IN_1: '0', OUT_1: '1' })).toEqual([]);
     expect(validatePinMap('arduino:avr:uno', CONNECTORS, { IN_1: '2', OUT_1: '13' })).toEqual([]);
   });
 

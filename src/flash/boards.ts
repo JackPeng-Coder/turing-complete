@@ -2,8 +2,8 @@
  * 本地桥能够烧录的开发板清单，以及导出器在估算时对照的资源预算。
  *
  * 这些数字来自芯片本身，不是随手定的目标。ATmega328P（Uno 与 Nano）有 32 KiB
- * flash，其中约半 KiB 被 bootloader 占用；SRAM 只有 2 KiB，串口缓冲、调用栈和
- * 电路自身状态的每一个字节都要挤在里面。Mega 2560 则是 256 KiB flash 与 8 KiB
+ * flash，其中约半 KiB 被 bootloader 占用；SRAM 只有 2 KiB，运行时缓冲、调用栈
+ * 和电路自身状态的每一个字节都要挤在里面。Mega 2560 则是 256 KiB flash 与 8 KiB
  * SRAM。下面的 `max*` 是**估算值允许声称的上限**，不是芯片顶格容量：真实尺寸由
  * `arduino-cli compile` 编译后回报，面板会把估算与实测两个数字并排显示。
  *
@@ -38,7 +38,7 @@ export interface BoardProfile {
  *
  * 容量数字的来源：Mega 的 253_952 = 256 KiB 减去 8 KiB bootloader；328P 的
  * 32_256 = 32 KiB 减去 0.5 KiB bootloader。`maxFlash`/`maxRam` 再各自留出运行时
- * 与串口/调用栈的余量，所以估算永远比芯片顶格容量保守。
+ * 与调用栈的余量，所以估算永远比芯片顶格容量保守。
  */
 export const BOARDS: readonly BoardProfile[] = [
   {

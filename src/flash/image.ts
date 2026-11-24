@@ -16,20 +16,20 @@ import type { Graph } from '../core/graph';
 /** 固件必须采用的结算策略：`dag` 可按拓扑序原地求值，`jacobi` 需要双缓冲迭代。 */
 export type ImageMode = 'dag' | 'jacobi';
 
-/** 沙盒画板上的一个连接器，按串口协议的编号方式表示。 */
+/** 沙盒画板上的一个连接器，按连接器编号表示。 */
 export interface ConnectorPin {
   /** 连接器实例 id（`IN_1`、`OUT_1`），也就是沙盒里的引脚 id。 */
   readonly id: string;
-  /** 协议里 `I <index>` 与 `F` 帧各列使用的下标。 */
+  /** 连接器在映像中的下标。 */
   readonly index: number;
   /** 连接器位宽（位数）。 */
   readonly width: number;
   /**
    * 连接器发布的那个编译后输出槽位。
    *
-   * 对输入引脚，它是源写到的 `level_input` 输出槽；对输出引脚，它是拷贝写入、
-   * 帧打包读取的 `level_output` 镜像槽。放在这里，生成器和宿主模型就都不必再从
-   * 一个 key 重新推导基址。
+   * 对输入引脚，它是源写到的 `level_input` 输出槽；对输出引脚，它是拷贝写入的
+   * `level_output` 镜像槽。放在这里，生成器和宿主模型就都不必再从一个 key 重新
+   * 推导基址。
    */
   readonly base: number;
 }
@@ -103,7 +103,7 @@ export interface ImageReport {
   readonly tables: number;
   /** 所有表的字节总数。 */
   readonly tableBytes: number;
-  /** 估算 RAM：结算缓冲、存储状态，以及串口/栈的保留区。 */
+  /** 估算 RAM：结算缓冲、存储状态，以及栈与运行时的保留区。 */
   readonly ramBytes: number;
   /** 估算 flash：节点/边数组、表和运行时模板。 */
   readonly flashBytes: number;
@@ -162,7 +162,9 @@ export interface ProgramImage {
   readonly level: string;
   /** 结算模式，固件据此切换双缓冲。 */
   readonly mode: ImageMode;
-  /** 规范化映像文本的 FNV-1a 值；固件在 banner 里回报它。 */
+  /** 固件自行推进时钟的频率（Hz）；0 表示只结算组合逻辑。 */
+  readonly clockHz: number;
+  /** 规范化映像文本的 FNV-1a 值，用于缓存与测试比对。 */
   readonly hash: number;
   /** 槽位总数。 */
   readonly slots: number;
@@ -176,13 +178,13 @@ export interface ProgramImage {
   readonly tables: readonly Uint8Array[];
   /** 存储实例数（每个存储元件一个状态字节）。 */
   readonly stateCount: number;
-  /** 输入连接器，按协议编号顺序。 */
+  /** 输入连接器，按编号顺序。 */
   readonly inputs: readonly ConnectorPin[];
-  /** 输出连接器，按协议编号顺序；`F` 帧各列的顺序。 */
+  /** 输出连接器，按编号顺序。 */
   readonly outputs: readonly ConnectorPin[];
-  /** 被分到物理引脚的输入连接器；全部走串口时为空。 */
+  /** 被分到物理引脚的输入连接器；未映射时为空。 */
   readonly pinInputs: readonly ImagePinIn[];
-  /** 被分到物理引脚的输出连接器；全部走串口时为空。 */
+  /** 被分到物理引脚的输出连接器；未映射时为空。 */
   readonly pinOutputs: readonly ImagePinOut[];
   /** 面板展示的估算数字。 */
   readonly report: ImageReport;
@@ -196,6 +198,8 @@ export type RefusalCode =
   | 'unsupported'
   | 'unstable'
   | 'pins'
+  | 'wide-connector'
+  | 'clock'
   | 'too-big';
 
 /** 电路为什么不能变成固件，中英双语各一份。 */
@@ -228,12 +232,11 @@ export function refusalStatus(refusal: ImageRefusal): { zh: string; en: string }
 /**
  * FNV-1a，32 位，作用在映像的规范拼写上。
  *
- * 刻意保持确定性：面板记住它烧录过的哈希，固件在 banner 里打印同一个数字，
- * 于是"板子跑的就是屏幕上的电路"只需一次比较，而不是靠猜。只为检测同一个标签页
- * 里的改动，用加密哈希就过度了。
+ * 刻意保持确定性：同一份映像在两次构建中得到同一个数字，面板与测试因此可以
+ * 直接比较，而不必逐字段深比较。用加密哈希来检测同一标签页里的改动就过度了。
  *
  * @param text `imageSignature` 产出的规范文本。
- * @returns 无符号 32 位哈希（固件以十六进制打印它）。
+ * @returns 无符号 32 位哈希。
  */
 export function hashText(text: string): number {
   let hash = 0x811c9dc5;
@@ -248,6 +251,7 @@ export function hashText(text: string): number {
 export function imageSignature(image: {
   readonly level: string;
   readonly mode: ImageMode;
+  readonly clockHz: number;
   readonly slots: number;
   readonly nodes: readonly ImageNode[];
   readonly sources: readonly ImageSource[];
@@ -258,12 +262,16 @@ export function imageSignature(image: {
   readonly pinInputs: readonly ImagePinIn[];
   readonly pinOutputs: readonly ImagePinOut[];
 }): string {
-  const parts: string[] = [image.level, image.mode, String(image.slots)];
+  const parts: string[] = [
+    image.level,
+    image.mode,
+    `clock:${image.clockHz}`,
+    String(image.slots),
+  ];
   for (const input of image.inputs) parts.push(`i:${input.id}:${input.index}:${input.width}:${input.base}`);
   for (const output of image.outputs)
     parts.push(`o:${output.id}:${output.index}:${output.width}:${output.base}`);
-  // 引脚会改变固件的实际行为，所以它也改变哈希：映射引脚之后，banner 仍然能回答
-  // "板子跑的是不是屏幕上的东西"。
+  // 引脚与时钟都会改变固件的实际行为，所以它们也改变哈希。
   for (const pin of image.pinInputs) parts.push(`pi:${pin.ext}:${pin.pin}`);
   for (const pin of image.pinOutputs) parts.push(`po:${pin.base}:${pin.pin}`);
   for (const source of image.sources) parts.push(`s:${source.out}:${source.ext}:${source.bit}`);

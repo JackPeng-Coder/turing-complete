@@ -62,36 +62,38 @@ function chain(gates: number): ProgramImage {
 describe('buildImage', () => {
   it('turns connectors and gates into sources, nodes and mirror copies', () => {
     const place = board();
-    const input = place.input('IN_1', 8);
-    const output = place.output('OUT_1', 8);
+    const input = place.input('IN_1', 1);
+    const output = place.output('OUT_1', 1);
     const gate = addInstance(place.graph, 'nand', 80, 80);
     connect(place.graph, { inst: input, port: 'out' }, { inst: gate.id, port: 'a' });
     connect(place.graph, { inst: gate.id, port: 'out' }, { inst: output, port: 'in' });
 
     const image = build(place.graph);
     expect(image.mode).toBe('dag');
-    expect(image.inputs).toEqual([{ id: 'IN_1', index: 0, width: 8, base: expect.any(Number) }]);
+    expect(image.inputs).toEqual([{ id: 'IN_1', index: 0, width: 1, base: expect.any(Number) }]);
     expect(image.outputs).toHaveLength(1);
     expect(image.outputs[0]!.id).toBe('OUT_1');
-    expect(image.sources).toHaveLength(8);
-    // One truth-table node for the NAND and one copy per output bit.
+    expect(image.sources).toHaveLength(1);
+    // One truth-table node for the NAND and one copy for the output bit.
     expect(image.nodes.filter((node) => node.kind === 'tab')).toHaveLength(1);
-    expect(image.nodes.filter((node) => node.kind === 'copy')).toHaveLength(8);
+    expect(image.nodes.filter((node) => node.kind === 'copy')).toHaveLength(1);
     expect(image.hash).toBeGreaterThan(0);
     expect(image.report.ramBytes).toBeLessThan(1900);
   });
 
   it('extracts a full adder as two output tables over the same three inputs', () => {
     const place = board();
-    place.input('IN_1', 3);
-    place.output('OUT_1', 2);
-    const input = place.graph.instances.find((inst) => inst.id === 'IN_1')!;
-    const output = place.graph.instances.find((inst) => inst.id === 'OUT_1')!;
+    const a = place.input('IN_1', 1);
+    const b = place.input('IN_2', 1);
+    const cin = place.input('IN_3', 1);
+    const sumPin = place.output('OUT_1', 1);
+    const coutPin = place.output('OUT_2', 1);
     const adder = addInstance(place.graph, 'full_adder', 80, 80);
-    connect(place.graph, { inst: input.id, port: 'out' }, { inst: adder.id, port: 'a' });
-    connect(place.graph, { inst: input.id, port: 'out' }, { inst: adder.id, port: 'b' });
-    connect(place.graph, { inst: input.id, port: 'out' }, { inst: adder.id, port: 'cin' });
-    connect(place.graph, { inst: adder.id, port: 'sum' }, { inst: output.id, port: 'in' });
+    connect(place.graph, { inst: a, port: 'out' }, { inst: adder.id, port: 'a' });
+    connect(place.graph, { inst: b, port: 'out' }, { inst: adder.id, port: 'b' });
+    connect(place.graph, { inst: cin, port: 'out' }, { inst: adder.id, port: 'cin' });
+    connect(place.graph, { inst: adder.id, port: 'sum' }, { inst: sumPin, port: 'in' });
+    connect(place.graph, { inst: adder.id, port: 'cout' }, { inst: coutPin, port: 'in' });
     const image = build(place.graph);
     const tables = image.nodes.filter((node) => node.kind === 'tab');
     expect(tables).toHaveLength(2);
@@ -165,7 +167,7 @@ describe('buildImage', () => {
   it('refuses unsupported parts by name', () => {
     const place = board();
     place.input('IN_1', 1);
-    place.output('OUT_1', 8);
+    place.output('OUT_1', 1);
     const wide = addInstance(place.graph, 'and8', 80, 80);
     const result = buildImage(place.graph, registry, SANDBOX_LEVEL);
     expect(isImage(result)).toBe(false);
@@ -238,14 +240,15 @@ describe('buildImage', () => {
     expect(result.image.hash).toBeTypeOf('number');
   });
 
-  it('refuses a connector wider than the protocol carries', () => {
+  it('refuses a wide connector in standalone mode', () => {
     const place = board();
     place.input('IN_1', 33);
     place.output('OUT_1', 1);
     const result = buildImage(place.graph, registry, SANDBOX_LEVEL);
     expect(isImage(result)).toBe(false);
     if (isImage(result)) return;
-    expect(result.refusal.code).toBe('too-big');
+    expect(result.refusal.code).toBe('wide-connector');
+    expect(result.refusal.instances).toContain('IN_1');
   });
 
   it('expands a player component to its leaves and builds it', () => {
@@ -271,7 +274,7 @@ describe('buildImage', () => {
     const composed = createRegistry(BASE_DEFS);
     composed.register(blueprintDef(component));
     const place = board();
-    const input = place.input('IN_1', 2);
+    const input = place.input('IN_1', 1);
     const output = place.output('OUT_1', 1);
     const instance = addInstance(place.graph, 'bp1', 80, 80);
     place.graph.customComponents.push(component);
@@ -296,7 +299,7 @@ describe('buildImage', () => {
     expect(pinned.pinInputs).toEqual([{ ext: 0, pin: 2 }]);
     expect(pinned.pinOutputs).toHaveLength(1);
     expect(pinned.pinOutputs[0]!.pin).toBe(13);
-    // The mapping changes what the firmware does, so it changes the banner hash.
+    // The mapping changes what the firmware does, so it changes the image hash.
     expect(pinned.hash).not.toBe(plain.hash);
     // The compiled-in pin tables cost their descriptor bytes exactly: 2 for the
     // input pin, 3 for the output pin, and one RAM byte for the poll snapshot.
@@ -324,7 +327,7 @@ describe('buildImage', () => {
     const place = board();
     const input = place.input('IN_1', 1);
     const output = place.output('OUT_1', 1);
-    place.input('IN_2', 8);
+    place.input('IN_2', 1);
     connect(place.graph, { inst: input, port: 'out' }, { inst: output, port: 'in' });
     const refusalOf = (pins: PinMap) => {
       const result = buildImage(place.graph, registry, SANDBOX_LEVEL, 'arduino:avr:uno', pins);
@@ -338,9 +341,6 @@ describe('buildImage', () => {
     // stays the holder of the pin.
     expect(shared.instances).toEqual(['OUT_1']);
     expect(refusalOf({ OUT_1: '22' }).code).toBe('pins');
-    const wide = refusalOf({ IN_2: '3' });
-    expect(wide.code).toBe('pins');
-    expect(wide.zh).toContain('IN_2');
   });
 
   it('is deterministic: one circuit, one hash, one sketch', () => {
@@ -349,10 +349,11 @@ describe('buildImage', () => {
     expect(second.hash).toBe(first.hash);
     expect(emitSketch(second)).toBe(emitSketch(first));
     const sketch = emitSketch(first);
-    expect(sketch).toContain('#define TC_HASH 0x');
     expect(sketch).toContain(`#define TC_NODE_COUNT ${first.nodes.length}`);
+    expect(sketch).toContain('#define TC_CLOCK_HZ 1');
     expect(sketch).toContain('void setup()');
     expect(sketch).toContain('void loop()');
-    expect(sketch).toContain('#TC1 ');
+    expect(sketch).not.toContain('Serial.begin');
+    expect(sketch).not.toContain('Serial.print');
   });
 });

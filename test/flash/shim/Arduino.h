@@ -5,12 +5,12 @@
  * Just enough Arduino to run a generated sketch on the host.
  *
  * The point of this file is the equivalence test in `test/flash/host.test.ts`:
- * the same sketch text that `arduino-cli` compiles for an Uno is also compiled
- * with g++ here and driven through a command script, so the firmware's settle,
- * clock-edge and connector behaviour is compared with `Simulation` before a
- * board is ever plugged in. It is NOT an Arduino emulator -- `millis()` is 0 and
- * `Serial` is a queue -- because the tests drive every clock edge explicitly and
- * the firmware's free-run mode is not what needs proving.
+ * the same standalone sketch that `arduino-cli` compiles for an Uno is also
+ * compiled with g++ here and driven through a command script, so the firmware's
+ * settle, clock-edge and pin behaviour is compared with `Simulation` before a
+ * board is ever plugged in. It is NOT an Arduino emulator -- `millis()` is 0 --
+ * because the tests drive every clock edge explicitly and the compiled clock is
+ * asserted in the sketch text instead.
  */
 #include <stdint.h>
 #include <stdio.h>
