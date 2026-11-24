@@ -499,7 +499,7 @@ export function mountAgentPanel(hosts: AgentPanelHosts, options: AgentPanelOptio
         continue;
       }
       if (entry.kind === 'run') {
-        // 一次已结束请求的度量：四个读数与 DSH 显示的一致，
+        // 一次已结束请求的度量：四个读数与 同类工具显示的一致，
         // 但不弹对话框——精确计数和首字平均耗时放在悬浮提示里。
         const line = document.createElement('div');
         line.className = 'agent-run-stats';

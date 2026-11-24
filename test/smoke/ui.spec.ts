@@ -108,7 +108,7 @@ async function placeParts(page: Page): Promise<{ cx: number; cy: number }> {
   return { cx, cy };
 }
 
-/** Drags a wire from the source's output pin to the output part's input pin. */
+/** Drags a wire from 课程表的 output pin to the output part's input pin. */
 async function wireParts(page: Page, cx: number, cy: number): Promise<void> {
   await dragWire(page, cx - 160 + 72, cy, cx + 160, cy);
 }
@@ -396,7 +396,7 @@ async function peakWhite(page: Page, x: number, y: number, width: number, height
  *
  * Reported from a real board: a source sitting to the RIGHT of the gate it feeds
  * took the shortest path -- out past both pins and back left -- and that run went
- * straight through the gate's body. The source here is placed to the right and
+ * straight through the gate's body. 课程表 here is placed to the right and
  * one row up, which is exactly that shape, and the gate is dropped in the way.
  *
  * The probe is the band of board immediately right of the gate at the target
@@ -411,7 +411,7 @@ test('a wire is routed around a gate, not through it', async ({ page }) => {
 
   const { cx, cy } = await boardCentre(page);
   // A part dropped at a point is centred on it, so these four numbers are the
-  // whole geometry: the source's output pin, and the gate's upper input pin.
+  // whole geometry: 课程表的 output pin, and the gate's upper input pin.
   const sourcePin = { x: cx + 200 + 72, y: cy - 140 };
   const gate = { x: cx - 40, y: cy - 100 };
   const inputPin = { x: gate.x, y: gate.y - 12 };
@@ -435,8 +435,8 @@ test('a wire is routed around a gate, not through it', async ({ page }) => {
 /**
  * Right-click is the board's own delete: the part under the pointer, and the
  * wires that reached it, as one undoable step. Checked through the readout rather
- * than the graph -- level 1's output is driven high by the source, so removing
- * the source has to show up as the value falling back to 0, and Ctrl+Z has to
+ * than the graph -- level 1's output is driven high by 课程表, so removing
+ * 课程表 has to show up as the value falling back to 0, and Ctrl+Z has to
  * bring both the part and its wire back.
  */
 test('right-click removes the part under the pointer, undoably', async ({ page }) => {
@@ -448,7 +448,7 @@ test('right-click removes the part under the pointer, undoably', async ({ page }
   const outValue = page.locator('.io-pin .io-value').first();
   await expect(outValue).toHaveText('1');
 
-  // The source's body, clear of its output pin and of the wire leaving it.
+  // 课程表的 body, clear of its output pin and of the wire leaving it.
   await page.mouse.click(cx - 124, cy, { button: 'right' });
   await expect(outValue).toHaveText('0');
   await page.screenshot({ path: 'test-results/smoke-right-click-delete.png' });
@@ -606,7 +606,7 @@ test('ctrl+drag bands the parts it sweeps over', async ({ page }) => {
   await open(page, '/');
   await page.getByRole('button', { name: '开始' }).click();
   const { cx, cy } = await placeParts(page);
-  // The probe sits in the source's body: painted green while it is there.
+  // The probe sits in 课程表的 body: painted green while it is there.
   expect(await peakGreen(page, cx - 124, cy, 20, 20)).toBeGreaterThan(120);
 
   await page.keyboard.down('Control');
@@ -671,7 +671,7 @@ test('chapter 2 is reachable: level 14 opens once chapter 1 is passed', async ({
   await expect(page.locator('.shell-bar')).toContainText('二进制速算');
   // The palette is live across the join: this level's own parts are the chapter-1
   // ones it lists, and the XOR gate is among them. (It is also chapter 2's first
-  // level rather than one of its byte puzzles, which is the 2.x order.)
+  // level rather than one of its byte puzzles, which is the 当前课程 order.)
   await expect(page.getByRole('button', { name: '异或门' })).toBeEnabled();
   // The level's own checker is mounted and live.
   await expect(page.locator('.truth-table')).toBeVisible();
@@ -838,7 +838,7 @@ test('chapter 3 is reachable: level 40 opens once chapter 2 is passed', async ({
 
 test('chapter 3 ends with a level that mounts its program check: level 49', async ({ page }) => {
   // 48 passed: the resume point is the phase's acceptance level -- the one whose
-  // check runs a real OVERTURE program against the machine the player built,
+  // check runs a real AXIS program against the machine the player built,
   // rather than a truth table. Reaching it proves the join reaches the end of
   // chapter 3 (it is the last level visible outside `?dev=1`; chapter 4 is
   // experimental and hidden), and that the `program` check kind (level data +
@@ -1043,19 +1043,19 @@ test('chapter 4 resets the board without losing the program: level 50', async ({
 });
 
 /**
- * A SAVE WRITTEN BEFORE THE 2.x REALIGNMENT KEEPS ITS STARS.
+ * A SAVE WRITTEN BEFORE THE 当前课程 REALIGNMENT KEEPS ITS STARS.
  *
  * The realignment renamed 37 level ids and removed three, and a save is keyed by
  * id -- so without `levels/id-map.ts` inside `migrate` every star would land on a
  * level that no longer exists, silently, because every lookup would simply miss.
  * The unit tests pin the translation table; this walks a real browser through it.
  *
- * The ids below are 1.x's. The fifth one is the interesting one: old
+ * The ids below are 旧版's. The fifth one is the interesting one: old
  * `ch1-06-nor-gate` is the CURRENT `ch1-05-nor-gate`, because the realignment
- * swapped OR and NOR back to the source's order -- so a resume point of level 6
+ * swapped OR and NOR back to 课程表的 order -- so a resume point of level 6
  * is the proof that the old id was translated rather than matched by number.
  */
-test('a save written before the 2.x realignment keeps its stars', async ({ page }) => {
+test('a save written before the campaign realignment keeps its stars', async ({ page }) => {
   const record = { passed: true, best: null, stars: 3 };
   await page.addInitScript(
     ([key, json]) => globalThis.localStorage.setItem(key, json),
@@ -1698,7 +1698,7 @@ test('the agent builds what it was asked for, one visible step at a time', async
   // The row says what happened in a sentence, not in the JSON the model read.
   await expect(page.locator('.agent-tool').first()).toHaveText('place_part · 在 (160, 160) 放了 与非门（i1）');
 
-  // The request's readings, DSH-style: tokens, speed and the cache share, plus a
+  // The request's readings, 同类工具-style: tokens, speed and the cache share, plus a
   // totaliser under the log. The mock sends the usage frame the request asked for.
   await expect(page.locator('.agent-run-stats')).toContainText('1.2k tok');
   await expect(page.locator('.agent-run-stats')).toContainText('缓存 83%');

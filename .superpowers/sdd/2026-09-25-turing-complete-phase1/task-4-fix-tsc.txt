@@ -1,2 +1,0 @@
-# <NODE> <PNPM> exec tsc --noEmit
-# exit code: 0

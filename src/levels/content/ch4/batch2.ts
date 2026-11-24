@@ -1,10 +1,10 @@
 // 第 4 章第 2 批：全局第 53-56 关，本章收尾的四关，也是本章头一次不全是同一形状的关卡。
-// 依赖下层 `boards/overture`（第 3 章机器的共享构造器）与 `spec`/`tables` 的关卡类型；
+// 依赖下层 `boards/axis`（第 3 章机器的共享构造器）与 `spec`/`tables` 的关卡类型；
 // 本文件只被 `content/ch4/index.ts` 拼接。第 54、56 关使用 `custom` 检查器（lock、maze），
 // 由内容路径上的副作用 import 登记。关键不变量：编程关每关两段步进、两个向量；
 // 闭环关的谜题数据（秘密字节、迷宫网格）只住在关卡 `params` 里。
 
-import { overtureBoard } from '../../boards/overture';
+import { axisBoard } from '../../boards/axis';
 import type { LevelSpec, ProgramStep } from '../../spec';
 // 这里的 `LevelIo` 是"引脚形状"，来自 `tables.ts`；`checks.ts` 也导出了一个同名但无关的
 // 运行时接口（绑定后的仿真环境），两者不要混用。
@@ -14,7 +14,7 @@ import type { LevelIo } from '../../tables';
  * 第 4 章第 53-56 关：本章收尾的四关，也是本章头一次不全是同一形状的关卡。
  *
  * 两种关卡、一个通道。第 53、55 关是批次 1 建立的直线形状：
- * `overtureBoard({ inputId })` 当画板，`program` 检查读玩家的程序（`from: 'player'`，无 `source`），
+ * `axisBoard({ inputId })` 当画板，`program` 检查读玩家的程序（`from: 'player'`，无 `source`），
  * 步进列表点名答案必须与不得出现在 `out` 上的节拍。第 54、56 关闭环：
  * 画板是同一台机器但 `halt: false`，检查是 `custom`——谜题数据（秘密字节、迷宫网格）
  * 住在关卡里，由注册的检查器（`lock`、`maze`）重置画板、自己装载玩家程序、驱动关卡引脚，
@@ -45,15 +45,15 @@ import type { LevelIo } from '../../tables';
  * 并把步骤省略的引脚默认为 0，所以没有 `inputs` 的步骤会清掉程序本该读取的字节。
  * `test/levels/ch4-batch2.test.ts` 让每一步都接受这条规则。
  *
- * 第 4 章不发放新元件（设计规格 §3.3），所以每关的 `rewards` 都缺席，
+ * 第 4 章不发放新元件（课程表 §3.3），所以每关的 `rewards` 都缺席，
  * 而托盘是随游戏发布的画板"由哪些元件构成"的精确清单——不是"已挣到的一切"。
  * `test/levels/ch4-batch2.test.ts` 让这份清单与画板双向对上。
  */
 
 /**
- * 随游戏发布的画板由哪些元件构成：`overtureBoard({ inputId })` 的全部元件，含连接器，别无其他。
+ * 随游戏发布的画板由哪些元件构成：`axisBoard({ inputId })` 的全部元件，含连接器，别无其他。
  *
- * 对照 `boards/overture.ts` 的 `placedParts` 阅读：关卡自己的引脚、取指级
+ * 对照 `boards/axis.ts` 的 `placedParts` 阅读：关卡自己的引脚、取指级
  * （常量轨、程序 RAM、计数器、译码器）、模式与字段胶水（拆分器、四个模式门与独热译码器）、
  * 寄存器堆及其 ALU 与写路径（多路选择器与开关），以及跳转胶水与停机线。
  * `halt: false` 是把一根导线接低，而不是增加元件，所以闭环关声明同样的清单、同样的门数。
@@ -225,15 +225,6 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
   /**
    * ch4-53-conditional-jumps —— 条件跳转 / Conditional Jumps
    *
-   * SOURCED：双语名字、位置（第 4 章第四关，全局第 53 关）与一句话概念，
-   * 来自阶段计划的第 4 章表格，它转录了 2.x 档案的第 4 章表格（本任务的 brief，
-   * `task-8-brief.md`）；概念就是条件跳转——`jz`/`jnz` 把机器的直线变成循环。
-   *
-   * AUTHORED（本项目的设计）：`n:8 -> out:8` 引脚形状；语义
-   * `out = n + (n-1) + ... + 1, mod 256`；画板（第 3 章机器，`overtureBoard({ inputId: 'n' })`，
-   * 默认停机）；读"玩家"缓冲区、按汇编解析的 `program` 检查（`from: 'player'`）；
-   * 两段步进及其向量 10 与 1，节拍由参考程序自身形状固定（裁决 R9——见步进注释）；
-   * 托盘（画板自己的元件）与缺席的奖励；以及实测的三星目标。
    */
   {
     id: 'ch4-53-conditional-jumps',
@@ -241,8 +232,8 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
     index: 53,
     name: { zh: '条件跳转', en: 'Conditional Jumps' },
     brief: {
-      zh: '你的 OVERTURE 只在遇到跳转指令时才改变取指顺序——这一关把它用起来。输入脚 n，程序要算 out = n + (n-1) + … + 1（按 256 取模）：拿一个寄存器当计数器、一个当累加器，每轮把计数器加进累加器，再把计数器减 1，减到 0 就跳出循环，最后把累加器写到 out。写 out 之后 halt 会把 PC 冻在那条指令上，所以结果会一直保持。',
-      en: 'Your OVERTURE only changes the order it fetches instructions when it meets a jump -- and this level is where the conditional jump earns its place. The input pin is n, and the program must publish out = n + (n-1) + ... + 1, taken mod 256. Keep the counter in one register and the running total in another: each pass adds the counter into the total, subtracts one from the counter, and leaves the loop when it reaches zero, then writes the total to out. After out is written the halt line freezes the program counter on that instruction, so the answer stays put.',
+      zh: '你的 AXIS 只在遇到跳转指令时才改变取指顺序——这一关把它用起来。输入脚 n，程序要算 out = n + (n-1) + … + 1（按 256 取模）：拿一个寄存器当计数器、一个当累加器，每轮把计数器加进累加器，再把计数器减 1，减到 0 就跳出循环，最后把累加器写到 out。写 out 之后 halt 会把 PC 冻在那条指令上，所以结果会一直保持。',
+      en: 'Your AXIS only changes the order it fetches instructions when it meets a jump -- and this level is where the conditional jump earns its place. The input pin is n, and the program must publish out = n + (n-1) + ... + 1, taken mod 256. Keep the counter in one register and the running total in another: each pass adds the counter into the total, subtracts one from the counter, and leaves the loop when it reaches zero, then writes the total to out. After out is written the halt line freezes the program counter on that instruction, so the answer stays put.',
     },
     hint: {
       zh: '两条跳转都拿 r3 当条件、r0 当地址：先用 loadi 把目标地址装进 r0，jz 在 r3 == 0 时跳过去，jnz 在 r3 不为 0 时跳过去。循环体是「把计数器加进累加器，再把计数器减 1」：move|s5|d1 与 move|s4|d2 把两个操作数摆到 r1/r2，add 写 r3，move|s3|d4 存回累加器；接着 move|s5|d1、loadi|1、move|s0|d2、sub 得到「计数器 - 1」，move|s3|d5 存回计数器，再用 loadi|14 与 jz 决定出不出去（14 就是循环外那条 move|s4|out 的地址，循环头是地址 1）。输入只在第一拍读一次，之后全靠寄存器；另外注意计数器减到 0 的那一轮已经把 1 加进去了，所以和里正好包含 1。',
@@ -266,7 +257,7 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
         steps: STEPS_53_AT_1,
       },
     ],
-    board: overtureBoard({ inputId: 'n' }),
+    board: axisBoard({ inputId: 'n' }),
     // 实测：675 门、6 级深（随游戏发布的画板——见模块说明），
     // 节拍取两段步进的最后一条断言并按 `Math.max` 合并：长的那段跑到 135，短的到 18。
     threeStar: { gate: 675, delay: 6, tick: 135 },
@@ -274,16 +265,6 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
 
   /**
    * ch4-54-code-breaker —— 道破心机 / Code Breaker
-   *
-   * SOURCED：双语名字、位置（第 4 章第五关，全局第 54 关）与一句话概念——
-   * 闭环猜谜游戏——来自阶段计划的第 4 章表格（本任务的 brief），
-   * 它转录了 2.x 档案的第 4 章表格。本关在 1.x 攻略里的前身属于 "code lock" 家族，
-   * 检查器的名字就来自那里。
-   *
-   * AUTHORED（本项目的设计）：`match:8 -> try:8` 引脚形状；秘密值（42，关卡自己选的非零字节——
-   * 见下面的注释）；预算（1024，对着参考程序的 590 实测）；带 params 的 `custom: lock` 检查；
-   * 画板（`overtureBoard({ inputId: 'match', halt: false })`，本关离不开它——见模块说明）；
-   * 托盘与缺席的奖励；以及实测的三星目标。
    *
    * brief 不能宣称 CPU 会对 `match` 作出反应，而它确实没有这样宣称：`out` 是组合的，
    * 只在写它的指令被译码时发布，而 `match` 由"另一条"指令采样——那一拍 `out` 已经回落到 0，
@@ -310,7 +291,7 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
     io: IO_MATCH,
     // 谜题数据住在这里，不在检查器里（裁决 4）：秘密字节，以及比参考程序实测 590 拍多四百拍的预算。
     checks: [{ kind: 'custom', id: 'lock', params: { secret: 42, budget: LOCK_BUDGET } }],
-    board: overtureBoard({ inputId: 'match', halt: false }),
+    board: axisBoard({ inputId: 'match', halt: false }),
     // 实测：675 门、6 级深（`halt` 是零成本元件，所以闭环画板与直线画板一样重），
     // 590 拍——参考程序发布 42 的那次读取，由批次测试通过 `runChecks` 重新测量。
     threeStar: { gate: 675, delay: 6, tick: 590 },
@@ -318,15 +299,6 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
 
   /**
    * ch4-55-mod-4 —— 高速掩码 / Mod 4
-   *
-   * SOURCED：双语名字、位置（第 4 章第六关，全局第 55 关）与一句话概念——
-   * 位掩码——来自阶段计划的第 4 章表格（本任务的 brief），它转录了 2.x 档案的第 4 章表格。
-   * 中文名"高速掩码"就是本关所教的"快掩码"：一个 `and` 取代一次除法或一次倒数。
-   *
-   * AUTHORED（本项目的设计）：`in:8 -> out:8` 引脚形状；语义 `out = in & 3`；
-   * 画板（`overtureBoard({ inputId: 'in' })`）；读"玩家"汇编的 `program` 检查；
-   * 两段步进，42（求 2）与 255（求 3）——裁决 R9 要求的两个向量，
-   * 也是答案都属于单指令常数的那一对；托盘与缺席的奖励；以及实测的三星目标。
    *
    * 程序就是第 51 关那五条指令，只是把 `add` 换成 `and`，这是关卡自己的主张而不是巧合：
    * 汇编器不计算任何新东西，变的只有运算。批次测试把两种拼写钉在同一张 ISA 表上。
@@ -360,7 +332,7 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
         steps: STEPS_55_AT_255,
       },
     ],
-    board: overtureBoard({ inputId: 'in' }),
+    board: axisBoard({ inputId: 'in' }),
     // 实测：与第 4 章其它关卡同一块画板，所以 675 门、6 级深；节拍取两段步进的最后一条断言
     // （形状相同，所以 `Math.max` 是 10）。
     threeStar: { gate: 675, delay: 6, tick: 10 },
@@ -368,17 +340,6 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
 
   /**
    * ch4-56-the-maze —— 路在脚下 / The Maze
-   *
-   * SOURCED：双语名字、位置（第 4 章第七关，全局第 56 关，本章最后一关）与一句话概念——
-   * 用三个墙面传感器把机器人开过网格——来自阶段计划的第 4 章表格（本任务的 brief），
-   * 它转录了 2.x 档案的第 4 章表格。参考算法也一并来自资料：把手一直放在墙上，
-   * 也就是 fixture 程序实现的"左边通就左转；否则前方通就前进；否则右转"规则。
-   *
-   * AUTHORED（本项目的设计）：`sensors:8 -> move:8` 引脚形状，
-   * 以及检查器与 brief 共享的传感器/动作编码（bit0 前方、bit1 左、bit2 右，墙 = 1；
-   * move 0 原地、1 前进、2 左转、3 右转）；迷宫网格本身、它朝东的起点与 1024 的预算；
-   * 带 params 的 `custom: maze` 检查；画板（`overtureBoard({ inputId: 'sensors', halt: false })`，
-   * 没有它，行走者会在第一步就冻住）；托盘与缺席的奖励；以及实测的三星目标。
    *
    * 迷宫是设计出来的，不是借来的，而裁决 3 固定了它必须满足什么：单格宽、封闭、
    * 参考规则能在预算内解出，而"永远前进"这种平凡程序"解不出"——批次测试会通过真实 CPU
@@ -404,7 +365,7 @@ export const CH4_BATCH2: readonly LevelSpec[] = [
     checks: [
       { kind: 'custom', id: 'maze', params: { grid: MAZE_GRID, budget: MAZE_BUDGET } },
     ],
-    board: overtureBoard({ inputId: 'sensors', halt: false }),
+    board: axisBoard({ inputId: 'sensors', halt: false }),
     // 实测：675 门、6 级深（同一台机器，`halt` 接低），168 拍——那一次交换的沿在第十步
     // 把机器人放到 `G` 上，由批次测试通过 `runChecks` 重新测量。
     // 路线花掉沿墙者 17 指令循环的九整趟，第十步的 `out` 出现在它那一趟的第 14 条指令。

@@ -46,7 +46,7 @@ import '../../custom/maze';
  * 参考程序完全不在这里：它们属于 `test/fixtures/ch4-references.ts`，每关一条 `{ program, format }`；
  * 如果关卡自带参考文本，空的玩家缓冲区就可能被拿去和它比对而误判通过。
  *
- * 画板用的是第 3 章那台机器（`boards/overture.ts`），而且是共享的构造器而非拷贝：
+ * 画板用的是第 3 章那台机器（`boards/axis.ts`），而且是共享的构造器而非拷贝：
  * `test/fixtures/ch3-references.ts` 给第 3 章机器评分用的也是同一个构造器，
  * 所以玩家在第 4 章编程的 CPU，正是玩家在第 3 章亲手搭出来的 CPU。
  */

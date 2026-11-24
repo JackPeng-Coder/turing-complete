@@ -14,7 +14,7 @@
  * 同时“什么都不检查”的空洞检查一律算失败，不能让任何电路蒙混过关。
  */
 
-import { assemble, OVERTURE_ISA, parseImage } from '../asm/index';
+import { assemble, AXIS_ISA, parseImage } from '../asm/index';
 import { CircuitValidationError, UnstableCircuitError } from '../core/errors';
 import type { Graph } from '../core/graph';
 import { Simulation, compile, type Netlist } from '../core/net';
@@ -55,7 +55,7 @@ export interface LevelIo {
    * 表（`Simulation.tick` 在施加沿之前先读每个存储元件的输入），而
    * `writeInput` 写入的值只有经过一次结算才能到达某个存储元件的输入端
    * ——所以写完就 tick 的调用方，锁存到的是上一次结算留下的值，也就是
-   * “上一组”输入向量。在 OVERTURE 板上这不是边角情况：关卡的输入要经过
+   * “上一组”输入向量。在 AXIS 板上这不是边角情况：关卡的输入要经过
    * `srcData` -> `d1` -> `data` 三个组合元件才到寄存器堆，所以不结算的
    * 检查器读到的是一个节拍之前写下的字节。内核自己的两个驱动器都正因此
    * 结算（`driveSteps` 在步骤输入与该步时钟沿之间，`runRow` 在
@@ -1501,7 +1501,7 @@ export function loadProgramImage(
  * 解析器从不抛错：拒绝是数据，不是异常。
  */
 function imageOfAssembly(text: string): { readonly bytes: readonly number[] } | { readonly detail: string } {
-  const assembled = assemble(text, OVERTURE_ISA);
+  const assembled = assemble(text, AXIS_ISA);
   const first = assembled.errors[0];
   if (first !== undefined) {
     return { detail: `program assembly failed at line ${first.line}: ${first.reason}` };

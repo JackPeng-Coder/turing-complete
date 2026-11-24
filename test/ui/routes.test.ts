@@ -97,7 +97,7 @@ function wire(
 
 describe('the router goes around parts, not through them', () => {
   /**
-   * The reported defect, rebuilt: the source is to the RIGHT of the target and
+   * The reported defect, rebuilt: 课程表 is to the RIGHT of the target and
    * one row down, so the shortest path hooks out to the right of both pins and
    * comes back left -- straight through a gate placed in that run. The old
    * router drew exactly that; the new one has to find its way around.

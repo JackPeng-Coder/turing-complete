@@ -23,7 +23,7 @@ import type { CheckFailure, CheckOutcome, CustomCheck, LevelSpec } from '../spec
 /**
  * `maze` —— 路在脚下 / The Maze，第 4 章的闭环导航检查器。
  *
- * 谜题。画板是玩家自己的 OVERTURE CPU，一个机器人在关卡声明的网格上行走。
+ * 谜题。画板是玩家自己的 AXIS CPU，一个机器人在关卡声明的网格上行走。
  * CPU 看到三位——正前方有墙、左边有墙、右边有墙，全部相对机器人当前朝向——
  * 并用一个动作码作答。检查器应用这个动作，发布机器人新状态对应的传感器字节，
  * 结算、推进时钟，然后再次询问。机器人站上终点就赢。

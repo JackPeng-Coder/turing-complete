@@ -241,7 +241,7 @@ export function parsePorts(payload) {
  * Whether `arduino-cli core list --format json` says the AVR core is installed.
  *
  * The CLI has reported the installed platform as either `installed_version`
- * (1.x) or `installed: true` (older), and the shape of the rest of the payload
+ * (旧版) or `installed: true` (older), and the shape of the rest of the payload
  * has changed often enough that only these two markers are trusted.
  */
 export function coreInstalled(payload) {

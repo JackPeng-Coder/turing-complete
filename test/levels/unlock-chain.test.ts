@@ -20,55 +20,28 @@ import { registry } from '../fixtures/build';
 /**
  * The chapter's unlock chain, asserted as a chain rather than level by level.
  *
- * WHAT THIS ADDS OVER THE OTHER TWO WALKS. `level-buildability.test.ts` checks
- * each level against its own palette (can the player build this level's
- * reference, and does the level offer anything it has not earned);
- * `ch2-batch*.test.ts` check each batch against its own file. Neither can see the
- * CHAPTER: whether every part the design says chapter 2 teaches is handed out,
- * whether one part is handed out twice (a level rewarding what an earlier level
- * already unlocked is a dead reward), or whether a part is offered before
- * anything unlocks it. That is what is below, over all 26 levels at once.
+ * Level-buildability checks each level against its own palette. This file checks
+ * the CHAPTER: whether every part the chapter is supposed to teach is handed
+ * out exactly once, whether one part is handed out twice (a level rewarding what
+ * an earlier level already unlocked is a dead reward), or whether a part is
+ * offered before anything unlocks it. That is what is below, over all 26 levels
+ * at once.
  *
- * THE EXPECTATION IS READ OUT OF THE SPEC, NOT RESTATED HERE. §3.3 of
- * `docs/superpowers/specs/2026-09-25-turing-complete-replica-design.md` is this
- * project's authority for which chapter unlocks what, so §3.3's rows are parsed
- * out of that markdown while this file runs (`specRow` below). This file used to
- * carry its own 33-name copy of §3.3's chapter-2 row and check the levels against
- * THAT. A copy is maintained by the same hand as the level data, so it tracks the
- * data and never the spec the data is supposed to match -- which is how §3.3 and
- * the levels could disagree for a whole phase with every test green. `ram8`,
- * rewarded by level 28 and named nowhere in §3.3, is what that cost.
+ * THE EXPECTATION IS READ OUT OF `docs/curriculum.md`, NOT RESTATED HERE. §3.3
+ * is the authority for which chapter unlocks what, so its rows are parsed out of
+ * that markdown while this file runs (`chapterRow` below). Keeping the table in
+ * one place means the curriculum and the level data cannot drift apart without
+ * this test failing.
  *
- * BOTH DIRECTIONS ARE CHECKED, and neither one restates the other's list:
+ * BOTH DIRECTIONS ARE CHECKED:
  *
- *  * spec -> data: every part §3.3's chapter-2 row names is unlocked by exactly
- *    one chapter-2 level (the `describe` below titled "every part in spec §3.3's
- *    chapter-2 list ..."). There is no exemption left: `decoder2` had one until
- *    the 2.x shape gave it a level, and the test that recorded the hole now
- *    records the level that filled it.
- *  * data -> spec: every part a chapter-2 level hands out is named by that row
- *    ("spec §3.3's rows and the level data agree", above it). That is the
- *    direction the old copy could not see, and the one `ram8` would have failed.
+ *  * table -> data: every part in §3.3's chapter-2 row is unlocked by exactly
+ *    one chapter-2 level.
+ *  * data -> table: every part a chapter-2 level hands out is named by that row.
  *
- * THE PHASE-END RULINGS, all settled, all of them now visible in §3.3 itself:
- *
- *  * `mem1` is a CHAPTER-1 part. Chapter 1's capstone (level 13, the Logic Exam)
- *    hands it out so chapter 2's latch level has a storage element to build its
- *    loop from; §3.3's chapter-1 row names it and the chapter-2 row no longer
- *    does.
- *  * `switch` unlocks at level 17 and `switch8` at level 27 in this project --
- *    the two are no longer one hand-out. The latch level's reference is built
- *    from two `switch`es, so the 1-bit part lands there; the 8-bit version
- *    arrives with the byte adder. §3.3's chapter-2 row names both. The source
- *    teaches the 1-bit part at its own Bit Switch level, which is level 24 here,
- *    so that level is a re-teach rather than a first meeting.
- *  * `ram8` is in §3.3's chapter-2 row: level 17 rewards it and level 38's little
- *    box is built from it.
- *  * `decoder2` used to be the counter-example this block recorded: §3.3 named
- *    it, no level rewarded it, and rule 2 carried an exemption for it. The 2.x
- *    shape gives it a level (`ch2-36-2-bit-decoder`), so the three widths are now
- *    introduced one per level -- `decoder1` at 35, `decoder2` at 36, `decoder3`
- *    at 37 -- and nothing is exempt from the rule.
+ * The settled hand-outs are visible in §3.3 itself: `mem1` belongs to chapter 1;
+ * `switch` unlocks at level 17 and `switch8` at level 27; `ram8` is in the
+ * chapter-2 row; `decoder2` gets its own level at 36.
  *
  * Anything ELSE unlocked by zero or two levels is a real defect -- a part no
  * player can ever hold, or a level whose reward is already in the player's hands
@@ -76,7 +49,7 @@ import { registry } from '../fixtures/build';
  */
 
 /**
- * Spec §3.3's unlock table, read out of the spec file.
+ * 课程表 §3.3's unlock table, read out of 课程表文件.
  *
  * The parse is deliberately shallow, and that is the whole reason it is safe to
  * depend on: §3.3's rows are markdown table rows, one row per line, and the
@@ -87,13 +60,13 @@ import { registry } from '../fixtures/build';
  * heading, a missing row and a repeated label all throw with the label in the
  * message, and the tests below pin what the rows they read have to contain.
  */
-const SPEC_PATH = '../../docs/superpowers/specs/2026-09-25-turing-complete-replica-design.md';
-const SPEC_MARKDOWN: string = readFileSync(new URL(SPEC_PATH, import.meta.url), 'utf8');
+const CURRICULUM_PATH = '../../docs/curriculum.md';
+const CURRICULUM_MARKDOWN: string = readFileSync(new URL(CURRICULUM_PATH, import.meta.url), 'utf8');
 
 /** The text of `heading`'s section: from that heading to the next `###` one. */
 function sectionOf(markdown: string, heading: string): string {
   const start = markdown.indexOf(heading);
-  if (start < 0) throw new Error(`the design spec has no \`${heading}\` section to read`);
+  if (start < 0) throw new Error(`课程表 has no \`${heading}\` section to read`);
   const rest = markdown.slice(start + 1);
   const next = rest.indexOf('\n### ');
   return next < 0 ? rest : rest.slice(0, next);
@@ -107,44 +80,44 @@ function parseUnlockRows(markdown: string): Map<string, readonly string[]> {
     if (!cells) continue;
     const label = cells[1]!;
     const ids = [...cells[2]!.matchAll(/`([a-z0-9_]+)`/g)].map((match) => match[1]!);
-    if (rows.has(label)) throw new Error(`spec §3.3 has two rows labelled \`${label}\``);
+    if (rows.has(label)) throw new Error(`课程表 §3.3 has two rows labelled \`${label}\``);
     rows.set(label, ids);
   }
   return rows;
 }
 
-const UNLOCK_ROWS = parseUnlockRows(SPEC_MARKDOWN);
+const UNLOCK_ROWS = parseUnlockRows(CURRICULUM_MARKDOWN);
 
 /** The component ids §3.3's row for `label` names, or a loud failure. */
-function specRow(label: string): readonly string[] {
+function chapterRow(label: string): readonly string[] {
   const ids = UNLOCK_ROWS.get(label);
-  if (!ids) throw new Error(`spec §3.3 has no row for ${label}`);
+  if (!ids) throw new Error(`课程表 §3.3 has no row for ${label}`);
   return ids;
 }
 
 /** §3.3's chapter-1 row: level 13's `mem1` puts a memory part in this row. */
-const CH1_ROW = specRow('Ch1');
+const CH1_ROW = chapterRow('Ch1');
 
 /**
  * §3.3's chapter-2 row: the 30 parts the chapter's levels hand out. `decoder2`
  * is in it like every other name: `ch2-36-2-bit-decoder` is where it arrives
  * (see the ruling above).
  */
-const CH2_ROW = specRow('Ch2');
+const CH2_ROW = chapterRow('Ch2');
 
 /**
  * §3.3's chapter-3 row: the ten parts the chapter hands out -- the six the
- * OVERTURE machine is built from, plus `alu2` and the shift/rotate family the
+ * AXIS machine is built from, plus `alu2` and the shift/rotate family the
  * retired Logic Engine used to carry, which `ch3-42-alu-2` hands out now.
  *
  * The six machine parts needed no ruling before they could be asserted: each is
  * introduced by a chapter-3 level, in row order, against a level whose brief is
  * the part itself. Chapters 1 and 2 both had to settle a name that had moved
- * (`mem1` into chapter 1's capstone, `switch` off the source's own level, `ram8`
+ * (`mem1` into chapter 1's capstone, `switch` off the 课程表的 own level, `ram8`
  * named only late), which is why their blocks below carry rulings and this one
  * carries none.
  */
-const CH3_ROW = specRow('Ch3');
+const CH3_ROW = chapterRow('Ch3');
 
 /** The starters, as a `Set<string>` so `has` takes a plain string. */
 const STARTERS = new Set<string>(STARTER_COMPONENTS);
@@ -191,25 +164,25 @@ describe('every chapter-2 level offers only parts it has already earned', () => 
 });
 
 // ---------------------------------------------------------------------------
-// The spec's §3.3 rows and the level data, compared in both directions
+// The 课程表的 §3.3 rows and the level data, compared in both directions
 // ---------------------------------------------------------------------------
 
-describe("spec §3.3's rows and the level data agree", () => {
+describe("课程表 §3.3's rows and the level data agree", () => {
   it('reads a row for every chapter the table lists', () => {
-    // Parse sanity. `specRow` already throws when a row it was asked for is
+    // Parse sanity. `chapterRow` already throws when a row it was asked for is
     // absent; this states the table's shape, so a deleted or renamed table is
     // reported here rather than as a confusing failure further down.
     for (const label of ['Ch1', 'Ch2', 'Ch3', 'Ch4', 'Ch5', 'Ch6', 'Ch7', '沙盒专用']) {
-      expect(UNLOCK_ROWS.has(label), `spec §3.3 has no row for ${label}`).toBe(true);
+      expect(UNLOCK_ROWS.has(label), `课程表 §3.3 has no row for ${label}`).toBe(true);
     }
     // Chapters 4-7 and the sandbox row are read but not compared against data:
-    // this build ships chapters 1-3 (47 levels), so the later rows have no
+    // this build ships chapters 1-4 (56 levels), so the later rows have no
     // rewards to be checked against until their chapters exist.
   });
 
   it('names every part a chapter-2 level hands out', () => {
-    // The direction rule 2 cannot see. Rule 2 walks the spec's list, so a part
-    // the spec never names is invisible to it however many levels reward it --
+    // The direction rule 2 cannot see. Rule 2 walks the 课程表的 list, so a part
+    // 课程表 never names is invisible to it however many levels reward it --
     // `ram8` was exactly that until the phase-end ruling: rewarded by level 28,
     // listed by level 37's palette, and absent from §3.3 for a whole phase
     // because the expectation in this file was a copy of the same list.
@@ -222,10 +195,10 @@ describe("spec §3.3's rows and the level data agree", () => {
       }
     }
     // Non-vacuity: the walk reached the chapter's rewards at all. A floor, not a
-    // count of record -- how many there are is the spec's business, not this
+    // count of record -- how many there are is the 课程表的 business, not this
     // file's, and a stub or empty parse must not pass this test.
     expect(rewarded.size).toBeGreaterThanOrEqual(25);
-    expect(unnamed, "chapter-2 rewards spec §3.3's chapter-2 row does not name").toEqual([]);
+    expect(unnamed, "chapter-2 rewards 课程表 §3.3's chapter-2 row does not name").toEqual([]);
   });
 
   it('agrees with the chapter-1 row in both directions, mem1 included', () => {
@@ -237,7 +210,7 @@ describe("spec §3.3's rows and the level data agree", () => {
     expect(rewarded.size).toBeGreaterThanOrEqual(10);
     expect(
       [...rewarded].filter((def) => !CH1_ROW.includes(def)),
-      "chapter-1 rewards spec §3.3's chapter-1 row does not name",
+      "chapter-1 rewards 课程表 §3.3's chapter-1 row does not name",
     ).toEqual([]);
 
     // The other direction, for chapter 1: a name in the row that no chapter-1
@@ -253,15 +226,15 @@ describe("spec §3.3's rows and the level data agree", () => {
         problems.push(`${def} is unlocked by ${unlockers[0]!.id}, which is chapter ${unlockers[0]!.chapter}`);
       }
     }
-    expect(problems, "parts spec §3.3's chapter-1 row names that chapter 1 does not hand out").toEqual(
+    expect(problems, "parts 课程表 §3.3's chapter-1 row names that chapter 1 does not hand out").toEqual(
       [],
     );
   });
 
   it('agrees with the chapter-3 row in both directions', () => {
     // Both directions in one test, deliberately: chapter 3's six parts are all
-    // introduced by the six levels whose brief is that part, so the spec->data
-    // and data->spec walks are two views of a single claim -- the machine is
+    // introduced by the six levels whose brief is that part, so 课程表->data
+    // and data->课程表 walks are two views of a single claim -- the machine is
     // handed out one piece per level, in order, with nothing left over. Splitting
     // them would let a part be dropped from the row and from the levels at once
     // and still read as two passes.
@@ -277,7 +250,7 @@ describe("spec §3.3's rows and the level data agree", () => {
     expect(rewarded.size).toBe(CH3_ROW.length);
     expect(
       [...rewarded].filter((def) => !CH3_ROW.includes(def)),
-      "chapter-3 rewards spec §3.3's chapter-3 row does not name",
+      "chapter-3 rewards 课程表 §3.3's chapter-3 row does not name",
     ).toEqual([]);
 
     // The other direction: a name in the row that no chapter-3 level hands out
@@ -294,7 +267,7 @@ describe("spec §3.3's rows and the level data agree", () => {
         problems.push(`${def} is unlocked by ${unlockers[0]!.id}, which is chapter ${unlockers[0]!.chapter}`);
       }
     }
-    expect(problems, "parts spec §3.3's chapter-3 row names that chapter 3 does not hand out").toEqual(
+    expect(problems, "parts 课程表 §3.3's chapter-3 row names that chapter 3 does not hand out").toEqual(
       [],
     );
   });
@@ -304,13 +277,13 @@ describe("spec §3.3's rows and the level data agree", () => {
 // Rule 2: every listed part is unlocked by exactly one level
 // ---------------------------------------------------------------------------
 
-describe("every part in spec §3.3's chapter-2 list is unlocked by exactly one level", () => {
-  it('walks the spec row itself, with no repeats and nothing dropped', () => {
+describe("every part in 课程表 §3.3's chapter-2 list is unlocked by exactly one level", () => {
+  it('walks 课程表 row itself, with no repeats and nothing dropped', () => {
     // Non-vacuity for the rule below: a parse that returned nothing, or half a
     // row, would quietly stop checking parts. The floor is a sanity band rather
-    // than a count of record -- the counts belong to the spec, and restating one
+    // than a count of record -- the counts belong to 课程表, and restating one
     // here is the mistake this file was rewritten to stop making. The duplicate
-    // check is a check on the spec: one part spelled twice is one the row cannot
+    // check is a check on 课程表: one part spelled twice is one the row cannot
     // honestly claim to introduce once.
     expect(CH2_ROW.length).toBeGreaterThanOrEqual(25);
     expect(new Set(CH2_ROW).size).toBe(CH2_ROW.length);
@@ -341,7 +314,7 @@ describe("every part in spec §3.3's chapter-2 list is unlocked by exactly one l
 
   it('hands ram8 out at level 17, ahead of the level that builds from it', () => {
     // SETTLED, and §3.3 now names `ram8` in its chapter-2 row -- the row test
-    // above fails if it stops. What is left to pin here is the part the spec
+    // above fails if it stops. What is left to pin here is the part 课程表
     // does not carry: WHICH level hands it out, and that the reward precedes the
     // first level that offers it. Load-bearing: level 38 lists `ram8`, so if
     // level 17 stopped rewarding it, level 38 would offer a part no level
@@ -358,14 +331,13 @@ describe("every part in spec §3.3's chapter-2 list is unlocked by exactly one l
     // which rule 2 cannot see: the 1-bit part lands on the latch level, whose
     // reference is built from two `switch`es (`test/fixtures/ch2-references.ts`
     // `circularDependencyReference`), and the 8-bit version arrives with the byte
-    // adder. The source teaches the 1-bit part at its own Bit Switch level --
-    // level 24 here, seven levels after the player already holds it -- which is
-    // the recorded cost of teaching the part where a puzzle needs it.
+    // adder. Level 24 re-teaches the part after the player already holds it,
+    // which is the recorded cost of teaching it where a puzzle needs it.
     expect(unlockersOf('switch').map((level) => level.id)).toEqual(['ch2-17-circular-dependency']);
     expect(unlockersOf('switch8').map((level) => level.id)).toEqual(['ch2-27-adding-bytes']);
   });
 
-  it('unlocks mem1 at chapter 1 level 13, the row the spec puts it in', () => {
+  it('unlocks mem1 at chapter 1 level 13, the row 课程表 puts it in', () => {
     // The ruling: chapter 2's latch level builds from `mem1`, and the part is
     // handed out by chapter 1's capstone so it exists before chapter 2 opens.
     // Both halves are asserted, because "unlocked by chapter 1" is only half the
@@ -484,7 +456,7 @@ describe('chapter 2 is exactly 26 levels, at indices 14-39', () => {
     // it is compared against.
     //
     // The chapter's export is compared to the game as a SET rather than as a
-    // sequence, and that is the 2.x shape rather than a relaxation: the four
+    // sequence, and that is the 当前课程 shape rather than a relaxation: the four
     // batches hold scattered slices of the chapter's numbering (batch 1 is 14,
     // 15, 16, 18, 21), so `content/index.ts` sorts the joined set by index and
     // `LEVEL_ORDER` is the campaign's order, not the batches'. The sibling test

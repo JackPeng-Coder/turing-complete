@@ -25,7 +25,7 @@ const byId = new Map(CH1_PART2.map((l) => [l.id, l]));
 
 describe('chapter 1 levels 7-13', () => {
   it('exposes seven levels in order', () => {
-    // Seven since the 2.x realignment: the XNOR capstone (12) and the logic exam
+    // Seven since the 当前课程 realignment: the XNOR capstone (12) and the logic exam
     // (13) joined, and the level that used to be 12 left for chapter 2.
     expect(CH1_PART2.map((l) => l.index)).toEqual([7, 8, 9, 10, 11, 12, 13]);
   });
@@ -180,7 +180,7 @@ const solutions: Record<string, () => Graph> = {
  * Circuits that a player would plausibly build and that must be rejected.
  *
  * `ch2-14-binary-racer`'s two entries used to live in this file too, because the
- * level was chapter 1's twelfth and this half owned it. The 2.x realignment moved
+ * level was chapter 1's twelfth and this half owned it. The 当前课程 realignment moved
  * it to chapter 2 (`src/levels/content/ch2/batch1.ts`), so the circuits moved with
  * it: a level this half no longer contains cannot be looked up in `byId` here, and
  * the loops below would grade `undefined` rather than the circuit.
@@ -346,13 +346,13 @@ describe('the chapter 1 registry', () => {
     expect(getLevel('ch1-07-always-on')).toBe(CH1_PART2[0]);
     expect(getLevel('ch1-13-logic-exam')).toBe(CH1_PART2[6]);
     // `ch2-14-binary-racer` used to BE `CH1_PART2[5]` -- chapter 1's capstone. The
-    // 2.x realignment moved it to chapter 2, so the assertion that it resolves at
+    // 当前课程 realignment moved it to chapter 2, so the assertion that it resolves at
     // all is kept here, pinned to the chapter it now belongs to.
     expect(getLevel('ch2-14-binary-racer').chapter).toBe(2);
   });
 
   it('lists chapter 1 as all thirteen levels', () => {
-    // Thirteen since the 2.x realignment, which added the XNOR capstone (12) and
+    // Thirteen since the 当前课程 realignment, which added the XNOR capstone (12) and
     // the logic exam (13) and moved the level that used to be 12 into chapter 2.
     expect(levelsOfChapter(1).map((l) => l.index)).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,

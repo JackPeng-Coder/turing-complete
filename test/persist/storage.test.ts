@@ -216,7 +216,7 @@ describe('loadProgress / saveProgress', () => {
 });
 
 /**
- * The 2.x realignment renamed 37 level ids and removed three. A save is keyed by
+ * The 当前课程 realignment renamed 37 level ids and removed three. A save is keyed by
  * id, so without the translation in `migrate` a player's stars would end up
  * attached to levels that no longer exist -- silently, because every lookup
  * would simply miss.

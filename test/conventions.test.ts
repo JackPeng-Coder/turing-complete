@@ -1,9 +1,9 @@
 /**
  * The project's conventions, as assertions that can fail.
  *
- * This file is this project's substitute for a linter. AGENTS.md records why no
- * linter is pinned (a dependency policy of exact versions and zero runtime
- * packages, enforced by a host that rejects freshly published ones); the rules
+ * This file is this project's substitute for a linter. CONTRIBUTING.md records
+ * why no linter is pinned (a dependency policy of exact versions and zero
+ * runtime packages, enforced by a host that rejects freshly published ones); the rules
  * that would otherwise live in prose live here instead, and they run under
  * `pnpm test` with everything else.
  *
@@ -107,11 +107,10 @@ function isLayer(name: string | undefined): name is Layer {
 /**
  * Which layers each layer may import, whether the import is a value or a type.
  *
- * This is the rule `docs/superpowers/plans/2026-09-25-turing-complete-phase0.md`
- * states as "four layers, one-way" -- restated to match the architecture the
- * code actually has, because that plan predates `asm/` and `persist/`, and
- * because `ui/` reads `core/` and `levels/` directly rather than going through
- * `app/`. What is enforced is the part that matters: nothing imports upwards.
+ * The layers are "four layers, one-way", restated to match the architecture the
+ * code actually has: `ui/` reads `core/` and `levels/` directly rather than
+ * going through `app/`. What is enforced is the part that matters: nothing
+ * imports upwards.
  *
  * The order is `core <- asm <- levels <- flash`, with `app` beside `flash`, `persist` beside `app`
  * (it reads `app/progress` to build an empty save) and `agent` beside it too. `flash/` turns a
@@ -232,8 +231,8 @@ describe('the README layout', () => {
     expect(invented).toEqual([]);
   });
 
-  it('tells a reader where the record and the tooling live', () => {
-    for (const path of ['tools/', 'docs/', '.superpowers/']) {
+  it('tells a reader where the curriculum and the tooling live', () => {
+    for (const path of ['tools/', 'docs/']) {
       expect(README.includes(path), `README never mentions ${path}`).toBe(true);
     }
   });
@@ -276,7 +275,7 @@ describe("the board's silhouettes", () => {
    *
    * The fix is structural: both callers now go through `traceSilhouette`, and
    * this rule fails if a second call site of either body tracer appears. It reads
-   * the source as text because that is what the invariant is about -- the tool
+   * 课程表 as text because that is what the invariant is about -- the tool
    * that catches the next drift has to see the code, not the picture.
    */
   it('traces every part body through the one silhouette function', () => {

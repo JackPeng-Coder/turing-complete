@@ -8,7 +8,7 @@ import { BASE_DEFS } from '../../src/core/defs/index';
 import { emptyGraph } from '../../src/core/graph';
 import { getLevel, LEVELS } from '../../src/levels/index';
 import { graphFromBoard } from '../../src/levels/board';
-import { overtureBoard } from '../../src/levels/boards/overture';
+import { axisBoard } from '../../src/levels/boards/axis';
 import { levelExpectsProgram, playerProgramFormat } from '../../src/levels/checks';
 import { createProgramRun, type ProgramRun } from '../../src/levels/run';
 import type { LevelCheck, LevelSpec } from '../../src/levels/spec';
@@ -53,7 +53,7 @@ function playerLevel(overrides: Partial<LevelSpec> = {}): LevelSpec {
       outputs: [{ id: 'out', width: 8 }],
     },
     checks,
-    board: overtureBoard({ inputId: 'in' }),
+    board: axisBoard({ inputId: 'in' }),
     ...overrides,
   };
 }

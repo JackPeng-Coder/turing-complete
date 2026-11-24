@@ -178,7 +178,7 @@ const solutions: Record<string, () => Graph> = {
       { kind: 'part', def: 'nand', id: 'g', from: ['n1', 'n2'] },
       { kind: 'output', from: 'g' },
     ]),
-  // De Morgan, not OR + NOT: the 2.x chapter puts NOR at level 5 and OR at
+  // De Morgan, not OR + NOT: the 当前课程 chapter puts NOR at level 5 and OR at
   // level 6, so `or` is not in this level's palette (`allowedComponents` lists it
   // today only because level 4 still hands it out; the level's own comment calls
   // the reference OR + NOT). NOT(a) AND NOT(b) is the same function, measures the

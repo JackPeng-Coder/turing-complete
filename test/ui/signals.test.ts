@@ -5,7 +5,7 @@ import { addInstance, connect, emptyGraph } from '../../src/core/graph';
 import { getLevel } from '../../src/levels/index';
 import { SANDBOX_ID, SANDBOX_LEVEL } from '../../src/levels/sandbox';
 import { graphFromBoard } from '../../src/levels/board';
-import { overtureBoard } from '../../src/levels/boards/overture';
+import { axisBoard } from '../../src/levels/boards/axis';
 import { createProgramRun } from '../../src/levels/run';
 import type { LevelSpec } from '../../src/levels/spec';
 import { createDisplay } from '../../src/ui/board/signals';
@@ -36,7 +36,7 @@ const ECHO = ['move|inp|d1', 'move|s1|out'].join('\n');
 
 /** The reference board, with `PROGRAM_LEVEL`'s pins wired to it. */
 function programBoard() {
-  return graphFromBoard(PROGRAM_LEVEL.id, overtureBoard({ inputId: 'in' }));
+  return graphFromBoard(PROGRAM_LEVEL.id, axisBoard({ inputId: 'in' }));
 }
 
 /**

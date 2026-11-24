@@ -209,7 +209,7 @@ const REFERENCE_SOLUTIONS: Record<string, FiledReference> = {
       { kind: 'part', def: 'nand', id: 'g', from: ['n1', 'n2'] },
       { kind: 'output', from: 'g' },
     ]),
-  // De Morgan, not OR + NOT: OR is level 6's part in the 2.x chapter and NOR is
+  // De Morgan, not OR + NOT: OR is level 6's part in the 当前课程 chapter and NOR is
   // level 5's, so the reference is the spelling the levels before it unlock --
   // NOT(a) AND NOT(b), the same function at the same 4 gates on a path two deep.
   'ch1-05-nor-gate': () =>
@@ -284,14 +284,14 @@ const REFERENCE_SOLUTIONS: Record<string, FiledReference> = {
       { kind: 'part', def: 'or3', id: 'any2', from: ['ab', 'ac', 'bc'] },
       { kind: 'output', from: 'any2' },
     ]),
-  // Straight wires: chapter 2's opener, which the 2.x realignment moved out of
+  // Straight wires: chapter 2's opener, which the 当前课程 realignment moved out of
   // chapter 1. Its reference is the shared fixture's, like the rest of the
   // chapter's -- writing a second copy here would be free to drift from it.
   // Chapter 2, levels 14-39, from the shared fixture the batch tests also use.
   ...CH2_REFERENCES,
   // Chapter 3, levels 40-49, likewise -- and here the fixture matters more than
   // it did for chapter 2. All three chapter-3 levels in a batch share ONE
-  // reference graph (`overtureMachine`, `computeUnitGraph`, ...), parameterised
+  // reference graph (`axisMachine`, `computeUnitGraph`, ...), parameterised
   // by `options`; the fixture is what holds those parameter defaults still, so
   // this walk is checking the palette against the same graph the batch tests
   // measured their three-star targets from. A copy pasted here instead would be
@@ -321,7 +321,7 @@ describe('the assembled set is chapter 1, then 2, then 3, then 4, in order', () 
     // nothing lost, nothing reordered, nothing doubled.
     const inGame = LEVELS.filter((level) => level.chapter === 2);
     // The chapter's export is compared as a SET of ids rather than as a sequence,
-    // which is the 2.x shape rather than a relaxation: the four batches hold
+    // which is the 当前课程 shape rather than a relaxation: the four batches hold
     // scattered slices of the chapter's numbering (batch 1 is 14, 15, 16, 18, 21)
     // and `content/index.ts` sorts the joined set by index, so the game plays the
     // chapter in the campaign's order while `CH2_LEVELS` stays in the authors'

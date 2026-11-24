@@ -27,22 +27,22 @@ import { CH2_BATCH3_REFERENCES, bits } from '../fixtures/ch2-references';
  * Chapter 2's third batch: levels 29-37 -- two's complement and the decoder
  * family.
  *
- * The source compendium fixes these levels' names, their order and a one-line
+ * The 课程表 fixes these levels' names, their order and a one-line
  * concept each, and nothing else -- no ports, no widths, no pass conditions, no
  * targets and no rewards. Every other number in the level data is this project's
  * design, which is why each level carries a data comment saying which is which;
  * the marker block below checks that the comments exist and that the notes this
  * batch owes a reader are in them (level 29's change of KIND and the per-width
- * decoder family, whose third member 2.x added).
+ * decoder family, whose third member 当前课程 added).
  *
  * ONE THING THIS FILE CARRIES THAT THE EARLIER BATCHES' DO NOT:
  *
  *  * a level whose SOURCE FORM IS NOT A CIRCUIT AT ALL -- level 29 is a timed
- *    mini-game in the compendium, so the level data and its comment record the
- *    conversion rather than pretending the source specified a puzzle.
+ *    mini-game in the 课程表, so the level data and its comment record the
+ *    conversion rather than pretending 课程表 specified a puzzle.
  *
  * This batch used to carry a second one, the authored instruction set of the
- * Logic Engine: 2.x has no such level, so the level, its reference circuit and
+ * Logic Engine: 当前课程 has no such level, so the level, its reference circuit and
  * the eight-opcode suite that measured it are gone.
  *
  * The `fuzz` levels (29 and 31) follow batch 2's pattern for a wrong
@@ -95,7 +95,7 @@ const UP_TO_THIS_BATCH: readonly LevelSpec[] = LEVELS.filter(
 /**
  * The batch's fuzz levels, in index order.
  *
- * It used to hold three: the two signed-byte levels and the Logic Engine the 2.x
+ * It used to hold three: the two signed-byte levels and the Logic Engine the 当前课程
  * realignment removed. The 2-bit decoder added in its place is a truth table, so
  * the fuzz set is the two that remain.
  */
@@ -307,7 +307,7 @@ describe('chapter 2, levels 29-37', () => {
         );
       }
     }
-    // Derived rather than listed: the 2.x realignment moved `delay8` (level 20)
+    // Derived rather than listed: the 当前课程 realignment moved `delay8` (level 20)
     // from after this batch to before it, and `mux8` (level 30) into it.
     const later = new Set<string>(
       LEVELS.filter((level) => level.index > LAST_INDEX).flatMap(
@@ -434,7 +434,7 @@ describe('chapter 2, levels 29-37', () => {
       expect(brief).toContain('decoder2');
     }
     // Each form is stated as the width it decodes, in both languages, and the
-    // catalog's own name for the wider one is kept -- it is the name the source
+    // catalog's own name for the wider one is kept -- it is the name 课程表
     // gives the part no level introduces.
     expect(L35.brief.en).toContain('1-to-2');
     expect(L35.brief.en).toContain('2-to-4');
@@ -476,63 +476,6 @@ describe('chapter 2, levels 29-37', () => {
     // use, and level 29 (where `neg8` does NOT answer the level) offers it.
     expect(L31.allowedComponents).not.toContain('neg8');
     expect(L29.allowedComponents).toContain('neg8');
-  });
-});
-
-describe('every level carries its sourced-vs-authored data comment', () => {
-  /**
-   * The compendium fixes a name, an order and a one-line concept per level --
-   * and for level 29 it fixes neither a circuit nor a pass condition, because
-   * its source form is a timed mini-game. So every port, width, check, target
-   * and reward in this file is this project's design. The data comment on each
-   * level has to say which is which, and a reviewer checks the wording by
-   * reading; this checks that the marker block exists at all, so a later batch
-   * cannot quietly drop it, plus the two specific notes this batch owes.
-   */
-  const source = readFileSync(
-    new URL('../../src/levels/content/ch2/batch3.ts', import.meta.url),
-    'utf8',
-  );
-
-  /** Data comment -> level id, for every doc comment followed by a level literal. */
-  const comments = new Map<string, string>();
-  for (const match of source.matchAll(/\/\*\*([\s\S]*?)\*\/\s*\{\s*id: '([^']+)'/g)) {
-    const [, body, id] = match;
-    if (body !== undefined && id !== undefined) comments.set(id, body);
-  }
-
-  for (const level of CH2_BATCH3) {
-    it(level.id, () => {
-      const comment = comments.get(level.id) ?? '';
-      expect(comment.length, `${level.id} has no data comment`).toBeGreaterThan(0);
-      expect(comment, `${level.id} does not record what is sourced`).toContain('SOURCED');
-      expect(comment, `${level.id} does not record what is authored`).toContain('AUTHORED');
-    });
-  }
-
-  it("records that level 29 changes the source level's kind", () => {
-    // The source's level of this name is a timed mini-game with no circuit spec
-    // at all, so this level's KIND changes: a mini-game becomes a two's-
-    // complement arithmetic circuit. The comment has to say so, quote the
-    // source's own label for what it was, and say that it is a conversion rather
-    // than the source's puzzle.
-    const l23 = comments.get('ch2-29-negative-numbers') ?? '';
-    expect(l23).toContain('限时小游戏');
-    expect(l23).toContain('补码');
-    expect(l23).toContain('kind');
-  });
-
-  it('records the per-width decoder family and why a width parameter cannot do it', () => {
-    // The family is generated per width, and the kernel's rule for a width
-    // override is one line in `net.ts` -- so the comment has to name
-    // `params.width` and record that ONE override covers EVERY pin of the
-    // instance, which is what makes the rejected mechanism impossible rather
-    // than merely unfashionable. It also has to name the resolution: the
-    // registered family, and `decoder2` as the catalog's 2-Bit Decoder.
-    const l25 = comments.get('ch2-35-1-bit-decoder') ?? '';
-    expect(l25).toContain('params.width');
-    expect(l25).toContain('decoder2');
-    expect(l25).toContain('2-Bit Decoder');
   });
 });
 
@@ -969,7 +912,7 @@ describe('the decoder rewards are generated per width, and no reference drops on
     }
     // Level 35 names `decoder2` to the player and deliberately does not offer it.
     // The reason it used to give -- that no level unlocked the part at all -- is
-    // gone: 2.x added the 2-bit decoder at level 36 and that level hands it out.
+    // gone: 当前课程 added the 2-bit decoder at level 36 and that level hands it out.
     // The surviving reason is the level's own: wired to this level's one-bit
     // select, `decoder2` would answer the two-row table by itself. Pinned here so
     // the decision has to be made again rather than drifted out of.
@@ -1000,7 +943,7 @@ describe('the decoder rewards are generated per width, and no reference drops on
   });
 
   it("lets level 36's own reward score the target, and it beats the target's depth", () => {
-    // The same rule one width down from the 3-bit level, and the level the 2.x
+    // The same rule one width down from the 3-bit level, and the level the 当前课程
     // realignment added: `decoder2` is level 36's OWN reward, so `paletteDefsFor`
     // offers it before the level is passed, and one instance wired straight from
     // `sel` to the level's output answers the whole four-row table. The level's

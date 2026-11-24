@@ -23,7 +23,7 @@ import type { CheckFailure, CheckOutcome, CustomCheck, LevelSpec } from '../spec
 /**
  * `lock` —— 道破心机 / Code Breaker，第 4 章的第一个闭环检查器。
  *
- * 谜题。画板是玩家自己的 OVERTURE CPU，检查器扮演"知道密码的机器"：
+ * 谜题。画板是玩家自己的 AXIS CPU，检查器扮演"知道密码的机器"：
  * 它读 CPU 在 `try` 上提出的字节，用 1 或 0 在 `match` 上作答，
  * 一直进行到 CPU 提出的正好是关卡选定的秘密值为止。这件事无法用步进表表达：
  * `program` 或 `script` 检查在步边界写输入、再读它产生的输出，
@@ -49,7 +49,7 @@ import type { CheckFailure, CheckOutcome, CustomCheck, LevelSpec } from '../spec
  *
  * 这块画板上"回答"到底意味着什么，是实测过的。检查器在同一次交换里回答它刚读到的字节，
  * 于是 CPU 在每个节拍采样到的是"该节拍的指令执行期间 `try` 所保持的值"的比较结果。
- * 在 OVERTURE 画板上，程序用 `move|sN|out` 发布 `try`、用 `move|inp|dN` 读 `match`——
+ * 在 AXIS 画板上，程序用 `move|sN|out` 发布 `try`、用 `move|inp|dN` 读 `match`——
  * 两条不同的指令——所以在读指令被译码的那一拍，`out` 已经回落到 0，CPU 采样到的 `match == 0`。
  * 参考搜索仍然通过（本检查器在"读到"秘密的那一拍判通过，而计数程序会发布每一个候选值），
  * 参考程序自己的"找到了"分支则根本不会被走到：在参考画板上实测，
@@ -169,7 +169,7 @@ export const callLock = (
     }
     // 写入、结算、再走节拍，顺序如此，结算不可省：节拍会从信号表里采样存储元件的输入，
     // 而上面写入的字节要经过关卡引脚与 CPU 寄存器堆之间的组合元件才能到达那里——
-    // OVERTURE 画板上是 `srcData` -> `d1` -> `data` 这条路径。
+    // AXIS 画板上是 `srcData` -> `d1` -> `data` 这条路径。
     // 不结算就走节拍，机器会采样到上一次的回答，那是一个没人搭过的电路、一个无解的谜题。
     io.settle();
     io.tick();

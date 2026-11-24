@@ -1,19 +1,5 @@
 /**
- * OVERTURE 的指令编码，以数据的形式存在——仅此而已。
- *
- * 布局来自 `docs/superpowers/plans/2026-09-29-turing-complete-phase2.md` 的
- * 裁定 5：最高两位选择四种模式之一，低六位是该模式的参数。原始资料固定的是
- * "高 2 位操作码、低 6 位参数"以及四种模式（`GAME_REFERENCE.md` §6.1、§6.3），
- * 但没有规定低六位内部的字段顺序。那个顺序是本项目的设计，本文件则是它的唯一
- * 权威——汇编器、`instr_decoder` 元件，以及第三章每个关卡的手写字节，都以它
- * 为准来解读。
- *
- * 刻意不包含的内容：任何"指令做什么"的陈述。`loadi` 写 REG0、`add` 读
- * REG1/REG2 并写 REG3、跳转从 REG0 取目标、从 REG3 取条件——这些都不在这里。
- * CPU 是玩家自己搭建的电路（规格 §6.1、第二阶段约束 11），所以一条指令的含义
- * 必须来自那个电路。工具链里再抄一份，就成了行为的第二个权威；哪天两者不一致，
- * 关卡作者手里会有一张表告诉他"电路错了"。下面的寄存器编号是操作数编码，不是
- * 角色分工。
+ * AXIS 的指令编码，以数据的形式存在——仅此而已。
  *
  * `instr_decoder`——同样由玩家搭建——是本模块的镜像：它把这些位原样切回去。
  * `assemble.ts` 是本模块唯一的读取者。
@@ -33,7 +19,7 @@ export interface FieldRange {
   readonly width: number;
 }
 
-/** 四种模式；名字由工具链起（原始资料里对应"立即数"等说法）。 */
+/** 四种模式：立即数、运算、传送、跳转。 */
 export type ModeId = 'immediate' | 'calc' | 'move' | 'jump';
 
 /** 写出的操作数 token 如何变成一个字段值。 */
@@ -62,7 +48,7 @@ export interface ModeDef {
   readonly opcode: number;
   /**
    * 低六位的全部位段；模式有未用位时连 `reserved` 一起列出。它们恰好平铺
-   * `[0, 6)`——没有空隙、没有重叠——正是这种平铺固定了裁定 5 的字段顺序；
+   * `[0, 6)`——没有空隙、没有重叠——正是这种平铺固定了字段顺序；
    * 有一条范围测试会断言它。
    */
   readonly fields: readonly FieldRange[];
@@ -83,7 +69,7 @@ export interface ModeDef {
 
 export interface Isa {
   readonly id: string;
-  /** 指令位宽：按原始资料 §6.1，一个 8 位字。 */
+  /** 指令位宽：一个 8 位字。 */
   readonly wordWidth: number;
   /** 所有模式共用的选择子：指令字的 [7:6] 位。 */
   readonly modeField: FieldRange;
@@ -92,10 +78,6 @@ export interface Isa {
 
 /**
  * 3 位操作数编码各自指向什么，下标就是编码值。
- *
- * `0-5` 是 REG0-REG5，`6` 是 `inp`、`7` 是 `out`（`GAME_REFERENCE.md` §6.2）。
- * 它是下面两张 token 表和译码器 `src`/`dst` 引脚共同遵循的命名权威；它本身不是
- * token 表，因为同一个寄存器在源字段里写作 `sN`、在目标字段里写作 `dN`。
  */
 export const OPERAND_NAMES = [
   'REG0',
@@ -110,11 +92,6 @@ export const OPERAND_NAMES = [
 
 /**
  * `move` 模式"源"字段接受的 token，以及每个 token 写入的编码。
- *
- * 原始资料的语法把源写作 `sN`/`inp`（`move|s1|d2`、`move|inp|d1`，§6.4 与
- * §10.2）。曾被否决的方案是一张八种编码共用、两个字段都合法的表：它会接受
- * `move|out|d3` 与 `move|s1|inp` 这些语法从未展示过的拼法；反正两个字段都是
- * 三位宽，接受它们除了多出一个没人审过的字节之外毫无好处。
  */
 export const SOURCE_CODES: Readonly<Record<string, number>> = {
   s0: 0,
@@ -128,7 +105,7 @@ export const SOURCE_CODES: Readonly<Record<string, number>> = {
 
 /**
  * `move` 模式"目标"字段接受的 token：`dN` 对应 REG0-REG5，`out` 对应输出端口
- * （`move|s0|d2`、`move|s3|out`，§6.2/§10.2）。`inp` 不是目标、`out` 不是源；
+ * （`move|s0|d2`、`move|s3|out`）。`inp` 不是目标、`out` 不是源；
  * 见 `SOURCE_CODES`。
  */
 export const DEST_CODES: Readonly<Record<string, number>> = {
@@ -142,16 +119,16 @@ export const DEST_CODES: Readonly<Record<string, number>> = {
 };
 
 /**
- * 裁定 5 的逐字转写。
+ * 编码规则。
  *
  * 编码器先写 `modeField`，再写模式的选择字段（若有），再写各操作数字段，除此之外
  * 什么都不写：其余所有位段——尤其是 `calc` 与 `jump` 的 `reserved`——按构造保持为
- * 0。这正是裁定 5 中「[2:0] 保留必须为 0」的含义；这里刻意不设 `mustBeZero` 之类
+ * 0。这正是该规则中「[2:0] 保留必须为 0」的含义；这里刻意不设 `mustBeZero` 之类
  * 的标志去同步，因为标志可以和一个未写入的字段相矛盾，而未写入的字段不会自相
  * 矛盾。
  */
-export const OVERTURE_ISA: Isa = {
-  id: 'overture',
+export const AXIS_ISA: Isa = {
+  id: 'axis',
   wordWidth: 8,
   modeField: { id: 'mode', offset: 6, width: 2 },
   modes: [

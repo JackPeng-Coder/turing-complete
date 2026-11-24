@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assemble, OVERTURE_ISA } from '../../src/asm/index';
+import { assemble, AXIS_ISA } from '../../src/asm/index';
 import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
 import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
 import { CH2_LEVELS } from '../../src/levels/content/ch2/index';
@@ -54,7 +54,7 @@ function programOf(spec: LevelSpec): ProgramCheck {
 }
 
 /**
- * The LEVEL-AUTHORED program text of a level's program check, or a loud failure.
+ * The level-supplied program text of a level's program check, or a loud failure.
  *
  * `ProgramCheck.source` became optional when chapter 4 added the player channel
  * (`from: 'player'` reads the player's buffer instead), so the field is now
@@ -143,7 +143,7 @@ describe('chapter 3 batch 2 - reference solutions', () => {
   it('publishes the ISA slicing of all 256 instructions at level 44', () => {
     // The independent half of the ISA cross-check: these four expressions are
     // ruling 5 written out, and the level's own rows are computed from
-    // `OVERTURE_ISA`. A table that omitted rows, sampled them, or hand-copied a
+    // `AXIS_ISA`. A table that omitted rows, sampled them, or hand-copied a
     // wrong offset fails here.
     const spec = level('ch3-44-instruction-decoder');
     const rows = rowsOf(spec);
@@ -164,7 +164,7 @@ describe('chapter 3 batch 2 - reference solutions', () => {
     // The level's machine executes these bytes; the test's copy is hand-encoded
     // from the ISA table, so an encoding change cannot pass by moving both sides.
     const check = programOf(level('ch3-46-alu'));
-    const assembled = assemble(sourceOf(level('ch3-46-alu')), OVERTURE_ISA);
+    const assembled = assemble(sourceOf(level('ch3-46-alu')), AXIS_ISA);
     expect(assembled.errors).toEqual([]);
     expect(assembled.bytes).toEqual([0x05, 0xb1, 0x82, 0x40, 0x9c, 0x48, 0x9f, 0x68, 0x9d, 0xa3]);
     // One instruction per step, one address each, and no step re-reads a byte

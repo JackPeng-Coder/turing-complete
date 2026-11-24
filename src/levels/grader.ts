@@ -71,7 +71,7 @@ export function scoreOf(m: Metrics): number {
 }
 
 /**
- * 电路的 NAND 等价门总数，也就是 GATE 指标（规格 §5.4：“电路 + 自定义
+ * 电路的 NAND 等价门总数，也就是 GATE 指标（成本口径：“电路 + 自定义
  * 组件 + 宽位组件全部展开后，NAND 等价门的总数”）。
  *
  * 这里只是对 `core/net.ts` 转调一层，真正的遍历在那里。实现放在那边
@@ -82,7 +82,7 @@ export function scoreOf(m: Metrics): number {
  *
  * 它数的是 `def.gateCost`，不是 `def.cost`。两个字段是刻意分开的两个
  * 指标：`cost` 是 `delayOf` 收取的“单个节点的延迟单位”，一个宽位元件
- * 故意只算 1 单位延迟（规格 §3.2），但它展开后是很多个 NAND 等价门——
+ * 故意只算 1 单位延迟（延迟口径），但它展开后是很多个 NAND 等价门——
  * 例如 `add8` 的延迟是 1，门数是 72。
  *
  * @param graph 要测量的电路文档（元件未被展开的状态）。

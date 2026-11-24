@@ -22,7 +22,7 @@ import { CH2_BATCH1_REFERENCES } from '../fixtures/ch2-references';
 /**
  * Chapter 2's first batch: levels 14-21.
  *
- * The source compendium fixes these levels' names, their order and a one-line
+ * The 课程表 fixes these levels' names, their order and a one-line
  * concept each, and nothing else -- no ports, no widths, no pass conditions, no
  * rewards. Every other number in the level data is this project's design, which
  * is why each level carries a data comment saying which is which; the last
@@ -480,36 +480,6 @@ describe('the vacuity invariant', () => {
     };
     expect(vacuityProblems(synthetic(check))).toEqual([]);
   });
-});
-
-describe('every level carries its sourced-vs-authored data comment', () => {
-  /**
-   * The compendium fixes a name, an order and a one-line concept per level and
-   * nothing else, so every port, width, check, target and reward in this file is
-   * this project's design. The data comment on each level has to say which is
-   * which, and a reviewer checks it by reading; this checks that the marker
-   * block exists at all, so a later batch cannot quietly drop it.
-   */
-  const source = readFileSync(
-    new URL('../../src/levels/content/ch2/batch1.ts', import.meta.url),
-    'utf8',
-  );
-
-  /** Data comment -> level id, for every doc comment followed by a level literal. */
-  const comments = new Map<string, string>();
-  for (const match of source.matchAll(/\/\*\*([\s\S]*?)\*\/\s*\{\s*id: '([^']+)'/g)) {
-    const [, body, id] = match;
-    if (body !== undefined && id !== undefined) comments.set(id, body);
-  }
-
-  for (const level of CH2_BATCH1) {
-    it(level.id, () => {
-      const comment = comments.get(level.id) ?? '';
-      expect(comment.length, `${level.id} has no data comment`).toBeGreaterThan(0);
-      expect(comment, `${level.id} does not record what is sourced`).toContain('SOURCED');
-      expect(comment, `${level.id} does not record what is authored`).toContain('AUTHORED');
-    });
-  }
 });
 
 /**

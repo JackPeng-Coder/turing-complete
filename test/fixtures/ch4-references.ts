@@ -26,8 +26,7 @@
  * constants, the 5r draft of level 52) stay in the batch test that asserts
  * they fail, because those are that file's argument.
  *
- * The byte strings are the controller's pre-verified encodings (see
- * `.superpowers/sdd/2026-10-08-turing-complete-phase3/reference-programs.md`);
+ * The byte strings are the controller's pre-verified encodings;
  * `test/levels/ch4-batch1.test.ts` and `test/levels/ch4-batch2.test.ts` re-derive
  * them from `asm/isa.ts`'s table so an encoding change cannot pass by moving
  * fixture and assembler together.
@@ -98,7 +97,7 @@ export const CH4_REFERENCES: Record<string, { program: string; format: 'asm' | '
    * operation: the pass adds the counter to the total, then takes the counter
    * down by one, and leaves the loop through `jz` when the subtraction produced
    * zero. The two `loadi` before the jumps are the jump's TARGET (REG0) and the
-   * condition is REG3 (the compendium's §6.4), which is why a jump is always two
+   * condition is REG3 (the 课程表's §6.4), which is why a jump is always two
    * instructions: one to say where, one to say when.
    *
    * For n = 10 the `out` instruction at address 14 is reached on tick 129, and

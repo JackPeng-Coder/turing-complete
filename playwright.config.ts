@@ -29,7 +29,6 @@ import { defineConfig } from '@playwright/test';
 // Playwright transpiles its own config, so it is loaded without `tsc`.
 const NODE = process.env.NODE_BIN ?? process.execPath;
 const PNPM_CANDIDATES = [
-  'C:\\Users\\ME\\.dsh\\dsh-runtimes\\dsh-primary-runtime\\dependencies\\pnpm\\bin\\pnpm.mjs',
   resolve(dirname(process.execPath), '..', '..', 'pnpm', 'bin', 'pnpm.mjs'),
 ];
 const BUNDLED_PNPM = PNPM_CANDIDATES.find((candidate) => existsSync(candidate));

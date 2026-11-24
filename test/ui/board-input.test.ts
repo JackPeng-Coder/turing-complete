@@ -236,7 +236,7 @@ describe('the selection band', () => {
     const { store, stack, graph } = board();
     const { drag, detach } = attach(store, stack);
     try {
-      // The source is at (0,0)-(72,72); the gate at (200,0)-(272,72).
+      // 课程表 is at (0,0)-(72,72); the gate at (200,0)-(272,72).
       drag({ x: -20, y: -20 }, { x: 100, y: 100 }, { ctrl: true });
       expect(store.get().selected).toEqual([graph.instances[0]!.id]);
       expect(store.get().camera).toEqual({ x: 0, y: 0, zoom: 1 });

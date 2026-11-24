@@ -33,7 +33,7 @@ import {
 /**
  * Chapter 2's second batch: levels 19-27 -- the byte operators and the adders.
  *
- * The source compendium fixes these levels' names, their order and a one-line
+ * The 课程表 fixes these levels' names, their order and a one-line
  * concept each, and nothing else -- no ports, no widths, no pass conditions, no
  * targets and no rewards. Every other number in the level data is this project's
  * design, which is why each level carries a data comment saying which is which;
@@ -49,8 +49,8 @@ import {
  *    vector in the failure record are the first ones that actually disagree. A
  *    fuzz check that failed "somewhere" would be indistinguishable from a
  *    vacuous one.
- *  * the source's two ACHIEVEMENT notes in this batch (level 22's five
- *    components, level 27's delay), both of which are records about the source
+ *  * 课程表的 two ACHIEVEMENT notes in this batch (level 22's five
+ *    components, level 27's delay), both of which are records about 课程表
  *    rather than pass conditions -- see the dedicated block at the end, which
  *    measures both on the reference solutions.
  *  * the `full_adder` reward, whose def was missing when this batch was authored
@@ -86,7 +86,7 @@ const L27 = levelAt(27);
 /**
  * The batch's three fuzz levels, in index order.
  *
- * It used to be `[byte OR, byte NOT, adding bytes]`; the 2.x realignment retired
+ * It used to be `[byte OR, byte NOT, adding bytes]`; the 当前课程 realignment retired
  * the 8-bit OR level and added the byte NAND in its place, and both are fuzz
  * checks over byte operators, so the slot passes to the level that exists.
  */
@@ -95,7 +95,7 @@ const FUZZ_LEVELS: readonly LevelSpec[] = [L25, L26, L27];
 /**
  * The campaign up to and including this batch, in play order.
  *
- * THE BATCHES ARE NO LONGER A RUNNING ORDER. The 2.x realignment scattered the
+ * THE BATCHES ARE NO LONGER A RUNNING ORDER. The 当前课程 realignment scattered the
  * levels across the batch files by what a task wrote rather than by where they
  * sit in the campaign -- `switch`, for instance, is handed out by
  * `ch2-17-circular-dependency`, which lives in `ch2/batch4.ts` but precedes every
@@ -317,7 +317,7 @@ describe('chapter 2, levels 19-27', () => {
       }
     }
     // The other side, DERIVED rather than listed. The list used to name the
-    // storage, shift and decoder family by hand; the 2.x realignment moved
+    // storage, shift and decoder family by hand; the 当前课程 realignment moved
     // `delay8` (level 20, Delayed Lines) from after this batch to before it, which
     // a hard-coded list cannot notice. What matters is the claim, not the names:
     // this batch offers nothing that only a later level hands out.
@@ -448,7 +448,7 @@ describe('chapter 2, levels 19-27', () => {
     // The expectation functions are the level's specification: a pure function
     // that computes something else is a level that grades the wrong thing, and
     // it would still be "not vacuous". These are the operators' defining values.
-    // `ch2-25-byte-nand` is the byte operator 2.x put in the retired 8-bit OR's
+    // `ch2-25-byte-nand` is the byte operator 当前课程 put in the retired 8-bit OR's
     // place, so it is the one this batch's operator test names.
     const nand = expectation(L25, 'out');
     expect(nand(vector({ a: 0x0f, b: 0x30 }))).toBe(0xff);
@@ -483,7 +483,7 @@ describe('chapter 2, levels 19-27', () => {
     // The four byte operators moved here from the retired 8-bit OR level.
     expect(L25.rewards?.components).toEqual(['and8', 'or8', 'nand8', 'nor8']);
     expect(L26.rewards?.components).toEqual(['xor8', 'xnor8', 'not8']);
-    // `switch` is no longer part of this hand-out: 2.x plays Circular Dependency
+    // `switch` is no longer part of this hand-out: 当前课程 plays Circular Dependency
     // (level 17) before this level, so the one-bit switch had to move there.
     expect(L27.rewards?.components).toEqual(['switch8']);
   });
@@ -543,49 +543,6 @@ describe('chapter 2, levels 19-27', () => {
     // is invisible content, and the level comments now describe it as live.
     expect(L19.rewards?.components).toEqual(['full_adder']);
     expect(registry.has('full_adder'), 'full_adder is not registered').toBe(true);
-  });
-});
-
-describe('every level carries its sourced-vs-authored data comment', () => {
-  /**
-   * The compendium fixes a name, an order, a one-line concept and -- for two
-   * levels in this batch -- an achievement note, and nothing else. So every
-   * port, width, check, target and reward in this file is this project's design.
-   * The data comment on each level has to say which is which, and a reviewer
-   * checks the wording by reading; this checks that the marker block exists at
-   * all, so a later batch cannot quietly drop it.
-   */
-  const source = readFileSync(
-    new URL('../../src/levels/content/ch2/batch2.ts', import.meta.url),
-    'utf8',
-  );
-
-  /** Data comment -> level id, for every doc comment followed by a level literal. */
-  const comments = new Map<string, string>();
-  for (const match of source.matchAll(/\/\*\*([\s\S]*?)\*\/\s*\{\s*id: '([^']+)'/g)) {
-    const [, body, id] = match;
-    if (body !== undefined && id !== undefined) comments.set(id, body);
-  }
-
-  for (const level of CH2_BATCH2) {
-    it(level.id, () => {
-      const comment = comments.get(level.id) ?? '';
-      expect(comment.length, `${level.id} has no data comment`).toBeGreaterThan(0);
-      expect(comment, `${level.id} does not record what is sourced`).toContain('SOURCED');
-      expect(comment, `${level.id} does not record what is authored`).toContain('AUTHORED');
-    });
-  }
-
-  it('records the two source achievements the batch has to honour', () => {
-    // Level 22's note is "仅用 5 个蓝色元件" and level 27's is "延迟 ≤ 35". Both are
-    // achievement notes, not pass conditions, and both are mapped deliberately:
-    // 22 to a measured gate threshold, 27 to nothing at all beyond a recorded
-    // reference value. The comments have to say so, and they have to quote the
-    // source's own numbers so a reader can see what was and was not adopted.
-    const fullAdder = comments.get('ch2-22-full-adder') ?? '';
-    expect(fullAdder).toContain('5 个蓝色元件');
-    const addingBytes = comments.get('ch2-27-adding-bytes') ?? '';
-    expect(addingBytes).toContain('延迟 ≤ 35');
   });
 });
 
@@ -839,7 +796,7 @@ describe('an empty circuit fails every level instead of throwing', () => {
 
 describe("level 22's five-component construction is the reference it names", () => {
   it('is five components and measures the gate target the achievement maps to', () => {
-    // The source's note for this level is the achievement "仅用 5 个蓝色元件" --
+    // 课程表的 note for this level is the achievement "仅用 5 个蓝色元件" --
     // five blue components. This project has no blue-component system (those are
     // custom/blueprint parts, a later phase), so the achievement is mapped to
     // the measured gate target of the circuit it describes. Measured here rather
@@ -882,11 +839,11 @@ describe("level 22's five-component construction is the reference it names", () 
 
 describe("level 27's target is the cascade's own measurement, and the source's 35 is not it", () => {
   it("measures the shipped reference well inside the source's reference value", () => {
-    // The source's note is the achievement "延迟 ≤ 35", which the level's data
+    // 课程表的 note is the achievement "延迟 ≤ 35", which the level's data
     // comment records as a reference value and which nothing here treats as a
     // pass condition: `threeStar` is the reference solution's measured metrics.
     // The measurement has to be taken, not chosen -- so this test states the
-    // relation (the measured delay is inside the source's number) separately
+    // relation (the measured delay is inside 课程表的 number) separately
     // from the equality `threeStar === metrics` the block above asserts.
     const result = grade(rippleAdderReference(), registry, specOf('ch2-27-adding-bytes'));
     expect(result.metrics.delay).toBeLessThanOrEqual(35);

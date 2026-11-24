@@ -1,17 +1,15 @@
 /**
- * 1.x 版关卡 id 与它们现在的新名字之间的对照表。
+ * 旧关卡 id 与当前 id 的对照表。
  *
- * 2026-10-04 的版本对齐把第 1~3 章的每一关都移到了它在 2.x 中的位置
- * （见 `src/levels/campaign.ts`），这改掉了其中 44 关的 id：id 里带着
- * 关卡的全局序号，所以给一关重新编号，就会连带改掉它后面所有关卡的编号。
+ * 一次课程顺序调整改掉了第 1~3 章中 44 关的 id：id 里带着全局序号，
+ * 给一关重新编号，就会连带改掉它后面所有关卡的编号。
  *
- * 存档是按这些 id 记录的（`persist/storage.ts`），因此 `migrate` 会读这张
- * 表，把玩家的通关星星带过这次改名。它是一张翻译表，不是关卡列表：已经
- * 是新 id 的、或者这张表从没听说过的 id，都会原样通过——这正是迁移可以
- * 反复执行（幂等）的原因。
+ * 存档按这些 id 记录（`persist/storage.ts`），因此 `migrate` 会读这张表，
+ * 把玩家的通关星星带到新 id。它是一张翻译表，不是关卡列表：已经是新 id、
+ * 或者表里没有的 id 都会原样通过——迁移可以反复执行（幂等）。
  *
- * `RETIRED_LEVEL_IDS` 里的三个 id 是同一个故事的另一半：2.x 里没有对应的
- * 关卡，所以提到它们的旧存档会丢掉那一条记录。
+ * `RETIRED_LEVEL_IDS` 里的 id 已经没有关卡对应，提到它们的旧存档会丢掉
+ * 那一条记录。
  */
 export const LEGACY_LEVEL_IDS: Readonly<Record<string, string>> = {
   'ch1-01-crude-awakening': 'ch1-01-humble-beginnings',
@@ -56,10 +54,8 @@ export const LEGACY_LEVEL_IDS: Readonly<Record<string, string>> = {
 /**
  * 已经没有关卡与之对应的旧 id。
  *
- * 第 2 章在向 2.x 对齐时少了三个 1.x 关卡：`Byte OR`（2.x 在这一带换成
- * 了 `Byte NAND`）、`Logic Engine`（2.x 把它删了），以及那个被误命名为
- * `Binary Racer` 的计数关（它和 `Counting Signals` 重复；2.x 只留一个
- * Binary Racer，指的是四位数读取的那一关）。
+ * 第 2 章在重组时少了三个旧关卡：`Byte OR`（由 `Byte NAND` 接替）、
+ * `Logic Engine`（被移除），以及一个与 `Counting Signals` 重复的计数关。
  */
 export const RETIRED_LEVEL_IDS: readonly string[] = [
   'ch2-15-binary-racer',

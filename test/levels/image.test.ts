@@ -15,7 +15,7 @@ import { parseImage } from '../../src/asm/index';
  * the line so a player can find the typo in their own text.
  *
  * The five bytes below are the plan's own example (`B1 05 82 40 9F`), spelled
- * the way a player would type them. They are also a real program in the OVERTURE
+ * the way a player would type them. They are also a real program in the AXIS
  * encoding, which is what makes them worth pinning rather than an arbitrary
  * pattern: `0xB1` is `move|inp|d1` and `0x9F` is `move|s3|out`.
  */

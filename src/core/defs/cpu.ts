@@ -3,11 +3,11 @@ import type { PortValue } from '../signal';
 import { FULL_ADDER, toUint } from './wide';
 
 /**
- * CPU 家族（phase 2 任务 2）：第 3 章发放、第 47 关用来搭出 OVERTURE 的六个
+ * CPU 家族（phase 2 任务 2）：第 3 章发放、第 47 关用来搭出 AXIS 的六个
  * 元件——alu8、regfile6、instr_decoder、pc8、ram_prog 与 halt。
  *
  * 它们是零件，不是一颗 CPU。全局约束 11 规定 CPU 是玩家要搭出来的东西；一个
- * class Overture，或任何"知道指令含义"的 def，都是这个家族绝不能变成的样子。
+ * class Axis，或任何"知道指令含义"的 def，都是这个家族绝不能变成的样子。
  * 因此下面每个 def 都只是一个带引脚和传递函数的数据通路元件：instr_decoder 只
  * 切字段、从不校验；alu8 把 op 字段映射成结果、从来看不到整条指令字；regfile6
  * 是一个寄存器堆，不知道源操作数和目标操作数是什么；ram_prog 是一块只读的
@@ -154,7 +154,7 @@ const alu8: ComponentDef = {
     { id: 'op', width: 3 },
   ],
   outputs: [{ id: 'out', width: W }],
-  // 延迟单位，一个节点算 1（规格 §3.2），与 wide.ts 里每个运算符一样。
+  // 延迟单位，一个节点算 1（延迟口径），与 wide.ts 里每个运算符一样。
   // 上面的门数指标是另一个数字，这是刻意的。
   cost: 1,
   gateCost:
@@ -253,7 +253,7 @@ const regfile6: ComponentDef = {
  * 纯接线，所以是 0 个 NAND 等价门、0 个延迟单位——与 splitter 和 maker 的定价
  * 完全一样，理由也相同：每个输出位都是 instr 的某一位搬到另一个名字的引脚上，
  * 这个元件里没有门可数。cost 是 0 而不是 1，因为本身就是导线的元件不能增加
- * 延迟单位（规格 §3.2 把电源与导线定价为 0）。被否决的替代方案是用比较器或独热
+ * 延迟单位（延迟口径 把电源与导线定价为 0）。被否决的替代方案是用比较器或独热
  * 最小项树搭一个"真正的"解码器：那是另一个元件、有另一套引脚（独热线而不是打包
  * 的字段），按那种构造给这个元件定价，就是在让玩家为它并不包含的门付费。第 42
  * 关的门数目标因此由 delay 而不是 gate 承担——这是预期行为，不是 bug。
@@ -342,7 +342,7 @@ const pc8: ComponentDef = {
 };
 
 /**
- * ram_prog：OVERTURE 读取指令的那块 256 字节程序存储器。addr:8 -> out:8，
+ * ram_prog：AXIS 读取指令的那块 256 字节程序存储器。addr:8 -> out:8，
  * 每个地址一个字节，组合读取。
  *
  * 读路径是组合的，并且把 addr 当下标读——存储契约唯一允许的例外，与 ram8 记录
@@ -350,10 +350,8 @@ const pc8: ComponentDef = {
  * 放进去的，所以任何输入的值都无法到达引脚。它根本没有写引脚：镜像不是电路能
  * 改变的东西，而是关卡交给这台机器的程序。
  *
- * 镜像经 Simulation.loadImage 到达，而不是经 params。phase 2 计划的可交付项第 7
- * 行写成 params.image，而任务 1 的调研记录
- * （.superpowers/sdd/2026-09-29-turing-complete-phase2/recon-kernel.md）说明了
- * 那种写法为什么行不通：compile() 从不碰实例状态（状态在 Simulation 构造函数里
+ * 镜像经 Simulation.loadImage 到达，而不是经 params。params.image 那种写法
+ * 行不通：compile() 从不碰实例状态（状态在 Simulation 构造函数里
  * 按零分配，net.ts），它只读一个参数键（params.width），而 reset() 会清掉每个
  * 状态字节——并且每个驱动电路的检查都在编译之后调用 reset()。所以镜像是在 reset
  * 之后由 Simulation.loadImage 拷进这个 def 的 state，evaluate 随后像任何读取一样

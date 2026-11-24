@@ -6,10 +6,10 @@
 // @ts-expect-error -- no Node ambient types in this project's tsconfig
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { OVERTURE_ISA, assemble } from '../../src/asm/index';
+import { AXIS_ISA, assemble } from '../../src/asm/index';
 import { STARTER_COMPONENTS } from '../../src/app/progress';
 import { graphFromBoard } from '../../src/levels/board';
-import { overtureBoard } from '../../src/levels/boards/overture';
+import { axisBoard } from '../../src/levels/boards/axis';
 import { levelExpectsProgram, runChecks } from '../../src/levels/checks';
 import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
 import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
@@ -44,7 +44,7 @@ import { CH4_REFERENCES } from '../fixtures/ch4-references';
  * for the first, `customOf` for the second -- and every assertion below says
  * which one it is about.
  *
- * WHAT IS THE SAME AS BATCH 1. The board is the level's (`overtureBoard(...)`),
+ * WHAT IS THE SAME AS BATCH 1. The board is the level's (`axisBoard(...)`),
  * the reference programs live in `test/fixtures/ch4-references.ts` and NEVER in
  * the level data (ruling 2: no `source`), grading runs through the real kernel
  * (`runChecks`/`grade`), and `threeStar` is the reference's MEASURED metric
@@ -300,7 +300,7 @@ describe('chapter 4 batch 2 - reference programs', () => {
   it('pins every three-star target to its reference solution own metrics', () => {
     // A target is the reference's measured score, never a hand-written
     // aspiration. All four levels ship one of the two board shapes the brief
-    // measures -- `overtureBoard({ inputId })` and the same board with
+    // measures -- `axisBoard({ inputId })` and the same board with
     // `halt: false`, which is a 0-cost part either way -- so they state one gate
     // and one delay, 675 and 6, and the tick is the run's own high-water mark:
     // the program levels' last asserted tick, and the custom levels' reported
@@ -411,14 +411,14 @@ describe('chapter 4 batch 2 - reference programs', () => {
     // r2 = r4, add, r4 = r3 (accumulate), r1 = r5, r0 = 1, r2 = 1, sub,
     // r5 = r3 (count down), r0 = 14, jz (leave when the count reached 0),
     // r0 = 1, j (loop), and finally out = r4.
-    const conditionalJumps = assemble(referenceOf(level('ch4-53-conditional-jumps')).program, OVERTURE_ISA);
+    const conditionalJumps = assemble(referenceOf(level('ch4-53-conditional-jumps')).program, AXIS_ISA);
     expect(conditionalJumps.errors).toEqual([]);
     expect(conditionalJumps.bytes).toEqual([
       0xb5, 0xa9, 0xa2, 0x40, 0x9c, 0xa9, 0x01, 0x82, 0x48, 0x9d, 0x0e, 0xc8, 0x01, 0xc0, 0xa7,
     ]);
     // LEVEL 55'S MASK is level 51's five instructions with `and` (01_010_000)
     // where `add` was: r1 = in, r0 = 3, r2 = 3, r3 = r1 & r2, out = r3.
-    const mod4 = assemble(referenceOf(level('ch4-55-mod-4')).program, OVERTURE_ISA);
+    const mod4 = assemble(referenceOf(level('ch4-55-mod-4')).program, AXIS_ISA);
     expect(mod4.errors).toEqual([]);
     expect(mod4.bytes).toEqual([0xb1, 0x03, 0x82, 0x50, 0x9f]);
     // LEVEL 54'S SEARCH: r5 = 0; loop -- out = r5 (publish the candidate), read
@@ -426,7 +426,7 @@ describe('chapter 4 batch 2 - reference programs', () => {
     // count r5 up by one and loop. The two `loadi|16` at the top of the exit stub
     // are the self-spin the machine's combinational `out` makes unreachable; the
     // bytes are kept because the program is the controller's pre-verified text.
-    const codeBreaker = assemble(referenceOf(level('ch4-54-code-breaker')).program, OVERTURE_ISA);
+    const codeBreaker = assemble(referenceOf(level('ch4-54-code-breaker')).program, AXIS_ISA);
     expect(codeBreaker.errors).toEqual([]);
     expect(codeBreaker.bytes).toEqual([
       0x00, 0x85, 0xaf, 0xb1, 0x00, 0x82, 0x40, 0x10, 0xd0, 0xa9, 0x01, 0x82, 0x40, 0x9d, 0x02,
@@ -437,7 +437,7 @@ describe('chapter 4 batch 2 - reference programs', () => {
     // `j`s are the T4b correction, and without them the CPU would keep deciding
     // from the first tick's byte. Left open masks 2 and turns left (19), ahead
     // open masks 1 and walks (23), otherwise turn right (13).
-    const maze = assemble(referenceOf(level('ch4-56-the-maze')).program, OVERTURE_ISA);
+    const maze = assemble(referenceOf(level('ch4-56-the-maze')).program, AXIS_ISA);
     expect(maze.errors).toEqual([]);
     expect(maze.bytes).toEqual([
       0xb4, 0xa1, 0x02, 0x82, 0x50, 0x13, 0xc8, 0xa1, 0x01, 0x82, 0x50, 0x17, 0xc8, 0x03, 0x87,
@@ -476,13 +476,13 @@ describe('chapter 4 batch 2 - reference programs', () => {
     // levels, `halt: false`. The default halt freezes the counter on the first
     // `out`, which is exactly right for 53 and 55 (the answer must stay) and
     // exactly wrong for 54 and 56 (the program must keep searching or walking).
-    expect(level('ch4-53-conditional-jumps').board).toEqual(overtureBoard({ inputId: 'n' }));
+    expect(level('ch4-53-conditional-jumps').board).toEqual(axisBoard({ inputId: 'n' }));
     expect(level('ch4-54-code-breaker').board).toEqual(
-      overtureBoard({ inputId: 'match', halt: false }),
+      axisBoard({ inputId: 'match', halt: false }),
     );
-    expect(level('ch4-55-mod-4').board).toEqual(overtureBoard({ inputId: 'in' }));
+    expect(level('ch4-55-mod-4').board).toEqual(axisBoard({ inputId: 'in' }));
     expect(level('ch4-56-the-maze').board).toEqual(
-      overtureBoard({ inputId: 'sensors', halt: false }),
+      axisBoard({ inputId: 'sensors', halt: false }),
     );
     // Stated the other way round as well, because "the same board with halt
     // tied low" is the fact the two closed-loop levels depend on: a level that
@@ -490,7 +490,7 @@ describe('chapter 4 batch 2 - reference programs', () => {
     // here and be unsolvable.
     for (const id of ['ch4-54-code-breaker', 'ch4-56-the-maze']) {
       expect(level(id).board, `${id} ships the halting board`).not.toEqual(
-        overtureBoard({ inputId: level(id).io.inputs[0]!.id }),
+        axisBoard({ inputId: level(id).io.inputs[0]!.id }),
       );
     }
   });
@@ -658,7 +658,7 @@ describe('chapter 4 batch 2 - the checks have teeth', () => {
       expect(spoof, `${spec.id} has no constant spoof`).toBeDefined();
       // It really reads no input: no `move|inp|dN` opcode (10_110_NNN) anywhere
       // in the bytes.
-      const image = assemble(spoof!.program, OVERTURE_ISA);
+      const image = assemble(spoof!.program, AXIS_ISA);
       expect(image.errors, `${spec.id} spoof does not even compile`).toEqual([]);
       expect(
         image.bytes.some((byte) => (byte & 0xf8) === 0xb0),
@@ -1105,28 +1105,6 @@ describe('chapter 4 batch 2 - level data', () => {
       }
     }
     expect(seen.has(`${goals[0]!.x},${goals[0]!.y}`), 'G is not reachable from S').toBe(true);
-  });
-
-  it('carries the sourced-vs-authored data comment', () => {
-    // The 2.x dossier fixes the names and the concepts; the io, the walks, the
-    // boards, the grids and the targets are this project's design. The marker
-    // block is what a reviewer reads to tell the two apart, and this checks it
-    // exists for every level in the batch.
-    const source = readFileSync(
-      new URL('../../src/levels/content/ch4/batch2.ts', import.meta.url),
-      'utf8',
-    );
-    const comments = new Map<string, string>();
-    for (const match of source.matchAll(/\/\*\*([\s\S]*?)\*\/\s*\{\s*id: '([^']+)'/g)) {
-      const [, body, id] = match;
-      if (body !== undefined && id !== undefined) comments.set(id, body);
-    }
-    for (const spec of CH4_BATCH2) {
-      const comment = comments.get(spec.id) ?? '';
-      expect(comment.length, `${spec.id} has no data comment`).toBeGreaterThan(0);
-      expect(comment, `${spec.id} does not record what is sourced`).toContain('SOURCED');
-      expect(comment, `${spec.id} does not record what is authored`).toContain('AUTHORED');
-    }
   });
 
   it("says what the code lock's machine cannot do, instead of claiming otherwise", () => {

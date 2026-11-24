@@ -10,7 +10,7 @@
  * one optional integration test that skips cleanly when the CLI is absent).
  *
  * This file imports `node:*` without `@types/node`, like the convention tests
- * do: the project deliberately has no Node ambient types (see AGENTS.md), so
+ * do: the project deliberately has no Node ambient types (see CONTRIBUTING.md), so
  * each such import carries one `@ts-expect-error` line.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';

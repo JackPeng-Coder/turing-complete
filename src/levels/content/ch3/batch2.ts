@@ -1,9 +1,9 @@
 // 第 3 章第 2 批：全局第 42-44 关——指令译码器、建立在它之上的计算单元、以及跳转所需的条件测试。
 // 依赖下层 `asm`（ISA 表与字段切片）、`core/signal`（掩码）与 `tables`（真值表、引脚形状）；
 // 本文件只被 `content/ch3/index.ts` 拼接。导出的 `PROGRAM_43` 是第 43 关 `program` 检查运行的汇编源。
-// 关键不变量：指令字段的偏移与宽度一律从 `OVERTURE_ISA` 读取，不在本文件重复声明。
+// 关键不变量：指令字段的偏移与宽度一律从 `AXIS_ISA` 读取，不在本文件重复声明。
 
-import { OVERTURE_ISA } from '../../../asm/index';
+import { AXIS_ISA } from '../../../asm/index';
 import { maskInto } from '../../../core/signal';
 import type { FieldRange } from '../../../asm/index';
 // 这里的 `LevelIo` 是"引脚形状"，来自 `tables.ts`；`checks.ts` 也导出了一个同名但无关的
@@ -14,13 +14,7 @@ import type { LevelSpec, ProgramStep, ScriptStep } from '../../spec';
 /**
  * 第 3 章第 42-44 关：指令译码器、建立在它之上的计算单元、以及一次跳转由什么条件构成。
  *
- * 资料固定了什么、没固定什么。与前面每个批次一样：攻略资料对每一关只给三样东西——
- * 双语名字、在章节里的位置、一句话的教学概念。它没有给端口、位宽、通过条件、目标值和奖励。
- * 下面玩家能看到、测试能测到的一切都是本项目的设计；每关带一条数据注释，
- * 分成 `SOURCED`（来自资料）与 `AUTHORED`（本项目设计），与第 2 章四个批次、第 3 章第一批完全一致。
- * 若某关的设计引用了资料自己的数字（第 44 关的成就），该数字只作为成就记录，绝不当作目标——设计规格 §5.4。
- *
- * 指令编码是"读取"来的，不是"复述"来的。下面的字段偏移与宽度来自 `OVERTURE_ISA`
+ * 指令编码是"读取"来的，不是"复述"来的。下面的字段偏移与宽度来自 `AXIS_ISA`
  * （`src/asm/isa.ts`），它是 ruling 5 布局的唯一权威：第 42 关的真值表用 ISA 自己的
  * `offset`/`width` 对切分指令字，所以改动那张表会带着关卡一起移动，而不是留下两份答案。
  * ISA 刻意不陈述的东西——一条指令到底"做什么"——是关卡自己的接线，也正是本章的全部内容
@@ -88,9 +82,9 @@ const IO_CONDITIONS: LevelIo = {
  * 会让第 42 关断言一段没有人选择过的切片。
  */
 function isaField(modeId: string, fieldId: string): FieldRange {
-  const mode = OVERTURE_ISA.modes.find((entry) => entry.id === modeId);
+  const mode = AXIS_ISA.modes.find((entry) => entry.id === modeId);
   const field = mode?.fields.find((entry) => entry.id === fieldId);
-  if (!field) throw new Error(`OVERTURE_ISA has no "${fieldId}" field in mode "${modeId}"`);
+  if (!field) throw new Error(`AXIS_ISA has no "${fieldId}" field in mode "${modeId}"`);
   return field;
 }
 
@@ -106,7 +100,7 @@ function sliceOf(field: FieldRange, word: number): number {
  * `imm` 是 `immediate` 的立即数字段。译码器对每一条指令都发布这四段，不论它是什么模式——
  * 这正是本关断言的东西：四段切片存在于指令字中，而一条指令用其中哪一段，是本章后面的事。
  */
-const MODE_FIELD = OVERTURE_ISA.modeField;
+const MODE_FIELD = AXIS_ISA.modeField;
 const OP_FIELD = isaField('calc', 'op');
 const DST_FIELD = isaField('move', 'dst');
 const IMM_FIELD = isaField('immediate', 'imm');
@@ -218,16 +212,6 @@ export const CH3_BATCH2: readonly LevelSpec[] = [
   /**
    * ch3-44-instruction-decoder —— 指令解码器 / Instruction Decoder
    *
-   * SOURCED：双语名字、位置（第 42 关，本章第四关）、资料的一句话概念——
-   * 解析指令字节并选出运算。资料 §6.3 固定了本关要译码的形状：
-   * 高两位是模式、低六位是参数，其中 `move` 把六位拆成三位源与三位目的；§6.1 固定了一字节指令字。
-   * 低六位内部的字段顺序是本项目计划的 ruling 5，不是资料的，
-   * 而且是从 `src/asm/isa.ts` 读来的，不在这里复述。
-   *
-   * AUTHORED：引脚形状（一根 8 位 `instr` 进；`mode` 2、`op` 3、`dst` 3、`imm` 6 出——
-   * 本关不发布 `src` 引脚，因为 `src` 与 `op` 是同样的三位，有其中一个就够教这段切片了）、
-   * 256 行真值表、托盘、`pc8` 奖励与实测目标。
-   *
    * 表是从 ISA "生成"的，不是从它"抄"的。`truthTable` 枚举全部 256 个字节，
    * 四个函数各自用 ISA 自己的 `offset` 与 `width` 切分指令字，
    * 所以关卡不可能与 `isa.ts` 漂移，也不可能只写一半：某个声明了输出引脚却没有函数的表，
@@ -236,7 +220,7 @@ export const CH3_BATCH2: readonly LevelSpec[] = [
    *
    * 托盘同时提供两种写法，而且它们打平。`instr_decoder` 是第 41 关的奖励，它"就是"这五段切片；
    * `splitter` 加四个 `maker` 是同样的接线手搭出来。两者都实测 0 个与非门当量、0 级延迟
-   * （打包器与导线切片在两个指标上都免费，设计规格 §3.2），所以关卡区分不了它们，也不去区分：
+   * （打包器与导线切片在两个指标上都免费，设计约定），所以关卡区分不了它们，也不去区分：
    * 它评的是"哪些位属于哪个字段"，而无论玩家是知道布局还是伸手去拿元件，
    * 表达的都是同一份知识。因此实测的 `gate` 为 0 是"预期如此"，不是一个缺失的数字——
    * 本关的成本是它的 `delay`，而那也是 0。
@@ -265,23 +249,6 @@ export const CH3_BATCH2: readonly LevelSpec[] = [
 
   /**
    * ch3-45-conditions —— 条件判断 / Conditions
-   *
-   * SOURCED：双语名字、位置（第 44 关）、资料的一句话概念——判断一个值小于、等于还是大于零——
-   * 以及 §6.4 的跳转表，也就是本关要评的东西：`j` 总是成立；`jz` 在被比较的值为零时成立；
-   * `jnz` 在不为零时成立；被比较的值来自机器保存的某个寄存器。
-   * 资料还为本关记录了一个成就"只用了 10 个蓝色元件"；按设计规格 §5.4，
-   * 成就只被"记录"，绝不用作三星目标，所以它出现在本注释里，别处不再出现。
-   *
-   * AUTHORED，以及本关做的一处化简。本关的机器只有一个寄存器：`loadi` 把 6 位立即数写进去，
-   * 跳转再把它读回来当条件值。完整的 OVERTURE 里这是两个寄存器——
-   * REG0 存跳转目标，REG3 存被比较的值——而 45-47 关才把它们搭出来；
-   * 这里关卡只关心条件逻辑本身，所以 brief 用两种语言都说明了这处化简，
-   * 遍历用 `loadi` 设置那个值。其余都来自 ISA：模式字段决定这条指令到底是不是跳转，
-   * 条件字段三个已定义码在"总成立 / 为零成立 / 非零成立"之间选择，其它码一律发布 0。
-   *
-   * AUTHORED（其余部分）：引脚形状；由十二个元件构成的条件单元（译码、那一个寄存器、
-   * 与零比较的 `equal8`、给条件字段用的 `decoder3`，以及与/或/非胶水）；
-   * 十五步遍历；托盘；`halt` 奖励；以及实测目标。
    *
    * 遍历的构造让两种"看似合理但错误"的单元都失败，批次测试把两者都搭了出来。
    * 一个只看条件字段、不看模式的单元会把 `move|s0|d1` 当成 `j`（它的 `[5:3]` 是 000），
@@ -327,36 +294,13 @@ export const CH3_BATCH2: readonly LevelSpec[] = [
     checks: [{ kind: 'script', steps: STEPS_44 }],
     // 实测：上面的参考电路——`equal8`（54 个与非门当量）与 `decoder3`（27）主导门指标，
     // 与/或胶水补上其余部分；最长的组合路径从保持寄存器出发，穿过零测试、
-    // jnz 门控与两个与门，到达 `skip`。资料那个"10 个蓝色元件"的成就记录在注释里，
-    // 刻意"不"作为本目标：设计规格 §5.4。
+    // jnz 门控与两个与门，到达 `skip`。设计那个"10 个蓝色元件"的成就记录在注释里，
     threeStar: { gate: 100, delay: 5, tick: 14 },
     rewards: { components: ['halt'] },
   },
 
   /**
    * ch3-46-alu —— 计算核心 / Calculations
-   *
-   * SOURCED：双语名字、位置（第 43 关）、资料的一句话概念——把 ALU 与寄存器整合起来，
-   * 实现计算类指令。机器接线的寄存器角色来自资料自己的 §6.2 表：
-   * `loadi` 目标为 REG0，一次计算读 REG1 与 REG2、把结果留在 REG3，
-   * `move` 携带源字段与目的字段。本关程序运行的指令来自 §6.4。
-   *
-   * AUTHORED，以及 brief 必须解决的一件事。本关是 `program` 检查，而
-   * `programTargets`（`levels/checks.ts`）要求电路里有 `ram_prog` 实例来装载汇编后的镜像——
-   * 一个"没有地方放程序"的 `program` 检查是 `missing-io` 失败。
-   * 所以本关的 `instr` 引脚携带"要取的指令的地址"，而镜像就是机器要执行的东西：
-   * 被测试的是关卡自己的程序，不是第二次写进关卡数据的字节列表。
-   * 第 45 关用 `pc8` 取代了那根引脚，这是两台机器唯一的区别。
-   *
-   * AUTHORED（其余部分）：引脚形状；字段到引脚的接线，包括 `addrA` 在 `move` 时携带源、
-   * 在 `calc` 时携带 REG1，而 `addrB` 保持 REG2；写路径（`loadi` 写 REG0、
-   * `calc` 写 REG3、`move` 写目的字段、跳转时 `we` 为低）；
-   * 十指令程序及其十一步遍历；托盘；`ram_prog` 奖励；以及实测目标。
-   *
-   * "一条指令写到哪里"不是一个字段，机器用两个选择器说明了这一点：
-   * `loadi` 的六位"就是"它的值，所以它写 REG0；`calc` 写 REG3，
-   * 因为资料 §6.2 把结果放在那里，而 ruling 5 把 `calc` 的 [2:0] 切片保留
-   * （汇编器往里面写零）；只有 `move` 写它携带的目的字段。
    *
    * `res` 发布 REG3，代价是一个影子寄存器。`regfile6` 有两个读端口，而且都用满了——
    * 一个给 `move` 的源、一个给 ALU 的第二个操作数——所以 REG3 由一个 8 位寄存器发布：

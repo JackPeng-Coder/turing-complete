@@ -3,9 +3,7 @@ import { maskOf } from '../core/signal';
 import type { FieldRange, Isa, ModeDef } from './isa';
 
 /**
- * OVERTURE 汇编文本 -> 指令字节。
- *
- * 语法（原始资料 §6.6、§10.2）。每行一条指令：
+ * AXIS 汇编文本 -> 指令字节。
  *
  *   `# ...`        注释，到行尾
  *   （空行）       跳过
@@ -56,7 +54,7 @@ const LABEL_DIRECTIVE = 'label';
 /**
  * 只接受十进制，而且是严格十进制：`Number('')` 是 0、`Number('1e2')` 是 100，
  * 若用宽松的 `Number(token)`，`loadi|` 会悄悄装入 0、`loadi|1e2` 会装入一个
- * 没人要求的数。`0x10` 被同一条规则拒绝——原始资料的语法没有数字前缀，而半套
+ * 没人要求的数。`0x10` 被同一条规则拒绝——本项目的语法没有数字前缀，而半套
  * 数字语法（比如只认十六进制不认二进制）比没有还糟。
  */
 const DECIMAL = /^\d+$/;
@@ -140,8 +138,8 @@ function unknownMnemonic(token: string, byLowerCase: ReadonlyMap<string, string>
 /**
  * token -> 模式与选择子，另附一份小写拼写表，纯粹用于"你是不是想写"提示。
  *
- * 用 `isa` 参数而不是 `OVERTURE_ISA` 构建，因为 ISA 是参数：第五阶段的 LEG 只要
- * 再给一张表，就能免费得到这个编译器。
+ * 用 `isa` 参数而不是 `AXIS_ISA` 构建，因为 ISA 是参数：未来接入另一套 ISA
+ * 时，只要再给一张表，就能复用这个编译器。
  */
 function indexMnemonics(isa: Isa): {
   readonly byToken: ReadonlyMap<string, MnemonicEntry>;
@@ -261,7 +259,6 @@ export function assemble(source: string, isa: Isa): AssembleResult {
     if (body === '') continue;
 
     // 这里会遇到两种行形状。标号的名字跟在关键字后面、以空白分隔（`label loop`，
-    // 原始资料 §6.6）；指令的字段则以 `|` 分隔（`loadi|5`）。因此要先按第一个
     // 词判断是不是标号关键字，再做任何字段切分。
     const words = body.split(/\s+/);
     if (words[0] === LABEL_DIRECTIVE) {

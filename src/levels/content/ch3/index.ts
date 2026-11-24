@@ -26,11 +26,6 @@ import { CH3_BATCH3 } from './batch3';
  * 无论本章是否被追加进总表都会通过；只有遍历 `ALL_LEVELS` 的
  * `unlock-chain.test.ts` 才抓得到，所以它断言的是章节边界的下标，而不只是关卡数量。
  *
- * 程序常量不从本文件再导出：`batch2.ts` 与 `batch3.ts` 各自导出其 `program` 检查所运行的
- * 汇编源代码（`PROGRAM_43`、`PROGRAM_45`-`PROGRAM_47`），这些字节在模块外可读。
- * 今天没有测试读取它们，这是一个待补的缺口而不是设计意图——导出它们正是为了以后断言它们。
- * 让它们留在使用它们的关卡旁边：本章索引只是一张"摆放顺序表"，
- * 在这里再导出会给同一段字符串制造第二条 import 路径，而两条路径正是"只改了一处"这类 bug 的来源。
  */
 export const CH3_LEVELS: readonly LevelSpec[] = [
   ...CH3_BATCH1,

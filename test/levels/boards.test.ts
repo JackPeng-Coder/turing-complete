@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { OVERTURE_ISA, assemble } from '../../src/asm';
+import { AXIS_ISA, assemble } from '../../src/asm';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { validateGraph } from '../../src/core/graph';
 import { Simulation, compile, delayOf } from '../../src/core/net';
 import { portValueToNumber } from '../../src/core/signal';
 import { graphFromBoard } from '../../src/levels/board';
-import { overtureBoard } from '../../src/levels/boards/overture';
+import { axisBoard } from '../../src/levels/boards/axis';
 import { gateCost } from '../../src/levels/grader';
 import type { BoardInit } from '../../src/levels/spec';
 import { registry } from '../fixtures/build';
@@ -24,15 +24,15 @@ import { registry } from '../fixtures/build';
  *
  * WHAT THIS FILE IS ACTUALLY GUARDING. Chapter 4's levels open on the machine
  * chapter 3 taught the player to build, and the same machine is chapter 3's
- * reference solution (`overtureMachine` in `test/fixtures/ch3-references.ts`).
+ * reference solution (`axisMachine` in `test/fixtures/ch3-references.ts`).
  * Two copies of that circuit would be free to drift, and the drift would read as
  * a pass -- the reference would keep grading green while the board the player is
  * handed slowly stopped being it. So the fixture is built FROM the board: there
- * is one builder (`overtureBoard`) and two readers, and no second copy exists to
+ * is one builder (`axisBoard`) and two readers, and no second copy exists to
  * drift in the first place.
  *
  * THAT SHARING IS NOT ITSELF EVIDENCE, and this file does not pretend it is.
- * `overtureMachine()` IS `graphFromBoard('ref', overtureBoard())`, so an
+ * `axisMachine()` IS `graphFromBoard('ref', axisBoard())`, so an
  * assertion that the two are equal can only fail on non-determinism, which the
  * block above already covers. What carries the weight is the numbers and the
  * behaviour: the plain board's 42 instances and 95 wires below (a board that
@@ -47,7 +47,7 @@ import { registry } from '../fixtures/build';
  * code 6, which names `inp` in the ISA and is a register the six-register file
  * does not have, so the bank publishes 0. Chapter 3 never notices -- its
  * programs are straight lines and loops over the registers -- but every
- * chapter-4 level reads its input, so `overtureBoard({ inputId })` carries the
+ * chapter-4 level reads its input, so `axisBoard({ inputId })` carries the
  * connector and the mux that make that read real, on both paths a `move`'s
  * source byte travels: the register file's write data and the `out` switch.
  * The acceptance is behavioural: one program, two boards, and only the wired one
@@ -64,7 +64,7 @@ import { registry } from '../fixtures/build';
  * test rather than a failing board, so it throws here instead of running.
  */
 function image(source: string): readonly number[] {
-  const result = assemble(source, OVERTURE_ISA);
+  const result = assemble(source, AXIS_ISA);
   const first = result.errors[0];
   if (first !== undefined) throw new Error(`the test program does not assemble: ${first.reason}`);
   return result.bytes;
@@ -129,7 +129,7 @@ function publishThroughOut(
   const sim = new Simulation(net, registry);
   const ram = graph.instances.find((inst) => inst.def === 'ram_prog');
   if (ram === undefined) {
-    throw new Error('the OVERTURE board has no ram_prog to load a program into');
+    throw new Error('the AXIS board has no ram_prog to load a program into');
   }
   sim.reset();
   sim.loadImage(ram.id, program);
@@ -140,12 +140,12 @@ function publishThroughOut(
 }
 
 describe('graphFromBoard', () => {
-  it('turns the OVERTURE board into the machine chapter 3 measured', () => {
+  it('turns the AXIS board into the machine chapter 3 measured', () => {
     // 42 instances is 40 parts plus the level's clock input and its output
     // connector; 95 wires is the same count the reference machine has always
     // had. Both are pinned because a board that quietly lost a part would still
     // compile, and the level's three-star target would move with it.
-    const graph = graphFromBoard('x', overtureBoard());
+    const graph = graphFromBoard('x', axisBoard());
     expect(graph.instances).toHaveLength(42);
     expect(graph.wires).toHaveLength(95);
     expect(graph.level).toBe('x');
@@ -156,7 +156,7 @@ describe('graphFromBoard', () => {
     // pins by instance id, so a board whose connectors were left unnamed --
     // `i1` and `i42` -- would grade as `missing-io` however correct its wiring
     // was.
-    const graph = graphFromBoard('x', overtureBoard());
+    const graph = graphFromBoard('x', axisBoard());
     const clk = graph.instances.find((inst) => inst.id === 'IN_clk');
     expect(clk?.def).toBe('level_input');
     const out = graph.instances.find((inst) => inst.id === 'OUT');
@@ -169,7 +169,7 @@ describe('graphFromBoard', () => {
 
   it('uses only component defs the kernel registers', () => {
     const known = new Set(BASE_DEFS.map((def) => def.id));
-    for (const inst of graphFromBoard('x', overtureBoard()).instances) {
+    for (const inst of graphFromBoard('x', axisBoard()).instances) {
       expect(known.has(inst.def), `${inst.id} is a ${inst.def}, which BASE_DEFS does not register`).toBe(
         true,
       );
@@ -177,7 +177,7 @@ describe('graphFromBoard', () => {
   });
 
   it('reports no structural error', () => {
-    const issues = validateGraph(graphFromBoard('x', overtureBoard()), registry);
+    const issues = validateGraph(graphFromBoard('x', axisBoard()), registry);
     // Errors only. The counter's own loop -- PC -> RAM -> decoder -> the jump
     // glue -> pc_in -> PC -- is a `feedback-loop` WARNING, which is what
     // `validateGraph` says about every loop: it is legal exactly when a storage
@@ -187,7 +187,7 @@ describe('graphFromBoard', () => {
   });
 
   it('compiles', () => {
-    expect(() => compile(graphFromBoard('x', overtureBoard()), registry)).not.toThrow();
+    expect(() => compile(graphFromBoard('x', axisBoard()), registry)).not.toThrow();
   });
 
   it('refuses a wire that names a part the board does not have', () => {
@@ -207,29 +207,29 @@ describe('graphFromBoard', () => {
   });
 });
 
-describe('the OVERTURE board is plain, deterministic data', () => {
+describe('the AXIS board is plain, deterministic data', () => {
   it('is the same board on every call', () => {
     // Determinism, stated the way the grader needs it: no clock, no counter, no
     // `Math.random()` -- two opens of the same level are the same circuit.
-    expect(overtureBoard()).toEqual(overtureBoard());
+    expect(axisBoard()).toEqual(axisBoard());
   });
 
   it('survives a round trip through JSON', () => {
     // `BoardInit` may hold numbers, strings and arrays and nothing else. A
     // function or a class instance smuggled in as a part would not survive this,
     // and could not be stored in level data at all.
-    const board = overtureBoard();
+    const board = axisBoard();
     expect(JSON.parse(JSON.stringify(board))).toEqual(board);
   });
 });
 
-describe('the OVERTURE board with a level input', () => {
+describe('the AXIS board with a level input', () => {
   it('leaves the chapter-3 machine alone when no input is asked for', () => {
     // The option must be the ONLY difference between the two boards: chapter 3's
     // three machine levels -- and every three-star target measured from them --
     // read this board with no options at all, so a select that was wired in
     // unconditionally would move the machine under them.
-    const graph = graphFromBoard('x', overtureBoard());
+    const graph = graphFromBoard('x', axisBoard());
     expect(graph.instances).toHaveLength(42);
     expect(graph.wires).toHaveLength(95);
     expect(graph.instances.map((inst) => inst.id)).not.toContain('IN_in');
@@ -245,19 +245,19 @@ describe('the OVERTURE board with a level input', () => {
     // select had been built from a comparator instead of the decode line, would
     // still compile and still pass every behavioural test below while moving
     // every chapter-4 three-star target with it -- and it is exactly the number
-    // `boards/overture.ts` quotes when it explains why the comparator was
+    // `boards/axis.ts` quotes when it explains why the comparator was
     // reverted.
-    expect(gateCost(graphFromBoard('x', overtureBoard()), registry)).toBe(643);
-    expect(gateCost(graphFromBoard('x', overtureBoard({ inputId: 'in' })), registry)).toBe(675);
+    expect(gateCost(graphFromBoard('x', axisBoard()), registry)).toBe(643);
+    expect(gateCost(graphFromBoard('x', axisBoard({ inputId: 'in' })), registry)).toBe(675);
     // The delay metric does not move, in either shape: the mux stands in the
     // source path at the depth the register-file read already had, and where the
     // comparator would have stood too.
-    expect(delayOf(graphFromBoard('x', overtureBoard()), registry)).toBe(6);
-    expect(delayOf(graphFromBoard('x', overtureBoard({ inputId: 'in' })), registry)).toBe(6);
+    expect(delayOf(graphFromBoard('x', axisBoard()), registry)).toBe(6);
+    expect(delayOf(graphFromBoard('x', axisBoard({ inputId: 'in' })), registry)).toBe(6);
   });
 
   it('carries the level input pin, and the one part that puts it on the source path', () => {
-    const wired = overtureBoard({ inputId: 'in' });
+    const wired = axisBoard({ inputId: 'in' });
     // TWO more parts than the plain board's 42, and each one is named, because
     // "the board gained a part" is only checkable if the count and the reason are
     // stated together: the level's own connector (`IN_in`) and the `mux8` that
@@ -293,7 +293,7 @@ describe('the OVERTURE board with a level input', () => {
   });
 
   it('makes the level input an alternative VALUE for a move, never a register index', () => {
-    const graph = graphFromBoard('x', overtureBoard({ inputId: 'in' }));
+    const graph = graphFromBoard('x', axisBoard({ inputId: 'in' }));
     // One consumer, and it is a mux: the input byte is one of the two things
     // `d1` can be handed, so it can only ever be a byte a `move` copies -- not
     // an address the register file would read. `b` is that mux's sel = 1 input.
@@ -315,7 +315,7 @@ describe('the OVERTURE board with a level input', () => {
     // the instruction word: the wire into the mux's `sel` is the `b6` line of the
     // splitter on the CONDITION decoder. That decoder is the `decoder3` the
     // jump's `jz`/`jnz` lines come from, and it decodes `DEC.op` -- the very
-    // [5:3] slice `DEC.src` names -- so its `b6` line IS "the source field is 6",
+    // [5:3] slice `DEC.src` names -- so its `b6` line IS "课程表 field is 6",
     // computed for the jump glue already. A comparator here would say the same
     // thing for 54 NAND equivalents more: the wired board's whole gate metric is
     // 675 with this line and was 729 with a comparator. The delay metric does not
@@ -343,7 +343,7 @@ describe('the OVERTURE board with a level input', () => {
   });
 
   it('reports no structural error and compiles', () => {
-    const graph = graphFromBoard('x', overtureBoard({ inputId: 'in' }));
+    const graph = graphFromBoard('x', axisBoard({ inputId: 'in' }));
     expect(validateGraph(graph, registry).filter((issue) => issue.severity === 'error')).toEqual([]);
     expect(() => compile(graph, registry)).not.toThrow();
   });
@@ -352,7 +352,7 @@ describe('the OVERTURE board with a level input', () => {
     // THE ACCEPTANCE FOR THE WRITE PATH. `move|inp|d1` copies the level's byte
     // into REG1 and `move|s1|out` publishes it, so a chapter-4 level's `program`
     // check sees the value it wrote on its own `in` pin.
-    expect(publishThroughOut(overtureBoard({ inputId: 'in' }), VIA_REGISTER, 0x2a)).toBe(0x2a);
+    expect(publishThroughOut(axisBoard({ inputId: 'in' }), VIA_REGISTER, 0x2a)).toBe(0x2a);
   });
 
   it('publishes zero for the same program on the plain board', () => {
@@ -360,7 +360,7 @@ describe('the OVERTURE board with a level input', () => {
     // the input path these instructions read code 6 out of the register file,
     // which publishes 0 for a register it does not have. A machine that always
     // answered 0x2a -- or one whose `out` never rose -- would fail here.
-    expect(publishThroughOut(overtureBoard(), VIA_REGISTER, 0x2a)).toBe(0);
+    expect(publishThroughOut(axisBoard(), VIA_REGISTER, 0x2a)).toBe(0);
   });
 
   it('encodes the programs this block drives the way the machine reads them', () => {
@@ -380,14 +380,14 @@ describe('the OVERTURE board with a level input', () => {
     // copies the level's byte straight to the port, through no register at all.
     // A board whose `out` switch read the register file directly published 0 for
     // that correct-looking program, which is the trap this test keeps shut.
-    expect(publishThroughOut(overtureBoard({ inputId: 'in' }), STRAIGHT_OUT, 0x5c)).toBe(0x5c);
+    expect(publishThroughOut(axisBoard({ inputId: 'in' }), STRAIGHT_OUT, 0x5c)).toBe(0x5c);
   });
 
   it('publishes zero for `move|inp|out` on the plain board', () => {
     // The same negative control, and it is not redundant with the register-routed
     // pair: this program never touches a register, so the only thing that can put
     // 0x5c on `out` is a board that carries the input path.
-    expect(publishThroughOut(overtureBoard(), STRAIGHT_OUT, 0x5c)).toBe(0);
+    expect(publishThroughOut(axisBoard(), STRAIGHT_OUT, 0x5c)).toBe(0);
   });
 
   it('still publishes a register through `move|sX|out`', () => {
@@ -396,7 +396,7 @@ describe('the OVERTURE board with a level input', () => {
     // one `loadi|42` wrote -- the level's input pin holds something else, and a
     // board whose `out` switch had been wired to the input rather than to the
     // source mux, or whose select ignored the field, would answer 0x5c.
-    expect(publishThroughOut(overtureBoard({ inputId: 'in' }), FROM_REGISTER, 0x5c)).toBe(42);
+    expect(publishThroughOut(axisBoard({ inputId: 'in' }), FROM_REGISTER, 0x5c)).toBe(42);
   });
 
   it('leaves a `loadi` alone even when its immediate looks like the source field 6', () => {
@@ -409,7 +409,7 @@ describe('the OVERTURE board with a level input', () => {
     // 0x5c.
     const immediate = image('loadi|50\nmove|s0|out');
     expect(immediate).toEqual([0x32, 0x87]);
-    expect(publishThroughOut(overtureBoard({ inputId: 'in' }), immediate, 0x5c)).toBe(50);
+    expect(publishThroughOut(axisBoard({ inputId: 'in' }), immediate, 0x5c)).toBe(50);
   });
 
   it('publishes zero for a `calc` whose op field is the reserved code 6', () => {
@@ -425,7 +425,7 @@ describe('the OVERTURE board with a level input', () => {
     // 0x9F is `move|s3|out`, so a board that let the input reach the write data,
     // or an ALU that answered a reserved op with anything but 0, would publish
     // 0x2a here.
-    expect(publishThroughOut(overtureBoard({ inputId: 'in' }), [0x70, 0x9f], 0x2a)).toBe(0);
+    expect(publishThroughOut(axisBoard({ inputId: 'in' }), [0x70, 0x9f], 0x2a)).toBe(0);
   });
 
   it('still runs chapter 3\'s countdown program to 21 on the wired board', () => {
@@ -439,7 +439,7 @@ describe('the OVERTURE board with a level input', () => {
     // instruction in the program writes and no constant produces. Tick 95 is that
     // walk's last step, one edge past the loop's exit, so the byte is asserted
     // after the machine has stopped as well as when it lands.
-    expect(publishThroughOut(overtureBoard({ inputId: 'in' }), COUNTDOWN, 0x5c, 95)).toBe(21);
+    expect(publishThroughOut(axisBoard({ inputId: 'in' }), COUNTDOWN, 0x5c, 95)).toBe(21);
     // The plain board is not a control here -- chapter 3's machine runs this
     // program today -- so the same run is stated once, on the wired board, which
     // is the shape chapter 4 ships.

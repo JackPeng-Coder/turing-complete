@@ -74,7 +74,7 @@ export interface ComponentDef {
   /**
    * 延迟代价 cost：信号穿过这个元件要花几个"基础门延迟"，供最长路径
    * delayOf 使用。电源和导线类元件为 0，每个门为 1，宽位元件同样记为 1
-   * （规格 §3.2：8 位加法器这类宽位组件也只算 1）。
+   * （延迟口径：8 位加法器这类宽位组件也只算 1）。
    *
    * 它不是门数指标：门数指标由下面的 gateCost 承担。cost 只被 delayOf
    * 按节点读取一次。
@@ -82,7 +82,7 @@ export interface ComponentDef {
   readonly cost: number;
   /**
    * NAND 等价门数 gateCost：把这个元件展开成 2 输入与非门后需要多少门
-   * （规格 §5.4）。只被 levels/grader.ts 的门数统计读取。
+   * （成本口径）。只被 levels/grader.ts 的门数统计读取。
    *
    * 两个指标故意对宽位元件给出不同数值：一个 add8 在延迟上只算 1 个单位，
    * 在门数上是 72 个与非门，所以不能共用一个字段。

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyGraph } from '../../src/core/graph';
 import { Simulation, compile } from '../../src/core/net';
 import { graphFromBoard } from '../../src/levels/board';
-import { overtureBoard } from '../../src/levels/boards/overture';
+import { axisBoard } from '../../src/levels/boards/axis';
 import { bindLevelIo, runChecks, type LevelIo } from '../../src/levels/checks';
 import { CUSTOM_BUDGET_CAP, customCheckIds } from '../../src/levels/custom/index';
 import { callMaze } from '../../src/levels/custom/maze';
@@ -13,7 +13,7 @@ import { scriptedIo } from '../fixtures/level-io';
 /**
  * `maze` -- 路在脚下 / The Maze: chapter 4's second closed-loop checker.
  *
- * THE PUZZLE. The board is the player's OVERTURE CPU, and a robot walks a grid
+ * THE PUZZLE. The board is the player's AXIS CPU, and a robot walks a grid
  * the level declares. The CPU sees three bits -- a wall directly ahead, one to
  * the left, one to the right, all relative to where the robot is facing -- and
  * answers with a move code. The checker applies the move, publishes the sensors
@@ -40,10 +40,9 @@ import { scriptedIo } from '../fixtures/level-io';
  */
 
 /**
- * The reference program for this puzzle, verbatim from
- * `.superpowers/sdd/2026-10-08-turing-complete-phase3/reference-programs.md`
- * (ch4-56): read the sensors into REG4, then loop -- left open, turn left;
- * otherwise ahead open, go forward; otherwise turn right.
+ * The reference program for this puzzle (ch4-56): read the sensors into REG4,
+ * then loop -- left open, turn left; otherwise ahead open, go forward;
+ * otherwise turn right.
  *
  * READ THE JUMP TARGETS: every loop-back is `loadi|1` / `j`, so the loop head is
  * address 1 and REG4 is loaded ONCE, at address 0. The program is a wall
@@ -704,7 +703,7 @@ describe('maze', () => {
 
 /**
  * THE ACCEPTANCE ON A REAL BOARD: the level `runChecks` would grade, with the
- * player's program loaded into the OVERTURE's `ram_prog`, so the moves the
+ * player's program loaded into the AXIS's `ram_prog`, so the moves the
  * checker applies are the ones a program actually published.
  *
  * THE STUB ABOVE PROVES THE GEOMETRY; this proves the wiring. A checker that
@@ -712,14 +711,14 @@ describe('maze', () => {
  * did not settle would feed the CPU the previous sensor byte -- neither of which
  * a scripted `LevelIo` can show.
  *
- * `halt: false` IS A FACT ABOUT THE LEVEL. The OVERTURE's halt line freezes the
+ * `halt: false` IS A FACT ABOUT THE LEVEL. The AXIS's halt line freezes the
  * counter on the `move|sN|out` instruction, and both of these programs write
  * `out` inside their loop, so on the halting board the machine stops after one
  * move. Measured: the reference program never leaves its first decision.
  */
 describe('maze on the reference board', () => {
   const board = (): ReturnType<typeof graphFromBoard> =>
-    graphFromBoard('maze', overtureBoard({ inputId: 'sensors', halt: false }));
+    graphFromBoard('maze', axisBoard({ inputId: 'sensors', halt: false }));
 
   /** The maze level with one check, out of the same spec the stub tests use. */
   const withGrid = (

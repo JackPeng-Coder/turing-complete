@@ -1,7 +1,7 @@
 /**
  * The campaign's shape, held to `src/levels/campaign.ts`.
  *
- * The table in that file is the 2.x target (the sourced 93-level table's
+ * The table in that file is the 当前课程 target (课程表d 93-level table's
  * chapters 1-4). This test is what makes it binding: id, chapter, global index
  * and both names have to agree exactly, in that order, and no level may exist
  * that the table does not name.

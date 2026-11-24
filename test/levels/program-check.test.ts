@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OVERTURE_ISA, assemble, parseImage } from '../../src/asm/index';
+import { AXIS_ISA, assemble, parseImage } from '../../src/asm/index';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { addInstance, connect, emptyGraph, type Graph } from '../../src/core/graph';
 import { Simulation, compile, type Netlist } from '../../src/core/net';
@@ -164,7 +164,7 @@ describe('Simulation.loadImage', () => {
 /**
  * The program every `program` check below runs.
  *
- * Hand-computed from the OVERTURE table in the phase-2 plan (decision 5):
+ * Hand-computed from the AXIS table in the phase-2 plan (decision 5):
  * `loadi` is `00_iiiiii`, `add` is `01_000_000`, and `move|sX|dY` is
  * `10_XXX_YYY` with 6 = `inp` and 7 = `out`. Every byte is different on purpose:
  * a circuit that always reads byte 0 must not be able to pass the reference
@@ -229,7 +229,7 @@ function programCheck(overrides: Partial<ProgramCheck> = {}): LevelCheck {
  *
  * `pc8` advances on every clock edge and the level's `load` pin sends it back to
  * address 0, so the circuit genuinely walks the image. This is the fetch half of
- * an OVERTURE with no instruction semantics of its own, which is the point: the
+ * an AXIS with no instruction semantics of its own, which is the point: the
  * check verifies that the assembled image reached the RAM and is read in order,
  * not that the circuit understands the instructions.
  */
@@ -325,7 +325,7 @@ describe('runChecks / program', () => {
     // still pass against a consistently-wrong assembler, so the image is pinned
     // here, and its bytes are asserted distinct: an all-equal image could not
     // tell "reads byte 0" from "reads in order".
-    expect(assemble(SOURCE, OVERTURE_ISA).bytes).toEqual([...IMAGE]);
+    expect(assemble(SOURCE, AXIS_ISA).bytes).toEqual([...IMAGE]);
     expect(new Set(IMAGE).size).toBe(IMAGE.length);
   });
 

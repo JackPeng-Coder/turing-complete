@@ -271,7 +271,7 @@ describe('a conversation', () => {
     await tick();
 
     const row = stage.querySelector('.agent-run-stats')!;
-    // The four readings, in the order DSH's composer pills show them, plus the
+    // The four readings, in the order 同类工具's composer pills show them, plus the
     // estimated cost from the published DeepSeek prices.
     expect(row.textContent).toBe('2.4s · 1.2k tok · 20 tok/s · 缓存 83% · ¥0.0004');
     expect(row.getAttribute('title')).toContain('输入 1,200 tok');

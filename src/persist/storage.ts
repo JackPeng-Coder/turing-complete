@@ -31,7 +31,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * 重新复活。缺少 `programs`——编程章节之前所有存档的形状——会被读成空程序表，
  * 缺少 `blueprints` 则读成空元件库，都不是损坏的存档。
  *
- * 关卡键会经过 `levels/id-map.ts` 翻译。2.x 对齐改掉了 37 个关卡的 id、删除了
+ * 关卡键会经过 `levels/id-map.ts` 翻译。当前课程 对齐改掉了 37 个关卡的 id、删除了
  * 3 个关卡，而存档以 id 为键——不翻译的话，玩家的星星会悄悄挂到已经不存在的
  * 关卡上。已经是当前 id 的键原样通过，指向已退休关卡的键被丢弃：没有关卡
  * 可供它描述了。

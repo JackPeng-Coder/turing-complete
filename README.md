@@ -1,6 +1,6 @@
 # 逻辑工坊 · 从与非门到 CPU
 
-一款由学生从零设计并实现的计算机原理教育游戏：所有图形由程序绘制，所有界面文字与游戏文案均为原创，不引入任何运行时依赖，也不用于商业发行。仓库中的源码、测试与文档共同记录了它的设计、实现与验证过程。
+一款由学生从零设计并实现的计算机原理教育游戏：所有图形由程序绘制，界面文字、关卡提示与文档由本项目撰写，不引入任何运行时依赖，也不用于商业发行。仓库中的源码、测试与文档共同记录了它的设计、实现与验证过程。
 
 ## 这是什么
 
@@ -34,7 +34,7 @@
 - **沙盒电路可写入 Arduino**：“开发板”页签从沙盒画板生成表驱动的草图——第一版支持一位门、全加器、延迟线、一位存储器和两个连接器——按 Uno、Nano 或 Mega 的预算估算占用，既可以下载自包含的 `.ino`，也可以通过 `tools/arduino-bridge.mjs` 烧录；这是一个在本地运行 `arduino-cli` 的回环守护进程（浏览器做不到）。一位连接器可以绑定到物理引脚：**D0–D13 与 A0–A5 全部可用**，输出用 `digitalWrite` 驱动，输入用内部上拉读取。烧录后电路**独立运行**：草图中没有串口协议，时钟频率由面板在构建时写死，拔下 USB 也不会停。
 - **可用中文对话的内置智能体**：填入 API 地址、密钥和模型即可——请求从浏览器直连该端点，因此应用仍然**没有运行时依赖、没有服务端**——然后用中文描述需求，看着它被逐步执行。智能体一次调用一个操作：放置、移动、连线、断开、删除、选择、封装为元件、打开元件电路并编辑、重命名或删除、撤销与重做、驱动输入引脚、运行时钟、单步、按“测试”、写入程序文本、导入导出电路。两步之间画板会停一帧，因此每一步都可见，刚操作过的元件会带上选中环。它的编辑和你自己的编辑进入同一个命令栈，Ctrl+Z 可以逐步回退；它只能放置关卡托盘里实际提供的元件。密钥以明文保存在 `localStorage` 的 `tc.agent.v1` 下，“设置”可以清除它；未配置时面板会说明缺什么，启动时不会询问，因为不配置也能正常游玩。
 
-第 5–7 章（Symphony CPU、函数、汇编挑战和外设）已规划，但尚未实现。
+第 5–7 章（函数、汇编挑战和外设）已规划，但尚未实现。
 
 ## 界面
 
@@ -99,20 +99,7 @@
 
 `pnpm dev` 与 `pnpm start` 由 `tools/launch.mjs` 驱动：它在同一个 Node 进程里先启动本地桥（`127.0.0.1:8765`），再启动 Vite；按 Ctrl+C 或关闭终端时两者一起退出。8765 上已经有桥时直接复用（不健康的桥也会复用并提示原因；复用的桥不会随启动器退出）。`pnpm start` 会先构建 `dist/`，再用 4173 端口预览并自动打开浏览器；加 `--no-open` 可阻止自动打开（`node tools/launch.mjs start --no-open`）。只想单独启动桥时仍可用 `pnpm arduino`。
 
-在**本机**，`PATH` 上的 `pnpm` 是一个损坏的包装脚本，因此同样的任务要通过把捆绑的 `pnpm.mjs` 交给捆绑的 Node 可执行文件来运行。以下是本机实际可用的命令：
-
-```powershell
-$NODE = "$env:USERPROFILE\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
-$PNPM = "$env:USERPROFILE\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin\pnpm.mjs"
-
-& $NODE $PNPM dev     # 开发服务器 + 本地桥，http://127.0.0.1:5173
-& $NODE $PNPM start   # 构建 + 预览 + 本地桥，并打开浏览器
-& $NODE $PNPM test    # Vitest，运行一次
-& $NODE $PNPM build   # tsc --noEmit && vite build -> dist/
-& $NODE $PNPM smoke   # Playwright 端到端冒烟测试
-```
-
-`pnpm <任务>` 是可移植写法，脚本和文档里都应使用；`& $NODE $PNPM` 只是本机的绕行办法。
+所有命令都通过 `pnpm <任务>` 运行；脚本与文档使用同一套可移植写法，不依赖特定机器的路径。
 
 ### 机房离线部署
 
@@ -171,13 +158,13 @@ src/
   ui/board/  画板本身：相机与命中测试、导线布线、绘制、实时信号
   persist/  localStorage 存档、沙盒电路与 `tc-circuit` 文件格式
 test/       Vitest 单元与关卡测试、约定断言、Playwright 冒烟测试
-tools/      SDD PowerShell 助手、会话记录读取器、视觉检查、Arduino 本地桥与启动器（tools/*.mjs）
-docs/       设计规格、阶段计划与各章关卡出处
+tools/      Arduino 本地桥、启动器与视觉检查（tools/*.mjs）
+docs/       课程结构与解锁表（docs/curriculum.md）
 ```
 
 依赖方向是单向的：`core` ← `asm` ← `levels` ← `flash`，`app` 与 `flash` 并列（它不导入 `flash`：导出器读取的是电路，不是应用）。`persist` 读取 `app` 以构造空存档，`agent` 读取 `app`，像玩家一样通过组合根实现的 `agent/host.ts` 接口驱动它；外壳导入 `agent` 和 `flash`，绝不反向，而 `agent/` 完全不能导入 `ui/`。没有任何模块向上导入，一旦出现，`test/conventions.test.ts` 就会让构建失败——这个文件就是本项目的 linter，因为按约定没有固定任何 linter。
 
-塑造整个项目的四条硬规则（详见 `AGENTS.md`）：
+塑造整个项目的四条硬规则（详见 `CONTRIBUTING.md`）：
 
 1. **零运行时依赖**：`package.json` 没有 `dependencies`，状态、撤销栈、渲染器和汇编器全部手写；每个开发依赖都锁定精确版本。
 2. **依赖单向**：不允许向上导入，运行时和类型都一样；这就是上面那条由测试强制的规则。
@@ -188,12 +175,8 @@ docs/       设计规格、阶段计划与各章关卡出处
 
 ## 贡献范围与后续计划
 
-阶段 0–3 覆盖第 1–4 章，即规划中的 93 关里的 **56 关**。在战役之外还做了两个阶段：**沙盒**与**玩家自建元件**——设计规格要求的两个功能（规格 §3.4、§7、§8.1）——以及**内置智能体**，这是本项目自主实现的一项 AI 功能。各章关数为 13/26/10/7/26/7/4，宽信号 2–64 位；固定这一结构的表在 [`src/levels/campaign.ts`](src/levels/campaign.ts)，[`test/levels/campaign-shape.test.ts`](test/levels/campaign-shape.test.ts) 让每一关都符合它。剩余第 5–7 章的阶段范围与验收标准见 [`docs/superpowers/plans/2026-10-16-turing-complete-chapters-5-7.md`](docs/superpowers/plans/2026-10-16-turing-complete-chapters-5-7.md)。
-
-构建过程的记录也一并提交。[`.superpowers/sdd/`](.superpowers/sdd/) 每个阶段一个目录：阶段 0 和 1 保存每项任务的任务简报、实现者报告，以及每个结论背后的评审差异——阶段 0 缺少任务 9 和 11 的简报，因为它们写于工作区约定确立之前——阶段 2 保存的是决策记录和 ALU 交接，而不是逐任务报告，因为它以更少、更大的任务进行。`tools/sdd/` 保存三个 PowerShell 助手，用于解析这样的工作区、编写任务简报和准备评审包。
-
-`docs/session-archive/` 按仓库所有者要求保留了一份原始记录 `session.v4.jsonl`（5.1 MB），即阶段 3 记录背后的会话；更早的记录已从工作树中移除，仍可通过 `git log --all -- docs/session-archive` 找到。扁平化的 `digest.md` 视图由 `tools/transcript-digest.mjs` 重新生成，并被 git 忽略，因此派生的副本不会成为第二个事实来源。
+阶段 0–3 覆盖第 1–4 章，共 **56 关**。在战役之外还完成了**沙盒**、**玩家自建元件**与**内置智能体**。各章关数为 13/26/10/7，宽信号 2–64 位；固定这一结构的表在 [`src/levels/campaign.ts`](src/levels/campaign.ts)，[`test/levels/campaign-shape.test.ts`](test/levels/campaign-shape.test.ts) 让每一关都符合它。剩余章节的规划另行维护，不在本仓库的提交范围内。
 
 ## 许可证
 
-MIT——见 [LICENSE](LICENSE)。所有图形由程序绘制，游戏自身的所有文字均为原创。
+MIT——见 [LICENSE](LICENSE)。所有图形由程序绘制；界面文字、关卡提示与文档由本项目撰写。

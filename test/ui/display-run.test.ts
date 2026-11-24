@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createRegistry } from '../../src/core/registry';
 import { BASE_DEFS } from '../../src/core/defs/index';
 import { graphFromBoard } from '../../src/levels/board';
-import { overtureBoard } from '../../src/levels/boards/overture';
+import { axisBoard } from '../../src/levels/boards/axis';
 import { createProgramRun } from '../../src/levels/run';
 import type { LevelSpec } from '../../src/levels/spec';
 import { createDisplay } from '../../src/ui/board/signals';
@@ -50,7 +50,7 @@ const INPUT = 0x2a;
 describe('the board, the run and the debugger as main.ts wires them', () => {
   it('agrees about the clock and the output after five steps', () => {
     // The board: the same reference circuit, and the run's machine handed to it.
-    const graph = graphFromBoard(PROGRAM_LEVEL.id, overtureBoard({ inputId: 'in' }));
+    const graph = graphFromBoard(PROGRAM_LEVEL.id, axisBoard({ inputId: 'in' }));
     const run = createProgramRun(graph, registry, PROGRAM_LEVEL, ECHO, 'asm');
     expect(run.errors).toEqual([]);
     const display = createDisplay(graph, registry, PROGRAM_LEVEL, {}, run.machine);
@@ -121,7 +121,7 @@ describe('the board, the run and the debugger as main.ts wires them', () => {
    * cleared: the tick goes back to 0 and the register file is empty after it.
    */
   it('resets the run back to tick 0 with the image still loaded', () => {
-    const graph = graphFromBoard(PROGRAM_LEVEL.id, overtureBoard({ inputId: 'in' }));
+    const graph = graphFromBoard(PROGRAM_LEVEL.id, axisBoard({ inputId: 'in' }));
     const run = createProgramRun(graph, registry, PROGRAM_LEVEL, ECHO, 'asm');
     expect(run.errors).toEqual([]);
     const display = createDisplay(graph, registry, PROGRAM_LEVEL, {}, run.machine);

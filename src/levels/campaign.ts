@@ -1,11 +1,6 @@
 /**
  * 战役的形状：有哪些关卡、各属第几章、全局序号是多少、中英文名各是什么。
  *
- * 这张表以 2.x 版为准，转录自 `GAME_RESEARCH_2026-10-03.md` 的 §5
- * （“完整关卡流程（93 关全表）”，一张有出处的 Steam 攻略表）。第 5~7 章
- * （第 57~93 关）尚未制作，所以不列在这里；本文件覆盖第 1~4 章的 56 关，
- * 也就是本项目实际发布的全部关卡。
- *
  * 之所以把战役形状写成数据而不是文字说明，是为了让
  * `test/levels/campaign-shape.test.ts` 能用它约束关卡规格：id、章节号、
  * 全局 `index` 与中英文名必须逐项、按序完全一致。在有了这张表之前，形状
@@ -32,7 +27,7 @@ export interface CampaignEntry {
 }
 
 /**
- * 2.x 战役的第 1~4 章，按解锁顺序排列。
+ * 现版战役的第 1~4 章，按解锁顺序排列。
  *
  * 数组顺序即解锁顺序；测试拿它和 `content/` 里各关的规格逐项对照，
  * 所以改战役形状应改这里，而不是去改某一关的关卡对象。
@@ -105,7 +100,7 @@ export const CAMPAIGN: readonly CampaignEntry[] = [
   { id: 'ch2-38-little-box', chapter: 2, index: 38, zh: '方寸之间', en: 'Little Box' },
   { id: 'ch2-39-counter', chapter: 2, index: 39, zh: '计数器', en: 'Counter' },
 
-  // 第 3 章 —— 处理器架构（CPU Architecture, OVERTURE），10 关
+  // 第 3 章 —— 处理器架构（CPU Architecture, AXIS），10 关
   {
     id: 'ch3-40-alu-1',
     chapter: 3,

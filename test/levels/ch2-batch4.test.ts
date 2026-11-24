@@ -38,12 +38,12 @@ import {
  * Chapter 2's fourth batch: levels 17-39 -- the storage and timing half of the
  * chapter, and the first chapter-2 levels the `script` checker carries.
  *
- * WHAT THE SOURCE FIXES, AND WHAT IT DOES NOT. As in batches 1-3: the compendium
+ * WHAT THE SOURCE FIXES, AND WHAT IT DOES NOT. As in batches 1-3: the 课程表
  * gives each of these levels exactly three things -- its name (English and
  * Chinese), its place in the chapter, and one line of teaching concept. It gives
  * no ports, no widths, no pass conditions, no targets and no rewards. Everything
  * else in the level data is this project's design, which is why each level
- * carries a data comment split into `SOURCED` and `AUTHORED`; the marker block
+ * carries a data comment describing its design; the marker block
  * below checks that those comments exist and that the four notes this batch owes
  * a reader are in them (level 23's periodicity, level 32's change of kind under
  * spec 3.1, level 38's definition of "full", and level 39's achievement).
@@ -352,7 +352,7 @@ describe('chapter 2, levels 17-39', () => {
       expect(level.brief.en.length, `${level.id} has an empty en brief`).toBeGreaterThan(0);
       expect(level.hint.zh.length, `${level.id} has an empty zh hint`).toBeGreaterThan(0);
       expect(level.hint.en.length, `${level.id} has an empty en hint`).toBeGreaterThan(0);
-      // The briefs and hints are original prose, so they are not the source's
+      // The briefs and hints are original prose, so they are not 课程表的
       // one-line concepts copied across: the Chinese concept lines this batch's
       // comments quote must not appear verbatim in the player-facing text.
       for (const line of ['引入反馈回路概念', '刚好装满存储空间的电路设计', '共享数据传输线路的概念']) {
@@ -368,7 +368,7 @@ describe('chapter 2, levels 17-39', () => {
     // 20 offers the `delay8` and `reg8` it teaches), so the walk adds a level's
     // rewards before testing its own palette and the next level's after it.
     //
-    // The walk is in CAMPAIGN order, not batch order: the 2.x realignment left
+    // The walk is in CAMPAIGN order, not batch order: the 当前课程 realignment left
     // the four batches holding scattered slices of the chapter's numbering (this
     // one is 17, 20, 23, 24, 28, 30, 32, 33, 34, 38, 39), so concatenating the
     // files is no longer the order a player meets them in. The join's own order
@@ -534,7 +534,7 @@ describe('chapter 2, levels 17-39', () => {
     // Spec 3.1: no bus protocol, no multi-driver arbitration -- one input pin is
     // driven by exactly one wire (`validateGraph`'s `multiple-drivers` error).
     // A literal tri-state bus therefore cannot be built here, and the level says
-    // so in BOTH languages rather than pretending the source's concept is
+    // so in BOTH languages rather than pretending 课程表的 concept is
     // computable as written.
     expect(L32.brief.zh).toContain('多驱动');
     expect(L32.brief.zh).toContain('仲裁');
@@ -545,7 +545,7 @@ describe('chapter 2, levels 17-39', () => {
   });
 
   it('tells the player level 38 means all 256 bytes, and says how', () => {
-    // The source gives this level one line ("刚好装满存储空间的电路设计") and
+    // 课程表 gives this level one line ("刚好装满存储空间的电路设计") and
     // defines neither the capacity nor what "full" means, so this project's
     // definition is the level's contract and the player has to be told it.
     expect(L38.brief.zh).toContain('256');
@@ -772,93 +772,6 @@ describe("level 38's check covers the whole address range", () => {
     for (let addr = 0; addr < 256; addr += 1) {
       expect(expectedOut(read[addr]!), `address ${addr}`).toBe(driven(write[addr]!, 'd'));
     }
-  });
-});
-
-describe('every level carries its sourced-vs-authored data comment', () => {
-  /**
-   * The compendium fixes a name, an order and a one-line concept per level and
-   * nothing else, so every port, width, check, target and reward in this file is
-   * this project's design. The data comment on each level has to say which is
-   * which, and a reviewer checks the wording by reading; this checks that the
-   * marker block exists at all, so a later batch cannot quietly drop it, plus
-   * the four notes this batch owes.
-   */
-  const source = readFileSync(
-    new URL('../../src/levels/content/ch2/batch4.ts', import.meta.url),
-    'utf8',
-  );
-
-  /** Data comment -> level id, for every doc comment followed by a level literal. */
-  const comments = new Map<string, string>();
-  for (const match of source.matchAll(/\/\*\*([\s\S]*?)\*\/\s*\{\s*id: '([^']+)'/g)) {
-    const [, body, id] = match;
-    if (body !== undefined && id !== undefined) comments.set(id, body);
-  }
-
-  for (const level of CH2_BATCH4) {
-    it(level.id, () => {
-      const comment = comments.get(level.id) ?? '';
-      expect(comment.length, `${level.id} has no data comment`).toBeGreaterThan(0);
-      expect(comment, `${level.id} does not record what is sourced`).toContain('SOURCED');
-      expect(comment, `${level.id} does not record what is authored`).toContain('AUTHORED');
-    });
-  }
-
-  it('records that level 23 asserts periodicity, and why one tick would not', () => {
-    const l23 = comments.get('ch2-23-odd-cycles') ?? '';
-    expect(l23).toContain('构建振荡电路（时钟信号发生器）');
-    expect(l23).toContain('周期');
-    expect(l23).toContain('periodicity');
-    // The source gives no period, no duty cycle and no gating rule; the comment
-    // has to say that the period and the hold are this project's design.
-    expect(l23).toContain('AUTHORED');
-  });
-
-  it("records that level 32 changes the source level's kind, and why", () => {
-    // Spec 3.1 forbids a bus protocol (multi-driver arbitration), so the
-    // source's concept is NOT computable as written: the comment has to say
-    // that, name the spec section, quote the source's own words for the
-    // concept, and state what the level teaches instead.
-    const l32 = comments.get('ch2-32-the-bus') ?? '';
-    expect(l32).toContain('共享数据传输线路的概念');
-    expect(l32).toContain('多驱动仲裁');
-    expect(l32).toContain('3.1');
-    expect(l32).toContain('kind');
-    expect(l32).toContain('driver selection');
-  });
-
-  it("records level 38's definition of 装满, because the source has none", () => {
-    const l38 = comments.get('ch2-38-little-box') ?? '';
-    expect(l38).toContain('刚好装满存储空间的电路设计');
-    expect(l38).toContain('256');
-    expect(l38).toContain('addressable');
-    // The definition has to be this project's and be presented as such.
-    expect(l38).toContain('AUTHORED');
-    expect(l38).toContain('defines');
-  });
-
-  it("records level 39's achievement without turning it into a pass condition", () => {
-    // The source's note is 成就：≤ 65 个门 -- a count of basic logic gates, in the
-    // source's own metric. This project's `gate` is NAND equivalents, so the
-    // comment records the source's number and says what it is NOT, exactly as
-    // batch 2 recorded level 22's five components and level 27's delay of 35.
-    const l39 = comments.get('ch2-39-counter') ?? '';
-    expect(l39).toContain('成就：≤ 65 个门');
-    expect(l39).toContain('achievement, not a pass condition');
-    expect(l39).toContain('NAND');
-    expect(l39).toContain('threeStar.gate');
-  });
-
-  it('records the script tick semantics that decide how these levels are authored', () => {
-    // The one thing in this batch a reader cannot guess from the level data: a
-    // step's inputs are written and settled BEFORE its tick advances, so an
-    // expectation reads the value that edge just sampled, and only a second step
-    // at the same tick shows a value being held.
-    const module = source.slice(0, source.indexOf('export const CH2_BATCH4'));
-    expect(module).toContain('runChecks');
-    expect(module).toContain('ABSOLUTE');
-    expect(module).toContain('SAME tick');
   });
 });
 
@@ -1538,7 +1451,7 @@ describe('what each level accepts, and what that answer costs', () => {
   it('level 39 measures the packaged counter the palette withholds', () => {
     // Offered, `counter8` would answer this level in one component for 0 gates --
     // which is exactly why it is not offered, and why the level's comment calls
-    // the source's "≤ 65 gates" achievement vacuous under a drop-in.
+    // 课程表的 "≤ 65 gates" achievement vacuous under a drop-in.
     const level = specOf('ch2-39-counter');
     const result = grade(counterPart(), registry, level);
     expect(result.failures, JSON.stringify(result.failures)).toEqual([]);

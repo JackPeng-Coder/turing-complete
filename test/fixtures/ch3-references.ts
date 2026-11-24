@@ -1,7 +1,7 @@
 import type { Graph } from '../../src/core/graph';
 import { addInstance, connect, emptyGraph } from '../../src/core/graph';
 import { graphFromBoard } from '../../src/levels/board';
-import { overtureBoard, type OvertureBoardOptions } from '../../src/levels/boards/overture';
+import { axisBoard, type AxisBoardOptions } from '../../src/levels/boards/axis';
 import { build } from './build';
 
 /** Sets a level `level_output` instance's pin width (`params.width`). */
@@ -177,12 +177,12 @@ export function aluReference(): Graph {
 }
 
 /**
- * Level 42: the six-operation ALU, filed under the level the 2.x shape gives
+ * Level 42: the six-operation ALU, filed under the level the 当前课程 shape gives
  * ADD/SUB to.
  *
  * WHY IT IS NOT `aluReference()`. The two levels' contracts coincide today -- this
  * project's ALU 1 was authored as the chapter's arithmetic engine and answers all
- * eight codes -- but they are separate levels with separate targets, and the source
+ * eight codes -- but they are separate levels with separate targets, and 课程表
  * intends ALU 1 to be the four logic operations alone. One shared graph would make
  * a later narrowing of ALU 1 silently change what level 42 is measured from;
  * written out, each level's target is its own circuit's measurement, which is what
@@ -396,7 +396,7 @@ function fanOutReference(): Graph {
 export const CH3_BATCH1_REFERENCES: Record<string, () => Graph> = {
   'ch3-40-alu-1': aluReference,
   'ch3-41-registers': registerBankReference,
-  // The new level of the 2.x shape: the same six-operation ALU, filed under the
+  // The new level of the 当前课程 shape: the same six-operation ALU, filed under the
   // level that adds ADD/SUB on top of ALU 1's four logic operations.
   'ch3-42-alu-2': alu2Reference,
   'ch3-43-the-foundry': fanOutReference,
@@ -547,10 +547,10 @@ function computeUnitReference(): Graph {
  * Level 44: the condition test alone -- one register holding the compared value,
  * the jump's condition field, and `skip`.
  *
- * ONE REGISTER, AND THE LEVEL SAYS SO. The source's achievement for this level is
+ * ONE REGISTER, AND THE LEVEL SAYS SO. 课程表的 achievement for this level is
  * "only 10 blue components", and the reduced machine is what buys it: a `loadi`
  * writes the 6-bit immediate into the register and a jump reads it back as its
- * condition value. In the full OVERTURE (levels 45-47) those are two registers --
+ * condition value. In the full AXIS (levels 45-47) those are two registers --
  * REG0 and REG3 -- wired by a `move`; here the level's brief states the reduction
  * in both languages, and the check drives `loadi` to set the value.
  *
@@ -619,10 +619,10 @@ export const CH3_BATCH2_REFERENCES: Record<string, () => Graph> = {
 // ---------------------------------------------------------------------------
 
 /**
- * The OVERTURE machine levels 45, 46 and 47 are graded on.
+ * The AXIS machine levels 45, 46 and 47 are graded on.
  *
- * THE CIRCUIT IS NOT WRITTEN OUT HERE ANY MORE. It is `overtureBoard()` in
- * `src/levels/boards/overture.ts`, which is also what a chapter-4 level ships as
+ * THE CIRCUIT IS NOT WRITTEN OUT HERE ANY MORE. It is `axisBoard()` in
+ * `src/levels/boards/axis.ts`, which is also what a chapter-4 level ships as
  * its starting circuit, and this wrapper exists so that there is exactly ONE of
  * it. Two copies -- the reference the levels' three-star targets were measured
  * from, and the board a player is handed -- would be free to drift, and the
@@ -639,25 +639,25 @@ export const CH3_BATCH2_REFERENCES: Record<string, () => Graph> = {
  *
  * WHY THE OPTIONS ARE STILL DECLARED HERE as a type: they are the batch test's
  * vocabulary for "this machine, wrong in one named way", and the same three
- * options are what `overtureBoard()` takes to build one. Re-exporting the board
+ * options are what `axisBoard()` takes to build one. Re-exporting the board
  * module's own type rather than restating the fields is what keeps a variant
  * reaching the board instead of being silently dropped on the floor.
  */
-export type OvertureOptions = OvertureBoardOptions;
+export type AxisOptions = AxisBoardOptions;
 
-export function overtureMachine(options: OvertureOptions = {}): Graph {
-  return graphFromBoard('ref', overtureBoard(options));
+export function axisMachine(options: AxisOptions = {}): Graph {
+  return graphFromBoard('ref', axisBoard(options));
 }
 
 /** Levels 45-47's reference: the machine above. */
-function overtureReference(): Graph {
-  return overtureMachine();
+function axisReference(): Graph {
+  return axisMachine();
 }
 
 export const CH3_BATCH3_REFERENCES: Record<string, () => Graph> = {
-  'ch3-48-program': overtureReference,
-  'ch3-47-immediate-values': overtureReference,
-  'ch3-49-turing-complete': overtureReference,
+  'ch3-48-program': axisReference,
+  'ch3-47-immediate-values': axisReference,
+  'ch3-49-turing-complete': axisReference,
 };
 
 export const CH3_REFERENCES: Record<string, () => Graph> = {

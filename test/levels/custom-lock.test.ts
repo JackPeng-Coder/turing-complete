@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyGraph } from '../../src/core/graph';
 import { Simulation, compile } from '../../src/core/net';
 import { graphFromBoard } from '../../src/levels/board';
-import { overtureBoard } from '../../src/levels/boards/overture';
+import { axisBoard } from '../../src/levels/boards/axis';
 import {
   bindLevelIo,
   loadProgramImage,
@@ -22,7 +22,7 @@ import { scriptedIo } from '../fixtures/level-io';
 /**
  * `lock` -- 道破心机 / Code Breaker: the level's first closed-loop checker.
  *
- * THE PUZZLE. The board is the player's OVERTURE CPU. The checker drives a
+ * THE PUZZLE. The board is the player's AXIS CPU. The checker drives a
  * `match` pin with 0 or 1, reads the byte the CPU publishes on `try`, and keeps
  * guessing until the byte it reads is the secret the level chose. Only the
  * CIRCUIT can search: it sees one bit per tick and has to remember what it has
@@ -45,10 +45,8 @@ import { scriptedIo } from '../fixtures/level-io';
  */
 
 /**
- * The reference program for this puzzle, verbatim from
- * `.superpowers/sdd/2026-10-08-turing-complete-phase3/reference-programs.md`
- * (ch4-54): try REG5, answer `match` into REG1, and count REG5 up until the
- * answer arrives.
+ * The reference program for this puzzle (ch4-54): try REG5, answer `match` into
+ * REG1, and count REG5 up until the answer arrives.
  */
 const REFERENCE_PROGRAM = [
   'loadi|0',
@@ -438,7 +436,7 @@ describe('lock', () => {
  *
  * `Simulation.tick` samples the signal table (net.ts), and a value written to a
  * level input only reaches a storage element through the combinational parts
- * between them -- on the OVERTURE board the level input is three parts away from
+ * between them -- on the AXIS board the level input is three parts away from
  * the register file (`srcData` -> `d1` -> `data`). A caller that writes and ticks
  * without settling therefore clocks the PREVIOUS input vector, which no
  * combinational stub can show and no assertion about a checker's method log can
@@ -456,7 +454,7 @@ describe('the level input path on the reference board', () => {
 
   /** The lock's level io, on the chapter-4 board wired to `match`. */
   function lockBoard(): LevelIo {
-    const graph = graphFromBoard('lock', overtureBoard({ inputId: 'match', halt: false }));
+    const graph = graphFromBoard('lock', axisBoard({ inputId: 'match', halt: false }));
     const net = compile(graph, registry);
     const sim = new Simulation(net, registry);
     const io = bindLevelIo(sim, net, LOCK_LEVEL);
@@ -524,7 +522,7 @@ describe('the level input path on the reference board', () => {
 
 /**
  * THE ACCEPTANCE FOR C1, C2 AND I1: the same level the kernel would grade, on a
- * real OVERTURE board, driven through `runChecks` exactly as `grade()` does.
+ * real AXIS board, driven through `runChecks` exactly as `grade()` does.
  *
  * WHAT THESE ADD OVER THE SCRIPTED TESTS. The stub above proves the checker's
  * EXCHANGE; it cannot prove that a program reaches the circuit at all, that the
@@ -536,15 +534,15 @@ describe('the level input path on the reference board', () => {
  * the CPU the previous input vector.
  *
  * THE BOARD IS BUILT WITH `halt: false`, AND THAT IS A FACT ABOUT THE LEVEL, NOT
- * A CONVENIENCE. The OVERTURE's halt line freezes the counter on the instruction
+ * A CONVENIENCE. The AXIS's halt line freezes the counter on the instruction
  * that writes `out`, and a closed-loop program writes `out` inside its loop, so
  * on the halting board the reference program stops at its first guess and never
  * searches again -- measured: `try` reads 0 forever. A chapter-4 closed-loop
- * level therefore ships `overtureBoard({ inputId, halt: false })`.
+ * level therefore ships `axisBoard({ inputId, halt: false })`.
  */
 describe('lock on the reference board', () => {
   const board = (): ReturnType<typeof graphFromBoard> =>
-    graphFromBoard('lock', overtureBoard({ inputId: 'match', halt: false }));
+    graphFromBoard('lock', axisBoard({ inputId: 'match', halt: false }));
 
   it('runs the player\'s program and passes when the search reaches the secret', () => {
     // THE C1 ACCEPTANCE. The reference program counts REG5 up, publishing each

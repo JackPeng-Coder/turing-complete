@@ -277,7 +277,7 @@ describe('chapter 3 batch 1 - level data', () => {
     // The plan's unlock chain: the three machine parts are unlocked by this batch
     // and the later batch consumes them. A reward that moved would break the
     // chapter. The third row is not one of them: `ch3-42-alu-2` is the level the
-    // 2.x realignment added, and it carries the shift/rotate family, whose
+    // 当前课程 realignment added, and it carries the shift/rotate family, whose
     // chapter-2 owner (the removed Logic Engine) no longer exists.
     expect(CH3_BATCH1.map((l) => l.rewards?.components)).toEqual([
       ['alu8'],

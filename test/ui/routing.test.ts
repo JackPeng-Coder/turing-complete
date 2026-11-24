@@ -197,7 +197,7 @@ describe('the bus value label', () => {
  * THE PROBES COME FROM THE PLAN, not from numbers and not from `routeWire`. The
  * router CHOOSES a shape now, and it may legitimately pick the straight-ish one:
  * an earlier version of this file probed the chord midpoint and passed only
- * because the old router hooked wide around the source. What the contract
+ * because the old router hooked wide around 课程表. What the contract
  * actually says is "the hit test follows whatever the painter was given", so
  * that is what is tested -- and if the plan ever does run along the chord, the
  * test says so instead of quietly passing.
@@ -244,7 +244,7 @@ describe('hit testing follows the routed wire', () => {
     }
     expect(probe, 'the route never leaves the chord: nothing to test').not.toBeNull();
     // Not the wire. It may be a part -- the chord spends most of its length
-    // inside the source's own body -- but it must not be the wire.
+    // inside 课程表的 own body -- but it must not be the wire.
     expect(hitTest(g, registry, probe!)).not.toEqual({ kind: 'wire', id: 'w1' });
   });
 });

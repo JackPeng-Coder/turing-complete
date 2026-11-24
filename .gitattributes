@@ -7,6 +7,6 @@
 # fresh clone on Windows and one on Linux hold identical bytes.
 * text=auto eol=lf
 
-# The one exception, and it is the platform's: the PowerShell helpers under
-# `tools/sdd/` are run by Windows PowerShell, whose own tooling expects CRLF.
+# The one exception, and it is the platform's: PowerShell scripts are run by
+# Windows PowerShell, whose own tooling expects CRLF.
 *.ps1 text eol=crlf

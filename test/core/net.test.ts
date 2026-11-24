@@ -1634,7 +1634,7 @@ function oneBitWatcher(seen: number[]): ComponentDef {
  * (signal.ts) -- so 0 and 1 are the only values either can return for that pin,
  * whatever the tick count. Reading `3` requires handing the table a width of
  * three, i.e. `read(base, 3)`, which sweeps the two slots that physically follow
- * the source: the *other* selector pins' live bits. This test pins both halves --
+ * 课程表: the *other* selector pins' live bits. This test pins both halves --
  * each consumer sees its own bit before and after every edge, and the packed 3 is
  * a three-slot range read rather than a one-bit one -- so a future change that
  * widens a pin, mis-resolves `drive`, or makes a read tick-dependent fails here.

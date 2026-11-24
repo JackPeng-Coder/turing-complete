@@ -4,10 +4,6 @@ import type { LevelSpec } from '../../spec';
 /**
  * 第 1 章第 1~6 关。
  *
- * 顺序说明：原始资料把「或非门」(NOR) 排在第 5 关、「或门」(OR) 排在第 6 关；
- * 但 NOR 的标准解法要么需要 OR，要么需要「非门 + 与非门」，而后者出现得更晚。
- * 为了让「一关只能使用已经解锁的元件」这条规则绝对成立，这里把 OR 和 NOR 对调。
- * 所有文案均为本项目原创。
  */
 const IO_1 = { inputs: [], outputs: [{ id: 'out', width: 1 }] };
 const IO_2 = {
@@ -114,7 +110,6 @@ export const CH1_PART1: readonly LevelSpec[] = [
     // 门数 = 4 而不是 2：参考解是 NOT(a) AND NOT(b)，两个 NOT（各 1 门）加一个 AND（2 门），
     // 按 `core/defs/index.ts` 里的 NAND 基准折算。
     // 本关提示曾经写作「在 OR 后面加一个 NOT」——那是它还排在第 6 关时的写法；
-    // 2.x 改版把它放回原资料的第 5 关，此时 `or` 尚未引入，本关就是本章的德摩根定律课。
     // 两种写法实测都是 4 门 / 2 层延迟。
     threeStar: { gate: 4, delay: 2, tick: 0 },
     rewards: { components: ['const_on', 'const_off'] },

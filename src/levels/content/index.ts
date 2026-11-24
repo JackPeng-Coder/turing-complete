@@ -17,7 +17,7 @@ import { CH4_LEVELS } from './ch4/index';
  * 下面这一行点名才可达）——这就是「章节只有在被本文件列入后才算完成」这条规则的三个证据。
  *
  * 文件归属不再代表顺序，所以这里按 `index` 排序。关卡的 `index` 是它的全局位置，
- * `src/levels/campaign.ts` 是固定这个位置的表格；2.x 改版把一些关卡在批次文件之间
+ * `src/levels/campaign.ts` 是固定这个位置的表格；本次改版把一些关卡在批次文件之间
  * 挪动过（例如第 2 章的 `circular-dependency` 和 `delayed-lines` 现在是本章第 4、7 关，
  * 却仍和旧邻居一起放在 `ch2/batch4.ts`），所以各文件的分布只是「哪个任务写了什么」的记录，
  * 不是运行顺序。在这里排序之后，第 n+1 关就是 `LEVEL_ORDER[n+1]`，这是构造出来的不变量，

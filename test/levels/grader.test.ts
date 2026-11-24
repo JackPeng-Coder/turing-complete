@@ -258,7 +258,7 @@ const ch1Reference: Record<string, () => Graph> = {
       { kind: 'part', def: 'nand', id: 'g', from: ['n1', 'n2'] },
       { kind: 'output', from: 'g' },
     ]),
-  // De Morgan, not OR + NOT: OR is level 6's part in the 2.x chapter and NOR is
+  // De Morgan, not OR + NOT: OR is level 6's part in the 当前课程 chapter and NOR is
   // level 5's, so the reference is the spelling the levels before it unlock --
   // NOT(a) AND NOT(b), the same function at the same 4 gates on a path two deep.
   'ch1-05-nor-gate': () =>
@@ -310,7 +310,7 @@ const ch1Reference: Record<string, () => Graph> = {
       { kind: 'part', def: 'and', id: 'a2', from: ['a1', 'c'] },
       { kind: 'output', from: 'a2' },
     ]),
-  // The 2.x chapter ends with the gate the old level 10 handed out without ever
+  // The 当前课程 chapter ends with the gate the old level 10 handed out without ever
   // teaching it, and a capstone that composes what the chapter built: the XNOR
   // level is XOR into a NOT, the exam is three pairwise ANDs into one 3-input OR.
   'ch1-12-xnor-gate': () =>
@@ -367,7 +367,7 @@ const CH1_REFERENCE: Record<string, { readonly metrics: Metrics; readonly score:
   'ch1-09-xor-gate': { metrics: { gate: 4, delay: 3, tick: 0 }, score: 16 },
   'ch1-10-bigger-or-gate': { metrics: { gate: 6, delay: 2, tick: 0 }, score: 14 },
   'ch1-11-bigger-and-gate': { metrics: { gate: 4, delay: 2, tick: 0 }, score: 12 },
-  // The two levels 2.x added to this chapter, and therefore the two entries with
+  // The two levels 当前课程 added to this chapter, and therefore the two entries with
   // no `a57908a` value behind them: measured from the references above, which are
   // the constructions their own data comments name (XOR + NOT is 4 + 1 gates on a
   // path two deep; three ANDs into one `or3` is 6 + 6 on a path two deep).

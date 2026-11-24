@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assemble, OVERTURE_ISA } from '../../src/asm/index';
+import { assemble, AXIS_ISA } from '../../src/asm/index';
 import { STARTER_COMPONENTS } from '../../src/app/progress';
 import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
 import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
@@ -11,12 +11,12 @@ import { runChecks } from '../../src/levels/checks';
 import { grade } from '../../src/levels/grader';
 import type { LevelSpec, ProgramCheck } from '../../src/levels/spec';
 import { registry } from '../fixtures/build';
-import { CH3_BATCH3_REFERENCES, overtureMachine } from '../fixtures/ch3-references';
+import { CH3_BATCH3_REFERENCES, axisMachine } from '../fixtures/ch3-references';
 
 /**
  * Chapter 3, levels 47-49 -- the machine, and the phase's acceptance level.
  *
- * All three levels are graded against ONE graph (`overtureMachine`), which is the
+ * All three levels are graded against ONE graph (`axisMachine`), which is the
  * claim the levels make: 48 is a straight line, 47 the same straight line built
  * around the immediate field, and 49 adds the loop. So the counterexamples here
  * are not second circuits; they are that same machine with exactly one thing
@@ -43,7 +43,7 @@ function programOf(spec: LevelSpec): ProgramCheck {
 }
 
 /**
- * The LEVEL-AUTHORED program text of a level's program check, or a loud failure.
+ * The level-supplied program text of a level's program check, or a loud failure.
  *
  * `ProgramCheck.source` became optional when chapter 4 added the player channel
  * (`from: 'player'` reads the player's buffer instead), so the field is now
@@ -136,7 +136,7 @@ describe('chapter 3 batch 3 - reference solutions', () => {
       ],
     };
     for (const spec of CH3_BATCH3) {
-      const assembled = assemble(sourceOf(spec), OVERTURE_ISA);
+      const assembled = assemble(sourceOf(spec), AXIS_ISA);
       expect(assembled.errors, spec.id).toEqual([]);
       expect(assembled.bytes, spec.id).toEqual([...(expected[spec.id] ?? [])]);
     }
@@ -147,9 +147,9 @@ describe('chapter 3 batch 3 - reference solutions', () => {
     // data depends on where the assembler puts each label: 47's is the index of
     // the instruction after the six-instruction program, and 49's two are the
     // loop head and the instruction after the loop.
-    const labels47 = assemble(sourceOf(level('ch3-47-immediate-values')), OVERTURE_ISA).labels;
+    const labels47 = assemble(sourceOf(level('ch3-47-immediate-values')), AXIS_ISA).labels;
     expect(labels47).toEqual({ finish: 6 });
-    const labels49 = assemble(sourceOf(level('ch3-49-turing-complete')), OVERTURE_ISA).labels;
+    const labels49 = assemble(sourceOf(level('ch3-49-turing-complete')), AXIS_ISA).labels;
     expect(labels49).toEqual({ loop: 2, done: 16 });
   });
 
@@ -194,7 +194,7 @@ describe('chapter 3 batch 3 - the checks have teeth', () => {
     // Level 48's check with the `loadi` select tied low: the write data is the
     // move source, so every `loadi` writes a zero and the answer never leaves 0.
     const outcome = runChecks(
-      overtureMachine({ immediate: 'never' }),
+      axisMachine({ immediate: 'never' }),
       registry,
       level('ch3-48-program'),
     );
@@ -209,7 +209,7 @@ describe('chapter 3 batch 3 - the checks have teeth', () => {
     // The near-miss the level exists for: 63 arrives as 31, so the subtraction
     // publishes 25 where the walk demands 57.
     const outcome = runChecks(
-      overtureMachine({ immediate: 'fiveBits' }),
+      axisMachine({ immediate: 'fiveBits' }),
       registry,
       level('ch3-47-immediate-values'),
     );
@@ -226,7 +226,7 @@ describe('chapter 3 batch 3 - the checks have teeth', () => {
     // single pass -- where the level demands 21, and it demands 0 at tick 83
     // while the loop is still running.
     const outcome = runChecks(
-      overtureMachine({ jump: 'never' }),
+      axisMachine({ jump: 'never' }),
       registry,
       level('ch3-49-turing-complete'),
     );
@@ -247,7 +247,7 @@ describe('chapter 3 batch 3 - the checks have teeth', () => {
     // an untaken one is not the thing this level is named after, in either
     // direction.
     const outcome = runChecks(
-      overtureMachine({ jump: 'always' }),
+      axisMachine({ jump: 'always' }),
       registry,
       level('ch3-49-turing-complete'),
     );
@@ -263,7 +263,7 @@ describe('chapter 3 batch 3 - the checks have teeth', () => {
     // This is what makes the level's "the byte must stay there" assertion -- the
     // last tick of each walk -- worth having.
     const outcome = runChecks(
-      overtureMachine({ halt: false }),
+      axisMachine({ halt: false }),
       registry,
       level('ch3-49-turing-complete'),
     );
@@ -326,9 +326,9 @@ describe('chapter 3 batch 3 - level data', () => {
     }
   });
 
-  it('does not offer decoder2, which the OVERTURE machine never needs', () => {
-    // The 2.x shape gave `decoder2` an owner (`ch2-36-2-bit-decoder` rewards it),
-    // so its absence here is no longer an unlock hole: the OVERTURE machine is
+  it('does not offer decoder2, which the AXIS machine never needs', () => {
+    // The 当前课程 shape gave `decoder2` an owner (`ch2-36-2-bit-decoder` rewards it),
+    // so its absence here is no longer an unlock hole: the AXIS machine is
     // built from six named parts -- `alu8`, `regfile6`, `instr_decoder`, `pc8`,
     // `ram_prog`, `halt` -- and a 2-bit decode is not one of them. A palette that
     // had gained it would be a level reaching for a part the machine's brief

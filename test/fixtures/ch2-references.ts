@@ -84,10 +84,10 @@ export const CH2_BATCH1_REFERENCES: Record<string, () => Graph> = {
       { kind: 'output', from: 'at_least_two' },
     ]),
   // The four-bit reader: every bit forwarded to the output of its own name. It is
-  // chapter 2's first level since the 2.x realignment moved it out of chapter 1,
+  // chapter 2's first level since the 当前课程 realignment moved it out of chapter 1,
   // and its circuit moved here with it -- a level the batch no longer contains
   // cannot be looked up in a map that only lists this batch. The popcount circuit
-  // that used to sit at this key belonged to the level 2.x does not have (it
+  // that used to sit at this key belonged to the level 当前课程 does not have (it
   // duplicated `ch2-18-counting-signals`); it went with the level.
   'ch2-14-binary-racer': () =>
     build([
@@ -478,7 +478,7 @@ export const CH2_BATCH3_REFERENCES: Record<string, () => Graph> = {
   'ch2-29-negative-numbers': absReference,
   'ch2-31-signed-negator': negateReference,
   'ch2-35-1-bit-decoder': oneBitDecoderReference,
-  // The middle width the 2.x realignment gave a level of its own.
+  // The middle width the 当前课程 realignment gave a level of its own.
   'ch2-36-2-bit-decoder': twoBitDecoderReference,
   'ch2-37-3-bit-decoder': threeBitDecoderReference,
 };

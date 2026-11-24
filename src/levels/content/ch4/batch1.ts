@@ -1,9 +1,9 @@
 // 第 4 章第 1 批：全局第 50-52 关，让"玩家亲手搭的机器"变成"玩家来编程的机器"。
-// 依赖下层 `boards/overture`（第 3 章那台机器的共享构造器）与 `spec`/`tables` 的关卡类型；
+// 依赖下层 `boards/axis`（第 3 章那台机器的共享构造器）与 `spec`/`tables` 的关卡类型；
 // 本文件只被 `content/ch4/index.ts` 拼接。程序来自玩家缓冲区（不留参考源），
 // 关键不变量：每关两段步进、两个不同输入向量，任何忽略输入、硬编码答案的程序都无法同时通过。
 
-import { overtureBoard } from '../../boards/overture';
+import { axisBoard } from '../../boards/axis';
 import type { LevelSpec, ProgramStep } from '../../spec';
 // 这里的 `LevelIo` 是"引脚形状"，来自 `tables.ts`；`checks.ts` 也导出了一个同名但无关的
 // 运行时接口（绑定后的仿真环境），两者不要混用。
@@ -13,8 +13,8 @@ import type { LevelIo } from '../../tables';
  * 第 4 章第 50-52 关：玩家"搭出来"的机器成为玩家"编程"的机器。
  *
  * CPU 就是第 3 章那台，画板是导入它的通道（裁决 1）。每一关都带
- * `board: overtureBoard({ inputId })`——与 `test/fixtures/ch3-references.ts` 给第 3 章机器评分
- * 所用的是同一个构造器，所以两章背后只有一套电路，没有会漂移的副本（见 `boards/overture.ts`）。
+ * `board: axisBoard({ inputId })`——与 `test/fixtures/ch3-references.ts` 给第 3 章机器评分
+ * 所用的是同一个构造器，所以两章背后只有一套电路，没有会漂移的副本（见 `boards/axis.ts`）。
  * 它是一个"起点"而不是内置 CPU：玩家仍然可以编辑它的每个元件与每根导线。
  * `inputId` 是这些关卡唯一拧动的旋钮，因为它们每一关都读关卡的输入引脚。
  *
@@ -42,15 +42,15 @@ import type { LevelIo } from '../../tables';
  * 而两段步进要求不同字节，所以任何忽略输入的程序都答不了两段。批次测试里的常数冒充就是证明：
  * 每个冒充者都能完美复现它自己那段步进，却被另一段步进拒绝。
  *
- * 第 4 章不发放新元件（设计规格 §3.3："无新元件；解锁汇编 IDE 与调试器"），
+ * 第 4 章不发放新元件（课程表 §3.3："无新元件；解锁汇编 IDE 与调试器"），
  * 所以每关的 `rewards` 都缺席，而托盘不是"已挣到的一切"（第 3 章的形状），
  * 而是随游戏发布的那块画板"由哪些元件构成"——机器就是关卡，元件就是它身上的那些。
  */
 
 /**
- * 随游戏发布的画板由哪些元件构成：`overtureBoard({ inputId })` 的全部元件，含连接器，别无其他。
+ * 随游戏发布的画板由哪些元件构成：`axisBoard({ inputId })` 的全部元件，含连接器，别无其他。
  *
- * 对照 `boards/overture.ts` 的 `placedParts` 阅读：关卡自己的引脚、取指级
+ * 对照 `boards/axis.ts` 的 `placedParts` 阅读：关卡自己的引脚、取指级
  * （常量轨、程序 RAM、计数器、译码器）、模式与字段胶水（拆分器、四个模式门与独热译码器）、
  * 寄存器堆及其 ALU 与写路径（多路选择器与开关），以及跳转胶水与停机线。
  * `test/levels/ch4-batch1.test.ts` 让这份清单与画板"双向"对上——
@@ -182,17 +182,6 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
   /**
    * ch4-50-punchcard-programming —— 打孔编程 / Punchcard Programming
    *
-   * SOURCED：双语名字与位置来自 2.x 档案的第 4 章表格——本章第一关、全局第 50 关——
-   * 外加它的一句话概念"手写二进制编码"，以及它 1.x 前身的名字（"Add 5"）。
-   * 第 4 章的教学目标也一并来自资料：先手写机器码，再解锁汇编器，用你自己的 CPU 解编程谜题。
-   *
-   * AUTHORED（本项目的设计）：玩家能看到、测试能测到的一切。`in:8 -> out:8` 引脚形状；
-   * 语义 `out = (in + 5) & 0xff`；画板（第 3 章机器，`overtureBoard({ inputId: 'in' })`，
-   * 默认停机——见模块说明）；读"玩家"缓冲区、按每行一字节机器码解析的 `program` 检查
-   * （`from: 'player'`、`format: 'bytes'`）；两段四步步进及其输入 100 与 42
-   * （两个检查、两个向量，裁决 R9——见模块说明）；托盘（画板自己的元件）与缺席的奖励；
-   * 以及实测的三星目标。
-   *
    * 这一关是"手写编码"的关卡。没有助记符、没有汇编器：玩家自己写操作码位，
    * 这就是全部概念，所以检查的读取器是 `parseImage`（`asm/image.ts`）——每行八个二进制位、
    * 允许注释——而不是下一关才解锁的汇编器。fixture 里的参考程序就是那五个字节，
@@ -204,7 +193,7 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
     index: 50,
     name: { zh: '打孔编程', en: 'Punchcard Programming' },
     brief: {
-      zh: '这台 CPU 就是你第 3 章搭好的那台 OVERTURE——现在轮到给它写程序了。这一关从最底层开始：手工机器码，每行 8 位二进制就是一个字节的指令，装进程序 RAM 后一个时钟沿执行一条。程序要算 out = (in + 5) & 0xff：把输入搬进寄存器，loadi 取常数 5，add 相加，最后把结果 move 到 out。写 out 之后机器会停在那条指令上，out 上的字节必须一直保持。',
+      zh: '这台 CPU 就是你第 3 章搭好的那台 AXIS——现在轮到给它写程序了。这一关从最底层开始：手工机器码，每行 8 位二进制就是一个字节的指令，装进程序 RAM 后一个时钟沿执行一条。程序要算 out = (in + 5) & 0xff：把输入搬进寄存器，loadi 取常数 5，add 相加，最后把结果 move 到 out。写 out 之后机器会停在那条指令上，out 上的字节必须一直保持。',
       en: 'This is the very CPU you built in chapter 3 -- now it is your turn to write programs for it. This level starts at the bottom: hand-written machine code, one line of 8 binary digits per byte of instruction, loaded into the program RAM and executed one instruction per clock edge. The program must compute out = (in + 5) & 0xff: move the input into a register, loadi the constant 5, add, and move the sum to out. Once out is written the machine stops on that instruction, and the byte on out has to stay there.',
     },
     hint: {
@@ -229,24 +218,14 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
         steps: STEPS_50_AT_42,
       },
     ],
-    board: overtureBoard({ inputId: 'in' }),
-    // 实测：675 门、6 级深（随游戏发布的画板——见模块说明与 `boards/overture.ts`），
+    board: axisBoard({ inputId: 'in' }),
+    // 实测：675 门、6 级深（随游戏发布的画板——见模块说明与 `boards/axis.ts`），
     // 节拍取两段步进的最后一条断言（形状相同，所以 `Math.max` 是 10）。
     threeStar: { gate: 675, delay: 6, tick: 10 },
   },
 
   /**
    * ch4-51-assembly-programming —— 汇编程序 / Assembly Programming
-   *
-   * SOURCED：双语名字与位置（第 4 章第二关，全局第 51 关）来自 2.x 档案的表格，
-   * 以及它的一句话概念：汇编语法、imm/mov/add。本章的顺序也来自资料——
-   * 这一关就是解锁汇编器的那一关，紧接在手写编码之后。
-   *
-   * AUTHORED（本项目的设计）：`in:8 -> out:8` 引脚形状；语义 `out = (in + 3) & 0xff`；
-   * 画板（同一台第 3 章机器，`overtureBoard({ inputId: 'in' })`）；读"玩家"缓冲区、
-   * 按汇编解析的 `program` 检查（`from: 'player'`、`format: 'asm'`）；
-   * 两段步进——第 50 关的形状对着 `in + 3`，用裁决 R9 要求的两个向量；
-   * 托盘与缺席的奖励；以及实测的三星目标。
    *
    * 程序就是第 50 关的程序换一种拼写，这是关卡自己的主张而不是巧合：
    * 同样五条指令、除立即数外同样字节，批次测试把两种拼写钉在同一张 ISA 表上。
@@ -282,7 +261,7 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
         steps: STEPS_51_AT_200,
       },
     ],
-    board: overtureBoard({ inputId: 'in' }),
+    board: axisBoard({ inputId: 'in' }),
     // 实测：与第 50 关同一块画板，所以门与延迟相同；节拍取两段步进的最后一条断言
     // （形状相同，所以 `Math.max` 是 10）。
     threeStar: { gate: 675, delay: 6, tick: 10 },
@@ -290,17 +269,6 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
 
   /**
    * ch4-52-circumference —— 三番两次 / Circumference
-   *
-   * SOURCED：双语名字与位置（第 4 章第三关，全局第 52 关）来自 2.x 档案的表格——
-   * 包括资料自己那对古怪的搭配：中文名"三番两次"是"一遍又一遍"的成语，
-   * 英文名却是 Circumference（本关的 1.x 前身是 "Calibrating Laser Cannons"）。
-   * 一句话概念也一并来自资料：计算 6r。笑点就在算术本身——圆周长约等于 6r，
-   * 而"三番两次"读作"三，两次"，正是参考程序算法的方式。
-   *
-   * AUTHORED（本项目的设计）：`r:8 -> out:8` 引脚形状（半径是本章唯一改过名字的输入）；
-   * 语义 `out = (6 * r) & 0xff`，连回绕一起；画板（`overtureBoard({ inputId: 'r' })`）；
-   * 读"玩家"汇编的 `program` 检查；两段步进——r = 200 时 6r 回绕成 176，r = 9 时是 54——
-   * 用裁决 R9 要求的两个向量（本关尤其如此：见步进注释）；托盘与缺席的奖励；以及实测的三星目标。
    *
    * 这一关为什么放在"汇编器"与"循环"之间：ISA 没有乘法，所以 6r 就是加法一遍又一遍地用——
    * 而 `add` 只把 r1、r2 读成 r3，"只"能这样，所以每个中间结果都得先搬回去才能参加下一步。
@@ -336,7 +304,7 @@ export const CH4_BATCH1: readonly LevelSpec[] = [
         steps: STEPS_52_AT_9,
       },
     ],
-    board: overtureBoard({ inputId: 'r' }),
+    board: axisBoard({ inputId: 'r' }),
     // 实测：与第 50、51 关同一块画板（只有输入引脚的名字变了），所以门与延迟相同；
     // 节拍取两段步进的最后一条断言（形状相同，所以 `Math.max` 是 14）。
     threeStar: { gate: 675, delay: 6, tick: 14 },

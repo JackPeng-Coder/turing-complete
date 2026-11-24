@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { addInstance, emptyGraph } from '../../src/core/graph';
 import { Simulation, compile } from '../../src/core/net';
 import { graphFromBoard } from '../../src/levels/board';
-import { overtureBoard } from '../../src/levels/boards/overture';
+import { axisBoard } from '../../src/levels/boards/axis';
 import { bindLevelIo, loadProgramImage, programTargets } from '../../src/levels/checks';
 import { createProgramRun } from '../../src/levels/run';
 import type { LevelSpec } from '../../src/levels/spec';
@@ -16,7 +16,7 @@ import { registry } from '../fixtures/build';
  * edges -- so this is the same board driven at a human's pace rather than a
  * second simulator.
  *
- * THE CIRCUIT IS REAL, WHICH IS THE POINT. `overtureBoard({ inputId: 'in' })` is
+ * THE CIRCUIT IS REAL, WHICH IS THE POINT. `axisBoard({ inputId: 'in' })` is
  * the chapter-4 reference CPU -- the machine the programming chapter hands the
  * player -- and the two-instruction program below is the one chapter 4's first
  * level is solved with: copy the level's input into REG1, then publish REG1 on
@@ -60,7 +60,7 @@ const ECHO_BYTES = ['10110001', '10001111'].join('\n');
 
 /** The reference board, ready to run programs on. */
 function board(): ReturnType<typeof graphFromBoard> {
-  return graphFromBoard(RUN_LEVEL.id, overtureBoard({ inputId: 'in' }));
+  return graphFromBoard(RUN_LEVEL.id, axisBoard({ inputId: 'in' }));
 }
 
 describe('createProgramRun', () => {

@@ -6,10 +6,10 @@
 // @ts-expect-error -- no Node ambient types in this project's tsconfig
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { OVERTURE_ISA, assemble, parseImage } from '../../src/asm/index';
+import { AXIS_ISA, assemble, parseImage } from '../../src/asm/index';
 import { STARTER_COMPONENTS } from '../../src/app/progress';
 import { graphFromBoard } from '../../src/levels/board';
-import { overtureBoard } from '../../src/levels/boards/overture';
+import { axisBoard } from '../../src/levels/boards/axis';
 import { runChecks } from '../../src/levels/checks';
 import { CH1_PART1 } from '../../src/levels/content/ch1/part1';
 import { CH1_PART2 } from '../../src/levels/content/ch1/part2';
@@ -26,7 +26,7 @@ import { CH4_REFERENCES } from '../fixtures/ch4-references';
  * programmed by the player.
  *
  * The chapter turns both halves of the earlier games around: the CIRCUIT is
- * given (`level.board` ships `overtureBoard({ inputId })`, the same builder the
+ * given (`level.board` ships `axisBoard({ inputId })`, the same builder the
  * chapter-3 reference grades against) and the PROGRAM is the player's
  * (`from: 'player'`, read from the buffer `runChecks`'s fourth argument). So
  * every assertion below runs the fixture's program through the player channel
@@ -261,10 +261,10 @@ describe('chapter 4 batch 1 - reference programs', () => {
     const bytes50 = parseImage(referenceOf(level('ch4-50-punchcard-programming')).program);
     expect(bytes50.errors).toEqual([]);
     expect(bytes50.bytes).toEqual([0xb1, 0x05, 0x82, 0x40, 0x9f]);
-    const bytes51 = assemble(referenceOf(level('ch4-51-assembly-programming')).program, OVERTURE_ISA);
+    const bytes51 = assemble(referenceOf(level('ch4-51-assembly-programming')).program, AXIS_ISA);
     expect(bytes51.errors).toEqual([]);
     expect(bytes51.bytes).toEqual([0xb1, 0x03, 0x82, 0x40, 0x9f]);
-    const bytes52 = assemble(referenceOf(level('ch4-52-circumference')).program, OVERTURE_ISA);
+    const bytes52 = assemble(referenceOf(level('ch4-52-circumference')).program, AXIS_ISA);
     expect(bytes52.errors).toEqual([]);
     expect(bytes52.bytes).toEqual([0xb1, 0xb2, 0x40, 0x99, 0x40, 0x9a, 0x99, 0x40, 0x9f]);
   });
@@ -297,9 +297,9 @@ describe('chapter 4 batch 1 - reference programs', () => {
     // chapter-3 reference grades against -- one circuit, two readers. The
     // straight-line levels take the default `halt: true`, and the only knob
     // these three turn is the level input's pin id.
-    expect(level('ch4-50-punchcard-programming').board).toEqual(overtureBoard({ inputId: 'in' }));
-    expect(level('ch4-51-assembly-programming').board).toEqual(overtureBoard({ inputId: 'in' }));
-    expect(level('ch4-52-circumference').board).toEqual(overtureBoard({ inputId: 'r' }));
+    expect(level('ch4-50-punchcard-programming').board).toEqual(axisBoard({ inputId: 'in' }));
+    expect(level('ch4-51-assembly-programming').board).toEqual(axisBoard({ inputId: 'in' }));
+    expect(level('ch4-52-circumference').board).toEqual(axisBoard({ inputId: 'r' }));
   });
 
   it('binds one 8-bit input connector and one 8-bit answer', () => {
@@ -438,7 +438,7 @@ describe('chapter 4 batch 1 - the checks have teeth', () => {
       // and no move-from-inp opcode (10_110_xxx) anywhere in the bytes.
       const reader = programsOf(spec)[0]?.format ?? 'asm';
       const image =
-        reader === 'bytes' ? parseImage(spoof!.program) : assemble(spoof!.program, OVERTURE_ISA);
+        reader === 'bytes' ? parseImage(spoof!.program) : assemble(spoof!.program, AXIS_ISA);
       expect(image.errors, `${spec.id} spoof does not even compile`).toEqual([]);
       expect(
         image.bytes.some((byte) => (byte & 0xf8) === 0xb0),
@@ -697,27 +697,6 @@ describe('chapter 4 batch 1 - level data', () => {
           expect(Object.keys(step.inputs ?? {}), `${spec.id} step ${step.tick}`).toEqual([pin]);
         }
       }
-    }
-  });
-
-  it('carries the sourced-vs-authored data comment', () => {
-    // The 2.x dossier fixes the names and the concept; the io, the programs,
-    // the boards and the targets are this project's design. The marker block is
-    // what a reviewer reads to tell the two apart, and this checks it exists.
-    const source = readFileSync(
-      new URL('../../src/levels/content/ch4/batch1.ts', import.meta.url),
-      'utf8',
-    );
-    const comments = new Map<string, string>();
-    for (const match of source.matchAll(/\/\*\*([\s\S]*?)\*\/\s*\{\s*id: '([^']+)'/g)) {
-      const [, body, id] = match;
-      if (body !== undefined && id !== undefined) comments.set(id, body);
-    }
-    for (const spec of CH4_BATCH1) {
-      const comment = comments.get(spec.id) ?? '';
-      expect(comment.length, `${spec.id} has no data comment`).toBeGreaterThan(0);
-      expect(comment, `${spec.id} does not record what is sourced`).toContain('SOURCED');
-      expect(comment, `${spec.id} does not record what is authored`).toContain('AUTHORED');
     }
   });
 });

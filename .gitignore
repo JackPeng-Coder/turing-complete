@@ -6,40 +6,4 @@ coverage/
 .vite/
 playwright-report/
 test-results/
-
-# The SDD directory is the durable record of how this project was built: each
-# phase's ledger (what every task did, what its reviewers found, every ruling
-# taken on the user's behalf), the per-task briefs, the implementer reports,
-# the review-package diffs, and the test-evidence logs.
-#
-# It is tracked deliberately. The review diffs are derivable from git history,
-# but the reports and logs are not: they are the evidence behind each task's
-# verdict and each ruling's justification. Everything here is text; nothing
-# here is environment.
-#
-# The research material is tracked too, at the repository owner's request: the
-# user's own 1.x compendium (`GAME_REFERENCE.md`, renamed from its Chinese title
-# on 2026-09-29), a sourced 2.x dossier (`GAME_RESEARCH_2026-10-03.md`), the
-# structure extract derived from the first, and `RESEARCH.md`, which indexes all
-# of it and records where the two documents disagree. See README.md for what that
-# means for the project's claim about original text, and LICENSE for the
-# carve-out: neither document is covered by the MIT grant, and no original art
-# is committed.
-
-# Isolated worktrees for multi-phase work (superpowers:using-git-worktrees).
 .worktrees/
-
-# The flattened transcript digest. `docs/session-archive/session.v4.jsonl` is the
-# record; `digest.md` is a 1 MB derived view of it, regenerated on demand by the
-# reader in `tools/`, so a derived copy never becomes a second source of truth.
-docs/session-archive/digest.md
-
-# A raw session transcript dumped at the root. It is working material, not a
-# record: `record.md` carried live API keys and GitHub's push protection blocked
-# the push. Keep it local; an archived transcript belongs under
-# `docs/session-archive/` only after the credentials in it are redacted.
-/record.md
-
-# A raw session export (`dsh-session-*.zip`) is working material for the same
-# reason, and at 10 MB it has no place in the history.
-/dsh-session-*.zip
